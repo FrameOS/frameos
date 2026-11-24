@@ -1,0 +1,10 @@
+{
+  "name": "Camera wall",
+  "description": "Up to four live cameras side by side (RTSP, MJPEG or HLS), a tap on one to fill the screen. Plays on a Raspberry Pi.",
+  "embedded": false,
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

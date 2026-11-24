@@ -1,0 +1,10 @@
+{
+  "name": "Slow movie",
+  "description": "A film played very slowly, a still every few minutes, so it takes days to go by. Made for e-paper; needs a Raspberry Pi.",
+  "embedded": false,
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

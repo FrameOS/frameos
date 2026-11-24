@@ -157,14 +157,16 @@ the latest's): `fast` (it redraws more than once a second: a
 `refreshInterval` under 1 s; never a layout), `touch` (taps or a mouse, one
 thing to the runtime: JSX handlers, pointer events), `keys` (a keyboard: key
 events, text input), `buttons` (the frame's own GPIO buttons), `linux`
-(Chromium, FFmpeg, a shell command), and `round`, which is no need but a
+(Chromium, FFmpeg, a shell command), `video` (it plays video or reads its
+frames, `frameos.video` / `videoFrame` / `videoInfo`: a Pi, cloud-managed or
+not, never an ESP32; docs/video.md), and `round`, which is no need but a
 fit: the scene works on a round screen too (code that asks `context.round`
 or `app.frame.round`, or `settings.round`, which wins either way;
 docs/scene-guide.md "Round panels"). The store front shows them on each tile
-("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Pi only", "Round
+("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Pi only", "Video", "Round
 screen") and filters by them (Any screen, Fits e-paper, Made for fast
 screens, Touch & mouse, Keyboard, Round screens). A frame's own store leaves
-out what it cannot run (`without=fast` on a slow panel, `linux` on an ESP32)
+out what it cannot run (`without=fast` on a slow panel, `linux,video` on an ESP32)
 and puts what fits first: `prefer=fast` on a fast panel, `round` on a round
 one (`prefer=round,fast`, the first weighing most). Round rules nothing out. Touch and keys rule nothing out: the frame's buttons and
 its pages reach any scene. Versions from before the column are read by

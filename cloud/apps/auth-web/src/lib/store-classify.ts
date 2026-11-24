@@ -264,7 +264,7 @@ export function ruleTags(facts: SceneFacts & { category?: string | null | undefi
   }
   if (needs.includes("fast")) {
     tags.push("lcd");
-  } else if (!needs.includes("linux")) {
+  } else if (!needs.includes("linux") && !needs.includes("video")) {
     tags.push("e-ink");
   }
   if (needs.includes("keys")) {
@@ -273,7 +273,10 @@ export function ruleTags(facts: SceneFacts & { category?: string | null | undefi
   if (needs.includes("buttons")) {
     tags.push("buttons");
   }
-  if (needs.includes("linux")) {
+  if (needs.includes("video")) {
+    tags.push("video");
+  }
+  if (needs.includes("linux") || needs.includes("video")) {
     tags.push("raspberry-pi");
   }
   for (const [pattern, tag] of keywordTags) {

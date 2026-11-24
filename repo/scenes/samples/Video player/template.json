@@ -1,0 +1,10 @@
+{
+  "name": "Video player",
+  "description": "The videos in a folder of the frame's files, one after another, for ever: by name or shuffled, with controls on a tap. Plays on a Raspberry Pi.",
+  "embedded": false,
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

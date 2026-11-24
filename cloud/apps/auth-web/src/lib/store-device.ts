@@ -72,7 +72,7 @@ export type StoreDeviceOptions = {
 
 const categorySlugs = new Set(storeCategories.map((category) => category.slug));
 // The needs a frame can say it lacks: touch and keys never rule a scene out.
-const ruledOutNeeds = new Set(["fast", "linux"]);
+const ruledOutNeeds = new Set(["fast", "linux", "video"]);
 // The needs a frame can put first, by what it says.
 const preferredNeeds: Record<string, string> = { fast: "fast", realtime: "fast", round: "round" };
 

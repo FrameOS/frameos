@@ -15,6 +15,9 @@
  * - `buttons`: it is used with the frame's own buttons (GPIO `button` events).
  * - `linux`: it runs a program on a Linux frame (Chromium, FFmpeg, a shell
  *   command), which an ESP32 and a cloud-managed frame refuse.
+ * - `video`: it plays video or reads frames of one (`frameos.video`,
+ *   `videoFrame`, `videoInfo`: docs/video.md), which takes a Raspberry Pi
+ *   with ffmpeg. An ESP32 cannot; a cloud-managed Pi can.
  * - `round`: no need but a fit: it works on a round screen too (only the
  *   circle inside the panel shows: docs/scene-guide.md "Round panels"). Read
  *   from code that asks `context.round` or `app.frame.round`, or said by
@@ -35,8 +38,8 @@
  * under its stricter tsconfig.
  */
 
-export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'linux' | 'round'
-export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'buttons', 'linux', 'round']
+export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'linux' | 'video' | 'round'
+export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'buttons', 'linux', 'video', 'round']
 
 const needLabels: Record<SceneNeed, string> = {
   fast: 'Fast screen',
@@ -44,6 +47,7 @@ const needLabels: Record<SceneNeed, string> = {
   keys: 'Keyboard',
   buttons: 'Buttons',
   linux: 'Pi only',
+  video: 'Video',
   round: 'Round screen',
 }
 
@@ -54,6 +58,7 @@ const needDescriptions: Record<SceneNeed, string> = {
   buttons: "Used with the frame's own buttons.",
   linux:
     'Runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32 or a cloud-managed frame.',
+  video: 'Plays video: a Raspberry Pi frame with FFmpeg (every FrameOS image has it), not an ESP32.',
   round: 'Made for round screens too: it keeps inside the circle. It looks the same on any other screen.',
 }
 
@@ -104,6 +109,9 @@ const ROUND_READ = /\b(?:context|frame)\s*\??\.\s*round\b/
 const KEY_EVENTS = new Set(['keyDown', 'keyUp', 'textInput'])
 /** The frame's own buttons (GPIO). */
 const BUTTON_EVENTS = new Set(['button'])
+
+/** Code that plays video or reads its frames (docs/video.md). */
+const VIDEO_CALL = /\bframeos\s*\.\s*video(?:Frame|Info)?\s*\(/
 
 /** Built-in apps that start a program on the frame (sceneAccess.ts gives them `shell`). */
 const LINUX_APPS = new Set(['data/chromiumScreenshot', 'data/rstpSnapshot'])
@@ -201,6 +209,9 @@ export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] 
     if (round === true || (round !== false && !isLayout(entry) && codeOf(entry).some((text) => ROUND_READ.test(text)))) {
       needs.add('round')
     }
+    if (codeOf(entry).some((text) => VIDEO_CALL.test(text))) {
+      needs.add('video')
+    }
     const stated = settingsOf(entry).needs
     if (Array.isArray(stated)) {
       for (const need of stated) {
@@ -275,6 +286,8 @@ export interface FrameFit {
   fast?: boolean
   /** Runs Linux programs: a Pi frame that is not cloud-managed. */
   linux?: boolean
+  /** Plays video: a Pi frame (docs/video.md), cloud-managed or not. */
+  video?: boolean
 }
 
 /**
@@ -288,6 +301,9 @@ export function sceneFitsFrame(needs: readonly unknown[] | null | undefined, fra
     return false
   }
   if (known.includes('linux') && frame.linux === false) {
+    return false
+  }
+  if (known.includes('video') && frame.video === false) {
     return false
   }
   return true

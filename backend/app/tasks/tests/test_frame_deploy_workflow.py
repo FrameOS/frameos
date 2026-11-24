@@ -1122,6 +1122,49 @@ async def test_full_plan_includes_cifs_utils_for_enabled_mountpoints(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_full_plan_installs_ffmpeg_for_scenes_that_play_video(monkeypatch: pytest.MonkeyPatch):
+    def frame_with(scenes):
+        return SimpleNamespace(
+            id=19,
+            name="VideoFrame",
+            ssh_keys=[],
+            rpios={"crossCompilation": "auto", "compilationMode": "precompiled"},
+            reboot=None,
+            mountpoints=None,
+            scenes=scenes,
+            last_successful_deploy={"frameos_version": "9.9.9"},
+            last_successful_deploy_at="2026-01-01T00:00:00+00:00",
+            to_dict=lambda: {"id": 19, "name": "VideoFrame"},
+        )
+
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.drivers_for_frame", lambda _frame: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db, project_id=None: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    async def packages(scenes):
+        workflow = FrameDeployWorkflow(
+            db=None,
+            redis=None,
+            frame=frame_with(scenes),
+            deployer=FakeDeployer(),
+            temp_dir="",
+            binary_builder=FakePrecompiledBinaryBuilder(),
+        )
+        plan = await workflow.plan("full")
+        assert plan.full_deploy is not None
+        return {pkg.name: pkg for pkg in plan.full_deploy.package_plans}
+
+    player = {"id": "p", "apps": {"a": {"sources": {"app.tsx": "const v = frameos.video('main', { src })"}}}, "nodes": []}
+    planned = await packages([player])
+    assert planned["ffmpeg"].reason == "video playback (docs/video.md)"
+    camera = {"id": "c", "nodes": [{"type": "app", "data": {"keyword": "data/rstpSnapshot"}}]}
+    assert "ffmpeg" in await packages([camera])
+    clock = {"id": "k", "apps": {"a": {"sources": {"app.ts": "// frameos.video plays nothing here"}}}, "nodes": []}
+    assert "ffmpeg" not in await packages([clock])
+
+
+@pytest.mark.asyncio
 async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=8,

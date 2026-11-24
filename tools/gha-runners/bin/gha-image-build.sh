@@ -41,7 +41,8 @@ apt-get install -yq --no-install-recommends \
   qemu-user-static binfmt-support \
   libicu74 libkrb5-3 zlib1g libssl3 \
   openssh-client sudo dnsutils iproute2 iputils-ping netcat-openbsd \
-  software-properties-common gnupg lsb-release acl python-is-python3
+  software-properties-common gnupg lsb-release acl python-is-python3 \
+  ffmpeg
 apt-get autoremove -yq; apt-get clean
 # The image must not decide to upgrade itself in the middle of a job.
 systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true

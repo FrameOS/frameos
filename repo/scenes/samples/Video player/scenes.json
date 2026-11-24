@@ -1,0 +1,200 @@
+[
+  {
+    "id": "video-player",
+    "name": "Video player",
+    "settings": {
+      "category": "Photos",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000",
+      "windowSize": "800x450",
+      "icon": "M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z",
+      "needs": [
+        "fast",
+        "touch",
+        "video"
+      ]
+    },
+    "fields": [
+      {
+        "name": "folder",
+        "label": "Folder",
+        "type": "string",
+        "value": "videos",
+        "hint": "In the frame's assets folder: every video in it and in the folders inside it.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "order",
+        "label": "Order",
+        "type": "select",
+        "value": "name",
+        "options": [
+          {
+            "value": "name",
+            "label": "By name"
+          },
+          {
+            "value": "shuffle",
+            "label": "Shuffled"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "repeat",
+        "label": "Repeat",
+        "type": "select",
+        "value": "all",
+        "options": [
+          {
+            "value": "all",
+            "label": "The whole folder"
+          },
+          {
+            "value": "one",
+            "label": "The video on show"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "value": "contain",
+        "options": [
+          {
+            "value": "contain",
+            "label": "The whole picture, black bars around it"
+          },
+          {
+            "value": "cover",
+            "label": "Fill the screen, the edges cropped"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fps",
+        "label": "Frames a second, at most",
+        "type": "select",
+        "value": "30",
+        "hint": "Fewer is less work for the Pi; a video slower than this keeps its own.",
+        "options": [
+          {
+            "value": "10",
+            "label": "10"
+          },
+          {
+            "value": "15",
+            "label": "15"
+          },
+          {
+            "value": "24",
+            "label": "24"
+          },
+          {
+            "value": "30",
+            "label": "30"
+          },
+          {
+            "value": "60",
+            "label": "60"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "spot",
+        "label": "Where it is",
+        "type": "json",
+        "value": "{}",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "a20c8d2b-839b-58e3-851a-7ab2d845b8fd",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "df7f1946-5d72-5c16-8e7d-f48e92a663cd",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "player",
+          "config": {}
+        }
+      },
+      {
+        "id": "42bbdad2-34a5-5073-ad28-79ee1e897c52",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "37503020-5418-5f85-923d-df861f95bae8",
+        "type": "appNodeEdge",
+        "source": "a20c8d2b-839b-58e3-851a-7ab2d845b8fd",
+        "target": "42bbdad2-34a5-5073-ad28-79ee1e897c52",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "0bc02f68-542d-5b79-9222-d2422c8959eb",
+        "type": "codeNodeEdge",
+        "source": "df7f1946-5d72-5c16-8e7d-f48e92a663cd",
+        "target": "42bbdad2-34a5-5073-ad28-79ee1e897c52",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "player": {
+        "name": "Video player",
+        "category": "data",
+        "description": "Plays the videos in a folder of the frame's assets one after another: by name or shuffled, the folder or one video again and again, controls and a list on a tap, where it was kept on disk.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Video player\",\n  \"category\": \"data\",\n  \"description\": \"Plays the videos in a folder of the frame's assets one after another: by name or shuffled, the folder or one video again and again, controls and a list on a tap, where it was kept on disk.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n",
+          "app.tsx": "// @name Video player\n// The videos in a folder of the frame's assets, one after another, for ever:\n// by name or shuffled, each once or the one on show again and again. A tap\n// shows the controls (back, pause, next, the list, the bar to seek); they go\n// after a few seconds of playing. Where it was is kept on disk, so a restart\n// goes on with the same file. Plays on a Raspberry Pi (docs/video.md): the\n// frames are decoded by ffmpeg at the size of the box, and only the video is\n// drawn again each frame.\nconst VIDEO = /\\.(mp4|m4v|mov|mkv|webm|avi|ts|mts|m2ts|mpg|mpeg|wmv|flv|3gp|ogv)$/i\nconst CONTROLS_MS = 4000\nconst LIST_AGAIN_MS = 60000\nconst SKIP_FAILED_MS = 3000\n\n// What the folder holds: read again every minute, so new files join.\nlet files = []\nlet listedFolder = null\nlet listedAt = 0\nlet order = []\n// Where it is, by file (kept on disk in the private `spot` field).\nlet current = ''\nlet paused = false\nlet view = 'player' // or 'list'\nlet controlsUntil = 0\nlet failed = {} // file -> why, skipped until the folder is read again\nlet failedAt = 0\nlet savedAt = 0\nlet barWidth = 0\nlet restartAt = null // the file on show picked again: back to here\n\nconst baseName = (path) => path.split('/').pop()\nconst clock = (s) => {\n  if (!(s >= 0)) return '--:--'\n  const h = Math.floor(s / 3600)\n  const m = Math.floor((s % 3600) / 60)\n  const sec = String(Math.floor(s % 60)).padStart(2, '0')\n  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`\n}\n\nconst readSpot = (app) => {\n  let spot = app.state.spot\n  if (typeof spot === 'string') {\n    try {\n      spot = JSON.parse(spot)\n    } catch {\n      spot = null\n    }\n  }\n  return spot && typeof spot === 'object' ? spot : {}\n}\n\nconst shuffled = (list) => {\n  const out = list.slice()\n  for (let i = out.length - 1; i > 0; i--) {\n    const j = Math.floor(Math.random() * (i + 1))\n    const t = out[i]\n    out[i] = out[j]\n    out[j] = t\n  }\n  return out\n}\n\nconst folderOf = (app) => String(app.state.folder ?? 'videos').trim().replace(/^\\/+|\\/+$/g, '')\n\nfunction listFolder(app) {\n  const folder = folderOf(app)\n  const now = Date.now()\n  if (listedFolder === folder && now - listedAt < LIST_AGAIN_MS) return\n  // Every file below the folder, each named from the assets' top.\n  const found = frameos.listAssets(folder) || []\n  const before = files.join('\\n')\n  files = found\n    .filter((name) => VIDEO.test(name) && !name.split('/').some((part) => part.startsWith('.')))\n    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))\n  if (listedFolder !== folder || files.join('\\n') !== before) {\n    order = app.state.order === 'shuffle' ? shuffled(files) : files.slice()\n    failed = {}\n  }\n  listedFolder = folder\n  listedAt = now\n}\n\nfunction playable() {\n  return order.filter((file) => !failed[file])\n}\n\nfunction step(app, by) {\n  const list = playable()\n  if (!list.length) return\n  const at = list.indexOf(current)\n  let next = at < 0 ? 0 : at + by\n  if (next >= list.length) {\n    // Round again, in a new order when shuffled.\n    if (app.state.order === 'shuffle' && list.length > 2) {\n      order = shuffled(files)\n      next = 0\n    } else {\n      next = 0\n    }\n  }\n  if (next < 0) next = list.length - 1\n  play(app, list[next], 0)\n}\n\nfunction play(app, file, start) {\n  if (file === current) restartAt = start\n  current = file\n  paused = false\n  frameos.setState('spot', { file, time: start })\n  savedAt = Date.now()\n  frameos.remember('start', start)\n}\n\nconst showControls = () => {\n  controlsUntil = Date.now() + CONTROLS_MS\n}\n\nconst Icon = ({ d, size }) => (\n  <svg className={`w-[${size}px] h-[${size}px]`} viewBox=\"0 0 24 24\">\n    <path fill=\"currentColor\" d={d} />\n  </svg>\n)\nconst ICONS = {\n  play: 'M8 5v14l11-7z',\n  pause: 'M6 5h4v14H6zM14 5h4v14h-4z',\n  next: 'M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z',\n  back: 'M6 6h2v12H6zm3.5 6l8.5 6V6z',\n  list: 'M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z',\n  close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',\n}\n\nfunction Button({ icon, size, onClick }) {\n  return (\n    <div\n      className={`flex items-center justify-center w-[${size * 2}px] h-[${size * 2}px] rounded-full bg-white/15 active:bg-white/40 text-white`}\n      onClick={onClick}\n    >\n      <Icon d={ICONS[icon]} size={size} />\n    </div>\n  )\n}\n\nfunction Message({ title, text, k }) {\n  return (\n    <div className=\"w-full h-full flex flex-col items-center justify-center bg-black text-white gap-[8px]\">\n      <span className={`text-[${Math.round(22 * k)}px] font-bold`}>{title}</span>\n      <span className={`text-[${Math.round(15 * k)}px] text-white/70 text-center px-[24px]`}>{text}</span>\n    </div>\n  )\n}\n\nfunction List({ app, k }) {\n  const list = order.length ? order : files\n  const row = Math.round(44 * k)\n  return (\n    <div className=\"w-full h-full flex flex-col bg-neutral-900 text-white\">\n      <div className={`flex items-center gap-[12px] h-[${Math.round(56 * k)}px] px-[14px] shrink-0 bg-black`}>\n        <span className={`flex-1 truncate text-[${Math.round(18 * k)}px] font-bold`}>\n          {`${folderOf(app) || 'Assets'} · ${files.length} video${files.length === 1 ? '' : 's'}`}\n        </span>\n        <Button icon=\"close\" size={Math.round(16 * k)} onClick={() => { view = 'player'; showControls() }} />\n      </div>\n      <div className=\"flex-1 overflow-y-auto\">\n        {list.map((file) => (\n          <div\n            className={`flex items-center gap-[10px] h-[${row}px] px-[16px] border-b border-white/10 ${file === current ? 'bg-sky-700' : 'active:bg-white/20'}`}\n            onClick={() => { play(app, file, 0); view = 'player'; showControls() }}\n          >\n            <span className={`flex-1 truncate text-[${Math.round(15 * k)}px] ${failed[file] ? 'text-white/40' : ''}`}>\n              {file.slice(folderOf(app) ? folderOf(app).length + 1 : 0)}\n            </span>\n            {failed[file] ? <span className={`text-[${Math.round(12 * k)}px] text-red-300`}>cannot play</span> : null}\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n\nfunction Controls({ app, video, k }) {\n  const icon = Math.round(22 * k)\n  const duration = video.duration\n  const time = video.time ?? 0\n  const known = duration > 0\n  const seek = (e) => {\n    if (!known) return\n    const width = e.width ?? barWidth\n    const at = Math.max(0, Math.min(1, e.localX / Math.max(width, 1))) * duration\n    frameos.seekVideo(video, at)\n    showControls()\n  }\n  const list = playable()\n  return (\n    <div className=\"absolute left-0 top-0 w-full h-full flex flex-col justify-between\">\n      <div className={`flex items-center gap-[10px] px-[14px] h-[${Math.round(48 * k)}px] bg-black/60 text-white`}>\n        <span className={`flex-1 truncate text-[${Math.round(16 * k)}px] font-bold`}>{baseName(current)}</span>\n        <span className={`text-[${Math.round(13 * k)}px] text-white/70`}>\n          {`${Math.max(1, list.indexOf(current) + 1)} of ${list.length}`}\n        </span>\n      </div>\n      <div className={`flex flex-col gap-[${Math.round(8 * k)}px] px-[16px] pb-[${Math.round(12 * k)}px] pt-[${Math.round(10 * k)}px] bg-black/60 text-white`}>\n        {known ? (\n          <div className={`flex items-center h-[${Math.round(24 * k)}px]`} onPointerDown={seek} onPointerMove={(e) => { if (e.buttons) seek(e) }}>\n            <div className={`flex-1 h-[${Math.max(3, Math.round(5 * k))}px] rounded-full bg-white/25`}>\n              <div className={`h-full rounded-full bg-sky-400 w-[${Math.round((Math.min(time, duration) / duration) * 1000) / 10}%]`} />\n            </div>\n          </div>\n        ) : null}\n        <div className=\"flex items-center gap-[12px]\">\n          <span className={`w-[${Math.round(120 * k)}px] text-[${Math.round(13 * k)}px] text-white/80`}>\n            {video.live ? 'Live' : `${clock(time)} / ${clock(duration)}`}\n          </span>\n          <div className=\"flex-1 flex items-center justify-center gap-[16px]\">\n            <Button icon=\"back\" size={icon} onClick={() => { step(app, -1); showControls() }} />\n            <Button icon={paused ? 'play' : 'pause'} size={Math.round(icon * 1.2)} onClick={() => { paused = !paused; showControls() }} />\n            <Button icon=\"next\" size={icon} onClick={() => { step(app, 1); showControls() }} />\n          </div>\n          <div className={`w-[${Math.round(120 * k)}px] flex justify-end`}>\n            <Button icon=\"list\" size={icon} onClick={() => { view = 'list' }} />\n          </div>\n        </div>\n      </div>\n    </div>\n  )\n}\n\nexport function get(app, context) {\n  const width = context?.imageWidth ?? app.frame.width\n  const height = context?.imageHeight ?? app.frame.height\n  const k = Math.max(0.6, Math.min(1.6, Math.min(width / 800, height / 480) * 1.15))\n  barWidth = width - 32\n  listFolder(app)\n  if (!files.length) {\n    return (\n      <Message\n        k={k}\n        title={`No videos in “${folderOf(app) || 'the assets folder'}”`}\n        text={`Copy video files (.mp4, .mkv, .webm, .mov) into the frame's assets folder, in ${folderOf(app) || 'its top'}/. The Files scene uploads them from the browser.`}\n      />\n    )\n  }\n  if (!current) {\n    const spot = readSpot(app)\n    if (spot.file && files.includes(spot.file)) {\n      current = spot.file\n      frameos.remember('start', Math.max(0, Number(spot.time) || 0))\n    } else {\n      play(app, playable()[0] ?? files[0], 0)\n    }\n  }\n  if (view === 'list') return <List app={app} k={k} />\n\n  const fit = app.state.fit === 'cover' ? 'cover' : 'contain'\n  const playCurrent = () => {\n    const v = frameos.video('player', {\n      src: current,\n      start: frameos.recall('start') ?? 0,\n      loop: app.state.repeat === 'one',\n      paused,\n      fit,\n      fps: Number(app.state.fps) || 30,\n    })\n    if (restartAt !== null) {\n      frameos.seekVideo(v, restartAt)\n      restartAt = null\n    }\n    return v\n  }\n  let video = playCurrent()\n  if (video.state === 'ended') {\n    // The next one now, in this render: its first frame follows the last.\n    step(app, 1)\n    video = playCurrent()\n  } else if (video.state === 'error') {\n    if (video.id === 0 && /cannot play it|, not here/.test(video.error || '')) {\n      // No video on this frame at all (an ESP32, the preview): say so once.\n      return <Message k={k} title=\"Video does not play here\" text={video.error} />\n    }\n    if (!failed[current]) {\n      failed[current] = video.error || 'cannot play'\n      failedAt = Date.now()\n    }\n    if (playable().length === 0) {\n      return <Message k={k} title=\"None of these videos play\" text={`${baseName(current)}: ${failed[current]}`} />\n    }\n    if (Date.now() - failedAt >= SKIP_FAILED_MS) {\n      step(app, 1)\n      video = playCurrent()\n    } else {\n      frameos.setNextSleep(SKIP_FAILED_MS / 1000)\n      return <Message k={k} title={baseName(current)} text={`Cannot play it: ${failed[current]}. Next one in a moment.`} />\n    }\n  } else if (video.state === 'playing' && Date.now() - savedAt > 15000) {\n    // Where it is, now and then: a restart goes on from about here.\n    frameos.setState('spot', { file: current, time: video.time })\n    savedAt = Date.now()\n  }\n  const controls = paused || view !== 'player' || Date.now() < controlsUntil\n  return (\n    <div className=\"relative w-full h-full bg-black\" onClick={() => { showControls() }}>\n      <img className={`w-full h-full object-${fit}`} src={video} />\n      {video.state === 'loading' && !controls ? (\n        <span className={`absolute left-[16px] bottom-[12px] text-[${Math.round(13 * k)}px] text-white/60`}>{baseName(current)}</span>\n      ) : null}\n      {controls ? <Controls app={app} video={video} k={k} /> : null}\n    </div>\n  )\n}\n"
+        }
+      }
+    }
+  }
+]

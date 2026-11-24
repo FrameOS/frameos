@@ -7,6 +7,7 @@ from functools import partial
 import hashlib
 import json
 import os
+import re
 import shlex
 import time
 from typing import Any
@@ -213,6 +214,33 @@ def _remote_upgrade_plan(frame: Frame) -> RemoteUpgradePlan | None:
         current_version=current_version,
         transport="remote" if _deploy_uses_remote(frame) else "ssh",
     )
+
+
+# A scene that plays video or reads its frames (docs/video.md), or the RTSP
+# snapshot app: what needs ffmpeg on the frame. The same calls as the SPA's
+# scene need `video` (frontend/src/utils/sceneNeeds.ts VIDEO_CALL).
+_VIDEO_CALL = re.compile(r"\bframeos\s*\.\s*video(?:Frame|Info)?\s*\(")
+
+
+def _scenes_use_ffmpeg(frame: Frame) -> bool:
+    scenes = getattr(frame, "scenes", None)
+    for scene in scenes if isinstance(scenes, list) else []:
+        if not isinstance(scene, dict):
+            continue
+        apps = scene.get("apps") if isinstance(scene.get("apps"), dict) else {}
+        for app in apps.values():
+            sources = app.get("sources") if isinstance(app, dict) and isinstance(app.get("sources"), dict) else {}
+            for name, text in sources.items():
+                if isinstance(text, str) and not name.endswith(".json") and _VIDEO_CALL.search(text):
+                    return True
+        for node in scene.get("nodes") or []:
+            data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
+            if node.get("type") == "app" and str(data.get("keyword") or "").endswith("rstpSnapshot"):
+                return True
+            for key in ("code", "codeJS"):
+                if isinstance(data.get(key), str) and _VIDEO_CALL.search(data[key]):
+                    return True
+    return False
 
 
 def _mountpoints_enabled(frame: Frame) -> bool:
@@ -868,6 +896,10 @@ class FrameDeployWorkflow:
                 )
         if not is_buildroot and _mountpoints_enabled(self.frame):
             package_plans.append(await self._plan_package("cifs-utils", "Samba/CIFS mountpoint support"))
+
+        # Buildroot images have ffmpeg; Raspberry Pi OS gets it when a scene needs it.
+        if not is_buildroot and _scenes_use_ffmpeg(self.frame):
+            package_plans.append(await self._plan_package("ffmpeg", "video playback (docs/video.md)"))
 
         if not is_buildroot and drivers.get("evdev"):
             package_plans.append(await self._plan_package("libevdev-dev", "evdev driver support"))
