@@ -107,11 +107,17 @@ def board_identity(frame: dict, status: dict | None = None) -> dict:
     w = render.get('previewWidth') or panel.get('width')
     h = render.get('previewHeight') or panel.get('height')
     mb = lambda b: f'{round(b / 1048576)}' if b else '?'  # noqa: E731
+    # A Linux frame (linux.py) has RAM where an ESP32 has PSRAM, and an SD
+    # card for flash: known by the RAM its board is sold with.
+    is_linux = frame.get('app') == 'frameos-linux' or status.get('app') == 'frameos-linux'
+    ram = known.get('ram_bytes') or (status.get('memory') or {}).get('ramTotal')
+    memory = f'ram{mb(ram)}m' if is_linux else f'psram{mb(psram)}m/flash{mb(flash)}m'
     return {
-        'board_id': f'{module}/{display}/{target}/psram{mb(psram)}m/flash{mb(flash)}m',
+        'board_id': f'{module}/{display}/{target}/{memory}',
         'module': module, 'display': display, 'target': target,
         'name': known.get('name') or frame.get('name') or module,
-        'psram_bytes': psram, 'flash_bytes': flash, 'panel_width': w, 'panel_height': h,
+        'psram_bytes': None if is_linux else psram, 'flash_bytes': None if is_linux else flash,
+        **({'ram_bytes': ram, 'os': 'linux'} if is_linux else {}), 'panel_width': w, 'panel_height': h,
         'panel_mpx': round(w * h / 1e6, 4) if w and h else None,
         'panel_kind': panel.get('kind') or ('lcd' if display.startswith('LCD_') else 'epaper'),
         'panel_colors': panel.get('colors'), 'touch': bool(frame.get('touch')),
@@ -126,6 +132,22 @@ def release_elfs(results=None) -> dict:
             if r.get('source') == 'release' and r.get('elf_sha16')}
 
 
+LINUX_VERSION_RE = re.compile(r'^(\d{4}\.\d+\.\d+)\+([0-9a-f]{40})$')
+_RELEASE_HASHES: dict = {}
+
+
+def release_frameos_hash(base: str) -> str | None:
+    """versions.json's `frameos` at tag v<base>: what a Linux release binary
+    prints after its version (`2026.11.14+1ea5424...`), a hash of the sources."""
+    if base not in _RELEASE_HASHES:
+        try:
+            out = subprocess.run(['git', '-C', REPO, 'show', f'v{base}:versions.json'], capture_output=True, text=True, timeout=10).stdout
+            _RELEASE_HASHES[base] = (json.loads(out).get('frameos') or '').split('+')[-1] or None
+        except Exception:
+            _RELEASE_HASHES[base] = None
+    return _RELEASE_HASHES[base]
+
+
 def build_identity(version: str | None, elf: str | None, elfs: dict) -> dict:
     """What firmware a board ran. A release is known by its image's ELF sha,
     not by the version it prints: builds made on the bench have printed a
@@ -134,6 +156,16 @@ def build_identity(version: str | None, elf: str | None, elfs: dict) -> dict:
     `<base>-<branch>.<sha>` and becomes `<base>+<sha>`."""
     version = version or ''
     elf = (elf or '')[:16]
+    lm = LINUX_VERSION_RE.match(version)
+    if lm:
+        # A Linux runtime prints its version and the hash of its sources: the
+        # release's own (versions.json at the tag) is the release.
+        base, src = lm.group(1), lm.group(2)
+        if release_frameos_hash(base) == src:
+            return {'frameos_version': base, 'build': base, 'channel': 'release', 'git_sha': None, 'elf_sha16': elf or None,
+                    'release_platform': 'linux', 'version_reported': version}
+        return {'frameos_version': base, 'build': f'{base}+src.{src[:8]}', 'channel': 'local', 'git_sha': None,
+                'elf_sha16': elf or None, 'release_platform': None, 'version_reported': version}
     m = VERSION_RE.match(version)
     base = m.group(1) if m else None
     if elf and elf in elfs:
@@ -201,6 +233,11 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
     _m(rows, 'mem.idle.internal_largest', mem.get('internalLargestBlock'), 'bytes')
     _m(rows, 'mem.framebuffer_reserved', mem.get('framebufferReserved'), 'bytes')
     _m(rows, 'net.wifi_rssi', (st.get('wifi') or {}).get('rssi'), 'dBm')
+    # A Linux frame (linux.py): RAM and the runtime's resident set, not scored.
+    _m(rows, 'mem.idle.ram_available', mem.get('ramAvailable'), 'bytes')
+    _m(rows, 'mem.idle.process_rss', mem.get('processRss'), 'bytes')
+    board = st.get('board') or {}
+    _m(rows, 'chip.cpu_governor_mhz', board.get('cpuMhz') if st.get('app') == 'frameos-linux' else None, 'MHz')
     bat = st.get('battery') or {}
     if bat.get('present'):
         _m(rows, 'power.battery_mv', bat.get('millivolts'), 'mV')
@@ -250,6 +287,8 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
         _m(rows, 'mem.largest.psram', (heap.get('psram') or {}).get('largest'), 'bytes')
         _m(rows, 'mem.largest.internal', (heap.get('internal') or {}).get('largest'), 'bytes')
         _m(rows, 'mem.bench.psram_low', bm.get('psram_low'), 'bytes')
+        _m(rows, 'mem.bench.process_peak_rss', (bm.get('memory') or {}).get('processPeakRss'), 'bytes')
+        _m(rows, 'mem.bench.ram_available', (bm.get('memory') or {}).get('ramAvailable'), 'bytes')
         # Derived: the baseline's cost taken off (SCORES.md).
         by = {r['metric']: r for r in rows}
         base = (by.get('bench.base.render_ms') or {}).get('value')
@@ -328,6 +367,7 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
         _m(rows, 'mem.soak.psram_drift', _slope([s.get('psramFree') for s in rounds]), 'bytes/round')
         _m(rows, 'mem.soak.internal_drift', _slope([s.get('internalFree') for s in rounds]), 'bytes/round')
         _m(rows, 'mem.soak.psram_low', min((s.get('psramFree') for s in rounds if s.get('psramFree')), default=None), 'bytes')
+        _m(rows, 'mem.soak.rss_drift', _slope([s.get('processRss') for s in rounds]), 'bytes/round')
         _m(rows, 'mem.soak.rounds', len(rounds), 'count')
 
     off = (suites.get('offline') or {}).get('offline') or []

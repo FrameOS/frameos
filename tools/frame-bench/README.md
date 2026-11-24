@@ -1,6 +1,7 @@
 # Frame bench
 
-A hardware bench for every FrameOS frame on this machine's USB: scenes,
+A hardware bench for every FrameOS frame on this machine's USB, and every
+Raspberry Pi frame listed for it over SSH (`--linux-only`): scenes,
 layouts and desktop windows, input, switch storms, a memory soak, a hanging
 backend, reboots and server rendering, with a report of crashes, OOMs, slow
 paths and regressions against an earlier run, and a scored benchmark that

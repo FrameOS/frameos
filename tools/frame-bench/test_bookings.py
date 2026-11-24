@@ -46,6 +46,39 @@ def test_a_lapsed_booking_frees_the_board(bk):
     assert 'lapsed' in open(bk.PATH).read()
 
 
+def test_a_booking_ends_when_it_said_whatever_the_time_zone(bk, monkeypatch):
+    # The machine went from CET to Buenos Aires under a morning's bookings
+    # (2026-11-24): a booking stamped in local time read three hours longer.
+    import time
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setenv('TZ', 'CET-1')  # POSIX: no tzdata needed
+    time.tzset()
+    try:
+        bk.book('cloudw', 'frameos-video (video PR)', 'playback', hours=2)
+        held = bk.holders()['cloudw']
+        until = bk._until(held)
+        # A reader from before the zones still reads `until` (and an
+        # unreadable one would be lapsed to it: the board free).
+        datetime.strptime(held['until'], bk.STAMP)
+        monkeypatch.setenv('TZ', '<-03>3')
+        time.tzset()
+        held = bk.holders()['cloudw']
+        assert bk._until(held) == until
+        assert not bk._lapsed(held, until - timedelta(minutes=1))
+        assert bk._lapsed(held, until)
+        assert abs((until - datetime.now(timezone.utc)).total_seconds() - 7200) < 120
+        # Extended in the new zone: `until` and `since` move to it together.
+        bk.book('cloudw', 'frameos-video', 'playback', hours=1)
+        held = bk.holders()['cloudw']
+        assert abs((bk._until(held) - datetime.now(timezone.utc)).total_seconds() - 3600) < 120
+        assert held['since'].endswith('-0300')
+        # A booking from before the zones reads as local time, as it did.
+        assert bk._until({'since': '2026-11-24 09:18', 'until': '2026-11-24 12:18'}).utcoffset() == timedelta(hours=-3)
+    finally:
+        monkeypatch.delenv('TZ')
+        time.tzset()
+
+
 def test_names(bk):
     assert bk.resolve('all') == list(bk.boards())
     assert bk.resolve('seeed_reterminal_sticky') == ['sticky']

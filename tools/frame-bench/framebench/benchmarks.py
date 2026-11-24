@@ -167,6 +167,13 @@ def restore(con, frame, entry=None):
         entry = entry or _journal().get(frame['port'])
     if not entry:
         return None
+    if getattr(con, 'linux', False):
+        # A Linux frame (linux.py): its uploaded scenes as they were, the
+        # file put back and the runtime restarted. It was never pointed away
+        # from its backend (no console `set backend` there).
+        con.restore_uploads()
+        _journal_set(frame['port'], None)
+        return entry
     ids = list(dict.fromkeys((entry.get('scenes') or []) + [s['id'] for s in scenes_for({'lcd': True})]))
     listed = con.usb_api_json('scene-list', 60) or {}
     held = {s.get('id') for s in listed.get('scenes') or []}
@@ -194,6 +201,11 @@ def restore_all(consoles_for, only=None):
             continue
         st = con.usb_api_json('status', 20) or {}
         module = (st.get('board') or {}).get('module')
+        if getattr(con, 'linux', False):
+            con.restore_uploads()
+            _journal_set(port, None)
+            done.append((port, 'put its uploaded scenes back and restarted the runtime'))
+            continue
         if entry.get('module') and module != entry['module']:
             done.append((port, f"not restored: the board there is {module}, the journal's is {entry['module']}"))
             continue

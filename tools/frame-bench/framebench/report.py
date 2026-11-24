@@ -157,7 +157,14 @@ def write(run: dict, out_dir: str, baseline: dict | None = None) -> str:
         suites = f.get('suites') or {}
         st = (suites.get('status') or {}).get('status') or {}
         mem = st.get('memory') or {}
-        if mem:
+        if mem and mem.get('ramTotal') is not None:
+            # A Linux frame (linux.py): its RAM and the runtime's resident set.
+            board = st.get('board') or {}
+            md.append(f"Idle memory: RAM available {_ms(mem.get('ramAvailable'))} of {_ms(mem.get('ramTotal'))}, "
+                      f"the runtime's resident set {_ms(mem.get('processRss'))} (peak {_ms(mem.get('processPeakRss'))}). "
+                      f"CPU at {board.get('cpuMhz')} MHz ({board.get('cpuGovernor')} governor, {board.get('cpuMaxMhz')} max).")
+            md.append('')
+        elif mem:
             md.append(f"Idle memory: PSRAM free {_ms(mem.get('psramFree'))} of {_ms(mem.get('psramTotal'))}, internal free {_ms(mem.get('internalFree'))} (largest {_ms(mem.get('internalLargestBlock'))}).")
             md.append('')
         if suites.get('reboot'):
