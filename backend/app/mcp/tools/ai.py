@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..client import ToolContext
+from ..client import ToolContext, segment
 from ..protocol import McpServer
-from ..registry import Tool
+from ..registry import ID_PATTERN, Tool
 from ..result import run, text
 
 
@@ -124,12 +124,12 @@ def register_ai_tools(server: McpServer, ctx: ToolContext) -> None:
     ))
 
     async def ai_chat_get(chat_id: str, project_id: int | None = None):
-        return await run(lambda: _text(api, "GET", f"/api/ai/chats/{chat_id}", project_id))
+        return await run(lambda: _text(api, "GET", f"/api/ai/chats/{segment(chat_id)}", project_id))
 
     server.tool(Tool(
         name="ai_chat_get",
         description="One scene AI chat with all its messages.",
-        properties={"chat_id": {"type": "string", "minLength": 1}},
+        properties={"chat_id": {"type": "string", "pattern": ID_PATTERN}},
         required=["chat_id"],
         annotations={"readOnlyHint": True},
         handler=ai_chat_get,

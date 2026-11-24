@@ -32,6 +32,18 @@ def test_address_block_reasons():
     assert "multicast" in address_block_reason(_ip("224.0.0.1"))
     assert "unspecified" in address_block_reason(_ip("0.0.0.0"))
     assert "private" in address_block_reason(_ip("192.168.1.20"), allow_private=False)
+    # "Public only" is "globally routable": carrier NAT / Tailscale space
+    # (100.64.0.0/10) is neither private nor public, and so are the
+    # benchmarking and documentation ranges and unique-local IPv6.
+    for not_public in (
+        "100.64.0.1", "100.100.100.100", "100.127.255.254", "::ffff:100.64.0.1",
+        "198.18.0.1", "192.0.0.8", "fd7a:115c:a1e0::1", "2001:db8::1", "2002:a00:1::1",
+    ):
+        assert "private" in address_block_reason(_ip(not_public), allow_private=False), not_public
+    for public in ("93.184.216.34", "100.63.255.255", "100.128.0.1", "2606:2800:220:1:248:1893:25c8:1946"):
+        assert address_block_reason(_ip(public), allow_private=False) is None, public
+    # A frame may live on a tailnet, as it may on a LAN.
+    assert address_block_reason(_ip("100.64.0.1")) is None
     # IPv4-mapped IPv6 is judged as the IPv4 it wraps.
     assert "link-local" in address_block_reason(_ip("::ffff:169.254.169.254"))
     assert "loopback" in address_block_reason(_ip("::ffff:127.0.0.1"), allow_loopback=False)

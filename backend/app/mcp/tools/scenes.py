@@ -9,13 +9,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..client import ToolContext
+from ..client import ToolContext, segment
 from ..protocol import McpServer
-from ..registry import Tool
+from ..registry import ID_PATTERN, SEGMENT_PATTERN, Tool
 from ..result import McpInputError, run, text
 from .frames import as_scene_list, compact_scene
 
-TEMPLATE_ID = {"type": "string", "description": "Saved scene id from scenes_list."}
+TEMPLATE_ID = {"type": "string", "pattern": ID_PATTERN, "description": "Saved scene id from scenes_list."}
+CATALOG_SLUG = {"type": "string", "pattern": SEGMENT_PATTERN, "description": "Slug from store_browse."}
 
 
 def compact_template(template: dict[str, Any], origin: str) -> dict[str, Any]:
@@ -54,7 +55,7 @@ def register_scene_tools(server: McpServer, ctx: ToolContext) -> None:
 
     async def scene_get(template_id: str, full: bool = False, project_id: int | None = None):
         async def go():
-            template = await api.json("GET", f"/api/templates/{template_id}", project_id=project_id)
+            template = await api.json("GET", f"/api/templates/{segment(template_id)}", project_id=project_id)
             scenes = template.get("scenes") or []
             return text({
                 **compact_template(template, ctx.public_origin),
@@ -139,12 +140,12 @@ def register_scene_tools(server: McpServer, ctx: ToolContext) -> None:
                 raise McpInputError("Nothing to change: pass name and/or description.")
             # The route wants both keys (Optional, not defaulted): send the
             # current value for whichever one is not changing.
-            current = await api.json("GET", f"/api/templates/{template_id}", project_id=project_id)
+            current = await api.json("GET", f"/api/templates/{segment(template_id)}", project_id=project_id)
             body = {
                 "name": name if name is not None else current.get("name"),
                 "description": description if description is not None else current.get("description"),
             }
-            payload = await api.json("PATCH", f"/api/templates/{template_id}", project_id=project_id, json=body)
+            payload = await api.json("PATCH", f"/api/templates/{segment(template_id)}", project_id=project_id, json=body)
             return text(compact_template(payload, ctx.public_origin))
 
         return await run(go)
@@ -159,7 +160,7 @@ def register_scene_tools(server: McpServer, ctx: ToolContext) -> None:
     ))
 
     async def scene_delete(confirm: bool, template_id: str, project_id: int | None = None):
-        return await run(lambda: _text(api, "DELETE", f"/api/templates/{template_id}", project_id))
+        return await run(lambda: _text(api, "DELETE", f"/api/templates/{segment(template_id)}", project_id))
 
     server.tool(Tool(
         name="scene_delete",
@@ -240,7 +241,7 @@ def register_scene_tools(server: McpServer, ctx: ToolContext) -> None:
 
     async def store_scene_get(repository: str, template: str, full: bool = False):
         async def go():
-            scenes = await api.json("GET", f"/api/repositories/system/{repository}/templates/{template}/scenes.json", scoped=False)
+            scenes = await api.json("GET", f"/api/repositories/system/{segment(repository)}/templates/{segment(template)}/scenes.json", scoped=False)
             scene_list = as_scene_list(scenes)
             return text({
                 "repository": repository,
@@ -253,7 +254,7 @@ def register_scene_tools(server: McpServer, ctx: ToolContext) -> None:
     server.tool(Tool(
         name="store_scene_get",
         description="The scenes of one bundled catalog template (store_browse rows with a repository_slug): summaries, or the full JSON with full=true.",
-        properties={"repository": {"type": "string", "minLength": 1}, "template": {"type": "string", "minLength": 1}, "full": {"type": "boolean"}},
+        properties={"repository": CATALOG_SLUG, "template": CATALOG_SLUG, "full": {"type": "boolean"}},
         required=["repository", "template"],
         annotations={"readOnlyHint": True},
         scoped=False,

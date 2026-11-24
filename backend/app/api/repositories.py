@@ -287,6 +287,10 @@ async def get_system_repository_image(
         if not await get_current_user_from_request(request, db):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
+    # One folder each, as the scenes.json route below checks: ".." would
+    # look for a template.json above the bundled repositories.
+    if any("/" in slug or "\\" in slug or slug in (".", "..") for slug in (repository_slug, template_slug)):
+        raise HTTPException(status_code=404, detail="Template not found")
     repository_path = SYSTEM_REPOSITORIES_PATH / repository_slug
     if not repository_path.is_dir():
         raise HTTPException(status_code=404, detail="Repository not found")

@@ -23,7 +23,7 @@ from fastapi import HTTPException
 from app.utils import photos
 from app.utils.network import assert_url_target_allowed, guarded_transport
 
-from ..client import ToolContext
+from ..client import ToolContext, segment
 from ..protocol import McpServer
 from ..registry import Tool, confirmed
 from ..result import ApiError, McpInputError, image, run, text
@@ -146,6 +146,11 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
         async def go():
             if (content_base64 is None) == (url is None):
                 raise McpInputError("Pass exactly one of content_base64 or url.")
+            if ctx.auth.get("token_access") == "read_only":
+                # The upload route refuses the token, but only after the
+                # download: a read-only token must not have the backend
+                # fetch (up to 250 MiB of) a URL it chose.
+                raise McpInputError("This API token is read-only: it cannot add photos.")
             if url is not None:
                 data = await _fetch_photo(url)
                 name = filename or _filename_from_url(url)
@@ -310,7 +315,7 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
         # name another route ("../../frames/5"), so this is checked twice.
         if not photos.valid_share_token(token):
             raise McpInputError("token must be a pk_... share token from photo_shares_list")
-        return await run(lambda: _json(api, "DELETE", f"/api/photos/shares/{token}", project_id))
+        return await run(lambda: _json(api, "DELETE", f"/api/photos/shares/{segment(token)}", project_id))
 
     server.tool(Tool(
         name="photo_share_delete",

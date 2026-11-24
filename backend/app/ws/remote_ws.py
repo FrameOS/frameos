@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import gzip
 import hmac
+import os
 import hashlib
 import json
 import secrets
@@ -24,6 +24,7 @@ from app.websockets import publish_message
 from app.models.frame import Frame, frame_has_shell_access, update_frame
 from app.utils.frame_secrets import websocket_frame_payload
 from app.models.log import new_log as log
+from app.middleware import _bounded_gunzip
 from app.utils.request_ip import client_ip_for_request
 from app.ws.remote_bridge import CMD_KEY, RESP_KEY, STREAM_KEY, send_cmd
 
@@ -31,6 +32,16 @@ router = APIRouter()
 
 MAX_REMOTES = 1000        # authenticated Remotes per worker (simple DoS safeguard)
 MAX_PENDING_HANDSHAKES = 64  # sockets still in hello/handshake, per worker
+# Of those, how many one address may hold: without it 64 sockets that never
+# say hello turned every real Remote away. The address is the socket peer, or
+# a proxy named in FRAMEOS_TRUSTED_PROXIES vouching for one (strict).
+MAX_PENDING_HANDSHAKES_PER_ADDRESS = 8
+# hello, challenge and handshake together, whatever each step's own timeout.
+HANDSHAKE_DEADLINE_SECONDS = 20
+# What one reply may carry in binary frames (a file read, an http body), and
+# what its gzip may inflate to: the same as a direct request to a frame
+# (frame_http.FRAME_HTTP_MAX_RESPONSE_BYTES).
+REMOTE_MAX_REPLY_BYTES = int(os.environ.get("FRAME_HTTP_MAX_RESPONSE_BYTES") or 64 * 1024 * 1024)
 CONN_TTL   = 60           # seconds – Redis key self-expiry
 REMOTE_DISCONNECTED_ERROR = "remote websocket disconnected before command completed"
 
@@ -40,6 +51,7 @@ active_sockets: set[WebSocket] = set()
 # Sockets accepted but not yet authenticated. Bounded on their own, so a flood
 # of unauthenticated connections cannot push real frames out of MAX_REMOTES.
 pending_handshakes: set[WebSocket] = set()
+pending_by_address: dict[str, int] = {}
 
 
 async def write_log(redis: Redis, frame_id: int, type: str, line: str, ip: str | None = None):
@@ -600,17 +612,31 @@ async def ws_remote_endpoint(
     # Unauthenticated sockets have their own bound; MAX_REMOTES is checked
     # once the Remote has proved it holds a frame's secret, so it only ever
     # counts (and turns away) real frames.
-    if len(pending_handshakes) >= MAX_PENDING_HANDSHAKES:
+    address = client_ip_for_request(ws, strict=True) or ""
+    if (
+        len(pending_handshakes) >= MAX_PENDING_HANDSHAKES
+        or pending_by_address.get(address, 0) >= MAX_PENDING_HANDSHAKES_PER_ADDRESS
+    ):
         await ws.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="server busy")
         return
 
     await ws.accept()
 
     pending_handshakes.add(ws)
+    pending_by_address[address] = pending_by_address.get(address, 0) + 1
     try:
-        authenticated = await authenticate_remote(ws)
+        try:
+            authenticated = await asyncio.wait_for(authenticate_remote(ws), timeout=HANDSHAKE_DEADLINE_SECONDS)
+        except asyncio.TimeoutError:
+            await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="handshake timeout")
+            authenticated = None
     finally:
         pending_handshakes.discard(ws)
+        left = pending_by_address.get(address, 1) - 1
+        if left > 0:
+            pending_by_address[address] = left
+        else:
+            pending_by_address.pop(address, None)
     if authenticated is None:
         return
     frame, server_api_key, shared_secret, hello_msg = authenticated
@@ -679,6 +705,10 @@ async def ws_remote_endpoint(
                 if cmd_id:
                     buf = cmd_buffers.get(cmd_id, None)
                     if buf is not None:
+                        if len(buf) + len(packet["bytes"]) > REMOTE_MAX_REPLY_BYTES:
+                            # The command waiting on it hears the disconnect.
+                            await ws.close(code=status.WS_1009_MESSAGE_TOO_BIG, reason="reply too large")
+                            break
                         buf.extend(packet["bytes"])
                 continue
 
@@ -717,10 +747,12 @@ async def ws_remote_endpoint(
                 buf = cmd_buffers.pop(cmd_id, None)
                 if buf:
                     try:
-                        raw = gzip.decompress(bytes(buf))
+                        raw = _bounded_gunzip(bytes(buf), REMOTE_MAX_REPLY_BYTES)
                     except Exception:
-                        raw = bytes(buf)
-                    if isinstance(result, dict) and "status" in result:
+                        raw = bytes(buf)              # not gzip: the bytes as sent
+                    if raw is None:
+                        ok, result = False, "reply too large"
+                    elif isinstance(result, dict) and "status" in result:
                         result["body"] = raw          # ← http command
                     else:
                         result = raw                  # ← file_read

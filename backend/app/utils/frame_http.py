@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 from http import HTTPStatus
 import ipaddress
+import re
 import ssl
 from typing import Any, Optional
 
 import httpx
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 
@@ -61,6 +63,21 @@ def _build_frame_path(
         sep = "&" if "?" in path else "?"
         path = f"{path}{sep}k={frame.frame_access_key}"
     return path
+
+
+_ACCESS_KEY_PARAM = re.compile(r"([?&]k=)[^&#\s]*")
+
+
+def redact_access_key(text: str, frame: Frame | None = None) -> str:
+    """`text` with the frame access key a GET URL carries (`?k=`, above)
+    taken out: a URL goes into error details, which the UI shows and the
+    frame's log keeps. The key itself is taken out too wherever else it
+    appears (an exception's own message may quote the URL)."""
+    redacted = _ACCESS_KEY_PARAM.sub(r"\1[redacted]", text)
+    key = getattr(frame, "frame_access_key", None) if frame is not None else None
+    if isinstance(key, str) and len(key) >= 8:
+        redacted = redacted.replace(key, "[redacted]")
+    return redacted
 
 
 def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
@@ -157,24 +174,61 @@ def _add_direct_candidate(
 
 
 def _frame_http_direct_candidates(frame: Frame, path: str, method: str) -> list[tuple[str, Any]]:
+    """Where to try this frame, in order, each with how its TLS is checked.
+
+    An ESP32's address moves (DHCP) while its row keeps the old one, so an
+    embedded frame is also tried at the address it last booted from. Without
+    TLS that is plain http, as the frame's own address is.
+
+    With TLS on (`https_proxy.enable`) nothing is ever tried over plain http:
+    the request carries the frame's bearer, and a fallback that any connect
+    error reaches is one someone on the LAN can force by resetting the https
+    port. The other address is tried over https instead, and since a frame's
+    certificate names the address it had when the certificate was made, that
+    try (and the frame's own address, when the certificate does not cover
+    it) is checked against the certificate itself rather than the name
+    (`_pinned_verify`)."""
     scheme, port = _frame_scheme_port(frame)
     candidates: list[tuple[str, Any]] = []
     verify = _httpx_verify(frame)
     original_url = _build_direct_frame_url(frame, frame.frame_host, scheme, port, path, method)
-    if scheme != "https" or _https_certificate_covers_target(frame, frame.frame_host):
-        candidates.append((original_url, verify))
-
     boot_ip = _embedded_last_boot_ip(frame)
-    if boot_ip:
-        fallback_port = int(frame.frame_port or 80)
-        _add_direct_candidate(candidates, frame, boot_ip, "http", fallback_port, path, method, True)
-    elif _is_embedded_frame(frame) and scheme == "https" and _ip_address(frame.frame_host) is not None:
-        fallback_port = int(frame.frame_port or 80)
-        _add_direct_candidate(candidates, frame, frame.frame_host, "http", fallback_port, path, method, True)
 
-    if not candidates:
+    if scheme != "https":
         candidates.append((original_url, verify))
+        if boot_ip:
+            _add_direct_candidate(candidates, frame, boot_ip, "http", int(frame.frame_port or 80), path, method, True)
+        return candidates
+
+    pinned = _pinned_verify(frame) if _is_embedded_frame(frame) else None
+    covered = _https_certificate_covers_target(frame, frame.frame_host)
+    candidates.append((original_url, verify if covered or pinned is None else pinned))
+    if boot_ip:
+        _add_direct_candidate(candidates, frame, boot_ip, "https", port, path, method, pinned or verify)
     return candidates
+
+
+def _pinned_verify(frame: Frame) -> Any:
+    """A TLS context that accepts exactly the server certificate this
+    backend holds for the frame, at whatever address answers with its key.
+    None when no certificate is stored (then the ordinary check applies)."""
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    cert_pem = (https_proxy.get("certs", {}).get("server") or "").strip()
+    if not https_proxy.get("enable") or not cert_pem:
+        return None
+    try:
+        # The leaf alone: a PEM that also carries its issuers must not make
+        # every certificate they signed pass.
+        leaf = x509.load_pem_x509_certificates(cert_pem.encode("utf-8"))[0]
+    except (ValueError, IndexError):
+        return None
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_REQUIRED
+    # Lets a certificate that is not a CA be the trust anchor.
+    context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    context.load_verify_locations(cadata=leaf.public_bytes(serialization.Encoding.PEM).decode("ascii"))
+    return context
 
 
 def _httpx_verify(frame: Frame):
@@ -400,7 +454,7 @@ async def _fetch_frame_http_bytes_once(
                             content=body,
                             timeout=timeout if timeout is not None else FRAME_HTTP_TIMEOUT,
                         ) as response:
-                            content = await _read_response_capped(response, url)
+                            content = await _read_response_capped(response, redact_access_key(url, frame))
                             return response.status_code, content, dict(response.headers)
                     except timeout_errors:
                         if attempt < attempts:
@@ -408,7 +462,7 @@ async def _fetch_frame_http_bytes_once(
                             continue
                         last_error = HTTPException(
                             status_code=HTTPStatus.REQUEST_TIMEOUT,
-                            detail=f"Timeout to {url}",
+                            detail=f"Timeout to {redact_access_key(url, frame)}",
                         )
                     except HTTPException:
                         # Our own verdict (an over-cap body): not a transport error.
@@ -427,11 +481,11 @@ async def _fetch_frame_http_bytes_once(
                             break
                         last_error = HTTPException(
                             status_code=HTTPStatus.BAD_GATEWAY,
-                            detail=str(exc),
+                            detail=redact_access_key(str(exc), frame),
                         )
                     except Exception as exc:
                         raise HTTPException(
-                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=redact_access_key(str(exc), frame)
                         )
                     break
             if candidate_index < len(candidates) - 1:

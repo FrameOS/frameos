@@ -206,6 +206,17 @@ Content-Type: audio/L16; rate=16000; channels=1
   "chat_failed"|"ai_unavailable","detail":"…"}` for a problem the frame should
   sound as an error. `4xx` for an unknown or inactive frame, a body over the
   caps, too many sessions.
+- **No microphone or the switch off: no turn.** The frame's token alone is
+  not the owner talking, so both planes answer `403 no_microphone` /
+  `403 voice_chat_off` before reading a byte, by the same facts the Settings
+  panel draws the voice controls by: the backend its own `device_config`
+  (`voiceChat` false; the configured pins over the preset's naming no
+  microphone, and no codec microphone on the preset: `voice_refusal` in
+  `embedded_voice.py`), the cloud what the frame said in its hello
+  (`hardware.voiceChat` false, `hardware.microphone` not true: `voiceRefusal`
+  in `voice-permissions.ts`). A board whose microphone the backend was never
+  told about (pins on a header, no preset) gets its turns once the pins are
+  entered in Settings.
 - Caps: a chunk is at most 64 KiB (2 s), a session at most 30 s of audio
   (960,000 bytes), 20 sessions per frame per 15 minutes, and a session
   nobody has written to for 60 s is forgotten. Sessions live in the

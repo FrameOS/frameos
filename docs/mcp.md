@@ -87,7 +87,8 @@ minted filled in.
 
 `backend/app/api/mcp.py` answers one JSON-RPC request per POST and keeps
 nothing: JSON responses, no SSE stream, no session id (`GET` and `DELETE`
-are 405). The protocol itself — `initialize`, `ping`, `tools/list`,
+are 405). The body is `application/json` (415 otherwise: any other type is
+what a page on another origin could post without a preflight). The protocol itself — `initialize`, `ping`, `tools/list`,
 `tools/call`, `resources/list`, `resources/templates/list`,
 `resources/read`, `prompts/list`, `prompts/get`, batches for older clients —
 is `backend/app/mcp/protocol.py`, small enough to own rather than add the
@@ -100,6 +101,15 @@ limits key on it, and project-scoped paths (`/api/frames`, `/api/templates`,
 `/api/settings`, …) get the `/api/projects/{id}` prefix. A tool names its
 project with `project_id`; omitted, the account's only project is used, and
 an account with several is told to pass one.
+
+An argument is the model's, and the model reads untrusted text, so no
+argument is pasted into a route path as it came: a string that becomes part
+of a path goes through `segment()` (quoted whole, so a `/` or `?` in it is
+data, and `.` / `..` refused) and carries a `pattern` in its schema
+(`ID_PATTERN` for a row's id, `SEGMENT_PATTERN` for looser names). The client
+also refuses any path that holds a dot segment, a query or a fragment before
+httpx can fold it into a route the tool never named, and `test_mcp.py` reads
+the tools' sources for an interpolation that skipped the quoting.
 
 ### Tools
 

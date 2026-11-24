@@ -342,7 +342,10 @@ link (`400 scene_contains_photo_link`); a private save is fine and turns
 the scene's sharing link off, and the sharing link of an older album scene
 no longer serves a version that holds one. The scene AI on both planes
 shows the model a placeholder (`pk_photo_link_1`, ...) and puts the real
-link back in what it returns. The MCP servers return scenes as they are:
+link back in what it returns: in the calls that deliver a scene or an app
+(to the editor, saved, put on a frame, rendered: `SCENE_DELIVERY_TOOLS` on
+both planes) and in no other, so text that talked the model into copying a
+link into a frame event, a setting or a lookup sends only the placeholder. The MCP servers return scenes as they are:
 their client is the owner's own agent.
 
 ### `POST /api/photos/scene`

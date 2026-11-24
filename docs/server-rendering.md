@@ -23,6 +23,17 @@ It also means the scene runs where the plane is, and fetches from there:
   access says (that switch is about the frame's own network, which the cloud
   is not on).
 
+And the scene is held to bounds where it runs. On a backend
+(`backend/app/utils/embedded_render.py`, `backend/tools/embedded_wasm_render.mjs`)
+the render process is started with what Node needs and none of the
+backend's own environment (no `SECRET_KEY`, no `DATABASE_URL`); one answer
+to a scene's request is at most 23 MiB as decoded, counted while it
+inflates; and a render with no board to stand in for (a virtual frame, a
+preview) still has a ceiling on what its scene may allocate: 256 MiB, or
+eight times the canvas where that is more, up to 1 GiB. A board's render
+has the board's own ceiling ("Renders run in the frame's memory",
+`docs/ai-chat.md`).
+
 This is the thin-client mode a PSRAM-less board (ESP32-C3) has always run in,
 offered as a choice to a board that has its own runtime (every ESP32-S3).
 Neither plane builds firmware for it: the switch is a setting.

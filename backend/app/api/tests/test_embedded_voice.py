@@ -46,6 +46,8 @@ async def voice_frame(
 ):
     frame = await device_frame(async_client, db)
     frame.scenes = scenes()
+    # A board with a microphone, as the E1001/E1002/E1003 presets seed it.
+    frame.device_config = {**(frame.device_config or {}), "micClkPin": 42, "micDataPin": 41, "micPwrPin": 38}
     if permissions:
         # The owner's switches, as the Settings panel writes them (camelCase
         # device_config keys; docs/voice-chat.md "What the voice chat may do").
@@ -552,6 +554,50 @@ async def test_the_frames_token_is_the_only_key(async_client, no_auth_client, db
     assert (await no_auth_client.post(url(frame, 0), content=SECOND_OF_SPEECH, headers=PCM_HEADERS)).status_code == 401
     assert (await no_auth_client.post(url(frame, 0), content=SECOND_OF_SPEECH, headers={**auth(other), **PCM_HEADERS})).status_code == 401
     assert heard["calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_no_turn_without_a_microphone_or_with_the_switch_off(async_client, no_auth_client, db, redis, heard):
+    """The frame's key is not the owner talking: a turn is what a held voice
+    key on a real microphone starts. The switch off, or no microphone at all
+    (so no voice controls in Settings either), and the route takes nothing."""
+    from app.api.embedded_voice import frame_has_microphone, voice_refusal
+
+    frame = await voice_frame(async_client, db)
+    headers = {**auth(frame), **PCM_HEADERS}
+
+    async def attempt() -> tuple[int, object]:
+        response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers=headers)
+        return response.status_code, response.json().get("detail")
+
+    def configure(**device_config):
+        frame.device_config = device_config
+        db.add(frame)
+        db.commit()
+
+    for spelling in ("voiceChat", "voice_chat"):
+        configure(micClkPin=42, micDataPin=41, **{spelling: False})
+        assert await attempt() == (403, "voice_chat_off")
+    configure()
+    assert await attempt() == (403, "no_microphone")
+    configure(micClkPin=42, micDataPin=-1)
+    assert await attempt() == (403, "no_microphone")
+    assert heard["calls"] == []
+
+    # The preset's own microphone counts where the pins were left to the
+    # board, a codec microphone whatever the pins say, and -1 unsets one.
+    configure(hardwarePreset="seeed_reterminal_e1002")
+    assert frame_has_microphone(frame) and voice_refusal(frame) is None
+    configure(hardwarePreset="seeed_reterminal_e1002", micClkPin=-1)
+    assert not frame_has_microphone(frame)
+    configure(hardwarePreset="seeed_reterminal_e1004")
+    assert not frame_has_microphone(frame)
+    configure(hardwarePreset="waveshare_esp32_s3_photopainter")
+    assert frame_has_microphone(frame)
+    configure(mic_clk_pin=4, mic_data_pin=5, voice_chat=True)
+    assert voice_refusal(frame) is None
+    status, _ = await attempt()
+    assert status == 200 and len(heard["calls"]) == 1
 
 
 @pytest.mark.asyncio

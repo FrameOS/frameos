@@ -255,6 +255,22 @@ async def test_poll_pending_then_connected(async_client, cloud_calls, db):
 
 
 @pytest.mark.asyncio
+async def test_a_first_link_keeps_only_the_scopes_it_asked_for(async_client, cloud_calls, db):
+    """The provider grants from what was asked. Answering the first link
+    with cloud login on top must not give its account a local session."""
+    _calls, responses = cloud_calls
+    await async_client.post("/api/cloud/connect", json={"scopes": ["backend:link", "backend:read", "store:read"]})
+    responses["poll"] = (
+        200,
+        {**POLL_SUCCESS, "scope": "backend:link backend:read auth:login telemetry:logs store:read made:up"},
+    )
+    data = (await async_client.post("/api/cloud/poll")).json()
+    assert data["status"] == "connected"
+    assert data["link"]["scopes"] == ["backend:link", "backend:read", "store:read"]
+    assert db.query(CloudBackendLink).first().requested_scope is None
+
+
+@pytest.mark.asyncio
 async def test_poll_auto_links_identity_of_approver(async_client, cloud_calls, db):
     """The cloud account that approved the link is the person connecting, so
     the identity mapping is created without a separate handoff."""

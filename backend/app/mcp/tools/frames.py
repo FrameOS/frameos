@@ -18,9 +18,9 @@ from typing import Any
 
 from app.models.frame import cached_app_configs, scene_declared_setting_groups, scene_is_from_store
 
-from ..client import ToolContext
+from ..client import ToolContext, segment, segments
 from ..protocol import McpServer
-from ..registry import Tool, confirmed
+from ..registry import ID_PATTERN, SEGMENT_PATTERN, Tool, confirmed
 from ..result import McpInputError, failure, image, run, text
 
 FRAME_ID = {"type": "integer", "description": "Frame id from frames_list."}
@@ -535,13 +535,13 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         if scenes is not None:
             return as_scene_list(scenes), {"source": "scenes"}
         if template_id:
-            payload = await api.json("GET", f"/api/templates/{template_id}", project_id=project_id)
+            payload = await api.json("GET", f"/api/templates/{segment(template_id)}", project_id=project_id)
             return as_scene_list(payload.get("scenes")), {"source": "template", "template_id": template_id, "name": payload.get("name")}
         if repository or template:
             if not (repository and template):
                 raise McpInputError("repository and template go together (slugs from store_browse).")
             payload = await api.json(
-                "GET", f"/api/repositories/system/{repository}/templates/{template}/scenes.json", scoped=False
+                "GET", f"/api/repositories/system/{segment(repository)}/templates/{segment(template)}/scenes.json", scoped=False
             )
             return as_scene_list(payload), {"source": "repository", "repository": repository, "template": template}
         # A zip, a scenes.json or a store page: the template route fetches it
@@ -640,9 +640,9 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "confirm": confirmed("changes what a physical frame shows"),
             "frame_id": FRAME_ID,
             "scenes": {"type": ["object", "array", "string"], "description": "Scene JSON to install."},
-            "template_id": {"type": "string"},
-            "repository": {"type": "string", "description": "Catalog repository slug (store_browse)."},
-            "template": {"type": "string", "description": "Catalog template slug (store_browse)."},
+            "template_id": {"type": "string", "pattern": ID_PATTERN},
+            "repository": {"type": "string", "pattern": SEGMENT_PATTERN, "description": "Catalog repository slug (store_browse)."},
+            "template": {"type": "string", "pattern": SEGMENT_PATTERN, "description": "Catalog template slug (store_browse)."},
             "url": {"type": "string", "description": "https:// URL of a scenes.json, zip or scene store page."},
             "name": {"type": "string", "description": "Name for the scene when exactly one is installed."},
             "activate": {"type": "boolean"},
@@ -818,7 +818,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         confirm: bool, frame_id: int, event: str, payload: dict[str, Any] | None = None, project_id: int | None = None
     ):
         async def go():
-            await api.json("POST", f"/api/frames/{frame_id}/event/{event}", project_id=project_id, json=payload or {})
+            await api.json("POST", f"/api/frames/{frame_id}/event/{segment(event)}", project_id=project_id, json=payload or {})
             return text({"ok": True, "event": event})
 
         return await run(go)
@@ -833,7 +833,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         properties={
             "confirm": confirmed("changes what a physical frame does"),
             "frame_id": FRAME_ID,
-            "event": {"type": "string", "minLength": 1, "maxLength": 128},
+            "event": {"type": "string", "pattern": SEGMENT_PATTERN},
             "payload": {"type": "object"},
         },
         required=["confirm", "frame_id", "event"],
@@ -866,7 +866,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         async def go():
             pid = await api.project_id(project_id)
             body, content_type = await api.bytes(
-                "GET", f"/api/projects/{pid}/frames/{frame_id}/scene_images/{scene_id}", scoped=False,
+                "GET", f"/api/projects/{pid}/frames/{frame_id}/scene_images/{segments(scene_id)}", scoped=False,
                 params={"thumb": "1" if thumbnail else None},
             )
             mime = content_type.split(";")[0].strip() or "image/png"
@@ -937,7 +937,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
     def power_tool(name: str, path: str, description: str) -> None:
         async def handler(confirm: bool, frame_id: int, project_id: int | None = None):
             async def go():
-                payload = await api.json("POST", f"/api/frames/{frame_id}/{path}", project_id=project_id)
+                payload = await api.json("POST", f"/api/frames/{frame_id}/{segment(path)}", project_id=project_id)
                 return text({"ok": True, "result": payload})
 
             return await run(go)
@@ -957,7 +957,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
     async def frame_deploy(confirm: bool, frame_id: int, mode: str = "fast", force: bool = False, project_id: int | None = None):
         async def go():
             path = "fast_deploy" if mode == "fast" else "deploy"
-            payload = await api.json("POST", f"/api/frames/{frame_id}/{path}", project_id=project_id, params={"force": "1" if force else None})
+            payload = await api.json("POST", f"/api/frames/{frame_id}/{segment(path)}", project_id=project_id, params={"force": "1" if force else None})
             return text({"mode": mode, **payload, "note": "Deploys run in the worker; frame_logs shows progress."})
 
         return await run(go)
@@ -1019,12 +1019,12 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
     ))
 
     async def frame_command_cancel(frame_id: int, command_id: str, project_id: int | None = None):
-        return await run(lambda: _json(api, "DELETE", f"/api/frames/{frame_id}/commands/{command_id}", project_id))
+        return await run(lambda: _json(api, "DELETE", f"/api/frames/{frame_id}/commands/{segment(command_id)}", project_id))
 
     server.tool(Tool(
         name="frame_command_cancel",
         description="Drop a pending action from frame_commands_list before the frame picks it up.",
-        properties={"frame_id": FRAME_ID, "command_id": {"type": "string"}},
+        properties={"frame_id": FRAME_ID, "command_id": {"type": "string", "pattern": ID_PATTERN}},
         required=["frame_id", "command_id"],
         handler=frame_command_cancel,
     ))

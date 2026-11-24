@@ -78,6 +78,27 @@ THUMB_MAX_SIDE = 512
 # camera's 100 MP file is cheap and the cap is higher (docs/photos.md).
 THUMB_MAX_PIXELS = 80_000_000
 THUMB_MAX_JPEG_PIXELS = 400_000_000
+
+# Pillow's decompression-bomb ceiling is one process-wide number, read when an
+# image is opened. The two openers below raise it for a camera JPEG and put it
+# back; two of them at once on worker threads used to put back each other's
+# raised value, which then stayed for every later open. One lock: the swap is
+# a header read, and everything else that opens an image sees the default.
+_PIL_LIMIT_LOCK = threading.Lock()
+
+
+def open_image_allowing(data: bytes, max_pixels: int):
+    """`Image.open` with Pillow's bomb ceiling at `max_pixels` for this open
+    only (the caller checks the size against its own cap after)."""
+    from PIL import Image
+
+    with _PIL_LIMIT_LOCK:
+        bomb_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = max_pixels
+        try:
+            return Image.open(io.BytesIO(data))
+        finally:
+            Image.MAX_IMAGE_PIXELS = bomb_limit
 READINESS_CACHE_SECONDS = 30
 UPLOAD_PART_MAX_AGE_SECONDS = 3600
 SHARE_URL_PREFIX = "/api/photos/shared"
@@ -732,12 +753,7 @@ def thumbnail_of(data: bytes, name: str) -> Optional[bytes]:
 
         # Pillow refuses to open anything over twice its own pixel ceiling
         # (178 MP); ours is the decision here, taken on the header.
-        bomb_limit = Image.MAX_IMAGE_PIXELS
-        Image.MAX_IMAGE_PIXELS = THUMB_MAX_JPEG_PIXELS
-        try:
-            opened = Image.open(io.BytesIO(data))
-        finally:
-            Image.MAX_IMAGE_PIXELS = bomb_limit
+        opened = open_image_allowing(data, THUMB_MAX_JPEG_PIXELS)
         with opened:
             cap = THUMB_MAX_JPEG_PIXELS if opened.format == "JPEG" else THUMB_MAX_PIXELS
             if opened.size[0] * opened.size[1] > cap:
@@ -1143,14 +1159,10 @@ def resize_image_bytes(data: bytes, name: str, options: ResizeOptions) -> tuple[
     except ImportError:  # pragma: no cover - Pillow is a dependency
         raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Image support is not installed")
 
-    bomb_limit = Image.MAX_IMAGE_PIXELS
-    Image.MAX_IMAGE_PIXELS = THUMB_MAX_JPEG_PIXELS
     try:
-        opened = Image.open(io.BytesIO(data))
+        opened = open_image_allowing(data, THUMB_MAX_JPEG_PIXELS)
     except Exception:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="This file is not an image that can be resized")
-    finally:
-        Image.MAX_IMAGE_PIXELS = bomb_limit
     with opened:
         source_format = (opened.format or "").lower()
         if source_format == "mpo":

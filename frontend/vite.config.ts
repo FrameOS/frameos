@@ -23,7 +23,10 @@ export default defineConfig({
       },
       '/api': {
         target: backendTarget,
-        changeOrigin: true,
+        // Keep `Host` as the browser dialled it, as for /ws below: the
+        // backend refuses a cookie-authenticated change whose Origin does
+        // not match it (backend/app/utils/same_origin.py).
+        changeOrigin: false,
       },
       '/ws': {
         target: backendTarget,

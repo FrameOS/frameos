@@ -270,8 +270,20 @@ process.stdin.on('end', async () => {
       }
       url = next;
     }
+    // The body as decoded, held to the cap while it arrives: a few kilobytes
+    // of gzip inflate to gigabytes, and the parent's own cap (maxBuffer) sees
+    // only what this child prints once it holds all of it.
+    const maxBodyBytes = req.maxBodyBytes > 0 ? req.maxBodyBytes : 23 * 1024 * 1024;
     const parts = [];
-    for await (const chunk of decodedBody(response)) parts.push(chunk);
+    let total = 0;
+    for await (const chunk of decodedBody(response)) {
+      total += chunk.length;
+      if (total > maxBodyBytes) {
+        response.destroy();
+        throw new Error('response body over ' + maxBodyBytes + ' bytes');
+      }
+      parts.push(chunk);
+    }
     const bytes = Buffer.concat(parts);
     process.stdout.write(JSON.stringify({ status: response.statusCode, bodyBase64: bytes.toString('base64'),
       headers: headerLines(response) }));
@@ -286,6 +298,14 @@ process.stdin.on('end', async () => {
 
 // Set once the request has been read; the XHR shim is installed before that.
 let NETWORK_POLICY = 'public'
+
+// What one answer may be: the child's stdout is the body as base64 inside
+// JSON (4 bytes for 3, plus the headers), so the body's cap sits under the
+// pipe's, and the child holds itself to it while the body is still arriving.
+const FETCH_CHILD_MAX_BUFFER = 32 * 1024 * 1024
+const MAX_FETCH_BODY_BYTES = 23 * 1024 * 1024
+// A render with no device ceiling and no word from its caller.
+const DEFAULT_MEMORY_CEILING_BYTES = 256 * 1024 * 1024
 
 class SyncXMLHttpRequest {
   open(method, url) {
@@ -313,10 +333,11 @@ class SyncXMLHttpRequest {
       timeoutMs: this.timeout || 30000,
       bodyBase64: body ? Buffer.from(body).toString('base64') : '',
       networkPolicy: NETWORK_POLICY,
+      maxBodyBytes: MAX_FETCH_BODY_BYTES,
     }
     const child = spawnSync(process.execPath, ['-e', FETCH_CHILD_SCRIPT], {
       input: JSON.stringify(request),
-      maxBuffer: 32 * 1024 * 1024,
+      maxBuffer: FETCH_CHILD_MAX_BUFFER,
       timeout: (this.timeout || 30000) + 5000,
     })
     if (child.status !== 0 || !child.stdout) {
@@ -439,6 +460,24 @@ if (request.deviceLimits) {
     } catch (error) {
       process.stderr.write(`embedded_wasm_render: device canvas unavailable (${error})\n`)
     }
+  }
+}
+// No device to stand in for (a virtual frame, a preview with no frame): the
+// render still gets a ceiling. Without one a scene's allocations are held
+// only by the module's own maximum (2 GiB), in each of the renders running
+// at once, on a host that may be a Pi. The same ceiling as a device's, just
+// far above what a scene needs (the Python caller sizes it from the canvas),
+// and without the device behaviour: the runtime plans its decodes as a host
+// with this much to spare, and a scene that passes it fails as a render that
+// ran out of memory. Old bundles predate the export and render unlimited.
+if (!request.deviceLimits) {
+  const ceiling = Number.isFinite(request.memoryCeilingBytes) && request.memoryCeilingBytes > 0
+    ? Math.floor(request.memoryCeilingBytes)
+    : DEFAULT_MEMORY_CEILING_BYTES
+  try {
+    call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [ceiling, 0])
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: memory ceiling unavailable (${error})\n`)
   }
 }
 // The frame's render scale (frame.json `renderScale`): what a UI from a

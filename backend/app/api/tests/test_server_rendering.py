@@ -2,6 +2,7 @@
 backend: the render pull's ETag, which scene it draws, and the picture drawn
 before a sleeping frame wakes."""
 
+import base64
 import hashlib
 import json
 import os
@@ -661,6 +662,56 @@ def test_a_name_that_resolves_to_the_hosts_own_address_is_refused_in_the_lookup(
     if shutil.which('node') is None:
         pytest.skip('node not available')
     assert _fetch_outcomes([(PRIVATE, 'http://localhost:9/'), (ALL, 'http://localhost:9/')]) == ['host', 'allowed']
+
+
+def test_the_fetch_child_stops_a_body_that_inflates_past_the_cap():
+    """A few kilobytes of gzip are megabytes once decoded, and the parent's
+    cap only sees what the child prints when it holds the whole body: the
+    child counts as it inflates and gives up at the cap."""
+    if shutil.which('node') is None:
+        pytest.skip('node not available')
+    import gzip
+    import subprocess
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    bomb = gzip.compress(bytes(8 * 1024 * 1024))
+    assert len(bomb) < 16 * 1024
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = bomb if self.path == '/bomb' else gzip.compress(b'x' * 1000)
+            self.send_response(200)
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f'http://127.0.0.1:{server.server_address[1]}'
+        harness = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'tools', 'embedded_wasm_render.mjs')
+        requests = [
+            {'method': 'GET', 'url': f'{base}{path}', 'headers': {}, 'timeoutMs': 5000, 'networkPolicy': 'all',
+             'maxBodyBytes': 64 * 1024}
+            for path in ('/bomb', '/small')
+        ]
+        done = subprocess.run(
+            ['node', '-e', _CHILD_RUNNER, harness, json.dumps(requests)], capture_output=True, timeout=60, check=True
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    bombed, small = json.loads(done.stdout)
+    assert bombed['status'] == 0 and 'response body over 65536 bytes' in bombed['error']
+    assert small['status'] == 200 and len(base64.b64decode(small['bodyBase64'])) == 1000
+    # The harness asks for a cap that fits the pipe it reads the answer from.
+    source = open(harness).read()
+    assert 'maxBodyBytes: MAX_FETCH_BODY_BYTES' in source and 'maxBuffer: FETCH_CHILD_MAX_BUFFER' in source
 
 
 # ------------------------------------------- keys, touch and the schedule

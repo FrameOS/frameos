@@ -8,9 +8,9 @@ from app.utils.scene_guide_gen import SCENE_GUIDE_SECTIONS
 from app.utils.settings_secrets import MASK_BULLETS
 from app.utils.versions import current_frameos_version
 
-from ..client import ToolContext
+from ..client import ToolContext, segment
 from ..protocol import McpServer
-from ..registry import Tool
+from ..registry import ID_PATTERN, Tool
 from ..result import McpInputError, run, text
 
 SETTINGS_GROUPS = tuple(SettingsUpdateRequest.model_fields)
@@ -78,14 +78,14 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
     ))
 
     async def api_token_revoke(confirm: bool, token_id: str):
-        return await run(lambda: _text(api, "DELETE", f"/api/user/api_tokens/{token_id}"))
+        return await run(lambda: _text(api, "DELETE", f"/api/user/api_tokens/{segment(token_id)}"))
 
     server.tool(Tool(
         name="api_token_revoke",
         description="Revoke one API token (a token may revoke itself). Requires confirm=true.",
         properties={
             "confirm": {"type": "boolean", "const": True, "description": "Must be true — scripts using the token stop working."},
-            "token_id": {"type": "string", "minLength": 1},
+            "token_id": {"type": "string", "pattern": ID_PATTERN},
         },
         required=["confirm", "token_id"],
         annotations={"destructiveHint": True},

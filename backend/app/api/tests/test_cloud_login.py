@@ -82,6 +82,14 @@ async def test_login_options_with_auth_scope(async_client, db):
 
 
 @pytest.mark.asyncio
+async def test_login_options_name_the_provider_only_when_cloud_login_is_offered(no_auth_client, db):
+    make_connected_link(db, scope="backend:link backend:read")
+    data = (await no_auth_client.get("/api/cloud/login/options")).json()
+    assert data["available"] is False
+    assert data["provider_url"] is None
+
+
+@pytest.mark.asyncio
 async def test_login_start_requires_scope(async_client, db):
     make_connected_link(db, scope="backend:link backend:read")
     response = await async_client.post("/api/cloud/login/start", json={})
