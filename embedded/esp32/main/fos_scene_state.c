@@ -100,13 +100,46 @@ static void note_absent(const char *scene_id, bool absent)
 bool fos_scene_state_path(const char *scene_id, char *out, size_t out_len)
 {
     if (scene_id == NULL || scene_id[0] == '\0' || out == NULL || out_len == 0) return false;
+    /* The id is written into the file (OWNER_KEY): one with a control
+     * character in it keeps no state. */
+    for (const unsigned char *p = (const unsigned char *)scene_id; *p; p++) {
+        if (*p < 0x20) return false;
+    }
     int n = snprintf(out, out_len, "%s/st-%08lx.json", s_dir, (unsigned long)fnv1a32(scene_id));
     return n > 0 && (size_t)n < out_len;
 }
 
-static char *read_file(const char *scene_id)
+/* A file's first member names the scene whose state it is:
+ * {"__owner":"<id>", ...the state...}. The name is 32 bits of hash, and two
+ * ids that share one are easy to make on purpose: without it, a scene given
+ * such an id read the state another scene had kept (its public fields, its
+ * persist:"disk" ones). Inside the object, not in front of it, so firmware
+ * from before reads the file as it always did (one key more, which no scene
+ * declares). A file without it is from before (`legacy`). */
+#define OWNER_KEY "{\"__owner\":\""
+
+/* The id as the owner member writes it: `"` and `\` escaped, nothing else to
+ * escape (fos_scene_state_path refuses control characters). */
+static bool owner_matches(const char *text, size_t len, const char *scene_id, size_t *member_len)
+{
+    size_t at = strlen(OWNER_KEY);
+    for (const char *p = scene_id; *p; p++) {
+        if (*p == '"' || *p == '\\') {
+            if (at >= len || text[at] != '\\') return false;
+            at++;
+        }
+        if (at >= len || text[at] != *p) return false;
+        at++;
+    }
+    if (at + 1 >= len || text[at] != '"' || text[at + 1] != ',') return false;
+    *member_len = at + 2;
+    return true;
+}
+
+static char *read_file(const char *scene_id, bool *legacy)
 {
     char path[FOS_SCENE_STATE_DIR_MAX + 32];
+    *legacy = false;
     if (!fos_scene_state_path(scene_id, path, sizeof(path))) return NULL;
     if (absent_index(fnv1a32(scene_id)) >= 0) return NULL;
     FILE *f = fopen(path, "rb");
@@ -114,18 +147,34 @@ static char *read_file(const char *scene_id)
         note_absent(scene_id, true);
         return NULL;
     }
-    char *buf = malloc(FOS_SCENE_STATE_MAX_BYTES + 1);
+    /* The owner member, then the state. */
+    size_t most = FOS_SCENE_STATE_MAX_BYTES + strlen(OWNER_KEY) + 2 * strlen(scene_id) + 2;
+    char *buf = malloc(most + 2);
     if (buf == NULL) {
         fclose(f);
         return NULL;
     }
     size_t total = 0;
-    while (total < FOS_SCENE_STATE_MAX_BYTES + 1) {
-        size_t r = fread(buf + total, 1, FOS_SCENE_STATE_MAX_BYTES + 1 - total, f);
+    while (total < most + 1) {
+        size_t r = fread(buf + total, 1, most + 1 - total, f);
         if (r == 0) break;
         total += r;
     }
     fclose(f);
+    size_t key_len = strlen(OWNER_KEY);
+    if (total >= key_len && memcmp(buf, OWNER_KEY, key_len) == 0) {
+        size_t member_len = 0;
+        if (!owner_matches(buf, total, scene_id, &member_len)) {
+            /* Another scene's file under this scene's hash: not this one's state. */
+            free(buf);
+            return NULL;
+        }
+        /* "{" and what follows the owner member. */
+        memmove(buf + 1, buf + member_len, total - member_len);
+        total -= member_len - 1;
+    } else {
+        *legacy = true;
+    }
     if (total == 0 || total > FOS_SCENE_STATE_MAX_BYTES) {
         /* Empty or over the cap: not state we vouch for. */
         free(buf);
@@ -181,9 +230,21 @@ static file_result_t write_file(const char *scene_id, const char *json, bool kno
     }
     size_t len = strlen(json);
     if (len > FOS_SCENE_STATE_MAX_BYTES) return FILE_KEPT;
+    /* An object with members (an empty one is no file, above): the owner
+     * goes in as its first. Anything else is no state. */
+    const char *members = json;
+    while (*members == ' ' || *members == '\n' || *members == '\r' || *members == '\t') members++;
+    if (*members != '{') return FILE_KEPT;
+    members++;
+    size_t members_len = len - (size_t)(members - json);
     FILE *f = fopen(path, "wb");
     if (f == NULL) return FILE_KEPT;
-    bool ok = fwrite(json, 1, len, f) == len;
+    bool ok = fputs(OWNER_KEY, f) >= 0;
+    for (const char *p = scene_id; ok && *p; p++) {
+        if ((*p == '"' || *p == '\\') && fputc('\\', f) == EOF) ok = false;
+        if (ok && fputc(*p, f) == EOF) ok = false;
+    }
+    ok = ok && fputs("\",", f) >= 0 && fwrite(members, 1, members_len, f) == members_len;
     if (fclose(f) != 0) ok = false;
     if (!ok) {
         remove(path);
@@ -243,12 +304,17 @@ char *fos_scene_state_load(const char *scene_id)
     char *result = NULL;
     pending_t *entry = find_pending(scene_id);
     if (entry == NULL && s_inflight.used && strcmp(s_inflight.id, scene_id) == 0) entry = &s_inflight;
+    bool legacy = false;
     if (entry != NULL) {
         result = entry->json ? copy_text(entry->json) : NULL;
     } else {
-        result = read_file(scene_id);
+        result = read_file(scene_id, &legacy);
     }
     unlock();
+    /* A file from before the owner line belongs to the scene that reads it
+     * first: written again with the line, so no other id that shares its
+     * hash is given it later. */
+    if (legacy && result != NULL) fos_scene_state_save(scene_id, result);
     return result;
 }
 

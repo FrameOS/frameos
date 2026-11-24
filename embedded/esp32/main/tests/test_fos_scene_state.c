@@ -347,6 +347,90 @@ static void test_a_missing_file_is_remembered(const char *dir)
     CHECK(fos_scene_state_load("ghost") == NULL);
 }
 
+static void write_raw(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) return;
+    fputs(text, f);
+    fclose(f);
+}
+
+static bool read_raw(const char *path, char *out, size_t cap)
+{
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) return false;
+    size_t got = fread(out, 1, cap - 1, f);
+    fclose(f);
+    out[got] = '\0';
+    return true;
+}
+
+/* The file is named by 32 bits of hash, and two ids that share them are easy
+ * to make on purpose (these two do): each file says whose it is, and a scene
+ * is handed none that names another. */
+static void test_a_file_is_its_scenes_alone(const char *dir)
+{
+    fos_scene_state_set_dir(dir);
+    const char *mine = "scene-zyao", *other = "scene-2kia";
+    char path[128], other_path[128];
+    CHECK(fos_scene_state_path(mine, path, sizeof(path)) && fos_scene_state_path(other, other_path, sizeof(other_path)));
+    CHECK(strcmp(path, other_path) == 0);
+
+    CHECK(fos_scene_state_save(mine, "{\"token\":\"kept\"}"));
+    CHECK(loads_as(mine, "{\"token\":\"kept\"}"));
+    CHECK(loads_as(other, NULL));
+    /* The pair shares the one file: the last to save has it, and neither
+     * reads the other's. */
+    CHECK(fos_scene_state_save(other, "{\"n\":1}"));
+    CHECK(loads_as(other, "{\"n\":1}") && loads_as(mine, NULL));
+    fos_scene_state_forget(other);
+
+    /* What is on flash is one JSON object, the owner its first member: what
+     * firmware from before reads as it always did. */
+    char raw[160];
+    CHECK(fos_scene_state_save(mine, "{\"token\":\"kept\",\"n\":2}"));
+    CHECK(fos_scene_state_path(mine, path, sizeof(path)));
+    CHECK(read_raw(path, raw, sizeof(raw)) && strcmp(raw, "{\"__owner\":\"scene-zyao\",\"token\":\"kept\",\"n\":2}") == 0);
+    CHECK(loads_as(mine, "{\"token\":\"kept\",\"n\":2}"));
+    fos_scene_state_forget(mine);
+
+    /* An id that only begins like the owner's, or that the owner's begins
+     * like, is not the owner (a new id each: a file seen missing is not
+     * opened again). */
+    const char *longer = "scene-prefix-longer", *shorter = "scene-prefix";
+    CHECK(fos_scene_state_path(shorter, path, sizeof(path)));
+    write_raw(path, "{\"__owner\":\"scene-prefix-longer\",\"x\":1}");
+    CHECK(loads_as(shorter, NULL));
+    remove(path);
+    CHECK(fos_scene_state_path(longer, path, sizeof(path)));
+    write_raw(path, "{\"__owner\":\"scene-prefix\",\"x\":1}");
+    CHECK(loads_as(longer, NULL));
+    remove(path);
+
+    /* A quote or a backslash in an id is written escaped, and read back. */
+    const char *odd = "we\"ird\\id";
+    CHECK(fos_scene_state_save(odd, "{\"x\":1}"));
+    CHECK(fos_scene_state_path(odd, path, sizeof(path)));
+    CHECK(read_raw(path, raw, sizeof(raw)) && strcmp(raw, "{\"__owner\":\"we\\\"ird\\\\id\",\"x\":1}") == 0);
+    CHECK(loads_as(odd, "{\"x\":1}"));
+    fos_scene_state_forget(odd);
+
+    /* A file from before the owner: taken by the scene that reads it, and
+     * written again as that scene's. */
+    const char *old_scene = "from-before";
+    CHECK(fos_scene_state_path(old_scene, path, sizeof(path)));
+    write_raw(path, "{\"album\":\"holiday\"}");
+    CHECK(loads_as(old_scene, "{\"album\":\"holiday\"}"));
+    CHECK(read_raw(path, raw, sizeof(raw)) && strcmp(raw, "{\"__owner\":\"from-before\",\"album\":\"holiday\"}") == 0);
+    CHECK(loads_as(old_scene, "{\"album\":\"holiday\"}"));
+    fos_scene_state_forget(old_scene);
+
+    /* The id is written into the file: one with a control character keeps none. */
+    CHECK(!fos_scene_state_path("two\nlines", path, sizeof(path)));
+    CHECK(!fos_scene_state_save("two\nlines", "{\"x\":1}"));
+    CHECK(loads_as("two\nlines", NULL));
+}
+
 int main(void)
 {
     test_path();
@@ -356,6 +440,7 @@ int main(void)
         return 1;
     }
     test_round_trip(dir);
+    test_a_file_is_its_scenes_alone(dir);
     test_write_behind(dir);
     test_flush_outside_the_lock(dir);
     test_nothing_to_keep_is_no_work(dir);
