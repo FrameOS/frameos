@@ -23,7 +23,7 @@ import { jsonError, readBoundedJsonValue } from "../../../../src/lib/device-flow
 import { hasDatabaseUrl } from "../../../../src/lib/env";
 import { logWarn } from "../../../../src/lib/log";
 import { PhotoLinkRedactor } from "../../../../src/lib/photos/share-links-in-scenes";
-import { checkRateLimit, clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { checkRateLimit, clientLimitKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { retireAppsInScenes } from "../../../../src/lib/retired-apps";
 import {
   renderScenes,
@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
       if (reports[index]?.executionAfter !== "interpreted") {
         continue;
       }
-      render.push(await renderCheck(scene, accountId ?? clientKey(request)));
+      render.push(await renderCheck(scene, accountId ?? clientLimitKey(request)));
     }
   }
 
@@ -384,7 +384,7 @@ const maxModelCallsPerScene = 60;
 async function spendSharedModelBudget(
   request: NextRequest,
 ): Promise<{ allowed: boolean; resetAt: number }> {
-  const perAddress = await checkRateLimit(`scenes:convert-model:${clientKey(request)}`, {
+  const perAddress = await checkRateLimit(`scenes:convert-model:${clientLimitKey(request)}`, {
     limit: sharedKeyPerAddressPerHour(),
     windowMs: 60 * 60 * 1000,
   });

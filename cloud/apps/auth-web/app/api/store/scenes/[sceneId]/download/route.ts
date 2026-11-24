@@ -12,7 +12,7 @@ import {
   jsonError,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
-import { clientKey, rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { clientLimitKey, rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { rebuildZipWithSceneOrigins } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 import { shouldCountDownload } from "../../../../../../src/lib/store-download-count";
@@ -142,7 +142,7 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   // Fire-and-forget download counting, for a zip actually served: not a
   // HEAD, and an address once a day per scene (store-download-count.ts). A
   // lost increment is fine.
-  if (request.method !== "HEAD" && shouldCountDownload(scene.id, clientKey(request))) {
+  if (request.method !== "HEAD" && shouldCountDownload(scene.id, clientLimitKey(request))) {
     void db
       .update(storeScenes)
       .set({ downloadCount: sql`${storeScenes.downloadCount} + 1` })

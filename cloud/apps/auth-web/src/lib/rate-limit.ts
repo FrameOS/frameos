@@ -1,6 +1,10 @@
 import { eq, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { createDb, rateLimitBuckets } from "@frameos-cloud/db";
+import {
+  createDb,
+  rateLimitAddressKey,
+  rateLimitBuckets,
+} from "@frameos-cloud/db";
 import { hasDatabaseUrl } from "./env";
 
 type Bucket = {
@@ -160,7 +164,7 @@ export async function rateLimitResponse(
     windowMs: number;
   },
 ) {
-  const result = await checkRateLimit(`${action}:${clientKey(request)}`, options);
+  const result = await checkRateLimit(`${action}:${clientLimitKey(request)}`, options);
   if (result.allowed) {
     return undefined;
   }
@@ -255,6 +259,13 @@ function trustedProxyCount() {
 
 export function clientKey(request: NextRequest) {
   return clientIpFromHeaders(request.headers);
+}
+
+// What a per-address limit counts by: the client's address, an IPv6 one
+// folded to its /64 (rateLimitAddressKey says why). The whole address stays
+// what audit rows and Turnstile get (clientKey).
+export function clientLimitKey(request: NextRequest) {
+  return rateLimitAddressKey(clientKey(request));
 }
 
 // The client IP the trusted-proxy config says to believe; also used to stamp

@@ -162,6 +162,7 @@ import {
   checkMemoryRateLimit,
   checkSharedRateLimit,
   clientIpFromRequest,
+  clientLimitKeyFromRequest,
 } from "./rate-limit";
 import {
   authenticateBrowserSession,
@@ -3443,7 +3444,7 @@ export async function startFrameHub(
     const clientIp = clientIpFromRequest(req);
     const limit = await checkSharedRateLimit(
       db,
-      `frame_hub_upgrade:${clientIp}`,
+      `frame_hub_upgrade:${clientLimitKeyFromRequest(req)}`,
       upgradeRateLimit,
     );
     if (!limit.allowed) {

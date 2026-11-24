@@ -24,6 +24,8 @@ export const appleProviderKey = "apple";
 export const socialProviderKeys = [googleProviderKey, appleProviderKey] as const;
 export type SocialProviderKey = (typeof socialProviderKeys)[number];
 
+export { rateLimitAddressKey } from "./rate-limit-key";
+
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
