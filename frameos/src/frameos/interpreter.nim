@@ -1584,6 +1584,12 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
   ## The natives. Most take a node id first; the log lines are written by the
   ## program itself (`L`), which costs the program's memory and not flash.
   let context = scene.programCtx
+  # Outside a run there is no context to work in. Only what the kit hands a
+  # snippet is answered then (its console, `state` and `context`, which a
+  # scene's code can keep and call from a timer): any other native has
+  # nothing to do, and reading the context it was not given was a crash.
+  if context.isNil and op notin {opLog, opStateRead, opContextRead}:
+    return JS_ThrowInternalError(ctx, "no run in progress")
   template a(i: int): JSValueConst = (if i < argc: argv[i] else: jsUndefined(ctx))
   proc num(ctx: ptr JSContext, v: JSValueConst): int {.inline.} =
     var n: int32
@@ -1696,7 +1702,7 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
       let message = entry{"message"}
       if not message.isNil and message.kind == JString:
         entry["message"] = %describeJsError(message.getStr())
-      if argc > 1:
+      if argc > 1 and not context.isNil:
         entry = withEventPayload(entry, context.event, context.payload)
       scene.logger.log(entry)
   of opLogOutput:
@@ -1764,6 +1770,73 @@ proc programFor(scene: InterpretedFrameScene): CompiledScene =
     source.compiled = compileScene(source.nodes, source.edges, profile)
   source.compiled
 
+proc programFailure(scene: InterpretedFrameScene, message: string): ref Exception =
+  scene.logger.log(%*{"event": "interpreter:programError", "sceneId": scene.id.string, "error": message})
+  newException(JSException, "Evaluation failed: " & message)
+
+proc snippetFailure(scene: InterpretedFrameScene, k: int, message: string, line: int): ref Exception =
+  ## Snippet `k` of the program does not compile, at `line` of its own.
+  let snippet = scene.program.snippets[k]
+  let error = message & " (line " & $line & ")"
+  if snippet.kind == psCache:
+    if scene.source.isNil:
+      return scene.programFailure(message)
+    let program = compileScene(scene.source.nodes, scene.source.edges, scene.program.profile,
+      scene.program.brokenCache & @[(snippet.nodeId, error)])
+    scene.program = program
+    scene.source.compiled = program
+    return nil
+  scene.logNodeErrorPayload(snippet.nodeId, %*{"event": "interpreter:jsCompileError",
+    "sceneId": scene.id.string, "nodeId": snippet.nodeId.int,
+    "sourceKind": (if snippet.kind == psCode: "code" else: "inline"),
+    "sourceName": snippet.name, "error": error, "snippet": snippet.snippet})
+  newException(JSException, "Evaluation failed: " & error)
+
+const SnippetCheckFile = "<frameos:snippet>"
+
+proc snippetStaysInside(ctx: ptr JSContext, snippet: string, message: var string, line: var int): bool =
+  ## Whether `snippet` is text the program can put between its parentheses
+  ## (scene_compiler.snippetFunction) without the text closing them.
+  ##
+  ## The program holds every snippet as it was written, and a scene's code
+  ## is anyone's: `1);…;(2` ends the wrapper early and runs what is between
+  ## when the program loads, before any budget is counting, and with a `}`
+  ## or two more it is out of the function that hides the kit and the
+  ## natives from it. So each snippet is compiled alone first, in square
+  ## brackets. What compiles there leaves every string, template and
+  ## comment it opened closed, so the next snippet starts as it would alone;
+  ## and the one bracket it can close without one of its own is a `]`, which
+  ## the `(` in the program refuses. Whatever passes here is therefore an
+  ## expression in the program, or a syntax error there (compileFailure).
+  ## Every expression a pair of parentheses takes, a pair of brackets takes
+  ## too, so nothing that ran before is refused.
+  var plain = true
+  for c in snippet:
+    if c notin {'a'..'z', 'A'..'Z', '0'..'9', '_', '$', '.', ' '}:
+      plain = false
+      break
+  if plain:
+    return true # `state.title`: no bracket, quote or comment to ask about
+  let text = "\"use strict\";[\n" & snippet & "\n]"
+  let compiled = JS_Eval(ctx, text.cstring, text.len.csize_t, SnippetCheckFile,
+    (JS_EVAL_TYPE_GLOBAL or JS_EVAL_FLAG_COMPILE_ONLY or snippetEvalFlags).cint)
+  if JS_IsException(compiled) == 0:
+    JS_FreeValue(ctx, compiled)
+    return true
+  let details = jsExceptionDetails(ctx)
+  message = details.message
+  line = 1
+  const at = SnippetCheckFile & ":"
+  let found = details.stack.find(at)
+  if found >= 0:
+    var k = found + at.len
+    var n = 0
+    while k < details.stack.len and details.stack[k] in {'0'..'9'}:
+      n = n * 10 + ord(details.stack[k]) - ord('0')
+      inc k
+    line = clamp(n - 1, 1, snippet.count('\n') + 1)
+  false
+
 proc compileFailure(scene: InterpretedFrameScene, message, stack: string): ref Exception =
   ## The program did not compile: the snippet the error is in (or that left
   ## something open the line after it) is named. A code node or an inline
@@ -1784,23 +1857,9 @@ proc compileFailure(scene: InterpretedFrameScene, message, stack: string): ref E
       culprit = k
   if culprit >= 0:
     let snippet = scene.program.snippets[culprit]
-    let error = message & " (line " & $(min(line, snippet.lastLine) - snippet.firstLine + 1) & ")"
-    if snippet.kind == psCache:
-      if not scene.source.isNil:
-        let program = compileScene(scene.source.nodes, scene.source.edges, scene.program.profile,
-          scene.program.brokenCache & @[(snippet.nodeId, error)])
-        scene.program = program
-        scene.source.compiled = program
-        return nil
-    else:
-      scene.logNodeErrorPayload(snippet.nodeId, %*{"event": "interpreter:jsCompileError",
-        "sceneId": scene.id.string, "nodeId": snippet.nodeId.int,
-        "sourceKind": (if snippet.kind == psCode: "code" else: "inline"),
-        "sourceName": snippet.name, "error": error, "snippet": snippet.snippet})
-      return newException(JSException, "Evaluation failed: " & error)
+    return scene.snippetFailure(culprit, message, min(line, snippet.lastLine) - snippet.firstLine + 1)
   # Nothing of the scene's own: the program around it.
-  scene.logger.log(%*{"event": "interpreter:programError", "sceneId": scene.id.string, "error": message})
-  newException(JSException, "Evaluation failed: " & message)
+  scene.programFailure(message)
 
 proc ensureProgram(scene: InterpretedFrameScene) =
   ## The scene's program evaluated into the programs' context, and its ways
@@ -1815,6 +1874,21 @@ proc ensureProgram(scene: InterpretedFrameScene) =
   var attempts = 0
   while true:
     inc attempts
+    if not scene.program.confined:
+      var refused = false
+      for k, snippet in scene.program.snippets:
+        var message = ""
+        var line = 1
+        # firstLine 0: a cache expression already left out of the program.
+        if snippet.firstLine > 0 and not snippetStaysInside(ctx, snippet.snippet, message, line):
+          let failure = scene.snippetFailure(k, message, line)
+          if not failure.isNil or attempts > 4:
+            raise (if failure.isNil: newException(JSException, "Evaluation failed: " & message) else: failure)
+          refused = true
+          break
+      if refused:
+        continue # the program was made again without that cache expression
+      scene.program.confined = true
     let source = scene.program.source
     let fn = JS_Eval(ctx, source.cstring, source.len.csize_t, ProgramFile,
       (JS_EVAL_TYPE_GLOBAL or snippetEvalFlags).cint)
