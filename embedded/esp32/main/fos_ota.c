@@ -299,13 +299,24 @@ static bool ota_gave_up(const char *version)
  * line: "downloading" followed by silence is what a deep-sleep frame used to
  * leave behind, and the control plane's Logs panel is the only place an owner
  * can look. */
-static void ota_log(const ota_source_t *src, const char *status, const char *detail)
+static void ota_log(const ota_source_t *src, const char *status, const char *given)
 {
+    /* The detail is one of this file's own words or text a plane sent (a
+     * manifest's `version`), and it is printed inside a JSON string here and
+     * again after the restart: a quote, a backslash or a control character in
+     * it would end that string and write the rest of the line. */
+    char detail[160];
+    size_t n = 0;
+    for (; given != NULL && given[n] != '\0' && n + 1 < sizeof(detail); n++) {
+        unsigned char c = (unsigned char)given[n];
+        detail[n] = c < 0x20 || c == '"' || c == '\\' ? '?' : (char)c;
+    }
+    detail[n] = '\0';
     char line[320];
     snprintf(line, sizeof(line),
              "{\"event\":\"ota:%s\",\"source\":\"esp32\","
              "\"status\":\"%s\",\"detail\":\"%s\"}",
-             src->plane, status, detail ? detail : "");
+             src->plane, status, detail);
     frameos_nim_log_hook(line);
     frameos_nim_flush_logs();
     /* Progress is noise after a restart; every other line is the verdict. */
@@ -314,7 +325,7 @@ static void ota_log(const ota_source_t *src, const char *status, const char *det
         ota_rtc_t *rtc = ota_rtc();
         strlcpy(rtc->last_plane, src->plane, sizeof(rtc->last_plane));
         strlcpy(rtc->last_status, status, sizeof(rtc->last_status));
-        strlcpy(rtc->last_detail, detail ? detail : "", sizeof(rtc->last_detail));
+        strlcpy(rtc->last_detail, detail, sizeof(rtc->last_detail));
         rtc->last_pending = 1;
     }
 }
