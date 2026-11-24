@@ -770,16 +770,19 @@ proc onClick(node: sink SvgNode, handler: int): SvgNode =
   node.attrs.add(("on-click", $handler))
   node
 
-proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: string): SvgNode =
-  ## The frame page's gear, round. Lit while the keys are on it: inverted on
-  ## e-paper as a tile is, ringed on an LCD.
+proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: string,
+    wide = false): SvgNode =
+  ## The frame page's gear, round; `wide`, the header's: wider than tall, its
+  ## gear larger, as the scene settings' is. Lit while the keys are on it:
+  ## inverted on e-paper as a tile is, ringed on an LCD.
   var c = "shrink-0 flex items-center justify-center rounded-full"
-  c.square(size)
+  c.px("h", size)
+  c.px("w", if wide: size * 8 div 5 else: size)
   if paper and lit: c.add " bg-black text-white"
   else:
     c.add button
     if lit: c.add " border-2 border-sky-400"
-  result = el("div", c, iconNode(GearPath, size * 2 div 3, "0 0 48 48"))
+  result = el("div", c, iconNode(GearPath, if wide: size * 4 div 5 else: size * 2 div 3, "0 0 48 48"))
   result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 1)
 
 type TileLook = object
@@ -898,8 +901,8 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: 
     search.attrs.add(("on-change", $SearchHandler))
     header.children.add search.role("field")
   if self.gear:
-    header.children.add self.gearButton(clamp(grid.headerH * 6 div 10, 14, 40), paper,
-      self.highlighted() == self.entries.len, button)
+    header.children.add self.gearButton(clamp(grid.headerH * 3 div 4, 14, 48), paper,
+      self.highlighted() == self.entries.len, button, wide = true)
   if self.keysOnly:
     root.children.add header.role("bar")
     return
@@ -1122,7 +1125,6 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
   ## A pointer event over the switcher: ui/events.nim hit-tests it, and
   ## scrolls the list under a finger or the wheel. A slow panel shows no
   ## press there, and a drag of the list only where it let go.
-  let tap = event == "tap"
   tapped = -1
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
   let count = self.entries.len
@@ -1144,9 +1146,12 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
     else: self.choose(count)
     tapped = -1
     self.touch()
-  elif changed and not tap:
-    # What is pressed moved, or the list scrolled: the contract renders
-    # nothing after a pointer event, so the picture is asked for here.
+  elif changed:
+    # What is pressed moved, the list scrolled, or a tap gave the search the
+    # keyboard or took it away: the contract renders nothing after a pointer
+    # event, so the picture is asked for here. (A tap on the search asked for
+    # none, and an ESP32 focuses a field on the tap alone: the keyboard came
+    # up only when something else drew, on the reTerminal Sticky 2026-11-25.)
     self.touch()
     sendEvent(evRender, newJObject(), eoScene)
 

@@ -946,8 +946,12 @@ block the_header_searches_the_scenes:
   doAssert field >= 0, "a search field in the header"
   let r = uiTarget(SceneSwitcherId, 1).regions[field]
   doAssert r.y + r.h <= switcherGrid(800, 480, thumbnails = false).headerH.float32, $r
-  scene.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "mouse"})
-  doAssert sent.len == 0, $sent
+  # A tap on it (an ESP32's glass focuses a field on the tap alone): the
+  # keyboard, and a picture asked for to show it, no scene switch.
+  scene.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "touch"})
+  doAssert sent.len == 1 and sent[0][0] == evRender, $sent
+  doAssert uiTarget(SceneSwitcherId, 1).input.focus > 0, "the field has the keyboard"
+  sent.setLen(0)
   scene.send("textInput", %*{"text": "CLOCK"})
   doAssert scene.state{"query"}.getStr() == "CLOCK"
   doAssert scene.entries.len == 1 and scene.entries[0].name == "Kitchen clock", $scene.entries.len
