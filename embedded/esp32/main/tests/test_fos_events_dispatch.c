@@ -8,7 +8,7 @@
  *
  *   cc -std=c11 -Wall -Wextra -Werror -O2 -Imain -Imain/tests/host_shim \
  *      -Icomponents/frameos_nim/include -Icomponents/frameos_display/include \
- *      main/fos_events.c main/tests/test_fos_events_dispatch.c -o t && ./t
+ *      main/fos_events.c main/fos_json_guard.c main/tests/test_fos_events_dispatch.c -o t && ./t
  *
  * Run by backend/app/tasks/tests/test_esp32_events_contract.py.
  */
@@ -460,6 +460,34 @@ static void test_scene_events(void)
     reset();
     n.nim_result = false;
     CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "turnOn", "{}") == FOS_EVENT_FAILED);
+
+    /* A payload nested deeper than any FrameOS payload reaches nobody: the
+     * runtime's reader recurses once per level, and so does the relay. As
+     * deep as the limit passes. */
+    {
+        char deep[2 * 40 + 16];
+        for (int depth = 32; depth <= 33; depth++) {
+            size_t at = 0;
+            at += (size_t)snprintf(deep + at, sizeof(deep) - at, "{\"a\":");
+            for (int i = 1; i < depth; i++) deep[at++] = '[';
+            for (int i = 1; i < depth; i++) deep[at++] = ']';
+            deep[at++] = '}';
+            deep[at] = '\0';
+            reset();
+            fos_event_result_t result = fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "setSceneState", deep);
+            if (depth == 32) {
+                CHECK(result == FOS_EVENT_DONE && n.nim_sends == 1);
+            } else {
+                CHECK(result == FOS_EVENT_FAILED && n.nim_sends == 0);
+                CHECK(strstr(n.log, "event:dropped") != NULL && strstr(n.log, "nested too deep") != NULL);
+            }
+        }
+        /* On a frame rendered on its plane it is not relayed either. */
+        reset();
+        n.remote = true;
+        CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "setSceneState", deep) == FOS_EVENT_FAILED);
+        CHECK(n.relays == 0);
+    }
 
     /* A custom event from a schedule or the cloud is the scene's to allow: it
      * reaches the Nim dispatcher, stamped, and is not refused here. */

@@ -1,5 +1,14 @@
 #include "fos_json_guard.h"
 
+/* In the firmware cJSON is compiled with this limit (CMakeLists.txt): a
+ * build that lost the definition, or moved one number alone, stops here. */
+#ifdef ESP_PLATFORM
+#ifndef CJSON_NESTING_LIMIT
+#error "CJSON_NESTING_LIMIT is not set for this build: see embedded/esp32/CMakeLists.txt"
+#endif
+_Static_assert(CJSON_NESTING_LIMIT == FOS_JSON_MAX_DEPTH, "cJSON's nesting limit is FOS_JSON_MAX_DEPTH");
+#endif
+
 bool fos_json_depth_ok(const char *text, size_t len, int max_depth)
 {
     if (text == NULL) return true;
