@@ -525,8 +525,45 @@ static void test_wake_mark(void)
     }
 }
 
+static void test_mark_box(void)
+{
+    /* Where the marks go, without drawing: the wake mark's own box, and on
+     * the panel exactly the bytes it draws (copied out, drawn, copied back:
+     * the buffer as it was). */
+    for (size_t f = 0; f < sizeof(FORMATS) / sizeof(FORMATS[0]); f++) {
+        for (size_t r = 0; r < sizeof(ROTATIONS) / sizeof(ROTATIONS[0]); r++) {
+            const fos_pixel_format_t format = FORMATS[f];
+            size_t len = buffer_len(800, 480, format);
+            uint8_t *buf = calloc(1, len);
+            uint8_t *before = malloc(len);
+            for (size_t i = 0; i < len; i++) buf[i] = (uint8_t)(i * 37u + 11u);
+            memcpy(before, buf, len);
+            fos_panel_surface_t s = {.buf = buf, .width = 800, .height = 480, .format = format,
+                                     .rotate = ROTATIONS[r]};
+            fos_panel_code_box_t box, drawn;
+            CHECK(fos_panel_mark_box(&s, &box), "fmt %d rot %d: a box", format, ROTATIONS[r]);
+            CHECK(memcmp(buf, before, len) == 0, "fmt %d rot %d: nothing drawn", format, ROTATIONS[r]);
+            size_t bytes = fos_panel_box_copy(&s, &box, NULL, false);
+            uint8_t *saved = malloc(bytes);
+            fos_panel_box_copy(&s, &box, saved, false);
+            fos_panel_draw_wake_mark(&s, 0, &drawn);
+            CHECK(drawn.x == box.x && drawn.y == box.y && drawn.w == box.w && drawn.h == box.h &&
+                      drawn.px == box.px && drawn.py == box.py && drawn.pw == box.pw && drawn.ph == box.ph,
+                  "fmt %d rot %d: the box the mark is drawn in", format, ROTATIONS[r]);
+            CHECK(memcmp(buf, before, len) != 0, "fmt %d rot %d: the mark drew", format, ROTATIONS[r]);
+            fos_panel_box_copy(&s, &box, saved, true);
+            CHECK(memcmp(buf, before, len) == 0, "fmt %d rot %d: and its box holds all it drew", format,
+                  ROTATIONS[r]);
+            free(saved);
+            free(before);
+            free(buf);
+        }
+    }
+}
+
 int main(void)
 {
+    test_mark_box();
     test_text_metrics();
     test_small_and_odd();
     test_every_format_size_and_rotation();

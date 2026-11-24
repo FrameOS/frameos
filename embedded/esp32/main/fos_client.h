@@ -145,6 +145,11 @@ bool fos_client_render_pending(void);
  * and after every render. */
 void fos_client_loading_begin(uint32_t since_tick);
 void fos_client_loading_end(void);
+/* A scene switch begins (fos_scenes.c): the loading mark as above, and on
+ * e-paper whose controller keeps the picture the loading tile up at once
+ * while somebody is at the frame (docs/realtime-rendering.md "A press shows
+ * at once"). Render task. */
+void fos_client_switch_begin(uint32_t since_tick);
 /* True while a render pass is rendering (fetches, scene, dither, panel
  * refresh); the OTA waits it out before it downloads (fos_ota.c). */
 bool fos_client_render_in_flight(void);
@@ -192,6 +197,16 @@ bool fos_client_notice_takes(int wire_x, int wire_y);
  * the render the press asks for takes it off first. The key still goes to
  * the scene. Any task. */
 void fos_client_notice_dismiss(void);
+/* The same, and for 3 (one element of the scene's UI, taken: the runtime's
+ * map alone says so) its box on the panel, x0, y0, x1, y1 past the last
+ * pixel, into `box`: what a press lights at once (fos_display_press_begin). */
+int fos_client_press_find(int wire_x, int wire_y, int box[4]);
+/* The touch task: a press landed that the map says is taken (`taken`, and
+ * for 3 the element's box on the panel). On e-paper the LED lights until its
+ * answer has been drawn, and on a scene whose taps are slow the render task
+ * inks the box before handing the press on. Nothing on an LCD, whose touch
+ * task lights the press itself. Any task. */
+void fos_client_press_seen(int taken, const int box[4]);
 /* Rendered on the server: a pointer pressed (true) or lifted through the
  * frame's HTTP API. While one is pressed the relay waits for its lift, as it
  * waits for a finger on the glass, so the plane hears the press whole. Any

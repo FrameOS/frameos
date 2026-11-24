@@ -262,6 +262,34 @@ bool fos_it8951_black_and_white(const uint8_t *wire, size_t bytes)
     return true;
 }
 
+bool fos_it8951_glass_wire_rect(int x, int y, int w, int h, bool mirror_x, fos_it8951_rect_t *out)
+{
+    const int width = FOS_IT8951_10IN3_WIDTH, height = FOS_IT8951_10IN3_HEIGHT;
+    if (x < 0) {
+        w += x;
+        x = 0;
+    }
+    if (y < 0) {
+        h += y;
+        y = 0;
+    }
+    if (x + w > width) w = width - x;
+    if (y + h > height) h = height - y;
+    if (w <= 0 || h <= 0) return false;
+    int wx = mirror_x ? width - x - w : x;
+    int x0 = wx / FOS_IT8951_TILE_WIDTH * FOS_IT8951_TILE_WIDTH;
+    int x1 = (wx + w + FOS_IT8951_TILE_WIDTH - 1) / FOS_IT8951_TILE_WIDTH * FOS_IT8951_TILE_WIDTH;
+    int y0 = y / FOS_IT8951_TILE_HEIGHT * FOS_IT8951_TILE_HEIGHT;
+    int y1 = (y + h + FOS_IT8951_TILE_HEIGHT - 1) / FOS_IT8951_TILE_HEIGHT * FOS_IT8951_TILE_HEIGHT;
+    if (x1 > width) x1 = width;
+    if (y1 > height) y1 = height;
+    out->x = (uint16_t)x0;
+    out->y = (uint16_t)y0;
+    out->w = (uint16_t)(x1 - x0);
+    out->h = (uint16_t)(y1 - y0);
+    return true;
+}
+
 #ifdef ESP_PLATFORM
 #include <stdarg.h>
 #include <stdio.h>
@@ -387,8 +415,9 @@ typedef struct {
     uint8_t dirty[FOS_IT8951_TILES];
     /* Sent as a halftone while someone tapped: the greys are still owed. */
     uint8_t owed[FOS_IT8951_TILES];
-    /* Changed outside the box the render gave (fos_it8951_10in3_hint): sent
-     * with the next picture, whatever its box. */
+    /* Changed outside the box the render gave (fos_it8951_10in3_hint), or
+     * something not in any picture on the glass there (glass_rect): sent
+     * with the next picture, whatever its box and the digests say. */
     uint8_t stale[FOS_IT8951_TILES];
 } tiles_t;
 static tiles_t *s_tiles = NULL;
@@ -1050,7 +1079,37 @@ void fos_it8951_10in3_set_interactive(bool interactive)
 
 bool fos_it8951_10in3_owed(void)
 {
-    return s_owed_any;
+    return s_owed_any || s_stale_any;
+}
+
+bool fos_it8951_10in3_glass_rect(const uint8_t *buf, int x, int y, int w, int h)
+{
+    if (s_standby && fos_it8951_10in3_init() != 0) return false;
+    /* Nothing to put back without the digests of what the controller holds. */
+    if (s_failed || !s_tiles || !s_rows_valid || !buf) return false;
+    fos_it8951_rect_t rect;
+    if (!fos_it8951_glass_wire_rect(x, y, w, h, s_variant.mirror_x, &rect)) return false;
+    finish_waveforms();
+    uint8_t *chunk = chunk_buffer();
+    if (!chunk) return false;
+    load_rect(buf, &rect, chunk, false, NULL);
+    heap_caps_free(chunk);
+    if (s_failed) return false;
+    start_waveform(MODE_DU, &rect);
+    if (s_failed) return false;
+    s_waveform_pending = true;
+    for (int row = rect.y / FOS_IT8951_TILE_HEIGHT; row <= (rect.y + rect.h - 1) / FOS_IT8951_TILE_HEIGHT; row++) {
+        for (int col = rect.x / FOS_IT8951_TILE_WIDTH; col <= (rect.x + rect.w - 1) / FOS_IT8951_TILE_WIDTH; col++) {
+            s_tiles->stale[(size_t)row * FOS_IT8951_TILE_COLS + (size_t)col] = 1;
+        }
+    }
+    s_stale_any = true;
+    return true;
+}
+
+void fos_it8951_10in3_wait(void)
+{
+    finish_waveforms();
 }
 
 void fos_it8951_10in3_rest(void)

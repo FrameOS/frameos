@@ -673,6 +673,20 @@ suite "layouts":
               break
           check taken == pressTakenAt(scene, x, y)
 
+  test "an element's own box is its entry, for a panel to light at the press":
+    # docs/realtime-rendering.md "A press shows at once": an LCD's touch task
+    # shades the element a finger lands on before any render, by its entry.
+    let scene = newScene("tests/counter")
+    let image = pass(scene)
+    let map = panelPressMap(scene, image.width, image.height, 0, "", 64)
+    var elements = 0
+    for entry in map:
+      if entry.element:
+        inc elements
+        check entry.taken and not entry.keys
+        check entry.x1 - entry.x0 < image.width or entry.y1 - entry.y0 < image.height
+    check elements > 0
+
   test "the press map on the panel answers where a touch lands on the scene":
     # What an ESP32 keeps after each render for its touch task, and what a
     # plane sends a board: the canvas turned back onto the panel, so a press

@@ -1,4 +1,5 @@
 #include "fos_touch.h"
+#include "fos_press.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -695,6 +696,82 @@ static int read_points(fos_touch_point_t *points)
     return count;
 }
 
+/* A press lit at once on an LCD (docs/realtime-rendering.md "A press shows
+ * at once", lcd_press.h): at the first report of a finger, before it has
+ * settled, the element the press map has under it is shaded in the buffer
+ * on the glass, whatever the render task is doing; a move off it, a second
+ * finger or the next picture puts it away, and its lift lets it go a moment
+ * later (FOS_PRESS_LINGER_MS) when no picture comes. One finger's, the
+ * first. */
+static int8_t s_lit_id = -1;
+static int s_lit_box[4];
+static int s_lit_x = 0, s_lit_y = 0; /* where it landed, panel pixels */
+/* When the press was first seen and when it was lit (esp_timer us): the
+ * console's `touch tap` prints them. */
+static int64_t s_seen_us = 0, s_lit_us = 0;
+
+static void panel_point(uint16_t wx, uint16_t wy, int *x, int *y)
+{
+    int pw = fos_display_width(), ph = fos_display_height();
+    *x = (int)((int64_t)pw * wx / FOS_TOUCH_WIRE_MAX);
+    *y = (int)((int64_t)ph * wy / FOS_TOUCH_WIRE_MAX);
+}
+
+static void press_unlight(void)
+{
+    if (s_lit_id < 0) return;
+    fos_display_press_end();
+    s_lit_id = -1;
+}
+
+/* `taken`, `box`: the press map's answer at the point (fos_client_press_find). */
+static void press_light(uint8_t id, int taken, const int box[4], uint16_t wx, uint16_t wy)
+{
+    if (!fos_display_is_lcd()) return;
+    uint8_t others = (uint8_t)((s_down_mask | s_settling_mask) & (uint8_t)~(1u << id));
+    if (others) {
+        /* Two fingers: a gesture, not a press. */
+        press_unlight();
+        return;
+    }
+    if (taken != 3) {
+        if (s_lit_id == (int8_t)id) press_unlight();
+        return;
+    }
+    if (s_lit_id == (int8_t)id && memcmp(box, s_lit_box, sizeof(s_lit_box)) == 0) return;
+    if (s_lit_id != (int8_t)id) panel_point(wx, wy, &s_lit_x, &s_lit_y);
+    fos_display_press_begin(box[0], box[1], box[2], box[3]);
+    s_lit_id = (int8_t)id;
+    memcpy(s_lit_box, box, sizeof(s_lit_box));
+    s_lit_us = esp_timer_get_time();
+}
+
+static void press_moved(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    if (s_lit_id != (int8_t)id) return;
+    int x, y;
+    panel_point(wx, wy, &x, &y);
+    if (fos_press_moved_off(x - s_lit_x, y - s_lit_y)) press_unlight();
+}
+
+static void press_lifted(uint8_t id)
+{
+    if (s_lit_id != (int8_t)id) return;
+    fos_display_press_release(FOS_PRESS_LINGER_MS);
+    s_lit_id = -1;
+}
+
+/* A finger seen for the first time, before it settles: lit at once. */
+static void press_first_seen(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    s_seen_us = esp_timer_get_time();
+    /* The voice chat's notice takes a press on it: nothing under it lights. */
+    if (!fos_display_is_lcd() || fos_client_notice_takes(wx, wy)) return;
+    int box[4];
+    int taken = fos_client_press_find(wx, wy, box);
+    press_light(id, taken, box, wx, wy);
+}
+
 static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
 {
     /* On the notice: it comes off when the finger lifts, and the press
@@ -711,9 +788,13 @@ static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
      * was, not only a finger dragged. */
     enqueue(FOS_TOUCH_MOVE, id, wx, wy);
     enqueue(FOS_TOUCH_DOWN, id, wx, wy);
-    int taken = fos_client_press_taken(wx, wy);
+    int box[4];
+    int taken = fos_client_press_find(wx, wy, box);
     click(FOS_TOUCH_DOWN, id, taken);
     edge_begin(id, wx, wy, taken);
+    /* Where it settled: the element under it now (a thumb rolls). */
+    press_light(id, taken, box, wx, wy);
+    fos_client_press_seen(taken, taken == 3 ? box : NULL);
 }
 
 /* A press reported once it settled, where it is then; or, when it glided
@@ -730,6 +811,56 @@ static void report_settled(uint8_t id, int x_max)
     }
 }
 
+/* A touch the console made (`touch tap`): read in place of the controller's
+ * reports, one finger, in the controller's own coordinates, until its lift,
+ * so a bench can time what a finger on the glass sets going without one. */
+static volatile int64_t s_inject_until_us = 0; /* 0: none; the lift once past it */
+static volatile int16_t s_inject_x = 0, s_inject_y = 0;
+
+static bool inject_points(fos_touch_point_t *points, int *count)
+{
+    int64_t until = s_inject_until_us;
+    if (until == 0) return false;
+    if (esp_timer_get_time() >= until) {
+        s_inject_until_us = 0;
+        *count = 0;
+        return true;
+    }
+    memset(&points[0], 0, sizeof(points[0]));
+    points[0].id = 0;
+    points[0].x = (uint16_t)s_inject_x;
+    points[0].y = (uint16_t)s_inject_y;
+    *count = 1;
+    return true;
+}
+
+esp_err_t fos_touch_inject(int px, int py, int hold_ms)
+{
+    if (!s_present || !s_irq) return ESP_ERR_INVALID_STATE;
+    int pw = fos_display_width(), ph = fos_display_height();
+    if (px < 0 || py < 0 || px >= pw || py >= ph || hold_ms <= 0) return ESP_ERR_INVALID_ARG;
+    /* The panel's pixel back into the controller's range, the other way
+     * round from the task (its swap, then its mirror). */
+    int x_max = s_swap ? s_y_max : s_x_max;
+    int y_max = s_swap ? s_x_max : s_y_max;
+    int rx = (int)((int64_t)px * x_max / pw), ry = (int)((int64_t)py * y_max / ph);
+    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_X) rx = x_max - 1 - rx;
+    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_Y) ry = y_max - 1 - ry;
+    s_inject_x = (int16_t)(s_swap ? ry : rx);
+    s_inject_y = (int16_t)(s_swap ? rx : ry);
+    s_seen_us = 0;
+    s_lit_us = 0;
+    s_inject_until_us = esp_timer_get_time() + (int64_t)hold_ms * 1000;
+    xSemaphoreGive(s_irq);
+    return ESP_OK;
+}
+
+void fos_touch_press_times(int64_t *seen_us, int64_t *lit_us)
+{
+    *seen_us = s_seen_us;
+    *lit_us = s_lit_us;
+}
+
 static void touch_task(void *arg)
 {
     (void)arg;
@@ -740,7 +871,9 @@ static void touch_task(void *arg)
                                                            : TOUCH_POLL_IDLE_MS;
         bool irq = xSemaphoreTake(s_irq, pdMS_TO_TICKS(wait_ms)) == pdTRUE;
         int count;
-        if (s_controller == CTRL_CST92XX && !s_polled && !irq) {
+        if (inject_points(points, &count)) {
+            /* the console's touch */
+        } else if (s_controller == CTRL_CST92XX && !s_polled && !irq) {
             /* The CST92xx is read on its interrupt alone: a read (and its
              * ack) between two reports costs the next one (the bench, a drag
              * in pieces, 2026-11-23). Without one it is only asked whether a
@@ -793,6 +926,7 @@ static void touch_task(void *arg)
                     s_first_ry[p->id] = (int16_t)ry;
                     s_first_x[p->id] = wx;
                     s_first_y[p->id] = wy;
+                    press_first_seen(p->id, wx, wy);
                 } else if (near_edge || now_ms - s_first_seen_ms[p->id] >= TOUCH_SETTLE_MS) {
                     /* On the glass before its press is queued: a frame
                      * rendered on the server sends what the queue holds once
@@ -802,13 +936,18 @@ static void touch_task(void *arg)
                      * opened one time in several). */
                     s_settling_mask &= (uint8_t)~bit;
                     s_down_mask |= bit;
-                    if (settling) report_settled(p->id, x_max);
-                    else report_down(p->id, wx, wy);
+                    if (settling) {
+                        report_settled(p->id, x_max);
+                    } else {
+                        s_seen_us = esp_timer_get_time(); /* at an edge: reported as it is seen */
+                        report_down(p->id, wx, wy);
+                    }
                 }
             } else if (moved) {
                 s_n_moves++;
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
                 edge_moved(p->id, wx, wy);
+                press_moved(p->id, wx, wy);
             }
         }
         /* A tap shorter than TOUCH_SETTLE_MS: its press, where it was last,
@@ -830,6 +969,7 @@ static void touch_task(void *arg)
             if (lifted & (1u << id)) {
                 enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
                 click(FOS_TOUCH_UP, (uint8_t)id, 0);
+                press_lifted((uint8_t)id);
                 s_edge[id] = FOS_TOUCH_EDGE_NONE;
             }
         }
@@ -1006,10 +1146,9 @@ esp_err_t fos_touch_start(void)
      * PSRAM: internal RAM is the Wi-Fi stack's. Without them a move carries
      * none. */
     s_passed = heap_caps_calloc(FOS_TOUCH_POINTS_MAX, sizeof(fos_touch_passed_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    /* What click asks a scene that runs here: the press map of every render.
-     * An LCD never clicks (its picture answers at once), and an animation
-     * there would make one every frame for nothing. */
-    if (!fos_display_is_lcd()) frameos_nim_keep_press_map(true);
+    /* What click asks a scene that runs here, and what an LCD lights at a
+     * press before any render (press_light): the press map of every render. */
+    frameos_nim_keep_press_map(true);
     s_present = true;
     char line[288];
     snprintf(line, sizeof(line),

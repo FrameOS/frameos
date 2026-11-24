@@ -62,6 +62,7 @@ idf_component_register(
         "lcd_qspi_box.c"
         "lcd_splash.c"
         "lcd_loading.c"
+        "lcd_press.c"
         "${FRAMEOS_GENERATED_DIR}/frameos_panel_table.c"
         ${vendor_srcs}
     INCLUDE_DIRS

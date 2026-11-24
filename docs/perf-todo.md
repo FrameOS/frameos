@@ -334,7 +334,68 @@ board and session, five taps each after a warm one, medians:
 | To-do, a tap in a row's field: parse | 16.3 ms | 4.5 ms (nested parses kept: the board ran this branch's own version, #997's landed first and is the one kept) |
 | Home, a card's toggle | 47 ms | 45 ms (raster 15: the card) |
 
+## A press shows at once (2026-11-24)
+
+An hour of console taps on release 2026.11.14 (the SenseCAP Indicator and the
+reTerminal E1003, `set debug 1`; main's `signal()` samples beside the boards'
+older copies) found the render itself no longer the main cost of a tap on
+either. On the SenseCAP the `signal()` Calculator's key renders in 37 ms (46
+with the probe on), of which layout is 25 to 29 (text 10.5 every tap); the
+same scene on the E1003 renders in 22 ms. But on the LCD nothing showed until
+that render was on the glass, 80 to 110 ms after the finger (the touch
+chip's 10 ms poll, the 20 ms settle, the dispatch, the press render, a scan),
+and on an element with no `active:` class not until the lift; a tap behind a
+timed render waited for all of it. On the E1003 nothing moved on the glass
+before the answer's waveform started (~0.2 s after the lift) and finished
+(~0.5 s more). What changed (docs/realtime-rendering.md "A press shows at
+once"):
+
+| | before | now |
+| --- | --- | --- |
+| SenseCAP: contact to the pressed element shaded on the glass | 80-110 ms (`active:` only), else at the lift | 5 ms after the first report: within the 10 ms poll and a 24 ms scan, `active:` class or not |
+| SenseCAP: a quick tap behind a busy render | never looked pressed | its `active:` look with the answer, 150 ms |
+| SenseCAP: a handler that blocks (sync fetch in `onClick`) | no sign until its render | the loading mark at 0.5 s |
+| Either: a timed render due under a finger | the tap waited for all of it | waits for the lift (1.5 s at most) |
+| E1003: contact to something showing | the answer's waveform, ~0.4-0.7 s after the lift | the LED at the press; a slow element (the Press test's 1.5 s button) inked: its DU started 39 ms after the render task took the press, the upload included; the quick button beside it is not inked |
+| E1003: a scene switch somebody waits for | nothing on the glass for 1.4-6 s | the loading tile, its DU started 56 ms into the switch |
+
+What it costs: about 7.5 KB of the S3 image (3,224,576 bytes against the
+3,217,024 of #994, the main this was built on: `fos_client.c` and
+`fos_touch.c` most of it, `lcd_press.c` 0.4 KB, `fos_press.c` 0.3 KB), 115
+KB of PSRAM on the SenseCAP once a press has been lit (a quarter of the
+panel's pixels, for the biggest box), and the press map made after every
+render on an LCD too. That build is 0.02 us on a host for DVD Logo Bounce
+(nothing to press) and 0.32 us for the Home panel (six entries), and an
+animation's quiet frame on a scene whose last map was empty builds none
+(`press_map_publish`). Main and this branch in turn on one SenseCAP, DVD
+Logo Bounce's steady ten seconds: 29.6 fps (296 frames, 28 ms a frame)
+against 29.5 (295, 29 ms; the line rounds to whole ms), twice each, before
+that gate. The 27 ms of 2026.11.14 against 30 seen earlier the same day was
+main's own change since the release: main itself measured 28.
+
 ## Still open
+
+- **A render that is already running is not stopped for a tap** (2026-11-24).
+  A timed render no longer starts under a finger (`fos_timed_render_waits_for_finger`),
+  but one under way when the finger lands runs to its end: there is no safe
+  checkpoint. The scene program runs its nodes in one go and a node's own
+  work has none (the Slideshow's 0.5-0.7 s is one JPEG decode); stopping
+  between nodes, or through QuickJS's interrupt handler, would leave a
+  `get()` half run (a slideshow's index moved on, its photo not drawn), the
+  e-paper canvas (the panel buffer itself) half drawn and the damage records
+  of `svg_frames.nim` describing a frame that is not there. It would need a
+  render to be a transaction it is not. The lit press (an LCD) and the ink
+  and LED (e-paper) are what shows meanwhile.
+- **Closing the scene switcher on the E1003 renders the covered scene again**
+  (Analog clock face 2.9 s and a GC16). Keeping its picture in the IT8951's
+  memory (a second image buffer: `LISAR` on load, `DPY_BUF_AREA` to show it)
+  was looked at and not built: the controller's buffer starts at 3.86 MB
+  (`0x003dbe78`) and a second 1872x1404 frame needs 2.6 MB more, which the
+  SDRAM's size (not reported by the controller) was not shown to hold; and the
+  frame's own canvas is the panel buffer, which the switcher draws over, so
+  the covered scene's picture would have to be kept on the board too (1.3 MB
+  of PSRAM) for the next tap's damage to be right. The loading tile shows
+  while it renders.
 
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside
   the app node outside the probed phases: not located.

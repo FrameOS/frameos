@@ -393,8 +393,32 @@ static void test_black_and_white(void)
     }
 }
 
+static void test_glass_wire_rect(void)
+{
+    fos_it8951_rect_t r;
+    /* Unmirrored: grown to whole tiles around it. */
+    CHECK(fos_it8951_glass_wire_rect(40, 10, 50, 20, false, &r), "a box on the panel");
+    CHECK(r.x == 32 && r.y == 8 && r.w == 64 && r.h == 24, "grown to tiles: %u,%u %ux%u", r.x, r.y, r.w, r.h);
+    /* Mirrored: the same box from the other side, then grown. */
+    CHECK(fos_it8951_glass_wire_rect(40, 10, 50, 20, true, &r), "mirrored");
+    int wx = FOS_IT8951_10IN3_WIDTH - 40 - 50;
+    CHECK(r.x <= wx && r.x + r.w >= wx + 50 && r.x % FOS_IT8951_TILE_WIDTH == 0, "covers it on the wire: %u+%u", r.x,
+          r.w);
+    /* Its tiles are whole, but the last column stops at the panel's edge. */
+    CHECK(fos_it8951_glass_wire_rect(FOS_IT8951_10IN3_WIDTH - 10, FOS_IT8951_10IN3_HEIGHT - 3, 10, 3, false, &r),
+          "the far corner");
+    CHECK(r.x + r.w == FOS_IT8951_10IN3_WIDTH && r.y + r.h == FOS_IT8951_10IN3_HEIGHT, "cut at the edge");
+    CHECK(r.w % 4 == 0 && r.x % 4 == 0, "whole words of four pixels");
+    /* Off the panel: none; over its edge: cut. */
+    CHECK(!fos_it8951_glass_wire_rect(-50, 0, 40, 10, false, &r), "left of the panel");
+    CHECK(!fos_it8951_glass_wire_rect(0, 0, 0, 10, false, &r), "empty");
+    CHECK(fos_it8951_glass_wire_rect(-10, -10, 40, 20, false, &r) && r.x == 0 && r.y == 0 && r.w == 32 && r.h == 16,
+          "over the corner, cut");
+}
+
 int main(void)
 {
+    test_glass_wire_rect();
     test_wire_order();
     test_full_row();
     test_tile_hashes();

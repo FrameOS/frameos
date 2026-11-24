@@ -769,6 +769,89 @@ turned 90 degrees; 30 touch moves, 32 frames each, 2026-10-28):
 What is left (`docs/realtime-todo.md`): the push on its own thread, and
 waking on input instead of polling.
 
+### A press shows at once
+
+A tap's answer is a render, and a render waits its turn: the press is not
+reported until it has settled (`TOUCH_SETTLE_MS`, 20 ms), the render task
+may be in the middle of another render (a clock's 385 ms, a slideshow's 0.5
+to 0.7 s on the SenseCAP Indicator), and a JSX UI's press render (its
+`active:` look) and the answer after the lift are 40 to 100 ms each there.
+Measured on 2026.11.14 (the hour of console taps in `docs/perf-todo.md`
+"Where a tap's time goes"), the pressed look came 80 to 110 ms after the
+finger, and on an element with no `active:` class nothing changed until the
+finger lifted. On the reTerminal E1003 nothing moves on the glass before the
+answer's waveform starts, ~0.2 s after the lift, and finishes ~0.5 s later.
+What the person sees sooner now (2026-11-24, `fos_press.h`, `lcd_press.h`):
+
+- **An LCD lights the press itself** (`lcd_press.c`, host-tested). The touch
+  task (core 0) asks the press map of the last render (`fos_client_press_find`:
+  every touch board keeps it now, not only e-paper) what is under the finger
+  at its first report, before the settle, and an element of the scene's UI
+  (`taken` 3: its own box, `interpreter.panelPressMap` `element`) is shaded a
+  quarter of the way to black (to white on a dark box) in the frame buffer on
+  the glass, its pixels saved first, under the loading mark's lock. The next
+  picture presented puts it away (`present_back`: it is the scene's answer,
+  its own `active:` look or the result), and so does the lift when no picture
+  follows within `FOS_PRESS_LINGER_MS` (250 ms, the mark's task), a move past
+  `FOS_PRESS_SLOP_PX` (a drag) or a second finger. A box over a quarter of
+  the panel is no button (a scene that takes every press: nothing is lit).
+  Put away by the render task it gives the buffer's write count back; put
+  away from another task the count stays moved, because a render may have
+  been copying from that buffer meanwhile (`svg_frames.nim` checks the count
+  after a whole-frame copy too now), and that buffer's next render draws it
+  whole. The mark and a press are never up together: the mark is the newer
+  news. On the SenseCAP Indicator the shade of a 200x120 button is drawn
+  5 ms after the touch task's first report of the finger (the console's
+  `touch tap`, below), so it is on the glass within the controller's 10 ms
+  poll and one scan of the panel (24 ms) of the contact, where the scene's
+  own `active:` look came 80 to 110 ms after it.
+- **A quick tap still looks pressed** (`ui/events.nim` `pressLinger`, an ESP32
+  only: `quickTapLingers`). Its press and its lift handled in one go behind a
+  busy render left no render that drew the `active:` look; now the look stays
+  with the tap's answer and goes `PressLingerMs` (150 ms) after a render drew
+  it, as a typed key's light does. The idle wait looks at a UI timer every 50
+  ms (`fos_nim_next_async_ms_impl`), so the key's light no longer stays up to
+  a whole second slice either.
+- **A handler that takes long shows the loading mark** (LCD). The mark used to
+  count from the render that answered a tap; a handler that blocks (a
+  synchronous `fetch` in an `onClick`) ran before that render and showed
+  nothing. It counts from the input's arrival now (`process_input_events`,
+  `FOS_LOADING_ANSWER_EXTRA_MS` past the usual 200 ms, so at half a second),
+  and goes where no render follows.
+- **A timed render does not start under a finger**
+  (`fos_timed_render_waits_for_finger`, host-tested): a render whose interval
+  ran out while a finger is on the glass waits for the lift, in 50 ms slices,
+  at most `FOS_TIMED_UNDER_FINGER_MAX_US` (1.5 s) past its time, so the tap's
+  render goes first. A render already running is not stopped: see
+  `docs/perf-todo.md` "Still open" for why there is no safe checkpoint.
+- **E-paper says it heard the press.** On a press the map takes, the touch
+  task lights the board's LED (`fos_led_busy`, the E1003's GPIO16) until the
+  waveform that draws the answer has run (`FOS_PRESS_WAVEFORM_MS` after it
+  starts, 4 s at most), beside the buzzer's click. On an element whose taps
+  took `FOS_PRESS_INK_AFTER_MS` (600 ms) or more to answer (contact to the
+  answer's picture ready, smoothed over its last few, by its box: the last
+  eight elements pressed, timed afresh on every scene), the render task inks the pressed box
+  before it hands the press on (`ink_press`): the box inverted in pure black
+  and white in the picture showing, for the upload alone, and one DU over it
+  (`fos_display_glass_rect`, the IT8951's `glass_rect`: its tiles marked
+  `stale`, so the next update sends the picture's own pixels whatever the
+  digests say, and the settle does when none comes). A quicker element is not
+  inked: its answer would wait for the ink's 470 ms waveform. A scene switch
+  somebody waits for (input within the hold's quiet 10 s) puts the loading
+  tile up the same way at once (`fos_client_switch_begin` at the switch call
+  sites in `fos_scenes.c`: the wake ring, `fos_panel_mark_box`), while the
+  scene loads; its first picture takes it away. On the E1003 (2026-11-24) a 1.5 s
+  button's ink went up 39 ms after the render task took the press (its 224x128
+  tiles' upload included), the answer's update sent the box's own pixels back
+  with its own, and the loading tile took 56 ms of a switch. Either one
+  invalidates the display state in memory, so the next render updates the
+  panel even when the scene drew nothing new (a switch that failed).
+
+The console's `touch tap <x> <y> [ms]` (`fos_touch_inject`) puts a finger
+on the glass through the touch task, in the controller's own coordinates, so
+the bench times all of this without one, and prints when the touch task saw
+it and lit it.
+
 ### A switch that takes a while: the loading mark
 
 On a fast panel a scene switch used to give no sign of life while the next

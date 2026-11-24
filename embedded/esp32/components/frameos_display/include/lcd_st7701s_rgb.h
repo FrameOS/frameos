@@ -112,6 +112,14 @@ void fos_lcd_st7701s_updating_end(bool picture_follows);
 void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark);
 void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation);
 void fos_lcd_st7701s_loading_end(void);
+/* A press lit at once (lcd_press.h), from the touch task: `begin` shades the
+ * box x0, y0, x1, y1 (panel pixels, x1 and y1 past the last) in the buffer
+ * on the glass, now; `release` at the lift, after which it goes in
+ * `linger_ms` unless a picture is presented first; `end` puts it away now
+ * (a drag, a second finger). The next picture presented puts it away too. */
+void fos_lcd_st7701s_press_begin(int x0, int y0, int x1, int y1);
+void fos_lcd_st7701s_press_release(int linger_ms);
+void fos_lcd_st7701s_press_end(void);
 
 /* What the boot splash says it is waiting for (lcd_splash.h), from whichever
  * task is booting. It shows once it has lasted FOS_LCD_SPLASH_STATUS_DELAY_MS,

@@ -102,6 +102,7 @@ type
     accentLit*: int      ## ... which one the last layout lit, -1 for none
     flash*: int          ## a key just typed (its byte), drawn lit for a moment after the press; 0 none
     flashDrawn*: bool    ## ... and a layout has drawn it so
+    pressedDrawn*: bool  ## a layout has drawn `pressed` (a quick tap's press lingers until one has)
     reveal*: bool        ## scroll the focused field into view at the next layout
     slow*: bool          ## a change costs a refresh (panel_shape.panelIsFast): no press shows
     paper*: bool         ## the panel draws in inks: the keyboard's and a select's look
@@ -2781,6 +2782,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   ## its focused field scrolled into sight, and the keyboard drawn below.
   memo = textMemo
   ui = addr input
+  if input.pressed.len > 0:
+    input.pressedDrawn = true
   focusSeen = false
   endsFound = false
   # The frame's keyboard, when it is this UI's (layoutUiDocked): laid out in

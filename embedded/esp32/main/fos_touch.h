@@ -217,4 +217,11 @@ esp_err_t fos_touch_arm_wake(void);
 bool fos_touch_woke_chip(void);
 /* One line for the console: the controller, its range, the last point. */
 void fos_touch_print_status(void);
+/* The console's `touch tap`: a finger at panel pixel (px, py) for `hold_ms`,
+ * read by the touch task in place of the controller's reports, so a bench
+ * times the whole of a press without a finger. */
+esp_err_t fos_touch_inject(int px, int py, int hold_ms);
+/* When the last press was first seen and when it was lit on an LCD
+ * (esp_timer us; 0: not). */
+void fos_touch_press_times(int64_t *seen_us, int64_t *lit_us);
 #endif

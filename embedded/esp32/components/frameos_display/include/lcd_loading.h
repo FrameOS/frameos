@@ -76,6 +76,10 @@ bool fos_lcd_loading_begin(fos_lcd_loading_t *m, int rotation, uint32_t since_ms
  * wait for. The buffers it wrote are `drawn_in` before and after the step. */
 int32_t fos_lcd_loading_step(fos_lcd_loading_t *m, uint16_t *scanned, uint32_t now_ms);
 
+/* Whether the mark is up at `now_ms`, or goes up at its next step: a switch
+ * loads and has taken the delay. */
+bool fos_lcd_loading_due(const fos_lcd_loading_t *m, uint32_t now_ms);
+
 /* The next picture is being presented, or the switch came to nothing: the
  * mark is put away (into `drawn_in`, when it was up) and the switch is over. */
 void fos_lcd_loading_end(fos_lcd_loading_t *m);

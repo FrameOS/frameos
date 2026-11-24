@@ -391,7 +391,7 @@ typedef struct {
     int x, y, tile, scale, pad;
 } mark_tile_t;
 
-static bool mark_tile(const fos_panel_surface_t *s, mark_tile_t *t)
+static bool mark_place(const fos_panel_surface_t *s, mark_tile_t *t)
 {
     if (s == NULL || s->buf == NULL || bits_per_pixel(s->format) == 0) return false;
     const int sw = fos_panel_scene_width(s);
@@ -403,12 +403,18 @@ static bool mark_tile(const fos_panel_surface_t *s, mark_tile_t *t)
     if (t->tile + 2 * margin > sw || t->tile + 2 * margin > sh) return false;
     t->x = sw - margin - t->tile;
     t->y = margin;
+    return true;
+}
+
+static bool mark_tile(const fos_panel_surface_t *s, mark_tile_t *t)
+{
+    if (!mark_place(s, t)) return false;
     fos_panel_fill_rect(s, t->x, t->y, t->tile, t->tile, true);
     fos_panel_fill_rect(s, t->x + t->scale, t->y + t->scale, t->tile - 2 * t->scale, t->tile - 2 * t->scale, false);
     return true;
 }
 
-static void mark_box(const mark_tile_t *t, fos_panel_code_box_t *box)
+static void mark_box(const fos_panel_surface_t *s, const mark_tile_t *t, fos_panel_code_box_t *box)
 {
     if (!box) return;
     memset(box, 0, sizeof(*box));
@@ -417,6 +423,22 @@ static void mark_box(const mark_tile_t *t, fos_panel_code_box_t *box)
     box->w = t->tile;
     box->h = t->tile;
     box->pad = t->pad;
+    /* The tile on the panel: its two opposite corners mapped. */
+    int ax, ay, bx, by;
+    scene_to_panel(s, box->x, box->y, &ax, &ay);
+    scene_to_panel(s, box->x + box->w - 1, box->y + box->h - 1, &bx, &by);
+    box->px = min_int(ax, bx);
+    box->py = min_int(ay, by);
+    box->pw = max_int(ax, bx) - box->px + 1;
+    box->ph = max_int(ay, by) - box->py + 1;
+}
+
+bool fos_panel_mark_box(const fos_panel_surface_t *s, fos_panel_code_box_t *box)
+{
+    mark_tile_t t;
+    if (!mark_place(s, &t)) return false;
+    mark_box(s, &t, box);
+    return true;
 }
 
 bool fos_panel_draw_sleep_mark(const fos_panel_surface_t *s, fos_panel_code_box_t *box)
@@ -431,7 +453,7 @@ bool fos_panel_draw_sleep_mark(const fos_panel_surface_t *s, fos_panel_code_box_
             }
         }
     }
-    mark_box(&t, box);
+    mark_box(s, &t, box);
     return true;
 }
 
@@ -454,6 +476,6 @@ bool fos_panel_draw_wake_mark(const fos_panel_surface_t *s, int frame, fos_panel
         fos_panel_fill_rect(s, t.x + t.pad + (cx - size / 2) * t.scale, t.y + t.pad + (cy - size / 2) * t.scale,
                             size * t.scale, size * t.scale, true);
     }
-    mark_box(&t, box);
+    mark_box(s, &t, box);
     return true;
 }
