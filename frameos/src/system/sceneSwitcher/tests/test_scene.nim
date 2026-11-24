@@ -341,6 +341,30 @@ block the_keys_scroll_the_list_to_the_highlight:
   for (event, _) in sent:
     doAssert event != evSetCurrentScene and event != evSceneSwitcher, event
 
+block it_opens_scrolled_to_the_scene_showing_in_a_layouts_hole:
+  # The reTerminal Sticky's home screen: the list in the hole its layout
+  # leaves on the 800x480 panel (a big clock over it, the keys' help under
+  # it). The open knows the panel alone; the first render scrolls in the
+  # hole, the scene showing in the middle of the list.
+  listed = entries(40)
+  sent.setLen(0)
+  let scene = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-30")
+  discard scene.draw(newImage(800, 300))
+  doAssert listScroll() > 0 and shownWhole(29), "the scene showing in sight at " & $listScroll()
+  let list = listRegion()
+  let tile = uiTarget(SceneSwitcherId, 1).regions[tileRegion(29)]
+  doAssert abs((tile.y + tile.h / 2) - (list.y + list.h / 2)) <= tile.h,
+    "in the middle of the list: " & $tile & " " & $list
+  preview("switcher-800x300-eink-opened", oneBit(scene.draw(newImage(800, 300))))
+  # Scrolled by a finger after that, the list stays where it was put.
+  let held = listScroll()
+  discard scene.draw(newImage(800, 300))
+  doAssert listScroll() == held
+  # One in the first screenful: the list stays at its top.
+  let near = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-3")
+  discard near.draw(newImage(800, 300))
+  doAssert listScroll() == 0 and shownWhole(2)
+
 block forward_and_back_move_a_screenful:
   # What turned a page (the frame's forward and back, a swipe in from an
   # edge, a scene direction, which the dispatcher hands the switcher as

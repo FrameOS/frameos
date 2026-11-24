@@ -103,6 +103,7 @@ type
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
     keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close or gear to draw
     headed*: bool ## the categories have headings (heads): a dozen scenes and more, two a category
+    revealing: bool ## just opened: the next render scrolls to the highlight in the room it has (draw)
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
@@ -543,10 +544,12 @@ proc scrollList(y: float32) =
   ## The list scrolled to `y` (the next layout keeps it in range).
   uiTarget(SceneSwitcherId, SwitcherNode).input.scrollTo(ListKey, 0, max(y, 0))
 
-proc reveal(self: SceneSwitcherScene, index: int) =
+proc reveal(self: SceneSwitcherScene, index: int, centred = false) =
   ## The list scrolled as little as it takes for the tile at `index` to
   ## show, with its heading where it starts a category: the keys walk a list
   ## longer than the screen, and e-paper has nothing else to follow them by.
+  ## `centred`: one out of sight comes to the middle of the list instead, as
+  ## the scene showing does when the list opens.
   let grid = self.grid()
   let spot = self.spots(grid)[index]
   let margin = grid.y0 - grid.listY
@@ -555,7 +558,9 @@ proc reveal(self: SceneSwitcherScene, index: int) =
     top -= grid.headingH
   let bottom = spot.top + grid.tileH + margin
   let y = listScroll()
-  if top.float32 < y:
+  if centred and (top.float32 < y or bottom.float32 > y + grid.listH.float32):
+    scrollList(float32(top - max(grid.listH - (bottom - top), 0) div 2))
+  elif top.float32 < y:
     scrollList(top.float32)
   elif bottom.float32 > y + grid.listH.float32:
     scrollList(float32(bottom - grid.listH))
@@ -638,7 +643,8 @@ proc takesNoTaps*(frameConfig: FrameConfig, paper: bool): bool =
 proc opened(self: SceneSwitcherScene) =
   ## Shown: the scene it was opened from is the highlighted one, the list's
   ## first when there is none or it is gone (then Close goes to the first),
-  ## and the list scrolled from its top to it.
+  ## and the list scrolled from its top to it: at the first render, which
+  ## knows the room (`revealing`; a layout's hole is not the panel).
   self.list()
   self.keysOnly = takesNoTaps(self.frameConfig, panelLook(self.frameConfig).paper)
   self.gear = framePageOffered() and not self.keysOnly
@@ -651,6 +657,7 @@ proc opened(self: SceneSwitcherScene) =
     self.forget()
   scrollList(0)
   self.highlight(max(index, 0))
+  self.revealing = true
   self.touch()
 
 # ---------------------------------------------------------------- input
@@ -1092,7 +1099,20 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   # target's input (what is hovered, what is pressed) empty. Back by itself
   # once nobody has touched it for a while.
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
-  let tree = self.tree(roomW, roomH, self.paper, self.sizeUnit(image))
+  let unit = self.sizeUnit(image)
+  if self.revealing:
+    # Just opened: the scene it was opened from in sight, in the middle of
+    # the list where it is further down, measured in the room this render
+    # has (a layout's hole, a window), which the open did not know.
+    self.revealing = false
+    self.roomW = roomW
+    self.roomH = roomH
+    self.unit = unit
+    scrollList(0)
+    let lit = self.highlighted()
+    if lit >= 0 and lit < self.entries.len:
+      self.reveal(lit, centred = true)
+  let tree = self.tree(roomW, roomH, self.paper, unit)
   if self.drawUi(SceneSwitcherId, tree, image, self.paper, self.slow, onTap, idleSeconds(self.slow), roomW, roomH):
     leave()
 

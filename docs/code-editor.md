@@ -20,7 +20,7 @@ nothing of a plane: `previewOnly`).
 | The host in the browser preview (reads only) | `frameos/src/frameos/scene_code_preview.nim`, through `frameos/src/wasm/wasm_main.nim` |
 | What a frame asks its plane | `POST /api/frames/{id}/panel/code`: backend `app/api/panel_code.py` (also `/api/panel/code`), cloud `src/lib/panel-code.ts` |
 | The AI | the voice chat's scene builder, typed instead of spoken: backend `app/utils/voice_scene_builder.py`, cloud `src/lib/ai/voice-scene-builder.ts` (`asked: "typed"`) |
-| The way in from a scene | the scene settings' **Code** button (`system/sceneSettings`, `HCode`), shown while the frame holds the editor |
+| The way in from a scene | the scene settings' **Code** button (`system/sceneSettings`, `HCode`), shown while the frame holds the editor, on the scene's and the frame's page (that scene) and a layout's (that layout) |
 
 ## Using it
 
@@ -127,9 +127,9 @@ JSX layer's, for any app (`docs/jsx-ui.md` "Fields and the keyboard",
   0.8 ms, the JSX walk 0.3 ms, the layout 1.6 ms (1.2 of it the text set in
   type when the window changed) for a 2,000-line file; the raster of the
   scrolled box is the rest, as in any scroller.
-- **Opened from the scene settings** (`Code`), it opens on that scene: the
-  button switches to the editor with its public field `open` set to the
-  scene's id (`setCurrentScene {sceneId: "code-editor", state: {open}}`), and
+- **Opened from the scene settings** (`Code`), it opens on that scene (on
+  the layout settings' page, on that layout): the button switches to the
+  editor with its public field `open` set to the scene's id (`setCurrentScene {sceneId: "code-editor", state: {open}}`), and
   the app opens it and clears the field (`frameos.setState('open', '')`).
 
 ## `frameos.code(op, arg)`
