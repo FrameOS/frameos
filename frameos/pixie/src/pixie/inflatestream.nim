@@ -105,7 +105,8 @@ const
   inflateWindowSize = 32768 # Max deflate back-reference distance (RFC 1951)
   inflateChunkSize = 32768
   # Room for the longest match (258) plus copy64's 13-byte overwrite slack
-  inflateBufferSize = inflateWindowSize + inflateChunkSize + 288
+  inflateMatchRoom = 288
+  inflateBufferSize = inflateWindowSize + inflateChunkSize + inflateMatchRoom
 
 type
   InflateOnData* = proc (data: openArray[uint8]) {.gcsafe, raises: [PixieError].}
@@ -499,6 +500,11 @@ proc inflateBlockStream(
       # Min match is 3 so leave room to overwrite by 13
       if s.op + copyLength + 13 > s.buf.len:
         s.flushWindow()
+        # Only the full buffer flushes (workingBufferLen), and it keeps a
+        # match's room past the window; checked here, once per flush, so no
+        # buffer can ever be written past.
+        if s.op + copyLength + 13 > s.buf.len:
+          failStream()
 
       # After a flush s.op >= inflateWindowSize >= distance, so the
       # back-reference always lands inside the buffer
@@ -540,6 +546,16 @@ proc inflateNoCompressionStream(
     s.op += take
     len -= take
 
+proc workingBufferLen(asked: int): int =
+  ## The working buffer for an output told to need `asked` bytes. A buffer no
+  ## bigger than the window never flushes (a stream that outgrows it is
+  ## refused), and one bigger than the window must keep a whole match's room
+  ## past the window after every flush: a buffer in between would let the
+  ## match after a flush write past its end. So anything over the window
+  ## gets the full buffer.
+  if asked > 0 and asked <= inflateWindowSize: asked
+  else: inflateBufferSize
+
 proc inflateStream(
   onData: InflateOnData,
   b: var BitStreamReader,
@@ -548,7 +564,9 @@ proc inflateStream(
   dictLen = 0
 ) =
   var
-    s = InflateStreamState(buf: newString(bufLen), onData: onData, dict: dict, dictLen: dictLen)
+    s = InflateStreamState(
+      buf: newString(workingBufferLen(bufLen)), onData: onData, dict: dict, dictLen: dictLen
+    )
     finalBlock: bool
   while not finalBlock:
     let
@@ -664,7 +682,7 @@ proc inflateToString(
       output.setLen(at + data.len)
       copyMem(output[at].addr, data[0].unsafeAddr, data.len)
   let bufLen =
-    if expected > 0 and expected + 288 < inflateBufferSize: expected + 288
+    if expected > 0: expected + inflateMatchRoom
     else: inflateBufferSize
   if zlib:
     uncompressZlibFrom(onData, b, bufLen)

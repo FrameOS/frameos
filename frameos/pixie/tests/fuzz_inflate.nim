@@ -13,19 +13,6 @@ import fuzzing, pixie/common, pixie/inflatestream, std/[random, strformat], zipp
 
 var rng = fuzzRand()
 
-const SizedOverrunOpen = not defined(pixieFuzzSizedOverrun)
-  ## A finding of this fuzzer that is still open (2026-11-24, seed 46206826,
-  ## round 252). `inflateToString` makes its buffer the size it is told plus
-  ## 288, and told 32 481 to 32 750 bytes for a stream that holds more, a
-  ## window flush leaves less room than a match may write: up to 270 bytes
-  ## past the buffer. The one caller that tells a size is the indexed font's
-  ## block reader, whose font is compiled in. Until inflatestream.nim refuses
-  ## it, a size in that band is not told here; -d:pixieFuzzSizedOverrun tells
-  ## it. Delete this and `told` with the fix.
-
-proc told(size: int): int =
-  if SizedOverrunOpen and size in 32_300 .. 32_900: 0 else: size
-
 proc makeText(rng: var Rand): string =
   ## Short (a font block is 2 KB), or long enough to turn the 32 KB window
   ## over and leave the 64 KB buffer more than once; noise, runs, and copies
@@ -106,7 +93,7 @@ proc run(
   if zlib:
     case way
     of wString: return uncompressZlib(segments)
-    of wStringSized: return uncompressZlib(segments, told(expected))
+    of wStringSized: return uncompressZlib(segments, expected)
     of wCallbackPieces: uncompressStreamZlib(onData, segments)
     of wCallbackPull: uncompressStreamZlib(onData, pull)
     of wCallbackWhole:
@@ -134,7 +121,7 @@ proc run(
           c = rng.rand(255).char
         dictionary = heapBytes(noise)
       return uncompressDeflate(whole.data, whole.len,
-        (if way == wString: 0 else: told(expected)), dictionary.data, dictionary.len)
+        (if way == wString: 0 else: expected), dictionary.data, dictionary.len)
     of wCallbackPieces, wCallbackPull: uncompressStreamDeflate(onData, pull)
     of wStops:
       stopAfter = rng.rand(0 ..< max(expected, 1))
