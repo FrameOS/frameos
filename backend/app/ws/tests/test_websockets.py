@@ -55,6 +55,39 @@ class DummyRedis:
     async def ttl(self, *args, **kwargs):
         return -2
 
+    async def decr(self, *args, **kwargs):
+        pass
+
+    async def eval(self, *args, **kwargs):
+        # The login's attempt counter (app/api/auth.py): the first attempt, no lock.
+        return 1
+
+    def pipeline(self, *args, **kwargs):
+        return _DummyPipeline()
+
+    async def scan_iter(self, *args, **kwargs):
+        for key in ():
+            yield key
+
+
+class _DummyPipeline:
+    """hit_rate_limit's INCR + TTL (app/utils/rate_limit.py): one hit, no window yet."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def incr(self, *args, **kwargs):
+        pass
+
+    def ttl(self, *args, **kwargs):
+        pass
+
+    async def execute(self):
+        return [1, -1]
+
     async def scan_iter(self, *args, **kwargs):
         if False:
             yield None
