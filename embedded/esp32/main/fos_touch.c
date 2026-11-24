@@ -542,6 +542,21 @@ static esp_err_t ft_read(uint8_t reg, uint8_t *buf, size_t len)
     return i2c_master_transmit_receive(s_dev, &reg, 1, buf, len, TOUCH_I2C_TIMEOUT_MS);
 }
 
+static esp_err_t ft_write(uint8_t reg, uint8_t value)
+{
+    uint8_t frame[2] = {reg, value};
+    return i2c_master_transmit(s_dev, frame, sizeof(frame), TOUCH_I2C_TIMEOUT_MS);
+}
+
+/* FocalTech's power modes: ID_G_CTRL 0 keeps the controller scanning at its
+ * active rate with no finger down; 1, its default, drops it to the monitor
+ * rate after ID_G_TIMEENTERMONITOR, so the first touch after a pause waits
+ * for a slower scan. A polled controller (the SenseCAP Indicator's FT6336U,
+ * mains-powered) stays active. The four registers from 0x86 are logged as
+ * they were (touch:ready `ft`). */
+#define FT_REG_G_CTRL 0x86
+static uint8_t s_ft_power[4] = {0}; /* ctrl, time to monitor, active period, monitor period */
+
 static void IRAM_ATTR on_irq(void *arg)
 {
     (void)arg;
@@ -937,6 +952,10 @@ esp_err_t fos_touch_start(void)
         drop_bus();
         return ESP_ERR_NOT_FOUND;
     }
+    if (s_controller == CTRL_FT6X36 && ft_read(FT_REG_G_CTRL, s_ft_power, sizeof(s_ft_power)) == ESP_OK &&
+        s_polled && s_ft_power[0] != 0) {
+        ft_write(FT_REG_G_CTRL, 0);
+    }
     uint8_t range[4] = {0};
     if (s_controller == CTRL_GT911 && reg_read(FOS_TOUCH_REG_X_MAX, range, sizeof(range)) == ESP_OK) {
         s_x_max = range[0] | (range[1] << 8);
@@ -992,15 +1011,16 @@ esp_err_t fos_touch_start(void)
      * there would make one every frame for nothing. */
     if (!fos_display_is_lcd()) frameos_nim_keep_press_map(true);
     s_present = true;
-    char line[256];
+    char line[288];
     snprintf(line, sizeof(line),
              "{\"event\":\"touch:ready\",\"source\":\"esp32\",\"controller\":\"%s\",\"address\":\"0x%02x\","
              "\"xMax\":%d,\"yMax\":%d,\"swapped\":%s,\"mirrored\":\"%s\",\"polled\":%s,"
-             "\"sharedBus\":%s,\"wake\":%s}",
+             "\"sharedBus\":%s,\"wake\":%s,\"ft\":[%u,%u,%u,%u]}",
              k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? "true" : "false",
              mirror_name(),
              s_polled ? "true" : "false", share ? "true" : "false",
-             fos_touch_wake_pin() >= 0 ? "true" : "false");
+             fos_touch_wake_pin() >= 0 ? "true" : "false", s_ft_power[0], s_ft_power[1], s_ft_power[2],
+             s_ft_power[3]);
     log_line(line);
     return ESP_OK;
 }

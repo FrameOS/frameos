@@ -18,6 +18,7 @@ from frameos/render_scale import MaxRenderScale
 import lib/tz
 import std/[monotimes, times]
 import frameos/channels
+from frameos/events_gen import contractEventIndex, ContractEventPolicies, ecInput
 import frameos/single_scene_host
 import frameos/scene_rhythm
 import frameos/layout_choice
@@ -346,7 +347,16 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
         host.renderRequested = true
         persisted = true
     result = host.send(origin.get(), event, payload) or persisted
-    persistSceneState()
+    let index = contractEventIndex(event)
+    if index >= 0 and ContractEventPolicies[index].class == ecInput:
+      # A finger's or a key's event asks for its render when a handler
+      # changed something, and that render's pass looks at the state
+      # (renderCurrentScene); until then it is owed. Looked at here, every
+      # pointerMove of a drag and each of a tap's three events built the
+      # state and compared it, ~0.6 ms each on a SenseCAP Indicator.
+      persistOwed = true
+    else:
+      persistSceneState()
   except Exception as e:
     log("event " & $eventName & " failed: " & e.msg)
     result = false

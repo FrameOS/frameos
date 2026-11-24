@@ -213,7 +213,10 @@ static void scene_state_writer_task(void *arg)
     (void)arg;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
-        if (!fos_client_input_held()) fos_scene_state_flush(fos_scene_state_crowded());
+        if (!fos_client_input_held()) {
+            fos_scene_state_flush(fos_scene_state_crowded());
+            fos_scenes_flush_marks();
+        }
     }
 }
 
@@ -288,6 +291,7 @@ static void boot_splash_wait(void)
 static void scene_state_flush_on_restart(void)
 {
     fos_scene_state_flush(true);
+    fos_scenes_flush_marks();
 }
 
 static void scene_state_write_behind(void)
