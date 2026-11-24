@@ -99,7 +99,7 @@ def _frame_private_keys(db, frame) -> tuple[list[str], str]:
     selected_keys = select_ssh_keys_for_frame(frame, settings)
     keypair_names = [key.get("name") or key.get("id") for key in selected_keys]
     keypair_label = ", ".join([name for name in keypair_names if name]) or "unknown"
-    return [key.get("private") for key in selected_keys if key.get("private")], keypair_label
+    return [str(key["private"]) for key in selected_keys if key.get("private")], keypair_label
 
 
 def _pool_key(db, frame) -> PoolKey:
