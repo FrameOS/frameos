@@ -4,7 +4,7 @@ Ideas for practical scenes the store at [scenes.frameos.net](https://scenes.fram
 Priority: lower than the platform work for now (2026-10-18), not parked.
 Focus: glanceable, high-contrast, low-refresh content that plays to e-ink strengths (always-on, no glow, readable in sunlight). Cadence notes assume typical e-ink refresh budgets (Spectra 6 ≈ minutes, faster B/W panels ≈ seconds).
 
-Already covered (don't duplicate): photo slideshows (Google Photos, Immich, SD card, Unsplash, Wikimedia, URL), curated art galleries, monthly calendar, iCal agenda, weather, chart, GitHub stars, XKCD, counter, message board, Chromium screenshot, Ken Burns, RTSP webcam, MiniGPT, OpenAI image, haiku of the hour, bird field journal, visited world map, DVD logo bounce, word clock, big typographic clock, analog clock face, year progress / memento mori, chess puzzle of the day, touch test. Photo albums are not a store scene: the Photos library builds one per album (`docs/photo-album-scene.json`).
+Already covered (don't duplicate): photo slideshows (Google Photos, Immich, SD card, Unsplash, Wikimedia, URL), curated art galleries, monthly calendar, iCal agenda, weather, chart, GitHub stars, XKCD, counter, message board, Chromium screenshot, Ken Burns, RTSP webcam, MiniGPT, OpenAI image, haiku of the hour, bird field journal, visited world map, DVD logo bounce, word clock, big typographic clock, analog clock face, year progress / memento mori, chess puzzle of the day, touch test, Spotify (the Spotify remote sample: what plays, with controls). Photo albums are not a store scene: the Photos library builds one per album (`docs/photo-album-scene.json`).
 
 Legend: **S** = simple (one HTTP source + layout), **M** = medium (auth / multiple sources / state), **L** = larger (protocol work, new app, or heavy layout).
 
@@ -81,7 +81,7 @@ Legend: **S** = simple (one HTTP source + layout), **M** = medium (auth / multip
 - [ ] **My team's fixtures & scores** — last result + next match + league position for a chosen club (football-data.org, TheSportsDB). Refresh hourly, per-minute on match day. **M**
 - [ ] **F1 race weekend** — countdown to next session, latest results, driver standings (Ergast/Jolpica API). Refresh daily. **M**
 - [ ] **Strava week** — km this week vs. last, latest activity with route polyline drawn as a line map. OAuth needed. Refresh hourly. **L**
-- [ ] **Now playing** — current Spotify / Sonos / last.fm track with heavily dithered album art. Only sensible on fast-refresh panels; document that constraint. **M**
+- [ ] **Now playing** — current Sonos / last.fm track with heavily dithered album art (Spotify: the Spotify remote sample). Only sensible on fast-refresh panels; document that constraint. **M**
 - [ ] **Reading tracker** — current book cover, % progress, pace vs. goal (Hardcover API / manual state). Refresh daily. **M**
 
 ## Notes for implementation
