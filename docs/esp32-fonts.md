@@ -270,7 +270,8 @@ permission).
   job is the private `getting` field on disk, so a restart goes on from what
   is on the card; a request that fails is tried at the next two renders, then
   said. Both servers answer ranges and send `Access-Control-Allow-Origin: *`,
-  so the browser preview can get fonts into its Files too.
+  what the browser preview's direct requests need (not tried in a browser
+  yet; a request that fails there goes through the plane's preview proxy).
 - **Drawn at once.** A face named by its file (`font-[Lora-Regular.ttf]`, the
   Text app's font) that the fonts folder has and its listing does not lists the
   folder again (`svgFontFileFor`), so the font a download just wrote draws in
