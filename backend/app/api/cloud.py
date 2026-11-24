@@ -915,7 +915,10 @@ async def cloud_login_options(db: Session = Depends(get_db)):
     available = enabled and _link_has_scope(link, "auth:login")
     return {
         "available": available,
-        "provider_url": link.provider_url if link else None,
+        # Only when cloud login is offered, which sends the browser there
+        # anyway: otherwise an anonymous caller learns where this install is
+        # linked (the device's options route has the same rule).
+        "provider_url": link.provider_url if link and available else None,
         "local_login_enabled": link.local_fallback_enabled if link else True,
         "setup_mode": db.query(User).first() is None,
     }
