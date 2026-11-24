@@ -364,6 +364,17 @@ kept.
   (a frame sets it once online). **Reload** in the header, and opening a place
   from the top, drop what was read (the listing, sizes, thumbnails) and list
   the folder again.
+- **A file that is no picture opens in the scene that reads it.** A scene
+  names the kinds of file it opens (`settings.opens`, its extensions as text:
+  the PDF viewer `"pdf"`, the ePub reader `"epub"`, the Code editor
+  `"txt md json csv ..."`; docs/scene-guide.md), every host lists that as
+  `opens` on `app.frame.scenes` (`listingItem`; an ESP32 keeps it in its scene
+  index, `make_entry`'s `keep_text`), and a tap on such a file is
+  `setCurrentScene {sceneId, state: {file: "<storage>:<path>"}}`: the scene's
+  public field `file`, which it reads once and sets back to `""`. The first
+  scene in the frame's order that opens the kind wins. With none, a card over
+  the page says "Can't open .mp3 files" and a tap puts it away; in the
+  browser preview such a file is downloaded instead, as before.
 - **Thumbnails or a list**, two buttons in its header. Thumbnails are
   `frameos.loadAssetImage(path, { keep: true, width, height })`: decoded at the
   tile's size (a JPEG scaled as it decodes, `readImageIntoTarget`), one a pass

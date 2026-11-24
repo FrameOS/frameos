@@ -61,6 +61,14 @@ A scenes file is a JSON array of scenes. Each scene is
   own that already reads well in a circle (a photo filling the screen, a
   centred clock), and `false` on one whose code reads it but should not be
   offered there.
+- `settings.opens` (optional): the kinds of file the scene opens, by their
+  extension, as one text: `"pdf"`, or `"txt md json"` for several. The
+  frame's Files app opens such a file in this scene: it switches to it with
+  `state: { file: "<storage>:<path>" }` (`"assets:Books/Dune.epub"`, the
+  storage an id of `app.frame.storages`). A scene that says it opens files
+  gives itself that public field (`"name": "file"`, `"type": "string"`,
+  `"access": "public"`, `"persist": "memory"`), and on its next render opens
+  the file and sets the field back with `frameos.setState('file', '')`.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -765,9 +773,10 @@ export function get(app) {
   lists its scenes (`{id, name}`, and `windowSize`, `"WxH"`, where a scene says
   the size its window should open at, `icon`, its `settings.icon`, where it
   has one: draw it as `<svg viewBox="0 0 24 24" className="w-6 h-6"><path d={icon}
-  fill="currentColor" /></svg>`, and `category`, its `settings.category`, a name
+  fill="currentColor" /></svg>`, `category`, its `settings.category`, a name
   such as `"Photos"`, where it has one: group a list of scenes by it, those
-  without one last under Other) and `app.frame.sceneId` is the one wrapped.
+  without one last under Other, and `opens`, its `settings.opens`, where it
+  has one) and `app.frame.sceneId` is the one wrapped.
   There a layout's `<Scene id={...} />` (no other props: with props it is a copy
   they set, as anywhere) is that scene itself, running in its own rectangle
   beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
@@ -1339,8 +1348,10 @@ interface FrameOSApp {
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
      * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
-     * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+     * (FrameOS 2026.11.10+). opens is the file types the scene opens, their extensions as the scene's
+     * settings.opens has them ("pdf", "txt md json"), where it names some. Such a file goes to the scene with
+     * setCurrentScene, its public field file set to "<storage>:<path>" (FrameOS 2026.11.15+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string; opens?: string }[];
     /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
      * window without their going back, so still open beside the scene showing, their page and edits as they were.
      * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes

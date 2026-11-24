@@ -791,7 +791,8 @@ proc setSceneCatalog*(indexJson: string): int =
         continue
       entries.add SwitcherEntry(id: id, name: item.textAt("name"), windowSize: item.textAt("windowSize"),
         # The store only checked its length; what is not an icon is none.
-        icon: sceneIconPath(item.textAt("icon")), category: item.textAt("category"))
+        icon: sceneIconPath(item.textAt("icon")), category: item.textAt("category"),
+        opens: item.textAt("opens"))
       intervals.add item{"refreshInterval"}.getFloat(0.0)
   sceneCatalog = move(entries)
   catalogRefresh = move(intervals)
