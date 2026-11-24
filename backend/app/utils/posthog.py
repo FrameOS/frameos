@@ -2,7 +2,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Optional, Any, Generic, TypeVar
 from fastapi import Request
-from jose import jwt, JWTError
+import jwt
+from jwt import PyJWTError as JWTError
 from posthog import Posthog
 
 from app.config import config

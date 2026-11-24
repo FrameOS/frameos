@@ -3,7 +3,8 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import jwt, JWTError
+import jwt
+from jwt import PyJWTError as JWTError
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis

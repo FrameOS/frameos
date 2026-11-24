@@ -542,3 +542,38 @@ def test_the_app_config_cannot_close_its_script_element():
     rendered = script_json(config)
     assert "<" not in rendered and ">" not in rendered and "&" not in rendered
     assert json.loads(rendered) == config
+
+
+def test_a_bearer_minted_before_the_switch_to_pyjwt_still_reads():
+    """python-jose made the tokens of every session open at the upgrade; the
+    same HS256 JWT must still decode, and anything else must not."""
+    import base64
+    import hashlib
+    import hmac
+    import json
+
+    from app.api.auth import ALGORITHM, SECRET_KEY, JWTError, _decode_jwt_claims
+
+    def b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def token(claims: dict, key: str = SECRET_KEY, alg: str = ALGORITHM) -> str:
+        head = b64(json.dumps({"alg": alg, "typ": "JWT"}, separators=(",", ":")).encode())
+        body = b64(json.dumps(claims, separators=(",", ":")).encode())
+        digest = hashlib.sha256 if alg == "HS256" else hashlib.sha512
+        signature = b64(hmac.new(key.encode(), f"{head}.{body}".encode(), digest).digest())
+        return f"{head}.{body}.{signature}"
+
+    import time
+
+    later = int(time.time()) + 3600
+    assert _decode_jwt_claims(token({"sub": "a@example.com", "jti": "s1", "exp": later})) == ("a@example.com", "s1")
+    for bad in (
+        token({"sub": "a@example.com", "jti": "s1", "exp": int(time.time()) - 10}),
+        token({"sub": "a@example.com", "jti": "s1", "exp": later}, key="another-key-of-enough-length-000000"),
+        token({"sub": "a@example.com", "jti": "s1", "exp": later}, alg="HS512"),
+        token({"sub": "a@example.com", "exp": later}),
+        "not.a.token",
+    ):
+        with pytest.raises(JWTError):
+            _decode_jwt_claims(bad)
