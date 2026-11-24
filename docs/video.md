@@ -206,7 +206,16 @@ player of the runtime tries the path again (`ispFailed`), unless the path was
 busy (`hardwareBusy`) or would not do this video (`V4l2Unsupported`: a
 stride, a size, a format the ISP changes).
 
-ISP_NUMBERS
+Measured on a Pi Zero W (Cloud-W, 2026-11-24), the frames on its 720x720
+RGB565 panel counted where the video's timecode changes: 720p 16.3 frames a
+second through the ISP path against 6.2 through ffmpeg's decode and scale,
+1080p 11.8 against 6.1, 360p 16.3 against 4.7. ffmpeg demuxing takes 4 to 6%
+of the core and the reader thread 20 to 25% (the picture's copy out of the
+ISP, 0.6 MB a frame the CPU reads uncached: about 8 ms); the render thread
+has the rest, 66 to 77%, which is what is left ("Holes" in "Next"). The chain
+alone, without the runtime, runs 1080p into 720x405 RGB565 at 37 to 42 frames
+a second on 9 ms of CPU a frame, 720p at 54 and 270p at 65. Paused, the path
+costs 2% of the core until the idle stop lets it go.
 
 **A decoder that is behind.** A launch whose frames take more than 1.2 frame
 times to make over its first 12 is started again where it was with a slow
@@ -343,7 +352,9 @@ box). All three skip without ffmpeg.
 
 - **Holes**: a `<video>` drawn straight into the canvas as a `<Scene>` is,
   the UI around it not run per frame (`docs/scene-layouts.md`, `seekHoles`).
-  Today the app's `get()` and the layout run every frame.
+  Today the app's `get()` and the layout run every frame: with the ISP path
+  that render is what holds a Pi Zero W at 12 to 16 frames a second (66 to
+  77% of its core, 2026-11-24).
 - **Real time on a Pi 0 to 4.** Where a 1080p frame goes on a Pi Zero W with
   the VideoCore decoding (ffmpeg's CPU a frame, `-benchmark`, 2026-11-24):
   - *Reading the decoder's frames.* Its buffers are uncached for the CPU:
