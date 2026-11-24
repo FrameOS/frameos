@@ -1,4 +1,6 @@
+import asyncio
 import ipaddress
+import ssl
 
 import httpx
 import pytest
@@ -46,64 +48,99 @@ def test_tls_connect_error_detail_for_non_tls_error():
     assert detail is None
 
 
-def test_embedded_direct_candidates_include_plain_http_last_boot_ip_fallback():
+def test_embedded_direct_candidates_follow_the_boot_ip_over_plain_http_without_tls():
     frame = _frame("espvaarikas.local")
     frame.mode = "embedded"
     frame.frame_port = 80
-    frame.https_proxy = {"enable": True, "port": 8443, "certs": {}}
     frame.embedded = {"lastBoot": {"ip": "10.8.0.232"}}
 
     candidates = _frame_http_direct_candidates(frame, "/status", "GET")
 
-    assert candidates[0][0] == "https://espvaarikas.local:8443/status"
-    assert candidates[1][0] == "http://10.8.0.232:80/status"
-    assert candidates[1][1] is True
+    assert candidates == [("http://espvaarikas.local:80/status", True), ("http://10.8.0.232:80/status", True)]
 
 
-def test_embedded_direct_candidates_include_plain_http_fallback_when_host_is_boot_ip():
-    frame = _frame("10.8.0.232")
-    frame.mode = "embedded"
-    frame.frame_port = 80
-    frame.https_proxy = {"enable": True, "port": 8443, "certs": {}}
-    frame.embedded = {"lastBoot": {"ip": "10.8.0.232"}}
-
-    candidates = _frame_http_direct_candidates(frame, "/status", "GET")
-
-    assert candidates[0][0] == "https://10.8.0.232:8443/status"
-    assert candidates[1][0] == "http://10.8.0.232:80/status"
-
-
-def test_embedded_direct_candidates_skip_https_ip_when_cert_does_not_cover_ip():
-    frame = _frame("10.8.0.232")
+def _tls_frame(frame_host: str, certificate_host: str | None, boot_ip: str | None = "10.8.0.232") -> Frame:
+    frame = _frame(frame_host)
     frame.mode = "embedded"
     frame.frame_port = 80
     frame.https_proxy = {
         "enable": True,
         "port": 8443,
-        "certs": generate_frame_tls_material("espvaarikas.local"),
+        "certs": generate_frame_tls_material(certificate_host) if certificate_host else {},
     }
-    frame.embedded = {"lastBoot": {"ip": "10.8.0.232"}}
-
-    candidates = _frame_http_direct_candidates(frame, "/api/action/ota", "POST")
-
-    assert candidates == [("http://10.8.0.232:80/api/action/ota", True)]
+    frame.embedded = {"lastBoot": {"ip": boot_ip}} if boot_ip else {}
+    return frame
 
 
-def test_embedded_direct_candidates_keep_https_ip_when_cert_covers_ip():
-    frame = _frame("10.8.0.232")
-    frame.mode = "embedded"
-    frame.frame_port = 80
-    frame.https_proxy = {
-        "enable": True,
-        "port": 8443,
-        "certs": generate_frame_tls_material("10.8.0.232"),
-    }
-    frame.embedded = {"lastBoot": {"ip": "10.8.0.232"}}
+def test_with_tls_on_no_candidate_is_plain_http():
+    """The request carries the frame's bearer, and every connect error moves
+    on to the next candidate: an http one would be a downgrade anyone on the
+    LAN can force by resetting the https port."""
+    for frame in (
+        _tls_frame("espvaarikas.local", "espvaarikas.local"),
+        _tls_frame("espvaarikas.local", None),
+        _tls_frame("10.8.0.232", "espvaarikas.local"),
+        _tls_frame("10.8.0.232", "10.8.0.232"),
+        _tls_frame("10.8.0.9", "10.8.0.9"),
+        _tls_frame("10.8.0.232", "10.8.0.232", boot_ip=None),
+    ):
+        for method, path in (("GET", "/status"), ("POST", "/api/action/ota")):
+            candidates = _frame_http_direct_candidates(frame, path, method)
+            assert candidates, frame.frame_host
+            assert all(url.startswith("https://") and ":8443/" in url for url, _ in candidates), candidates
 
-    candidates = _frame_http_direct_candidates(frame, "/api/action/ota", "POST")
 
-    assert candidates[0][0] == "https://10.8.0.232:8443/api/action/ota"
-    assert candidates[1][0] == "http://10.8.0.232:80/api/action/ota"
+def test_with_tls_on_the_boot_ip_is_tried_over_https_against_the_frames_own_certificate():
+    frame = _tls_frame("espvaarikas.local", "espvaarikas.local")
+    candidates = _frame_http_direct_candidates(frame, "/status", "GET")
+    assert [url for url, _ in candidates] == ["https://espvaarikas.local:8443/status", "https://10.8.0.232:8443/status"]
+    by_name, by_certificate = candidates[0][1], candidates[1][1]
+    # The name the certificate was made for is checked the ordinary way; the
+    # address it has moved to is not in the certificate, so there the
+    # certificate itself is what is checked.
+    assert by_name.check_hostname is True
+    assert by_certificate.check_hostname is False and by_certificate.verify_mode == ssl.CERT_REQUIRED
+
+    # The row holds an address the certificate does not cover: still https.
+    moved = _tls_frame("10.8.0.232", "espvaarikas.local")
+    candidates = _frame_http_direct_candidates(moved, "/api/action/ota", "POST")
+    assert [url for url, _ in candidates] == ["https://10.8.0.232:8443/api/action/ota"]
+    assert candidates[0][1].check_hostname is False
+
+    # No certificate stored: nothing to pin, the ordinary check applies.
+    bare = _tls_frame("espvaarikas.local", None)
+    assert [verify for _, verify in _frame_http_direct_candidates(bare, "/status", "GET")] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_the_pinned_check_takes_the_frames_certificate_and_no_other(tmp_path):
+    """A real handshake: the frame's own certificate passes at an address it
+    does not name; another certificate made for the very same name does not."""
+    frame = _tls_frame("espvaarikas.local", "espvaarikas.local")
+    pinned = frame_http._pinned_verify(frame)
+    assert pinned is not None
+
+    async def handshake(certs: dict[str, str]) -> None:
+        (tmp_path / "cert.pem").write_text(certs["server"])
+        (tmp_path / "key.pem").write_text(certs["server_key"])
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(tmp_path / "cert.pem", tmp_path / "key.pem")
+
+        async def serve(reader, writer):
+            writer.close()
+
+        server = await asyncio.start_server(serve, "127.0.0.2", 0, ssl=server_context)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            _, writer = await asyncio.open_connection("127.0.0.2", port, ssl=pinned)
+            writer.close()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    await handshake(frame.https_proxy["certs"])
+    with pytest.raises(ssl.SSLCertVerificationError):
+        await handshake(generate_frame_tls_material("espvaarikas.local"))
 
 
 def test_embedded_auth_headers_use_server_api_key():
@@ -255,13 +292,11 @@ async def test_control_verbs_do_not_retry_when_the_server_key_is_accepted(monkey
 
 
 @pytest.mark.asyncio
-async def test_fetch_frame_http_bytes_falls_back_after_tls_candidate_error(monkeypatch):
-    frame = _frame("espvaarikas.local")
-    frame.mode = "embedded"
-    frame.frame_port = 80
-    frame.https_proxy = {"enable": True, "port": 8443, "certs": {}}
-    frame.embedded = {"lastBoot": {"ip": "10.8.0.232"}}
+async def test_a_tls_failure_moves_on_to_the_boot_ip_over_https_and_never_to_http(monkeypatch):
+    frame = _tls_frame("espvaarikas.local", "espvaarikas.local")
+    frame.server_api_key = "server-secret"
     calls = []
+    answering = {"https://10.8.0.232:8443/api/action/ota"}
 
     async def fake_use_remote(_frame, _redis):
         return False
@@ -278,7 +313,7 @@ async def test_fetch_frame_http_bytes_falls_back_after_tls_candidate_error(monke
 
         def stream(self, method, url, headers=None, content=None, timeout=None):
             calls.append((method, url, self.verify, headers, content, timeout))
-            if url.startswith("https://"):
+            if url not in answering:
                 raise httpx.ConnectError(
                     "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
                     "Hostname mismatch, certificate is not valid for 'espvaarikas.local'."
@@ -304,8 +339,19 @@ async def test_fetch_frame_http_bytes_falls_back_after_tls_candidate_error(monke
     assert headers["x-frameos"] == "ok"
     assert [call[1] for call in calls] == [
         "https://espvaarikas.local:8443/api/action/ota",
-        "http://10.8.0.232:80/api/action/ota",
+        "https://10.8.0.232:8443/api/action/ota",
     ]
+    # The second try checks the certificate itself, not the address.
+    assert calls[1][2].check_hostname is False
+
+    # Nothing answers over TLS: the bearer is never sent in clear instead.
+    calls.clear()
+    answering.clear()
+    with pytest.raises(frame_http.HTTPException) as refused:
+        await frame_http._fetch_frame_http_bytes(frame, None, path="/api/action/ota", method="POST")
+    assert refused.value.status_code == 502
+    assert calls and all(call[1].startswith("https://") for call in calls)
+    assert all(call[3] == {"Authorization": "Bearer server-secret"} for call in calls)
 
 
 @pytest.mark.asyncio

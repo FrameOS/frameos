@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import httpx
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 
@@ -157,24 +158,61 @@ def _add_direct_candidate(
 
 
 def _frame_http_direct_candidates(frame: Frame, path: str, method: str) -> list[tuple[str, Any]]:
+    """Where to try this frame, in order, each with how its TLS is checked.
+
+    An ESP32's address moves (DHCP) while its row keeps the old one, so an
+    embedded frame is also tried at the address it last booted from. Without
+    TLS that is plain http, as the frame's own address is.
+
+    With TLS on (`https_proxy.enable`) nothing is ever tried over plain http:
+    the request carries the frame's bearer, and a fallback that any connect
+    error reaches is one someone on the LAN can force by resetting the https
+    port. The other address is tried over https instead, and since a frame's
+    certificate names the address it had when the certificate was made, that
+    try (and the frame's own address, when the certificate does not cover
+    it) is checked against the certificate itself rather than the name
+    (`_pinned_verify`)."""
     scheme, port = _frame_scheme_port(frame)
     candidates: list[tuple[str, Any]] = []
     verify = _httpx_verify(frame)
     original_url = _build_direct_frame_url(frame, frame.frame_host, scheme, port, path, method)
-    if scheme != "https" or _https_certificate_covers_target(frame, frame.frame_host):
-        candidates.append((original_url, verify))
-
     boot_ip = _embedded_last_boot_ip(frame)
-    if boot_ip:
-        fallback_port = int(frame.frame_port or 80)
-        _add_direct_candidate(candidates, frame, boot_ip, "http", fallback_port, path, method, True)
-    elif _is_embedded_frame(frame) and scheme == "https" and _ip_address(frame.frame_host) is not None:
-        fallback_port = int(frame.frame_port or 80)
-        _add_direct_candidate(candidates, frame, frame.frame_host, "http", fallback_port, path, method, True)
 
-    if not candidates:
+    if scheme != "https":
         candidates.append((original_url, verify))
+        if boot_ip:
+            _add_direct_candidate(candidates, frame, boot_ip, "http", int(frame.frame_port or 80), path, method, True)
+        return candidates
+
+    pinned = _pinned_verify(frame) if _is_embedded_frame(frame) else None
+    covered = _https_certificate_covers_target(frame, frame.frame_host)
+    candidates.append((original_url, verify if covered or pinned is None else pinned))
+    if boot_ip:
+        _add_direct_candidate(candidates, frame, boot_ip, "https", port, path, method, pinned or verify)
     return candidates
+
+
+def _pinned_verify(frame: Frame) -> Any:
+    """A TLS context that accepts exactly the server certificate this
+    backend holds for the frame, at whatever address answers with its key.
+    None when no certificate is stored (then the ordinary check applies)."""
+    https_proxy = normalize_https_proxy(frame.https_proxy)
+    cert_pem = (https_proxy.get("certs", {}).get("server") or "").strip()
+    if not https_proxy.get("enable") or not cert_pem:
+        return None
+    try:
+        # The leaf alone: a PEM that also carries its issuers must not make
+        # every certificate they signed pass.
+        leaf = x509.load_pem_x509_certificates(cert_pem.encode("utf-8"))[0]
+    except (ValueError, IndexError):
+        return None
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_REQUIRED
+    # Lets a certificate that is not a CA be the trust anchor.
+    context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    context.load_verify_locations(cadata=leaf.public_bytes(serialization.Encoding.PEM).decode("ascii"))
+    return context
 
 
 def _httpx_verify(frame: Frame):
