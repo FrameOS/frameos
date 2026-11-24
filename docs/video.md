@@ -134,11 +134,28 @@ What decodes a source is chosen for its codec (ffprobe's), in this order
 
 What the machine has is read once a runtime (`decodeCaps` in
 `video/player.nim`); `FRAMEOS_VIDEO_HARDWARE=0` leaves the hardware alone. A
-hardware launch that fails (no frame, or a non-zero exit in the middle) is
-started again with ffmpeg's own from where it got to, and once ffmpeg's own
-plays it, no player of that runtime tries the codec's hardware again
-(`hardwareFailed`). A source that was not there at all (a camera off) is no
-hardware's fault: its next try has the hardware again.
+hardware launch that fails (no frame, a non-zero exit in the middle, or no
+frame in 20 s: a VideoCore decoder that got some of its buffers and not the
+rest waited on its device for ever) is started again with ffmpeg's own from
+where it got to, and once ffmpeg's own plays it, no player of that runtime
+tries the codec's hardware again (`hardwareFailed`). Two failures are no
+hardware's fault, and the next player tries it again: a source that was not
+there at all (a camera off), and a decoder that could not take the video now
+(`hardwareBusy`: `VIDIOC_REQBUFS failed`). That is no buffers ("Cannot
+allocate memory": a VideoCore's are CMA, which every player and the display
+share), or no decoder of its own ("Invalid argument", the kernel saying
+"failed to create component ril.video_decode": a VideoCore decoding other
+videos flat out did not make another in time). Each fallback is in the
+frame's log once, as `video:software` with the decoder, ffmpeg's reason and
+`hardwareKept`, also while the runner has paused a fast scene's log.
+
+**A V4L2 decoder's buffers.** ffmpeg asks for 16 coded and 20 decoded ones;
+at 1080p a VideoCore's are 1.5 and 3 MB of CMA each, 85 MB a video, and on a
+Pi Zero W (256 MB of CMA) the fourth 1080p decoder of four failed and another
+hung. FrameOS asks for 6 and 10 (`V4l2OutputBuffers`, `V4l2CaptureBuffers`):
+43 MB at 1080p, so four 1080p videos fit, and the VideoCore decodes as fast
+(44 frames a second of 1080p, 2026-11-24). Fewer than 8 decoded ones had
+ffmpeg warn that all of them were in use.
 
 **A decoder that is behind.** A launch whose frames take more than 1.2 frame
 times to make over its first 12 is started again where it was with a slow
@@ -170,9 +187,20 @@ nonref` made no frame at all of an x264 clip: not used.
   which it does well ("Where it plays").
 - **Intel and AMD** Linux frames: VA-API.
 
-Not yet run on a Pi with the codec (the bench's Pi Zero W has an image from
-before it): the fallback is tested against a real ffmpeg given a decoder with
-no device (`test_video_player.nim`).
+**Measured on a Pi Zero W** (Cloud-W, the 2026.11.15 base image's kernel,
+1 GHz, 2026-11-24). The VideoCore decodes 1080p H.264 at 37-44 frames a
+second and 720p at 75, against 3.1 and 6.9 in software on its one core. What
+FrameOS gets into a 720x720 RGB565 box is less, the core being full of the
+rest (see "Next"): hardware against software, 4.9 against 3.0 frames a
+second of 720p, 3.8 against 2.2 of 1080p, 6.2 against 4.4 of 360p. Twenty
+video switches and seeks in the Video player all decoded in hardware and
+left no buffer behind. Don't time `h264_v4l2m2m` with `-f null`: FFmpeg 6.1
+aborts as it drains it at the end (`Assertion pkt failed at
+fftools/ffmpeg_dec.c:597`, the null muxer holding every decoded buffer), and
+a few of those, with runtime restarts, once left 200 MB of decoder buffers
+held by no process until a reboot. FrameOS's pipe ends clean. The fallbacks
+are tested against a real ffmpeg given a decoder with no device, one short
+of memory and one that makes no frame (`test_video_player.nim`).
 
 ## Network
 
@@ -203,8 +231,9 @@ Pi plays one. Its scenes say `video` among their needs, never `linux`.
   ffmpeg alone made 6.9 frames a second of a 270p clip, 3.8 of a busy 360p
   one and 2.7 of 720p (2026-11-24), the scale and the colour conversion
   costing as much as the decode, 4.0 of 720p with the shortcuts at 1 GHz
-  ("Hardware"). It plays, slowly (the clock follows the decoder); its
-  VideoCore's H.264 decoder is the way to real time there.
+  ("Hardware"). With its VideoCore decoding (a base image from 2026.11.15 on)
+  ffmpeg makes 7.3 of 720p and 5.2 of 1080p there; what is left between
+  that and real time is in "Next".
 - **Raspberry Pi OS**: the backend's deploy installs the `ffmpeg` package when
   one of the frame's scenes plays video or uses the RTSP snapshot app
   (`_scenes_use_ffmpeg` in `frame_deploy_workflow.py`). A cloud-managed Pi OS
@@ -260,13 +289,43 @@ box). All three skip without ffmpeg.
 - **Holes**: a `<video>` drawn straight into the canvas as a `<Scene>` is,
   the UI around it not run per frame (`docs/scene-layouts.md`, `seekHoles`).
   Today the app's `get()` and the layout run every frame.
-- **More hardware**: the scale and the colour conversion on the VideoCore's
-  ISP (`bcm2835-isp`, a V4L2 mem2mem device upstream ffmpeg has no filter
-  for), half a Pi Zero's frame; a Pi 5's HEVC once ffmpeg drives
-  v4l2-request; then zero copies: the frames in the panel's buffer, or a DRM
-  plane.
+- **Real time on a Pi 0 to 4.** Where a 1080p frame goes on a Pi Zero W with
+  the VideoCore decoding (ffmpeg's CPU a frame, `-benchmark`, 2026-11-24):
+  - *Reading the decoder's frames.* Its buffers are uncached for the CPU:
+    copying a 1080p frame out of one takes 42 ms, scaling it to 720x405 150
+    (the same scale of a frame in RAM, after a software decode, 63). This is
+    the most of it; neighbour scaling, which reads fewer of its rows, 98.
+  - *Not the colour conversion*: to RGB565 and to RGBX cost the same, and 565
+    is half the bytes after it (the panel is 565).
+  - *The pad*: 34 ms to put the 720x405 picture in a black 720x720 frame,
+    whose 1 MB then goes through the pipe (9 ms), the ring and two copies.
+  - *The runtime's own*: a render of 18 to 35 ms and a push to the panel of
+    13 to 17 a frame (`get()` and the layout every frame: "Holes").
+
+  30 frames a second is 33 ms a frame for all of it, so the pixels have to
+  leave the CPU. In steps:
+  1. *Cheap*: no pad (ffmpeg makes the picture's own size, the `<img>`
+     centres it on black) and neighbour scaling for a decoder that is
+     behind: ffmpeg's 191 ms a 1080p frame to about 100.
+  2. *The ISP*: the VideoCore's `bcm2835-codec-isp` (`/dev/video12`, a V4L2
+     mem2mem device) scales and converts to RGB565, reading the decoder's
+     buffers as dma-bufs, no copy. Upstream ffmpeg has no filter for it, so
+     the runtime drives the decoder and the ISP itself (V4L2's stateful
+     decoder: the formats, the source-change event, the drain, a seek's
+     flush) and ffmpeg only demuxes (`-c:v copy -bsf:v h264_mp4toannexb -f
+     h264`). The CPU then reads 0.6 MB of RGB565 a frame; with holes, an
+     estimated 20 to 30 frames a second. Pi 0 to 4 only, and testable only
+     on one.
+  3. *DRM planes*: the decoder's buffers handed to KMS as a plane over the
+     video's box, the HVS scaling and converting as it scans out: no CPU a
+     frame at all, 1080p at 30 and four cameras at once. FrameOS would drive
+     KMS on a vc4 frame instead of `/dev/fb0` (a buffer it draws into and
+     flips; the loading mark and the cursor into it, or the cursor plane),
+     the UI over a video in a plane above it with alpha, a video that cannot
+     be a plane (opacity, a window over it, a turn of 90 or 270 degrees,
+     which the HVS cannot do) drawn by the CPU as now, and the scene's
+     picture (`GET /image`, its snapshot) given a still of the video. A
+     Pi 5's software decode gains too: a YUV plane, no scaler.
+- **A Pi 5's HEVC** once ffmpeg drives v4l2-request.
 - **Audio**: frames have no speakers; ALSA is not in the image.
 - **The preview**: the browser could play the video itself.
-- **On the device**: these numbers are FFmpeg's alone. The runtime's playback
-  on a Pi (render, driver push, frames dropped) is to be measured with a
-  build of this branch on Cloud-5.

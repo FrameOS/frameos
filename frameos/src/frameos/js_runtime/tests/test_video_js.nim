@@ -6,6 +6,7 @@ import frameos/types
 import frameos/values
 import frameos/utils/font # the typeface resolver the layout's text uses
 import frameos/utils/svg_frames
+import frameos/video/player as video_player
 
 # Video for JS apps (docs/video.md, js_runtime/js_video.nim): `frameos.video`
 # drawn with an <img>, decoded by ffmpeg at the size the layout gave it, the
@@ -24,9 +25,12 @@ if haveFfmpeg:
     "-map \"[v]\" -pix_fmt yuv420p -c:v mpeg4 " & quoteShell(assets / "videos" / "clip.mp4"))
   doAssert made.exitCode == 0, made.output
 
+var logged: seq[JsonNode] ## what the scenes logged, newest last
+
 proc testLogger(config: FrameConfig): Logger =
   var logger = Logger(frameConfig: config, enabled: true)
-  logger.log = proc(payload: JsonNode) = discard
+  logger.log = proc(payload: JsonNode) =
+    if logger.enabled: logged.add payload
   logger.enable = proc() = logger.enabled = true
   logger.disable = proc() = logger.enabled = false
   logger
@@ -200,5 +204,40 @@ export function get(app) {
       check ui.scene.state{"still"}{"error"}.kind == JNull
       check image.color(20, 15).b > 200
       check "no such file" in ui.scene.state{"none"}.getStr()
+
+  test "a hardware decoder that gives way says so in the log, once":
+    if not haveFfmpeg:
+      skip()
+    else:
+      # A V4L2 launch short of memory, as on a Pi Zero W with its CMA taken;
+      # the real ffmpeg otherwise.
+      let fake = assets / "ffmpeg-short"
+      writeFile(fake, "#!/bin/sh\ncase \"$*\" in\n  *_v4l2m2m*)\n" &
+        "    echo '[mpeg4_v4l2m2m @ 0x1] output VIDIOC_REQBUFS failed: Cannot allocate memory' >&2\n" &
+        "    exit 1;;\nesac\nexec " & quoteShell(findExe("ffmpeg")) & " \"$@\"\n")
+      setFilePermissions(fake, {fpUserRead, fpUserWrite, fpUserExec})
+      putEnv("FRAMEOS_FFMPEG", fake)
+      setDecodeCapsForTest(DecodeCaps(v4l2Decoders: @["mpeg4_v4l2m2m"]))
+      defer:
+        delEnv("FRAMEOS_FFMPEG")
+        setDecodeCapsForTest(DecodeCaps())
+      logged.setLen(0)
+      let ui = newUi(player, "tests/video-fallback")
+      # A video renders fast: the runner has turned the scene's log off.
+      ui.scene.logger.disable()
+      let last = ui.playFor(30, proc(): bool = ui.videoState{"state"}.getStr() == "ended")
+      check ui.videoState{"state"}.getStr() == "ended"
+      check last.color(60, 40).b > 200 # ffmpeg's own played it
+      var said: seq[JsonNode]
+      for entry in logged:
+        if entry{"event"}.getStr().endsWith(":video:software"):
+          said.add entry
+      check said.len == 1
+      check not ui.scene.logger.enabled # and left as the runner had it
+      if said.len == 1:
+        check said[0]{"src"}.getStr() == "clip.mp4"
+        check said[0]{"decoder"}.getStr() == "mpeg4_v4l2m2m"
+        check said[0]{"reason"}.getStr() == "output VIDIOC_REQBUFS failed: Cannot allocate memory"
+        check said[0]{"hardwareKept"}.getBool()
 
 removeDir(assets)

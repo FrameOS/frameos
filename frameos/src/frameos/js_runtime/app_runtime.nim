@@ -92,6 +92,7 @@ type
     error: string
     when not defined(frameosEmbedded) and not defined(frameosWasm):
       player: VideoPlayer
+      toldFallbacks: int ## the player's fallbacks to ffmpeg's own already logged
 
   JsAppRuntime* = ref object
     category*: string
@@ -4542,7 +4543,7 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   # Its videos: the frame due now, at the size each `<img>` got (js_video.nim).
   when not defined(frameosEmbedded) and not defined(frameosWasm):
     if runtime.videos.len > 0 and root.tag != "svg":
-      runtime.fillVideos(context, svg, regionScale)
+      runtime.fillVideos(owner, context, svg, regionScale)
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len
