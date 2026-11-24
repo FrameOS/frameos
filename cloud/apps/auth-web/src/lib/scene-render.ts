@@ -1239,6 +1239,18 @@ function refused(url) {
   return isIP(host) !== 0 && addressIsPrivate(host);
 }
 const skippedHeaders = new Set(["host", "connection", "content-length", "transfer-encoding"]);
+// Headers that name the caller to ONE origin. A redirect that leaves it must
+// not carry them along, or a scene's API key for host A is handed to whatever
+// host A bounces to. The list and the rule are the runtime's own HTTP client's
+// (frameos/src/frameos/utils/http_client.nim CrossOriginHeaders).
+const crossOriginHeaders = new Set(["authorization", "proxy-authorization", "cookie", "x-api-key"]);
+function withoutCrossOriginHeaders(headers) {
+  const kept = {};
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (!crossOriginHeaders.has(name.toLowerCase())) kept[name] = value;
+  }
+  return kept;
+}
 function requestOnce(target, req, signal) {
   const headers = {};
   for (const [name, value] of Object.entries(req.headers || {})) {
@@ -1280,18 +1292,30 @@ process.stdin.on("end", async () => {
     // Redirects are followed by hand so every hop passes the host check: a
     // public URL must not bounce scene code to loopback or link-local.
     let response;
+    // What the next hop is sent: as the runtime's client does it, a hop to
+    // another origin loses the credential headers, and a 301 / 302 / 303
+    // turns anything but a GET or HEAD into a GET with no body.
+    let hopRequest = { method: req.method, headers: req.headers || {}, bodyBase64: req.bodyBase64 };
     for (let hop = 0; ; hop += 1) {
       if (refused(target)) {
         throw new Error("host not allowed");
       }
-      response = await requestOnce(target, req, controller.signal);
+      response = await requestOnce(target, hopRequest, controller.signal);
       const location = response.headers.location;
       if (response.statusCode >= 300 && response.statusCode < 400 && location) {
         response.resume();
         if (hop >= 5) {
           throw new Error("too many redirects");
         }
-        target = new URL(location, target);
+        const next = new URL(location, target);
+        if (next.origin !== target.origin) {
+          hopRequest = { ...hopRequest, headers: withoutCrossOriginHeaders(hopRequest.headers) };
+        }
+        const method = String(hopRequest.method || "GET").toUpperCase();
+        if ([301, 302, 303].includes(response.statusCode) && method !== "GET" && method !== "HEAD") {
+          hopRequest = { ...hopRequest, method: "GET", bodyBase64: "" };
+        }
+        target = next;
         continue;
       }
       break;

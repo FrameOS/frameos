@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { createServer, type Server } from "node:http";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { inflateSync } from "node:zlib";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
@@ -112,6 +112,121 @@ describe("the HTTP child's host check", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+});
+
+describe("the HTTP child's redirects", () => {
+  // The servers a test can reach are on loopback, which the child refuses:
+  // these runs take the host check out (a later declaration of the same
+  // function wins) and leave everything else as shipped.
+  const unguarded = `${fetchChildScript}\nfunction addressIsPrivate() { return false; }`;
+  type Seen = { body: string; headers: Record<string, string | string[] | undefined>; method: string; url: string };
+
+  function listen(handler: Parameters<typeof createServer>[1]) {
+    const server: Server = createServer(handler);
+    return new Promise<{ close: () => Promise<void>; port: number }>((resolve) =>
+      server.listen(0, "127.0.0.1", () =>
+        resolve({
+          close: () => new Promise<void>((done) => server.close(() => done())),
+          port: (server.address() as AddressInfo).port,
+        }),
+      ),
+    );
+  }
+
+  // Not spawnSync: the servers answer on this process's event loop.
+  function fetchInChild(request: Record<string, unknown>) {
+    return new Promise<{ status: number; error?: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, ["-e", unguarded], { stdio: ["pipe", "pipe", "inherit"] });
+      let out = "";
+      child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString("utf-8")));
+      child.on("error", reject);
+      child.on("close", () => {
+        try {
+          resolve(JSON.parse(out) as { status: number; error?: string });
+        } catch (error) {
+          reject(error as Error);
+        }
+      });
+      child.stdin.end(JSON.stringify({ timeoutMs: 10_000, ...request }));
+    });
+  }
+
+  async function runThrough(status: number, sameOrigin: boolean) {
+    const seen: Seen[] = [];
+    const record = (request: IncomingMessage, done: () => void) => {
+      const parts: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => parts.push(chunk));
+      request.on("end", () => {
+        seen.push({
+          body: Buffer.concat(parts).toString("utf-8"),
+          headers: request.headers,
+          method: request.method ?? "",
+          url: request.url ?? "",
+        });
+        done();
+      });
+    };
+    const elsewhere = await listen((request, response) =>
+      record(request, () => response.end("landed")),
+    );
+    const first = await listen((request, response) =>
+      record(request, () => {
+        if (request.url === "/landed") {
+          response.end("landed");
+          return;
+        }
+        response.writeHead(status, {
+          location: sameOrigin ? "/landed" : `http://127.0.0.1:${elsewhere.port}/landed`,
+        });
+        response.end();
+      }),
+    );
+    try {
+      const result = await fetchInChild({
+        bodyBase64: Buffer.from("secret=1").toString("base64"),
+        headers: {
+          Authorization: "Bearer scene-key",
+          Cookie: "a=b",
+          "X-Api-Key": "scene-key",
+          "X-Trace": "kept",
+        },
+        method: "POST",
+        url: `http://127.0.0.1:${first.port}/start`,
+      });
+      expect(result.status).toBe(200);
+      expect(seen).toHaveLength(2);
+      return seen[1]!;
+    } finally {
+      await first.close();
+      await elsewhere.close();
+    }
+  }
+
+  it("leaves the credential headers behind when a hop changes origin", async () => {
+    const landed = await runThrough(307, false);
+    expect(landed.headers.authorization).toBeUndefined();
+    expect(landed.headers.cookie).toBeUndefined();
+    expect(landed.headers["x-api-key"]).toBeUndefined();
+    // What names nobody travels on, and a 307 keeps its method and body.
+    expect(landed.headers["x-trace"]).toBe("kept");
+    expect(landed.method).toBe("POST");
+    expect(landed.body).toBe("secret=1");
+  }, 30_000);
+
+  it("keeps them on a redirect within the origin", async () => {
+    const landed = await runThrough(307, true);
+    expect(landed.headers.authorization).toBe("Bearer scene-key");
+    expect(landed.headers["x-api-key"]).toBe("scene-key");
+  }, 30_000);
+
+  it("turns a POST into a GET with no body on a 301, 302 or 303", async () => {
+    for (const status of [301, 302, 303]) {
+      const landed = await runThrough(status, false);
+      expect(landed.method, String(status)).toBe("GET");
+      expect(landed.body, String(status)).toBe("");
+      expect(landed.headers.authorization, String(status)).toBeUndefined();
+    }
+  }, 60_000);
 });
 
 describe("rendererVersion", () => {
