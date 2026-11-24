@@ -57,13 +57,15 @@ export type StoreDeviceSceneInfo = StoreDeviceScene & { description: string };
 // What a frame asks beyond the store front's filters: how many a page (its
 // grid), a shelf to put first, shelves to leave out, what it cannot do
 // (`without=fast` on e-paper, `linux` on an ESP32: docs/scene-store.md "What a
-// scene needs") and a need to put first (`prefer=fast` on an LCD). The app
-// before needs asked `prefer=realtime` / `exclude=realtime` of the Real time
-// shelf, which was the fast scenes: both still mean that.
+// scene needs") and the needs to put first (`prefer=fast` on an LCD,
+// `round` on a round panel, `prefer=fast,round` on both, the first said
+// weighing most). The app before needs asked `prefer=realtime` /
+// `exclude=realtime` of the Real time shelf, which was the fast scenes: both
+// still mean that.
 export type StoreDeviceOptions = {
   limit?: number;
   prefer?: string;
-  preferNeed?: string;
+  preferNeeds?: string[];
   exclude?: string[];
   without?: string[];
 };
@@ -71,11 +73,16 @@ export type StoreDeviceOptions = {
 const categorySlugs = new Set(storeCategories.map((category) => category.slug));
 // The needs a frame can say it lacks: touch and keys never rule a scene out.
 const ruledOutNeeds = new Set(["fast", "linux"]);
-const fastAliases = new Set(["fast", "realtime"]);
+// The needs a frame can put first, by what it says.
+const preferredNeeds: Record<string, string> = { fast: "fast", realtime: "fast", round: "round" };
 
 export function parseStoreDeviceOptions(params: URLSearchParams): StoreDeviceOptions {
   const limit = Number.parseInt(params.get("limit") ?? "", 10);
-  const prefer = (params.get("prefer") ?? "").trim();
+  const preferred = (params.get("prefer") ?? "").split(",").map((part) => part.trim());
+  const prefer = preferred.find((part) => categorySlugs.has(part)) ?? "";
+  const preferNeeds = [
+    ...new Set(preferred.map((part) => preferredNeeds[part]).filter((need): need is string => !!need)),
+  ];
   const asked = (params.get("exclude") ?? "").split(",").map((slug) => slug.trim());
   const exclude = asked
     .filter((slug) => categorySlugs.has(slug) && !formerCategorySlugs[slug])
@@ -91,8 +98,8 @@ export function parseStoreDeviceOptions(params: URLSearchParams): StoreDeviceOpt
   }
   return {
     limit: Number.isFinite(limit) ? Math.min(storeDeviceMaxPageSize, Math.max(1, limit)) : storeDevicePageSize,
-    ...(categorySlugs.has(prefer) ? { prefer } : {}),
-    ...(fastAliases.has(prefer) ? { preferNeed: "fast" } : {}),
+    ...(prefer ? { prefer } : {}),
+    ...(preferNeeds.length > 0 ? { preferNeeds } : {}),
     exclude,
     without: [...without],
   };
@@ -181,7 +188,7 @@ export async function listStoreScenesForDevice(
     .where(and(...storeDeviceConditions(filters, options.exclude, options.without)))
     .orderBy(
       ...(options.prefer ? [sql`(${storeScenes.category} = ${options.prefer}) desc`] : []),
-      ...(options.preferNeed ? [sql`(${options.preferNeed} = any(${storeScenes.needs})) desc`] : []),
+      ...(options.preferNeeds ?? []).map((need) => sql`(${need} = any(${storeScenes.needs})) desc`),
       sql`${storeScenes.featuredAt} desc nulls last`,
       desc(storeScenes.downloadCount),
       desc(storeScenes.updatedAt),

@@ -113,6 +113,10 @@ uses QuickJS only to execute the resulting JavaScript.
     into a 2 KB block, the wasm library's `getAllResponseHeaders()`, the
     final response's only) and the prelude's `__frameosAnswer` makes them an
     object, names in lower case and a repeated one joined with ", ".
+    The native side hands the answer over as an object whose `body` is a JS
+    string made from the bytes (`answerToJS`), as `fetch`'s async answers
+    are: escaped into JSON text and parsed back out, a 512 KB page was about
+    3.5 MB at once.
   - `fetchImage(url, {headers, saveAsset: {name, extension, mode}, exif, colors})`:
     download and decode an image natively — the bytes never enter the JS
     heap — and return `{image: imageRef, width, height, savedAs?, exif?,

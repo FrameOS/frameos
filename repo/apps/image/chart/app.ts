@@ -113,10 +113,28 @@ export function get(app, context) {
   const levels = []
   for (let v = hi; v >= lo - step * 1e-6 && levels.length < 12; v -= step) levels.push(v)
   const points = series.reduce((most, s) => Math.max(most, s.values.length), 0)
-  let plotX = padding
-  let plotY = padding
-  const plotRight = W - padding
-  let plotBottom = H - padding
+  // On a round panel the chart goes in a wide box whose corners touch the
+  // circle 12 px in from its rim, the title in the arc over it, the two
+  // centred together.
+  let left = 0
+  let top = 0
+  let right = W
+  let bottom = H
+  if (context.round === true) {
+    const rim = unit / 2 - 12
+    const titleH = c.title ? fontSize * 1.75 : 0
+    const reach = rim * 0.62
+    const halfW = Math.floor(Math.sqrt(rim * rim - reach * reach))
+    const halfH = reach - titleH / 2
+    left = W / 2 - halfW
+    right = W / 2 + halfW
+    top = H / 2 + titleH / 2 - halfH - titleH
+    bottom = H / 2 + titleH / 2 + halfH
+  }
+  let plotX = left + padding
+  let plotY = top + padding
+  const plotRight = right - padding
+  let plotBottom = bottom - padding
   if (c.title) {
     text(W / 2, plotY + fontSize * 0.875, c.title, fontSize * 1.25, 'middle')
     plotY += fontSize * 1.75
@@ -203,7 +221,7 @@ export function get(app, context) {
       const widest = labels.reduce((most, l) => Math.max(most, l.length), 0) * fontSize * 0.6 + fontSize * 0.5
       const step = Math.max(1, Math.ceil((points * widest) / plotW))
       for (let i = 0; i < points; i += step) {
-        const x = Math.min(Math.max(xOf(i), widest / 2), W - widest / 2)
+        const x = Math.min(Math.max(xOf(i), left + widest / 2), right - widest / 2)
         if (labels[i]) text(x, plotBottom + fontSize * 0.3, labels[i], fontSize, 'middle', 'hanging')
       }
     }

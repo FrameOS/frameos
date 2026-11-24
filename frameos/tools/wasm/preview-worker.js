@@ -871,6 +871,20 @@ function applyRenderScale(scale, force) {
   }
 }
 
+// A round panel (panel_shape.boardPanelRound): `context.round` and
+// `app.frame.round` say so, and the built-in scenes keep inside the circle.
+// Every init starts square.
+function applyRound(round) {
+  if (!round) {
+    return
+  }
+  try {
+    call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ round: true })])
+  } catch (e) {
+    // older bundle without the export
+  }
+}
+
 // Run as an ESP32 (memory.runsAsEmbedded in the runtime): `app.frame.embedded`
 // is true, downloads decode into the canvas, and a JS app's interpreter stays
 // between renders while the simulated memory has room, as on an awake ESP32. The device picker's ESP32 presets ask for it, and so
@@ -1083,6 +1097,7 @@ async function init(msg) {
     applyDeviceLimits(msg.deviceLimits)
     applyEmbedded(msg.embedded === true || Boolean(msg.deviceLimits && msg.deviceLimits.embedded))
     applyRenderScale(msg.renderScale)
+    applyRound(msg.round === true)
     // The Scene store app may browse the store and preview its scenes here
     // (frameos/scene_store_preview.nim); installing stays a frame's. Only
     // this worker turns it on: a plane's renders are a fresh runtime each.
@@ -1371,6 +1386,17 @@ self.onmessage = (ev) => {
       if (Module && typeof Module._frameos_wasm_choose_layout === 'function') {
         call('frameos_wasm_choose_layout', 'boolean', ['string'], [String(msg.layoutId || '')])
         renderNow()
+      }
+      break
+    case 'setRound':
+      // A round panel or a square one, drawn again at once.
+      if (Module) {
+        try {
+          call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ round: msg.round === true })])
+        } catch (e) {
+          // older bundle without the export
+        }
+        dispatchEvent('render', {})
       }
       break
     case 'setRenderScale':

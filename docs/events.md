@@ -249,7 +249,12 @@ no filter on a field hears every value of it.
   on a touch screen is the switcher's (up from the bottom). The switcher
   moves its highlight a screenful on or back on them, its list scrolling
   with it (wrapping around at the ends); the scene settings take `back`
-  as Cancel, a field's keyboard going away first.
+  as Cancel, a field's keyboard going away first. So on every scene: while
+  a JSX field of the scene showing, or of its layout, has the keyboard (or
+  a `<select>` its list, a link its code), `back` puts that away and goes
+  no further, the scene and the layout hearing nothing of it
+  (`interpreter.runEvent`, [`jsx-ui.md`](jsx-ui.md) "Fields and the
+  keyboard").
 - The input payloads are under [Input](#input).
 
 ### Input
@@ -404,7 +409,10 @@ and `toggleScreen` switches it to what it is not; the dispatcher keeps which
 (`displayOn`), and the scene hears the `turnOn` or `turnOff` it became. A
 press on a dark screen turns it back on and goes nowhere else: its down, its
 up and whatever gesture it makes never reach the scene, since nobody could
-see what they were pressing.
+see what they were pressing. The same holds for a press on the voice chat's
+answer drawn across the bottom of an ESP32's panel: the touch driver keeps
+that finger from the dispatcher and the answer comes off
+([voice-chat.md](voice-chat.md) "Taking the notice off").
 
 From outside (a script, Home Assistant's `rest_command`), they are a POST to
 the frame's own server with its access key, as a bearer or `?k=`:
@@ -748,7 +756,7 @@ the preview alike. There are two, applied in this order:
   is showing. A long press of LEFT is the previous scene and of RIGHT the next
   on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
   firmware's board table), and the owner may add, change or clear it. The
-  reTerminal Sticky's one front key (AI) pressed once is the scene's (its
+  reTerminal Sticky's one front key (Action to people, label `AI`) pressed once is the scene's (its
   role is `primary`: Enter on a UI, the layout's refresh), twice `back`,
   three times the scene switcher (a `triplePress` rule, so that key waits
   for a third press) and held the voice chat. A frame

@@ -22,6 +22,7 @@ import frameos/ui/tree
 from frameos/ui/theme import role
 import frameos/render_probe
 from frameos/utils/memory import waitingTextDrops
+from frameos/panel_shape import RoundInset
 import frameos/utils/qr
 import frameos/panel_shape
 when not defined(frameosEmbedded):
@@ -60,6 +61,9 @@ type
       ## is the field's, as an HTML <label> is (ui/events.hitAt). Under the
       ## box's children; 0 for every other region.
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
+    scroller*: int32
+      ## The box around it that scrolls up and down, its key + 1; 0 for none.
+      ## The keys turn its pages (ui/events.nim `turnPage`).
     scene*: bool
       ## Not an element but a `<Scene>` or `<yield />`, where it is in paint
       ## order: whatever is in a region after it is drawn over the scene and
@@ -111,6 +115,11 @@ type
     link*: string        ## the link whose QR code is up over the UI ("Links"); "" for none
     ring*: int           ## where Tab and the frame's keys are (ui/events.nim "Keys"): the element's
                          ## key + 1, drawn ringed and with its `focus:` classes; 0 for none
+    turn*: int           ## a frame's button turned a page of the box that scrolls at this key + 1
+                         ## (scrolled there already): the next layout moves the ring onto it ...
+    turnBack*: bool      ## ... up, to the last element above where the ring was ...
+    turnFrom*: float32   ## ... which is this far down the box (its top), unscrolled ...
+    turnSteps*: int      ## ... and this many more, for the presses that came before that layout
 
   TextMemo = object
     key: string          ## the runs, their styles, the width and alignment
@@ -1524,6 +1533,31 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
 var emitBackdrop {.threadvar.}: ColorRGBA
+var emitRim {.threadvar.}: array[3, float32]
+  ## A round panel's whole canvas (UiInput.round): its circle's centre and
+  ## radius, where a list's scroll bar goes along the rim; radius 0 elsewhere.
+
+proc rimBar(cx, cy, r, top, bottom, shown, at: float32): Path =
+  ## A round panel's scroll bar (docs/jsx-ui.md "Round panels"): an arc
+  ## along the rim at the list's right, across its height as far as 45°
+  ## either side of 3 o'clock; `shown` of it is the bar, `at` (0 to 1) how
+  ## far down it has gone.
+  let
+    lo = arcsin(clamp((top - cy) / r, -0.7071, 0.7071))
+    hi = arcsin(clamp((bottom - cy) / r, -0.7071, 0.7071))
+    span = max(hi - lo, 0)
+    len = max(span * shown, min(span, 0.12))
+    a0 = lo + (span - len) * at
+    steps = 12
+  result = newPath()
+  for i in 0 .. steps:
+    let a = a0 + len * i.float32 / steps.float32
+    if i == 0: result.moveTo(cx + (r + 1.5) * cos(a), cy + (r + 1.5) * sin(a))
+    else: result.lineTo(cx + (r + 1.5) * cos(a), cy + (r + 1.5) * sin(a))
+  for i in countdown(steps, 0):
+    let a = a0 + len * i.float32 / steps.float32
+    result.lineTo(cx + (r - 1.5) * cos(a), cy + (r - 1.5) * sin(a))
+  result.closePath()
 var
   linkQr {.threadvar.}: Image ## the QR code of the link that is up, while one is ...
   linkQrUrl {.threadvar.}: string ## ... its URL ...
@@ -2144,12 +2178,15 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
             visible: [ends[e][0], ends[e][1], ends[e][0] + 1, ends[e][1] + ends[e][3]])
       # What is inside answers the pointer where it shows, scrolled.
       var k = kids
+      let pages = scrollsY and n.maxY > 0 and n.field == 0
       for i in kids ..< regions.len:
         var r = regions[i]
         r.x -= sx
         r.y -= sy
         r.visible = [max(r.visible[0] - sx, vx), max(r.visible[1] - sy, vy),
           min(r.visible[2] - sx, vx + vw), min(r.visible[3] - sy, vy + vh)]
+        if pages and r.scroller == 0:
+          r.scroller = int32(n.key + 1)
         if r.visible[2] > r.visible[0] and r.visible[3] > r.visible[1]:
           regions[k] = r
           inc k
@@ -2159,7 +2196,12 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         let
           barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
           bar = SvgNode(tag: "path", path: newPath())
-        bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
+        if emitRim[2] > 0 and vx + vw > emitRim[0]:
+          # On a round panel it runs along the rim, where a corner's bar
+          # would be off the glass.
+          bar.path = rimBar(emitRim[0], emitRim[1], emitRim[2], vy, vy + vh, vh / (vh + n.maxY), sy / n.maxY)
+        else:
+          bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
         bar.path.share()
         bar.paint(n.text.color, op * 0.35)
         drawn.add bar
@@ -2237,6 +2279,66 @@ proc fieldIn(n: UiNode, key: int): UiNode =
     result = c.fieldIn(key)
     if not result.isNil:
       return
+
+proc turnStops(n: UiNode, oy, shift, lo, hi: float32, into: var seq[(int, float32, float32)]) =
+  ## The elements inside `n` the keys stop at, in the order they walk them
+  ## (as `emit` lays their regions down: in-flow children, then absolute
+  ## ones), each as (key, top, bottom) where `emit` puts it, less `shift`
+  ## (the scroll of the boxes in between), and only those that show between
+  ## `lo` and `hi`.
+  for pass in [false, true]:
+    for c in n.children:
+      if c.box.absolute != pass or c.box.display == diNone or c.box.opacity <= 0:
+        continue
+      let
+        y = round(oy + c.y)
+        top = y - shift
+        bottom = round(oy + c.y + c.size.y) - shift
+        shows = bottom > lo and top < hi
+      if shows and (c.field > 0 or c.handlers[ueClick] > 0 and c.handlers[ueClick] - 1 <= LinkOpen):
+        into.add (c.key, top, bottom)
+      if c.kind == ukBox and c.field == 0:
+        if c.box.overflowX == ovVisible and c.box.overflowY == ovVisible:
+          c.turnStops(y, shift, lo, hi, into) # what overflows it shows too
+        elif shows:
+          let sy = clamp(scrollOf(c.key)[1], 0, c.maxY)
+          c.turnStops(y, shift + sy, max(lo, top + c.box.border[0]), min(hi, bottom - c.box.border[2]), into)
+
+proc turnPage(top: UiNode, input: var UiInput) =
+  ## A frame's next or prev button turned a page of a box that scrolls
+  ## (ui/events.nim `turnPage`, which scrolled it): the ring goes to the
+  ## first element the new page shows below where it was (going back, the
+  ## last above it), and `turnSteps` on from there; with none, it stays
+  ## where it was while that shows, else it is on the box itself. Before
+  ## `reveal`, which shows the element whole.
+  let
+    box = top.fieldIn(input.turn - 1)
+    back = input.turnBack
+    at = input.turnFrom
+  var steps = input.turnSteps
+  input.turn = 0
+  input.turnSteps = 0
+  if box.isNil or box.kind != ukBox:
+    return
+  let sy = clamp(scrollOf(box.key)[1], 0, box.maxY)
+  var stops: seq[(int, float32, float32)]
+  box.turnStops(0, 0, sy + box.box.border[0], sy + box.size.y - box.box.border[2], stops)
+  var picked = -1
+  for j in 0 ..< stops.len:
+    let i = if back: stops.high - j else: j
+    if (if back: stops[i][1] < at - 0.5 else: stops[i][1] > at + 0.5):
+      picked = i
+      if steps == 0:
+        break
+      dec steps
+  if picked >= 0:
+    input.ring = stops[picked][0] + 1
+    input.reveal = true
+    return
+  for s in stops:
+    if s[0] == input.ring - 1:
+      return # nothing to press on the new page: the ring stays while its element shows
+  input.ring = box.key + 1
 
 proc ring(top: UiNode, input: var UiInput, regions: seq[UiRegion], w, h: float32, drawn: var seq[SvgNode]) =
   ## The element the keys went to (`input.ring`), ringed over everything but
@@ -2650,6 +2752,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     top.size = top.layout(rw, rh, true, true)
     top.x = max(top.box.margin[3].resolve(w), 0)
     top.y = max(top.box.margin[0].resolve(h), 0)
+  if input.turn > 0:
+    top.turnPage(input)
   if input.reveal and (input.focus > 0 or input.ring > 0):
     # The focused field in sight, else the element the keys went to.
     var r: array[4, float32]
@@ -2665,8 +2769,11 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     result.children.add page
   var gradients = 0
   emitBackdrop = rgba(0, 0, 0, 0) # the root is painted over whatever the scene drew
+  # Inside the bezel (RoundInset), as everything the frame draws by itself.
+  emitRim = if input.round: [w / 2, h / 2, min(w, h) / 2 - RoundInset.float32 - 4] else: [0'f32, 0, 0]
   probe(phEmit):
     top.emit(0, 0, 1, result.children, gradients, regions)
+  emitRim = [0'f32, 0, 0]
   if input.open > 0:
     var shown = false
     let anchor = top.fieldIn(input.open - 1)

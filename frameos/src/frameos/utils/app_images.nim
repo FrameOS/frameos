@@ -6,6 +6,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/utils/image
 from frameos/utils/memory import runsAsEmbedded
+from frameos/panel_shape import panelIsRound
 
 proc contextImage*(context: ExecutionContext): Image {.inline.} =
   if context != nil and context.hasImage and not context.image.isNil:
@@ -76,12 +77,15 @@ proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: s
   ## erroring producer under a 24 fps animation runs (and logs) once a period.
   let width = self.contextImageWidth(context)
   let height = self.contextImageHeight(context)
+  # The whole canvas of a round panel: the message inside its circle.
+  let round = not self.frameConfig.isNil and panelIsRound(self.frameConfig.device) and
+    width == self.frameConfig.renderWidth() and height == self.frameConfig.renderHeight()
   if runsAsEmbedded():
     var k = 1
     while (width div k) * (height div k) * 4 > ErrorFrameMaxBytes:
       inc k
-    return renderError(max(1, width div k), max(1, height div k), message)
-  renderError(width, height, message)
+    return renderError(max(1, width div k), max(1, height div k), message, round)
+  renderError(width, height, message, round)
 
 proc decodeTargetIsOwned*(context: ExecutionContext): bool =
   ## Whether the pending target is one the chain allocated (and so is

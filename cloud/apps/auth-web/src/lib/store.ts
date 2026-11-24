@@ -492,7 +492,8 @@ export type ValidatedSceneZip = {
   // the scene under it, store-version-write.ts). A layout's is always its
   // kind's shelf, whatever it says (categories.ts). Undefined otherwise.
   sceneCategory: string | undefined;
-  // What it needs of a frame (sceneNeeds.ts): `fast`, `touch`, `keys`, `linux`.
+  // What it needs of a frame (sceneNeeds.ts): `fast`, `touch`, `keys`,
+  // `linux`, and `round` (it fits a round screen too).
   needs: string[];
   // The listing's icon (docs/scene-icons.md): the main scene's
   // `settings.icon` (the scene a pack starts on, as for `isLayout`), through

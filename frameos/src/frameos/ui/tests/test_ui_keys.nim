@@ -140,6 +140,22 @@ suite "the keys":
     check buttonRoleForLabel("REFRESH") == "primary"
     forgetUiTarget("keys", 1)
 
+  test "a board its plane renders keeps the ring from one pull to the next":
+    # Each pull is a new process (docs/server-rendering.md "Kept between
+    # pulls"): without the ring, every next started over from the top.
+    let target = uiTarget("keys", 1)
+    discard target.draw(page())
+    discard uiButtonKeys(["keys"], button("next", "doublePress"))
+    let kept = lastingUiInput()
+    forgetUiTarget("keys", 1)
+    check restoreLastingUiInput(kept) == 1
+    let again = uiTarget("keys", 1)
+    discard again.draw(page())
+    check again.ringed == 1
+    check uiButtonKeys(["keys"], button("next", "press"))
+    check again.ringed == 2
+    forgetUiTarget("keys", 1)
+
   test "a UI with nothing to press does not hear keys or buttons":
     let target = uiTarget("still", 1)
     discard target.draw(el("div", "w-full h-full", txt("12:30")))
@@ -163,6 +179,134 @@ suite "the keys":
     check scene.ringed == 5 and chrome.ringed == -1
     forgetUiTarget("scene", 1)
     forgetUiTarget("layout", 1)
+
+suite "the keys turn pages":
+  setup:
+    calls.setLen(0)
+    forgetTypedKeys()
+
+  proc news(): SvgNode =
+    ## A bar to press above a list of twenty rows that scrolls (40 px each, 260 px
+    ## of them showing: rows 0 to 5 whole, row 6 cut off) and one below: the
+    ## Hacker News sample's page between its header and a layout's chrome.
+    var rows: seq[SvgNode]
+    for i in 0 ..< 20:
+      rows.add el("div", "h-[40px] shrink-0", txt("Story " & $i)).on("on-click", $(10 + i))
+    el("div", "w-full h-full flex flex-col bg-black text-white",
+      el("div", "h-[30px] shrink-0", txt("new")).on("on-click", "1"),
+      el("div", "flex-1 min-h-0 overflow-y-auto", rows),
+      el("div", "h-[30px] shrink-0", txt("More")).on("on-click", "2"))
+
+  proc scrollTop(target: UiTarget): float32 =
+    for r in target.regions:
+      if r.scrollY > 0:
+        return target.input.scrolled(r.key)[1]
+
+  proc next(target: UiTarget, root: SvgNode, back = false) =
+    ## A frame's next (prev) button, and the render after it.
+    check uiButtonKeys(["news"], button(if back: "prev" else: "next", "press"))
+    discard target.draw(root)
+
+  test "next walks the rows it shows, then turns the page, and goes on past the list at its end":
+    let target = uiTarget("news", 1)
+    let root = news()
+    discard target.draw(root)
+    target.next(root)
+    check target.ringed == 1 # the bar above the list
+    for i in 0 .. 5:
+      target.next(root)
+      check target.ringed == 10 + i
+    check target.scrollTop == 0 # every row so far showed whole
+    # Row 6 is cut off at the bottom: a page (260 px less an eighth) instead
+    # of the 30 px that would show it, and the ring on the first row of the
+    # new page below row 5.
+    target.next(root)
+    check target.scrollTop == 228
+    check target.ringed == 16
+    for i in 7 .. 11:
+      target.next(root)
+      check target.ringed == 10 + i
+    target.next(root)
+    check target.scrollTop == 456 and target.ringed == 22
+    for i in 13 .. 16:
+      target.next(root)
+      check target.ringed == 10 + i
+    target.next(root)
+    check target.scrollTop == 540 # the end of the list: less than a page
+    check target.ringed == 27
+    target.next(root)
+    target.next(root)
+    check target.ringed == 29
+    # At its end the list lets the ring go on, to the bar below it.
+    target.next(root)
+    check target.ringed == 2
+    # Prev mirrors it: back up the rows, a page up when the one before is cut off.
+    target.next(root, back = true)
+    check target.ringed == 29
+    for i in countdown(18, 14):
+      target.next(root, back = true)
+      check target.ringed == 10 + i # rows 18 to 14 show whole
+    check target.scrollTop == 540
+    target.next(root, back = true)
+    check target.scrollTop == 312
+    check target.ringed == 23 # row 13, the last on the new page above row 14
+    forgetUiTarget("news", 1)
+
+  test "presses that come before the page is drawn go on from where the ring lands":
+    let target = uiTarget("news", 1)
+    let root = news()
+    discard target.draw(root)
+    for _ in 1 .. 7:
+      discard uiButtonKeys(["news"], button("next", "press"))
+    check target.ringed == 15
+    # A double press: the page turns, and the second press is one row on.
+    check uiButtonKeys(["news"], button("next", "doublePress"))
+    discard target.draw(root)
+    check target.scrollTop == 228
+    check target.ringed == 17
+    forgetUiTarget("news", 1)
+
+  test "a keyboard's Tab walks on: no pages":
+    let target = uiTarget("news", 1)
+    let root = news()
+    discard target.draw(root)
+    for _ in 1 .. 7:
+      check uiTypedKeys(["news"], %*{"key": "Tab", "code": "Tab"})
+      discard target.draw(root)
+    check target.ringed == 15
+    check uiTypedKeys(["news"], %*{"key": "Tab", "code": "Tab"})
+    discard target.draw(root)
+    check target.ringed == 16 # cut off: brought into sight by what it needs
+    check target.scrollTop > 0 and target.scrollTop < 228
+    forgetUiTarget("news", 1)
+
+  test "a box that scrolls with nothing to press in it is a stop, its pages turned to its end":
+    let target = uiTarget("text", 1)
+    var lines: seq[SvgNode]
+    for i in 0 ..< 30:
+      lines.add el("div", "h-[20px] shrink-0", txt("Line " & $i))
+    let root = el("div", "w-full h-full flex flex-col bg-black text-white",
+      el("div", "flex-1 min-h-0 overflow-y-auto", lines),
+      el("div", "h-[40px] shrink-0", txt("Done")).on("on-click", "3"))
+    discard target.draw(root)
+    check uiListens("text", "button")
+    check uiButtonKeys(["text"], button("next", "press"))
+    discard target.draw(root)
+    var box = -1
+    for r in target.regions:
+      if r.scrollY > 0: box = r.key
+    check target.input.ring == box + 1 # the box itself
+    var tops: seq[float32]
+    for _ in 1 .. 2:
+      check uiButtonKeys(["text"], button("next", "press"))
+      discard target.draw(root)
+      check target.input.ring == box + 1
+      tops.add target.scrollTop
+    check tops == @[245'f32, 320] # a page (280 less an eighth), then the rest
+    check uiButtonKeys(["text"], button("next", "press"))
+    discard target.draw(root)
+    check target.input.ring != box + 1 and target.ringed == 3 # at its end, on to Done
+    forgetUiTarget("text", 1)
 
 suite "the keys and fields":
   setup:
@@ -244,3 +388,36 @@ suite "the keys and fields":
     discard target.draw(root)
     check target.ringed == 1004 # back on the select
     forgetUiTarget("pick", 1)
+
+  test "the frame's back closes a list, the ring back on its select, then lets go of a field":
+    # interpreter.runEvent asks this before the scene hears `back`.
+    let target = uiTarget("pick", 1)
+    var options: seq[SvgNode]
+    for i in 0 ..< 3:
+      options.add el("option", "", txt("Option " & $i)).on("value", "o" & $i)
+    let box = el("select", "w-[200px] h-[30px] bg-zinc-800", options).on("value", "o0").on("on-change", "7")
+    let root = el("div", "w-full h-full bg-black text-white", box)
+    discard target.draw(root)
+    check not uiBack(["pick"], dry = true) # nothing up: the scene's back
+    check uiButtonKeys(["pick"], button("next", "press"))
+    check uiButtonKeys(["pick"], button("primary", "press"))
+    discard target.draw(root)
+    check uiButtonKeys(["pick"], button("next", "press"))
+    check uiBack(["pick"], dry = true)
+    check target.input.open > 0 # asked, nothing done
+    check uiBack(["pick"])
+    check target.input.open == 0 and calls.len == 0
+    discard target.draw(root)
+    check target.ringed == 1004
+    check not uiBack(["pick"])
+    forgetUiTarget("pick", 1)
+    let fields = uiTarget("form", 1)
+    discard fields.draw(form())
+    check uiButtonKeys(["form"], button("next", "press"))
+    check uiButtonKeys(["form"], button("primary", "press"))
+    check fields.input.focus > 0 and fields.input.keyboard
+    check uiBack(["other", "form"]) # a layout's UI and the scene's, as one
+    check fields.input.focus == 0 and not fields.input.keyboard
+    check fields.ringed == 1001
+    check not uiBack(["form"])
+    forgetUiTarget("form", 1)

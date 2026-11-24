@@ -1460,6 +1460,9 @@ one render after the release, with the notice — else the switch alone
 started a 45 s render that the state waited out. An answer that changed
 nothing is drawn over a copy of the last image, no scene render. Shown
 once, restored before the snapshot like the local-network-access code box.
+A tap on it takes it off and goes nowhere else (`fos_client_notice_takes`:
+the touch task queues none of that finger's reports); a key takes it off
+and still goes to the scene (`docs/voice-chat.md` "Taking the notice off").
 The first 300 ms are dropped so the sparkle is not in the recording; deep
 sleep is held off for the session.
 

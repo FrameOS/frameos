@@ -964,19 +964,42 @@ proc jsText(ctx: ptr JSContext, op: JSValue, value: JSValue): JSValue {.nimcall.
     return JS_NewArrayBufferCopy(ctx, s.cstring, s.len.csize_t)
 {.pop.}
 
+proc answerToJS(ctx: ptr JSContext, head: string, body: var string, hasBody: bool): JSValue =
+  ## An HTTP answer for the prelude: `head`, its JSON without the body, as an
+  ## object, and the body set on it as a JS string made from the bytes, which
+  ## go once it is made. Escaped into the JSON text and parsed back out, a
+  ## body was four copies at once, the two in JS two bytes a character once
+  ## one is past Latin-1: 3.5 MB for a 512 KB piece of GitHub's front page,
+  ## more than a reTerminal Sticky had (2026-11-24). A body with no room is
+  ## the answer's error (status 0), never an exception that leaves its
+  ## promise waiting.
+  result = JS_ParseJSON(ctx, head.cstring, head.len.csize_t, "<answer>")
+  if not hasBody or JS_IsException(result) != 0:
+    return
+  let text = nimStringToJS(ctx, body)
+  body = ""
+  if JS_IsException(text) != 0:
+    JS_FreeValue(ctx, JS_GetException(ctx))
+    discard JS_SetPropertyStr(ctx, result, "status", nimIntToJS(ctx, 0))
+    discard JS_SetPropertyStr(ctx, result, "error", nimStringToJS(ctx, describeJsError("out of memory")))
+  else:
+    discard JS_SetPropertyStr(ctx, result, "body", text)
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
   ## base64-encoded, required for binary responses), timeoutMs, find,
   ## findLength, findLimit}.
-  ## Returns JSON: {status, headers, body | bodyBase64} or {status: 0,
-  ## error}; headers as "name: value" lines, which the prelude turns into
-  ## an object (__frameosHeaders). With
+  ## Returns an object (answerToJS): {status, headers, body | bodyBase64} or
+  ## {status: 0, error}; headers as "name: value" lines, which the prelude
+  ## turns into an object (__frameosAnswer). With
   ## `find` the body stays native: the response carries `found` (the text
   ## at each occurrence, findLimit of them, findLength bytes each) and, for a
   ## non-2xx status, the first KB of the body so the error stays readable.
   let e = env(ctx)
   var response = %*{"status": 0}
+  var resBody = ""
+  var hasBody = false
 
   let urlStr = toNimString(ctx, url)
   var options = optionsArg(ctx, optionsJson)
@@ -1008,7 +1031,6 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     let maxSeconds = capToRenderDeadline(int(max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0) * 1000)).float / 1000.0
     let httpMethod = options{"method"}.getStr("GET").toUpperAscii()
     var code = 0
-    var resBody = ""
     var answered = false
     var resHeaders = ""
     when defined(testing):
@@ -1017,7 +1039,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
         resHeaders = jsHttpHookHeaders
         answered = true
     if not answered:
-      let res = boundedRequestWithHeaders(
+      var res = boundedRequestWithHeaders(
         urlStr,
         httpMethod = httpMethod,
         body = body,
@@ -1028,7 +1050,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
         wantHeaders = true
       )
       code = res.code
-      resBody = res.body
+      resBody = move(res.body)
       when defined(frameosEmbedded) or defined(frameosWasm):
         resHeaders = res.headers
       else:
@@ -1060,7 +1082,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     elif options{"base64"}.getBool(false):
       response["bodyBase64"] = %*encode(resBody)
     else:
-      response["body"] = %*resBody
+      hasBody = true
   except CatchableError as err:
     # The request's URL is the scene's and may carry a key or a share token;
     # the client's own errors name its origin only (utils/redacted_url.nim),
@@ -1068,9 +1090,10 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     # reaches the log or an app that draws it.
     let message = redactedUrlsIn(err.msg)
     response["error"] = %*message
+    hasBody = false
     if e != nil:
       frameos_apps.logError(e.owner, "JS app httpRequest failed: " & message)
-  return nimStringToJS(ctx, $response)
+  answerToJS(ctx, $response, resBody, hasBody)
 
 const DecoderFits = ["cover", "contain", "stretch"]
   ## The placements a decode can honour while it streams into a target. The
@@ -2492,6 +2515,16 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if e.context.hasImage and not e.context.image.isNil:
       return appLength(ctx, e, e.context.image.height)
     return jsUndefSentinel(ctx)
+  of "round":
+    # This app draws a round panel's whole canvas: only the circle inside it
+    # shows, so the app keeps what matters there (docs/scene-guide.md "Round
+    # panels"). False in a window, a split's panel or a layout's hole, which
+    # are rooms of their own, and on every other panel.
+    let config = e.owner.frameConfig
+    return nimBoolToJS(ctx, not config.isNil and panelIsRound(config.device) and
+      e.context.hasImage and not e.context.image.isNil and
+      e.context.image.width == frameos_apps.renderWidth(config) and
+      e.context.image.height == frameos_apps.renderHeight(config))
   of "targetWidth", "targetHeight", "targetFit":
     let target = e.owner.addressedTarget(e.context)
     if target.width > 0:
@@ -2532,7 +2565,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       if windowLimit() > 0:
         keys.add("windows")
   of "context":
-    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
+    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep", "round"]
     if e.context.hasImage and not e.context.image.isNil:
       keys.add("image")
       keys.add("imageWidth")
@@ -3419,10 +3452,11 @@ const appJsPrelude* = compactJs("""
   const __frameosAppState = __frameosProxy("state", jsGetAppState);
   const __frameosAppFrame = __frameosProxy("frame", jsGetAppFrame);
   globalThis.__frameosContext = __frameosProxy("context", jsGetAppContext);
-  // httpRequest's answer, its "name: value" header lines as an object: names
-  // in lower case, a repeated one joined with ", " as the web's Headers does.
-  const __frameosAnswer = (text) => {
-    const a = JSON.parse(text || "{}"), h = {};
+  // httpRequest's answer (an object, its body a string of its own), its
+  // "name: value" header lines as an object: names in lower case, a repeated
+  // one joined with ", " as the web's Headers does.
+  const __frameosAnswer = (a) => {
+    const h = {};
     if (typeof a.headers !== "string") return a;
     for (const line of a.headers.split("\n")) {
       const i = line.indexOf(":"), k = line.slice(0, i).trim().toLowerCase(), v = line.slice(i + 1).trim();
@@ -3551,12 +3585,14 @@ const appJsPrelude* = compactJs("""
     return id;
   };
   const __later = (kind, arg, options) => new Promise((ok, no) => __wait(kind, arg, options, ok, no));
+  // An answer comes as JSON text or as an object (a fetch's, its body a string
+  // of its own); one that cannot be read rejects rather than waits for ever.
   globalThis.__frameosSettle = (id, text, failed) => {
     const w = __waits.get(id);
     if (!w) return;
     __waits.delete(id);
-    if (failed) w[1](new Error(text));
-    else w[0](text ? JSON.parse(text) : undefined);
+    if (failed) return w[1](new Error(text));
+    try { w[0](typeof text !== "string" ? text : text ? JSON.parse(text) : undefined); } catch (e) { w[1](e); }
   };
   const __fetchInit = (init) => JSON.stringify({ method: init.method, headers: init.headers, timeoutMs: init.timeoutMs,
     body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __appReplacer);
@@ -3657,7 +3693,7 @@ const appJsPrelude* = compactJs("""
     const end = () => { s.loading = false; s.at = Date.now(); };
     if (!jsAsyncMode()) {
       try {
-        const a = JSON.parse(jsHttpRequest(url, __fetchInit(init)) || "{}");
+        const a = __frameosAnswer(jsHttpRequest(url, __fetchInit(init)));
         take(__response(url, a), a.body ?? "");
       } catch (e) { fail(e); }
       end();
