@@ -28,6 +28,14 @@ def confirmed(what: str = "changes what a physical frame does or shows, or remov
     return {"type": "boolean", "const": True, "description": CONFIRM_DESCRIPTION.format(what=what)}
 
 
+# An argument that names one row by its id (a uuid, a token id) and lands in a
+# route path: nothing but id characters. And one that names something by a
+# looser text (an event, a catalog folder): one path segment's worth, no more.
+# The client quotes both again (client.py `segment`); the pattern is what tells
+# the caller why.
+ID_PATTERN = "^[A-Za-z0-9_-]{1,64}$"
+SEGMENT_PATTERN = "^[^/\\\\?#]{1,128}$"
+
 PROJECT_ID_SCHEMA = {
     "type": "integer",
     "description": "Project id (projects_list). Omit when the account has exactly one project.",

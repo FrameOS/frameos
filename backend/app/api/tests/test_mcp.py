@@ -685,3 +685,133 @@ def test_uri_templates():
     assert match_uri_template("frameos://frames/{frame_id}", "frameos://frames/3") == {"frame_id": "3"}
     assert match_uri_template("frameos://frames/{frame_id}/scenes/{scene_id}", "frameos://frames/3/scenes/x-y") == {"frame_id": "3", "scene_id": "x-y"}
     assert match_uri_template("frameos://frames/{frame_id}", "frameos://frames/3/scenes/x") is None
+
+
+# -- arguments that land in a route path ------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_tool_argument_never_names_another_route(async_client, db: Session, redis):
+    """A tool's string argument is the model's, and the model reads untrusted
+    text. Pasted into a route path as it came, "../../frames/7" is another
+    route once httpx folds it (a DELETE of the frame, with no confirm), and
+    "x?reveal=1" is a query. Each of these must end at the schema or at the
+    client's own refusal, and the frame and its settings must be untouched."""
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    template = (await async_client.post("/api/templates", json={"name": "Kept", "scenes": [SCENE]})).json()
+    up = f"../../../frames/{frame.id}"
+    attempts = [
+        ("frame_command_cancel", {"frame_id": frame.id, "command_id": up}),
+        ("frame_command_cancel", {"frame_id": frame.id, "command_id": ".."}),
+        ("frame_event", {"confirm": True, "frame_id": frame.id, "event": "../../../templates", "payload": {"name": "x"}}),
+        ("frame_event", {"confirm": True, "frame_id": frame.id, "event": "render?x=1"}),
+        ("frame_event", {"confirm": True, "frame_id": frame.id, "event": ".."}),
+        ("frame_scene_preview", {"frame_id": frame.id, "scene_id": "../../../../settings"}),
+        ("frame_scene_preview", {"frame_id": frame.id, "scene_id": "a/../../b"}),
+        ("scene_get", {"template_id": "../settings"}),
+        ("scene_get", {"template_id": f"{template['id']}/export"}),
+        ("scene_delete", {"confirm": True, "template_id": f"../frames/{frame.id}"}),
+        ("scene_update", {"template_id": "../settings", "name": "x"}),
+        ("store_scene_get", {"repository": "..", "template": "x"}),
+        ("store_scene_get", {"repository": "samples", "template": "../../../frames"}),
+        ("frame_scene_install", {"confirm": True, "frame_id": frame.id, "template_id": "../settings", "deploy": "none"}),
+        ("frame_scene_install", {"confirm": True, "frame_id": frame.id, "repository": "..", "template": "..", "deploy": "none"}),
+        ("ai_chat_get", {"chat_id": "../../settings?reveal=1"}),
+        ("ai_chat_get", {"chat_id": ".."}),
+        ("api_token_revoke", {"confirm": True, "token_id": "../../projects"}),
+    ]
+    for name, arguments in attempts:
+        payload = (await rpc(async_client, "tools/call", {"name": name, "arguments": arguments})).json()
+        refused = "error" in payload and payload["error"]["code"] == -32602
+        failed = "result" in payload and payload["result"].get("isError") is True
+        assert refused or failed, (name, arguments, payload)
+        if failed:
+            # Refused by the client or answered 404 by the route it named,
+            # never the answer of some other route.
+            assert "settings" not in result_text(payload["result"]).lower() or "404" in result_text(payload["result"]), (name, payload)
+    assert frame_row(db, frame.id) is not None
+    assert (await async_client.get(f"/api/templates/{template['id']}")).status_code == 200
+
+    # What a real id does is unchanged, and an id with a slash in it (the
+    # status screen's "system/index") still reaches the one route that takes it.
+    assert result_json(await call(async_client, "scene_get", {"template_id": template["id"]}))["name"] == "Kept"
+    preview = await call(async_client, "frame_scene_preview", {"frame_id": frame.id, "scene_id": "system/index"})
+    assert preview.get("isError") is not True
+    assert any(item["type"] == "image" for item in preview["content"])
+
+
+def test_route_paths_are_built_from_quoted_segments():
+    from app.mcp.client import assert_route_path, segment, segments
+    from app.mcp.result import McpInputError
+
+    assert segment("9f1c-ab") == "9f1c-ab"
+    assert segment("a/b?c#d") == "a%2Fb%3Fc%23d"
+    assert segment("Scene store") == "Scene%20store"
+    assert segments("system/index") == "system/index"
+    for bad in ("", ".", ".."):
+        with pytest.raises(McpInputError):
+            segment(bad)
+    for bad in ("a/../b", "../x", "a/./b"):
+        with pytest.raises(McpInputError):
+            segments(bad)
+
+    assert_route_path("/api/frames/7/commands/9f1c")
+    assert_route_path("/api/repositories/system/samples/templates/Scene%20store/scenes.json")
+    for bad in (
+        "/api/frames/7/commands/../../../frames/8",
+        "/api/frames/7/commands/..",
+        "/api/frames/7/commands/%2e%2e/x",
+        "/api/frames/7/commands/x%2f..%2f..",
+        "/api/ai/chats/x?reveal=1",
+        "/api/ai/chats/x#y",
+        "/api/ai/chats/x\\y",
+        "http://elsewhere/api/x",
+        "//elsewhere/api/x",
+    ):
+        with pytest.raises(McpInputError):
+            assert_route_path(bad)
+
+
+def test_no_tool_pastes_an_argument_into_a_route_path():
+    """Every `/api/...` f-string in the MCP package may interpolate a value
+    only through `segment()` / `segments()` (client.py) or `int()`, or by a
+    name every tool declares an integer. A new tool that writes
+    f"/api/things/{thing_id}" fails here: quote it, and give the argument a
+    pattern (ID_PATTERN / SEGMENT_PATTERN) so the caller is told why."""
+    import ast
+    from pathlib import Path
+
+    import app.mcp as mcp_package
+    from app.mcp.server import build_server
+
+    integer_names = {"frame_id", "from_frame_id", "pid", "project_id"}
+    server, api = build_server(app=None, headers={}, client_ip="127.0.0.1", public_origin="http://x", auth={})
+    for tool in server.tools.values():
+        for name, schema in tool.input_schema()["properties"].items():
+            if name in integer_names:
+                assert schema.get("type") == "integer", (tool.name, name)
+
+    bare: list[str] = []
+    for source in sorted(Path(mcp_package.__file__).parent.rglob("*.py")):
+        if source.name == "client.py":
+            # Its one f-string puts the project in front of a path that
+            # `assert_route_path` has already taken.
+            continue
+        for node in ast.walk(ast.parse(source.read_text())):
+            if not isinstance(node, ast.JoinedStr) or not node.values:
+                continue
+            first = node.values[0]
+            if not (isinstance(first, ast.Constant) and isinstance(first.value, str) and first.value.startswith("/api/")):
+                continue
+            for value in node.values:
+                if not isinstance(value, ast.FormattedValue):
+                    continue
+                inner = value.value
+                quoted = (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Name)
+                    and inner.func.id in {"segment", "segments", "int"}
+                )
+                integer = isinstance(inner, ast.Name) and inner.id in integer_names
+                if not (quoted or integer):
+                    bare.append(f"{source.name}:{node.lineno}: {ast.unparse(inner)}")
+    assert bare == []

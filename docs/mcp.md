@@ -101,6 +101,15 @@ limits key on it, and project-scoped paths (`/api/frames`, `/api/templates`,
 project with `project_id`; omitted, the account's only project is used, and
 an account with several is told to pass one.
 
+An argument is the model's, and the model reads untrusted text, so no
+argument is pasted into a route path as it came: a string that becomes part
+of a path goes through `segment()` (quoted whole, so a `/` or `?` in it is
+data, and `.` / `..` refused) and carries a `pattern` in its schema
+(`ID_PATTERN` for a row's id, `SEGMENT_PATTERN` for looser names). The client
+also refuses any path that holds a dot segment, a query or a fragment before
+httpx can fold it into a route the tool never named, and `test_mcp.py` reads
+the tools' sources for an interpolation that skipped the quoting.
+
 ### Tools
 
 Sixty-odd tools in five groups; every one documents its parameters, and the
