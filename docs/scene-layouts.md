@@ -713,6 +713,19 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   what is picked opens), twice: back, thrice: home (the scene list), held:
   talk (the board's preset map). People are told "Action" everywhere a key is named for them: the
   layout's help, and the SPA's and the iOS app's button rows (`keyTitle`,
+<<<<<<< HEAD
+  pinned by `docs/button-map-fixtures.json`).
+  **One header that shrinks.** Over every scene is a thin bar (6.5 units):
+  the time and the short date on the left (a tap: the scene list), the Wi-Fi
+  signal and the battery on the right (a tap: the frame's page), a 2 px rule
+  under it, one ink and no greys, so it stays crisp on the black-and-white
+  panel. When the scene list is open (a swipe up, Action pressed thrice, or
+  twice where the frame's map leaves that free: the layout's own binding), the
+  same header is big: the layout turns the list into a home screen with the
+  time and the date large, the battery and the signal, and under the list how
+  to get around, a line each, read off the frame's event map: what Action does (once,
+  twice, thrice, held: "go", "go back", "go home", "talk"), what UP and
+=======
   pinned by `docs/button-map-fixtures.json`). The scene gets the whole glass.
   When the scene list is open (a swipe up, Action pressed thrice, or twice
   where the frame's map leaves that free: the layout's own binding), the
@@ -720,12 +733,21 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   and the date, the battery and the signal, and under the list how to get
   around, a line each, read off the frame's event map: what Action does (once,
   twice, thrice, held: `once: go · twice: back · thrice: home · hold: talk`), what UP and
+>>>>>>> sticky-go-key
   DOWN do (in the list they move; held, the map's scene back and on) and the
   swipes. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
   nobody used it (removed 2026-11-23; an install that chose it gets the whole
-  glass).
-  "Around the scene" also offers a status bar. A press of Action that the frame's
+  glass, as "Around the scene: Nothing" does).
+  The signal is a fan of four (the dot and three arcs, the strength solid and
+  the rest a hairline) and the battery its level and percentage, each only
+  where the frame says it (`app.frame.wifiRssi`, `app.frame.batteryPercent`:
+  an ESP32; none in the preview or on a Pi). The bar's clock asks for the next
+  run when the minute turns (`frameos.setNextSleep`), and on e-paper that
+  never wakes the panel: the chrome is drawn on the scene's own passes (the
+  rule above), so the time shown is when the picture was last drawn, and a
+  scene that draws more often than once a minute brings it up to date within
+  a pass, in the same refresh. A press of Action that the frame's
   map leaves to the scene also draws the picture again (`render`).
 - **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
   E1004, the model read off the panel (size and colour) or set. A bar along
@@ -753,12 +775,15 @@ Both are on the store's Device layouts shelf (`settings.devices` names the
 boards), and both are set up through their fields, on the install or from the
 frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
-E-series' hint under the name; the Sticky's date and its help under the list),
+E-series' hint under the name; the Sticky's date, in its bar and on its home
+screen, and its help under the list), the Sticky's bar or nothing around a scene,
 whether the Refresh key or Action draws the picture again when pressed (off: the
 press is the scene's alone, and its cap says "To scene") and opens the scene
 list when pressed twice, white on black or black on white, and the text size
 (0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is
-on until it is turned off, so an install from before keeps its look.
+on until it is turned off, so an install from before keeps its look; the
+Sticky's bar is the one new look an install gets without asking (it was
+"Nothing" by default until 2026-11-24), and "Nothing" takes it off.
 
 The pictures in their pull request were made with
 `frameos/tools/wasm_layout_shots.mjs`: the wasm runtime run as each board
