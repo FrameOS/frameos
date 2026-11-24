@@ -229,6 +229,24 @@ export async function requireRecentAuth(
   );
 }
 
+// For a route that already takes the password in its body (changing it,
+// deleting the account). Without two-factor that password is exactly what
+// /login/reauth would ask for, so asking twice proves nothing more. With
+// two-factor on, the password is the one credential that proves LESS than
+// sign-in did: the session must also have passed sudo mode recently, which
+// on such an account is the second factor. So the password alone, typed into
+// a lifted cookie's session, never weakens an account that has one.
+export async function requireRecentAuthWithSecondFactor(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+  maxAgeSeconds: number = recentAuthMaxAgeSeconds,
+): Promise<NextResponse | undefined> {
+  if (!secondFactorEnrolled(await secondFactorStatus(db, accountId))) {
+    return undefined;
+  }
+  return requireRecentAuth(db, accountId, maxAgeSeconds);
+}
+
 // The proof routes call this once the credentials checked out: stamps the
 // session row so the next sensitive request goes through. Returns false when
 // the token no longer names a live session (nothing to stamp).

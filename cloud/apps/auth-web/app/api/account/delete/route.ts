@@ -18,7 +18,10 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
-import { requireRecentAuth } from "../../../../src/lib/recent-auth";
+import {
+  requireRecentAuth,
+  requireRecentAuthWithSecondFactor,
+} from "../../../../src/lib/recent-auth";
 import {
   readSession,
   sessionCookieName,
@@ -118,6 +121,12 @@ export async function POST(request: NextRequest) {
   }
 
   if (account.passwordHash) {
+    // With two-factor on, the password alone proves less than sign-in did:
+    // the session must have passed sudo mode (the second factor) recently.
+    const reauth = await requireRecentAuthWithSecondFactor(db, accountId);
+    if (reauth) {
+      return reauth;
+    }
     // Dummy fallback keeps the timing flat whether or not a hash exists.
     const valid = await verifyPasswordWithDummyFallback(
       password,

@@ -167,6 +167,7 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string) {
 export type SecurityNotification = {
   // Which credential changed, as the subject line's noun phrase.
   what:
+    | "api_token_created"
     | "apple_linked"
     | "google_linked"
     | "password_changed"
@@ -181,6 +182,7 @@ export type SecurityNotification = {
 };
 
 const securityNotificationLines: Record<SecurityNotification["what"], string> = {
+  api_token_created: "A personal API token was created on your FrameOS Cloud account. A token lets a script or an AI assistant act as you without signing in, until it expires or you revoke it under Account → Developer.",
   apple_linked: "Sign in with Apple was connected to your FrameOS Cloud account. Signing in with Apple now opens this account.",
   google_linked: "Google sign-in was connected to your FrameOS Cloud account. Signing in with Google now opens this account.",
   password_changed: "The password on your FrameOS Cloud account was changed, and every other session was signed out.",

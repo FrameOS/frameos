@@ -2,7 +2,7 @@
 // POST  — start (or restart) enrollment: a fresh secret + QR code. Nothing is
 //         enforced until /confirm sees a valid code. Needs the password when
 //         the account has one (requireStrengtheningProof).
-// DELETE — remove the authenticator (needs the weakening proof).
+// DELETE — remove the authenticator (sudo mode, then the weakening proof).
 import QRCode from "qrcode";
 import { revokeApiTokensForAccount } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
@@ -62,9 +62,14 @@ export async function DELETE(request: NextRequest) {
   if (!db) {
     return response;
   }
+  // Sudo mode like every other weakening route: on an account with an
+  // authenticator the recent proof is the second factor itself, so the
+  // password in the body, typed into a lifted cookie's session, cannot
+  // remove it alone.
   const context = await accountSecurityContext(request, db, {
     action: "two-factor-totp",
     mutating: true,
+    recentAuth: true,
   });
   if ("response" in context) {
     return context.response;

@@ -1,6 +1,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
+  accountApiTokens,
   accountIdentities,
   accounts,
   createDb,
@@ -12,7 +13,14 @@ import { POST as changePassword } from "../../../app/api/account/password/route"
 import { POST as login } from "../../../app/api/auth/login/route";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
+import {
+  beginTotpEnrollment,
+  confirmTotpEnrollment,
+  totpCodeAtStep,
+  totpStepFor,
+} from "../../lib/two-factor";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
@@ -192,5 +200,92 @@ describe("account password change", () => {
       }),
     );
     expect(newLogin.status).toBe(200);
+  });
+
+  it("revokes the account's API tokens", async () => {
+    // A token minted under the old password is a way in that would outlive
+    // the new one; a reset and a second-factor change already end them.
+    const user = await signUpVerifiedUser();
+    await establishSession(user.accountId, user.email);
+    await db.insert(accountApiTokens).values({
+      access: "full",
+      accountId: user.accountId,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      name: "script",
+      tokenHash: hashSecret("fc_api_test_password_change"),
+      tokenHint: "ange",
+    });
+
+    const response = await changePassword(
+      postJson("/api/account/password", {
+        currentPassword: initialPassword,
+        newPassword: "an even longer password",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ api_tokens_revoked: 1, ok: true });
+    const [row] = await db
+      .select({ revokedAt: accountApiTokens.revokedAt })
+      .from(accountApiTokens)
+      .where(eq(accountApiTokens.accountId, user.accountId));
+    expect(row?.revokedAt).not.toBeNull();
+  });
+
+  it("needs a recent second-factor proof on an account with two-factor", async () => {
+    // With a second factor on, the password alone proves less than sign-in
+    // did: a lifted cookie plus a phished password must not rotate it.
+    const user = await signUpVerifiedUser();
+    const sessionToken = await establishSession(user.accountId, user.email);
+    const secret = await beginTotpEnrollment(db, user.accountId);
+    if (!secret) {
+      throw new Error("enrollment did not start");
+    }
+    expect(
+      await confirmTotpEnrollment(
+        db,
+        user.accountId,
+        totpCodeAtStep(secret, totpStepFor()),
+      ),
+    ).toBe(true);
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+
+    const refused = await changePassword(
+      postJson("/api/account/password", {
+        currentPassword: initialPassword,
+        newPassword: "an even longer password",
+      }),
+    );
+    expect(refused.status).toBe(403);
+    const payload = (await refused.json()) as {
+      error: string;
+      reauth?: { methods?: { code?: boolean; password?: boolean } };
+    };
+    expect(payload.error).toBe("reauth_required");
+    expect(payload.reauth?.methods).toMatchObject({ code: true, password: false });
+
+    // The old password still signs in (to the second-factor step): nothing changed.
+    const stillOld = await login(
+      postJson("/api/auth/login", { email: user.email, password: initialPassword }),
+    );
+    expect(stillOld.status).toBe(200);
+  });
+
+  it("asks an account without two-factor for the password only", async () => {
+    const user = await signUpVerifiedUser();
+    const sessionToken = await establishSession(user.accountId, user.email);
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+    const response = await changePassword(
+      postJson("/api/account/password", {
+        currentPassword: initialPassword,
+        newPassword: "an even longer password",
+      }),
+    );
+    expect(response.status).toBe(200);
   });
 });

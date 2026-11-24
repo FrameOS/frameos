@@ -382,6 +382,12 @@ export const securityLogic = kea<securityLogicType>([
           return
         }
         const payload = await readJsonPayload(response)
+        // With two-factor on, the password alone does not change the
+        // password: a stale session proves the second factor on
+        // /login/reauth first and the form is filled in again on return.
+        if (redirectToReauthIfRequired(response, payload)) {
+          return
+        }
         if (payload?.error === 'invalid_password') {
           actions.setPasswordError('The current password is incorrect.')
         } else if (payload?.error === 'weak_password' && payload.message) {

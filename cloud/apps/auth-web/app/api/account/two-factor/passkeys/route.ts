@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
   notifySecurityChange,
+  revokeOtherSessions,
   revokedTokensDetail,
   readJsonBody,
 } from "../../../../../src/lib/account-security";
@@ -87,6 +88,11 @@ export async function POST(request: NextRequest) {
   // passkey existed would keep bypassing it, so they die with the enrolment
   // and the owner re-mints behind the new factor.
   const apiTokensRevoked = await revokeApiTokensForAccount(db, context.accountId);
+  // And when this passkey is what turns two-factor ON, every other browser
+  // session goes too: none of them ever answered a second factor.
+  const sessionsRevoked = before.enabled
+    ? 0
+    : await revokeOtherSessions(db, context.accountId);
   await recordAuditEvent(db, {
     accountId: context.accountId,
     actor: {
@@ -94,7 +100,7 @@ export async function POST(request: NextRequest) {
       providerSubject: context.providerSubject,
     },
     eventType: "account.passkey_added",
-    metadata: { apiTokensRevoked, method: "passkey", name },
+    metadata: { apiTokensRevoked, method: "passkey", name, sessionsRevoked },
     target: { passkeyId },
   });
   await notifySecurityChange(
@@ -107,6 +113,7 @@ export async function POST(request: NextRequest) {
     ok: true,
     passkey: { id: passkeyId, name },
     ...(recoveryCodes ? { recovery_codes: recoveryCodes } : {}),
+    sessions_revoked: sessionsRevoked,
   });
   result.cookies.set(webauthnChallengeCookieName, "", {
     ...webauthnChallengeCookieOptions(),

@@ -1,5 +1,5 @@
 import { and, count, eq, isNull } from "drizzle-orm";
-import { accountApiTokens } from "@frameos-cloud/db";
+import { accountApiTokens, accounts } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   apiTokenAccessValues,
@@ -20,7 +20,9 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { sendSecurityNotificationEmail } from "../../../../src/lib/email";
 import { getCloudBaseUrl } from "../../../../src/lib/env";
+import { reportError } from "../../../../src/lib/log";
 import {
   hasRecentAuth,
   recentApprovalMaxAgeSeconds,
@@ -176,6 +178,29 @@ export async function POST(request: NextRequest) {
     metadata: { access, expires_at: expiresAt.toISOString(), name },
     target: { apiTokenId: row.id },
   });
+
+  // A token is a durable way in that survives the session that minted it:
+  // the owner hears of every one, like any other credential added to the
+  // account. Best-effort, like the 2FA mails; the token exists either way.
+  const [account] = await db
+    .select({ primaryEmail: accounts.primaryEmail })
+    .from(accounts)
+    .where(eq(accounts.id, session.accountId))
+    .limit(1);
+  const mailTo = account?.primaryEmail ?? session.email;
+  if (mailTo) {
+    try {
+      await sendSecurityNotificationEmail(mailTo, {
+        detail: `"${name}", ${access === "read_only" ? "read-only" : "full access"}, expires ${expiresAt.toISOString().slice(0, 10)}`,
+        what: "api_token_created",
+        when: new Date(),
+      });
+    } catch (error) {
+      reportError("account.api_token_created_mail_failed", error, {
+        accountId: session.accountId,
+      });
+    }
+  }
 
   return NextResponse.json(
     {

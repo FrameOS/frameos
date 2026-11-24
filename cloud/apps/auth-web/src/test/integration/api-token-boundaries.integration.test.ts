@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 import {
   accountApiTokens,
   accountIdentities,
+  accountTotp,
   accounts,
   createDb,
   frameCommands,
@@ -56,6 +57,22 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(Object.fromEntries(requestHeaders)),
 }));
 
+// The security mails that "went out" (the real sender only logs without a
+// Postmark token): which change, to whom, and the details line.
+const securityMails = vi.hoisted(
+  () => [] as { detail?: string | undefined; to: string; what: string }[],
+);
+
+vi.mock("../../lib/email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/email")>()),
+  sendSecurityNotificationEmail: async (
+    to: string,
+    notification: { detail?: string | undefined; what: string },
+  ) => {
+    securityMails.push({ detail: notification.detail, to, what: notification.what });
+  },
+}));
+
 const baseUrl = "http://localhost:3000";
 const password = "a long enough password";
 const db = createDb();
@@ -69,6 +86,7 @@ beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
   requestHeaders.clear();
+  securityMails.length = 0;
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
@@ -507,6 +525,138 @@ describe("enrolling a second factor revokes every API token", () => {
       }),
     );
     expect(asToken.status).toBe(401);
+  });
+});
+
+describe("turning two-factor on signs the other browsers out", () => {
+  // A session that signed in before the account had a second factor never
+  // answered one; it must not keep walking past the factor just enrolled.
+  it("revokes every other session when the first factor is confirmed", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const elsewhere = await createSession(db, {
+      accountId,
+      email,
+      providerIssuer: passwordProviderIssuer,
+      providerSubject: email,
+    });
+    const current = await establishSession(accountId, email);
+
+    const start = await beginTotp(
+      request("/api/account/two-factor/totp", { password }),
+    );
+    const { secret } = (await start.json()) as { secret: string };
+    const confirm = await confirmTotp(
+      request("/api/account/two-factor/totp/confirm", {
+        code: totpCodeAtStep(secret, totpStepFor()),
+      }),
+    );
+    expect(confirm.status).toBe(200);
+    expect(await confirm.json()).toMatchObject({ ok: true, sessions_revoked: 1 });
+
+    const rows = await db
+      .select({ revokedAt: sessions.revokedAt, tokenHash: sessions.tokenHash })
+      .from(sessions)
+      .where(eq(sessions.accountId, accountId));
+    const byHash = new Map(rows.map((row) => [row.tokenHash, row.revokedAt]));
+    expect(byHash.get(hashSecret(elsewhere))).not.toBeNull();
+    expect(byHash.get(hashSecret(current))).toBeNull();
+  });
+});
+
+describe("minting an API token tells the owner", () => {
+  it("sends the security mail with the token's name and access", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await createApiToken(
+      request("/api/account/api-tokens", { access: "read_only", name: "dash" }),
+    );
+    expect(minted.status).toBe(201);
+    expect(securityMails).toHaveLength(1);
+    expect(securityMails[0]).toMatchObject({ to: email, what: "api_token_created" });
+    expect(securityMails[0]?.detail).toContain('"dash"');
+    expect(securityMails[0]?.detail).toContain("read-only");
+    // The secret itself never rides the mail.
+    const { token } = (await minted.json()) as { token: string };
+    expect(securityMails[0]?.detail).not.toContain(token);
+  });
+});
+
+describe("on an account with two-factor, the password alone weakens nothing", () => {
+  // The password is the one credential a phishing page or a reused secret
+  // hands over. With a second factor on, a session that has not passed sudo
+  // mode (the second factor) recently cannot use it to remove that factor or
+  // delete the account.
+  async function userWithTotp() {
+    const { accountId, email } = await signUpVerifiedUser();
+    const sessionToken = await establishSession(accountId, email);
+    const start = await beginTotp(
+      request("/api/account/two-factor/totp", { password }),
+    );
+    const { secret } = (await start.json()) as { secret: string };
+    const confirm = await confirmTotp(
+      request("/api/account/two-factor/totp/confirm", {
+        code: totpCodeAtStep(secret, totpStepFor()),
+      }),
+    );
+    expect(confirm.status).toBe(200);
+    return { accountId, email, sessionToken };
+  }
+
+  async function ageSession(sessionToken: string) {
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+  }
+
+  it("does not remove the authenticator from a stale session", async () => {
+    const { accountId, sessionToken } = await userWithTotp();
+    await ageSession(sessionToken);
+
+    const refused = await removeTotp(
+      request("/api/account/two-factor/totp", { password }, "DELETE"),
+    );
+    expect(refused.status).toBe(403);
+    const payload = (await refused.json()) as {
+      error: string;
+      reauth?: { methods?: { code?: boolean; password?: boolean } };
+    };
+    expect(payload.error).toBe("reauth_required");
+    // Sudo mode on a two-factor account is the second factor, not the password.
+    expect(payload.reauth?.methods).toMatchObject({ code: true, password: false });
+    const [row] = await db
+      .select({ confirmedAt: accountTotp.confirmedAt })
+      .from(accountTotp)
+      .where(eq(accountTotp.accountId, accountId));
+    expect(row?.confirmedAt).not.toBeNull();
+    expect(row).toBeDefined();
+  });
+
+  it("does not delete the account from a stale session", async () => {
+    const { accountId, sessionToken } = await userWithTotp();
+    await ageSession(sessionToken);
+
+    const refused = await deleteAccount(
+      request("/api/account/delete", { password }),
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("reauth_required");
+    const [row] = await db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(eq(accounts.id, accountId));
+    expect(row?.id).toBe(accountId);
+  });
+
+  it("still deletes an account without two-factor on the password alone", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const sessionToken = await establishSession(accountId, email);
+    await ageSession(sessionToken);
+
+    const deleted = await deleteAccount(
+      request("/api/account/delete", { password }),
+    );
+    expect(deleted.status).toBe(200);
   });
 });
 

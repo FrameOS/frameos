@@ -68,7 +68,9 @@ How it plugs in (`src/lib/api-tokens.ts`):
   (`frame_id`) answers `403 api_token_not_allowed`. So a token alone never
   puts a device of its own choosing in reach of the account's service keys.
 - Rate limits are per client IP, unchanged. Audit events:
-  `account.api_token_created`, `account.api_token_revoked`.
+  `account.api_token_created`, `account.api_token_revoked`. Minting one mails
+  the owner. A password change, a password reset and any second-factor change
+  revoke every token of the account.
 
 ## Routes added for the MCP (usable directly too)
 

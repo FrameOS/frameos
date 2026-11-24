@@ -31,7 +31,9 @@ function PasswordCard(): JSX.Element {
       <Form logic={securityLogic} formKey="password" enableFormOnSubmit className="max-w-md space-y-3">
         {passwordError ? <AccountNotice tone="error">{passwordError}</AccountNotice> : null}
         {passwordDone ? (
-          <AccountNotice tone="success">Password changed. Other signed-in sessions were signed out.</AccountNotice>
+          <AccountNotice tone="success">
+            Password changed. Other signed-in sessions were signed out, and API tokens were revoked.
+          </AccountNotice>
         ) : null}
         <Field name="current_password" label="Current password">
           <TextInput type="password" autoComplete="current-password" />
@@ -181,7 +183,7 @@ export function SecurityPage(): JSX.Element {
   return (
     <div className="space-y-8">
       <AccountPageHeader page="security" />
-      <AccountSection title="Password" description="Changing your password signs out every other session.">
+      <AccountSection title="Password" description="Changing your password signs out every other session and revokes your API tokens.">
         <PasswordCard />
       </AccountSection>
       <AccountSection
