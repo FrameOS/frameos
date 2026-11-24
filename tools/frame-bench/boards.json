@@ -1,5 +1,5 @@
 {
-  "_doc": "What a board's console does not say. `key` is the board's short name, what a booking names (framebench/bookings.py). Optional: an unknown board is benched and recorded from `usb_api status` alone (records.board_identity); an entry adds its name, panel size and chip features. Keys: `boards` by module id (fos_board.c), `panels` by display id, `chips` by target. See tools/frame-bench/SCORES.md.",
+  "_doc": "What a board's console does not say. `key` is the board's short name, what a booking names (framebench/bookings.py). Optional: an unknown board is benched and recorded from `usb_api status` alone (records.board_identity); an entry adds its name, panel size and chip features. Keys: `boards` by module id (fos_board.c), `panels` by display id, `chips` by target. See tools/frame-bench/SCORES.md. A Linux frame (a Raspberry Pi, benched over SSH: framebench/linux.py) is keyed by its model as /proc/device-tree/model names it (`raspberry_pi_zero_w`), its display by the frame's `device` driver, its chip by the SoC; `ram_bytes` stands where an ESP32 has PSRAM.",
   "boards": {
     "seeed_sensecap_indicator_d1": {"key": "sensecap", "name": "SenseCAP Indicator D1", "target": "esp32-s3", "display": "LCD_ST7701S_480x480", "psram_bytes": 8388608, "flash_bytes": 8388608},
     "waveshare_esp32_s3_touch_amoled_1_75": {"key": "amoled175", "name": "Waveshare ESP32-S3-Touch-AMOLED-1.75", "target": "esp32-s3", "display": "AMOLED_CO5300_466x466", "psram_bytes": 8388608, "flash_bytes": 16777216},
@@ -8,7 +8,9 @@
     "seeed_reterminal_e1002": {"key": "e1002", "name": "reTerminal E1002", "target": "esp32-s3", "display": "EPD_7in3e", "psram_bytes": 8388608, "flash_bytes": 8388608},
     "seeed_reterminal_e1003": {"key": "e1003", "name": "reTerminal E1003", "target": "esp32-s3", "display": "EPD_10in3", "psram_bytes": 8388608, "flash_bytes": 33554432},
     "seeed_reterminal_e1004": {"key": "e1004", "name": "reTerminal E1004", "target": "esp32-s3", "display": "EPD_13in3e", "psram_bytes": 8388608, "flash_bytes": 33554432},
-    "pimoroni_inky_frame_7_3_spectra": {"key": "pico", "name": "Inky Frame 7.3 Spectra (Pico 2 W)", "target": "rp2350", "display": "EPD_7in3e", "psram_bytes": 8388608, "flash_bytes": 4194304}
+    "pimoroni_inky_frame_7_3_spectra": {"key": "pico", "name": "Inky Frame 7.3 Spectra (Pico 2 W)", "target": "rp2350", "display": "EPD_7in3e", "psram_bytes": 8388608, "flash_bytes": 4194304},
+    "raspberry_pi_zero_w": {"key": "cloudw", "name": "Raspberry Pi Zero W", "target": "bcm2835", "display": "pimoroni.hyperpixel4sq_touch", "ram_bytes": 536870912},
+    "raspberry_pi_5": {"key": "cloud5", "name": "Raspberry Pi 5", "target": "bcm2712", "display": "pimoroni.hyperpixel4_touch", "ram_bytes": 4294967296}
   },
   "panels": {
     "LCD_ST7701S_480x480": {"width": 480, "height": 480, "kind": "lcd", "colors": "rgb565"},
@@ -18,12 +20,16 @@
     "EPD_7in3e": {"width": 800, "height": 480, "kind": "epaper", "colors": "spectra6"},
     "EPD_10in3": {"width": 1872, "height": 1404, "kind": "epaper", "colors": "grey16"},
     "EPD_13in3e": {"width": 1200, "height": 1600, "kind": "epaper", "colors": "spectra6"},
-    "EPD_7in5_V2": {"width": 800, "height": 480, "kind": "epaper", "colors": "bw"}
+    "EPD_7in5_V2": {"width": 800, "height": 480, "kind": "epaper", "colors": "bw"},
+    "pimoroni.hyperpixel4sq_touch": {"width": 720, "height": 720, "kind": "lcd", "colors": "rgb666"},
+    "pimoroni.hyperpixel4_touch": {"width": 480, "height": 800, "kind": "lcd", "colors": "rgb666"}
   },
   "chips": {
     "esp32-s3": {"cores": 2, "max_mhz": 240, "jpeg_hw": false, "ppa": false},
     "esp32-c3": {"cores": 1, "max_mhz": 160, "jpeg_hw": false, "ppa": false},
     "esp32-p4": {"cores": 2, "max_mhz": 400, "jpeg_hw": true, "ppa": true, "_note": "FrameOS has no P4 build yet (fos_board.c only names the chip); when one uses the JPEG decoder and the PPA, the image score is where it shows."},
-    "rp2350": {"cores": 2, "max_mhz": 150, "jpeg_hw": false, "ppa": false, "_note": "A thin client: its plane renders for it."}
+    "rp2350": {"cores": 2, "max_mhz": 150, "jpeg_hw": false, "ppa": false, "_note": "A thin client: its plane renders for it."},
+    "bcm2835": {"cores": 1, "max_mhz": 1000, "jpeg_hw": false, "ppa": false, "_note": "ARM1176JZF-S (ARMv6) on the Pi Zero W: 1 GHz at most, 700 MHz under the powersave governor the Buildroot image runs it at."},
+    "bcm2712": {"cores": 4, "max_mhz": 2400, "jpeg_hw": false, "ppa": false}
   }
 }

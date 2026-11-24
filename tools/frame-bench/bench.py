@@ -17,6 +17,10 @@ runs, never opens one someone else has booked, and waits for those (runs the
 free ones meanwhile) unless `--skip-booked`. Pass `--who "<session> (...)"`
 (or set $FRAMEOS_BENCH_WHO) so others know whom to ask.
 
+A Linux frame (a Raspberry Pi) is benched over SSH, not USB: list it in
+~/.frameos-bench/linux-frames.json (`["root@10.8.0.171"]`) or
+$FRAMEOS_BENCH_SSH; `--linux-only` benches those alone (framebench/linux.py).
+
 Environment: FRAMEOS_BENCH_BACKEND (default http://localhost:8989),
 FRAMEOS_BENCH_TOKEN (a backend API token), FRAMEOS_BENCH_HOST_IP (this
 machine's address as the frames see it, for the offline suite).
@@ -57,13 +61,23 @@ def others_boards(who):
     return held, {f['port'] for f in seen if bookings.key_of(f.get('module', '')) in held}
 
 
+def save_inventory(found, linux_only=False):
+    """inventory.json: what was found, and with `--linux-only` the USB boards
+    as they were saved (none of their ports was opened)."""
+    saved = os.path.join(HOME, 'inventory.json')
+    kept = []
+    if linux_only and os.path.exists(saved):
+        kept = [f for f in inventory.load(saved) if not str(f.get('port', '')).startswith('ssh:')]
+    inventory.save(saved, kept + found)
+
+
 def cmd_discover(args):
     be = Backend()
     held, skip = others_boards(os.environ.get('FRAMEOS_BENCH_WHO'))
     if held:
         print('booked by someone else, not asked: ' + ', '.join(sorted(held)))
-    frames = inventory.discover(be if be.token else None, skip_ports=skip)
-    inventory.save(os.path.join(HOME, 'inventory.json'), frames)
+    frames = inventory.discover(be if be.token else None, skip_ports=skip, serial=not args.linux_only)
+    save_inventory(frames, args.linux_only)
     for f in frames:
         print(f"{f['port']:14} frame {str(f.get('frame_id')):>3}  {f.get('name', '')[:24]:24} {f['module'][:28]:28} "
               f"{f['display']:20} {f['kind']:5} fw {f.get('version')}  {f.get('ip')}")
@@ -147,7 +161,11 @@ def cmd_run(args):
         print(f'booking as "{who}": pass --who "<session> (...)" so others know whom to ask')
     held, skip = others_boards(who)
     saved = os.path.join(HOME, 'inventory.json')
-    if args.rediscover or not os.path.exists(saved) or held:
+    if args.linux_only:
+        # The Linux frames alone (linux.py): no USB port is opened.
+        frames = inventory.discover(be if be.token else None, skip_ports=skip, serial=False)
+        save_inventory(frames, linux_only=True)
+    elif args.rediscover or not os.path.exists(saved) or held:
         frames = inventory.discover(be if be.token else None, skip_ports=skip)
         inventory.save(saved, frames + [f for f in (inventory.load(saved) if os.path.exists(saved) else [])
                                         if f.get('port') in skip])
@@ -168,6 +186,8 @@ def cmd_run(args):
         known = json.load(fh).get('boards', {})
     for key in sorted(held):
         module = names[key]
+        if args.linux_only and not (known.get(module) or {}).get('ram_bytes'):
+            continue
         stub = {'key': key, 'module': module, 'name': known.get(module, {}).get('name', key), 'port': None,
                 'waiting': True, 'kind': 'local'}
         if module not in found and pick([stub], args.frames):
@@ -290,7 +310,7 @@ def cmd_scores(args):
 def cmd_restore(args, ports=None):
     """What a killed benchmark suite left on a board (its backend pointed at a
     closed port, the benchmark scenes): put back, port by port."""
-    from framebench.console import Console
+    from framebench.linux import open_console
     wanted = {p for p in benchmarks._journal() if ports is None or p in ports}
     if not wanted:
         if args is not None:
@@ -299,7 +319,7 @@ def cmd_restore(args, ports=None):
     opened = []
 
     def console_for(port):
-        con = Console(port)
+        con = open_console(port)
         opened.append(con)
         con.idle(0.5)
         return con
@@ -316,8 +336,10 @@ def cmd_restore(args, ports=None):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
-    sub.add_parser('discover')
+    d = sub.add_parser('discover')
+    d.add_argument('--linux-only', action='store_true', help='only the Linux frames over SSH (linux-frames.json): no USB port opened')
     r = sub.add_parser('run')
+    r.add_argument('--linux-only', action='store_true', help='only the Linux frames over SSH (linux-frames.json): no USB port opened')
     r.add_argument('--frames', help='comma list: name/module substrings, ports or frame ids')
     r.add_argument('--suites', default='default', help=f"comma list of {','.join(SUITES)} (default: per frame kind)")
     r.add_argument('--warm', type=int, default=3)

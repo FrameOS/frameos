@@ -1,12 +1,13 @@
 ---
 name: frame-bench
-description: Bench every FrameOS frame attached to this machine (ESP32 boards and Pico thin clients on USB, attached to a local backend) — scenes, layouts and desktop windows, input, switch storms, memory soak, offline backend, reboots, server rendering — and report crashes, OOMs, slow paths and regressions. Use when asked to "bench the frames", check that a firmware change keeps working on real hardware, or compare against an earlier run.
+description: Bench every FrameOS frame attached to this machine (ESP32 boards and Pico thin clients on USB, Raspberry Pi frames over SSH, attached to a local backend) — scenes, layouts and desktop windows, input, switch storms, memory soak, offline backend, reboots, server rendering — and report crashes, OOMs, slow paths and regressions. Use when asked to "bench the frames", check that a firmware change keeps working on real hardware, or compare against an earlier run.
 ---
 
 # Frame bench
 
 `tools/frame-bench/bench.py` drives every frame on this machine's USB through
-its serial console and the backend it is attached to, and writes a report of
+its serial console, every Linux frame (a Raspberry Pi) listed for it over SSH,
+and the backend they are attached to, and writes a report of
 everything that crashed, failed, ran slow or took a slower path than before.
 
 ## Booking a board
@@ -71,6 +72,50 @@ tools/frame-bench/boards.py release sticky,e1003 --who ...
    opens ports with pyserial's defaults and never touches the lines. Never use
    `dtr=False; rts=False` on these boards.
 3. pyserial: `frameos/.venv/bin/python3` has it.
+
+## Linux frames (a Raspberry Pi, over SSH)
+
+A Pi has no USB console, so `framebench/linux.py` makes one: the runtime's
+journal followed over SSH (`journalctl -u frameos -f`), its HTTP API for what
+a console is told (`scene <id>` is `POST /event/setCurrentScene`, with the
+backend's `serverApiKey` bearer), SSH for the rest (`restart` is
+`systemctl restart frameos`). A render is said the way the firmware says it
+(`render #N ... done in`), so every suite runs on it; what it cannot do is a
+`skipped` with the reason (the offline suite).
+
+- **List it** in `~/.frameos-bench/linux-frames.json` (`["root@10.8.0.171"]`)
+  or `$FRAMEOS_BENCH_SSH`; its port is `ssh:root@10.8.0.171`, its booking key
+  its board's in `boards.json` (`cloudw`: a Pi Zero W). `--linux-only` on
+  `discover` and `run` opens no USB port (the other sessions' boards).
+- **Attach it** with the backend's own adoption (`POST /frames/adopt`, which
+  needs the frame's admin login: put one in its frame.json over SSH first),
+  then copy its scenes into the backend frame (a cloud-pushed set is not in
+  its local API: `state/uploaded.json`) and push. A push restarts its runtime
+  (~15 s on a Pi Zero). Take a layout chosen ON the frame off
+  (`state/scene-frame-layout.json`): it wraps every scene, the benchmark's too.
+- **Times are the frame's own.** The runtime's logger thread hands lines to
+  the journal up to 250 ms late, and SSH adds more (350-600 ms on a Pi Zero),
+  so each line carries the journal's stamp, turned into this machine's clock
+  by a measured offset (`+-` half a round trip, in the raw log's first line).
+- **The benchmark scenes go on with `uploadScenes`** beside the frame's own,
+  and come off by putting `state/uploaded.json` back and restarting the
+  runtime (an upload leaves memory no other way); `bench.py restore` does it
+  for a killed run from `~/.frameos-bench/uploaded-before-bench-<host>.json`.
+- **An animation is not logged frame by frame**: the runtime pauses its render
+  log for ten seconds after two fast renders. The two frames logged at each
+  pause give a frame's period (`render:animation`, `via: linux log burst`).
+  That pause also hides the first render after an animation (2026.11.14): such
+  a switch is confirmed by a render after it and reported `switch_unlogged`,
+  untimed.
+- **Restart** is the runtime's (systemd), not the OS's: the Pi's boot is not
+  in `resp.boot.first_render_ms`. **Memory** is RAM and the runtime's RSS
+  (`mem.idle.ram_available`, `mem.process.rss`, `mem.bench.process_peak_rss`),
+  never scored against PSRAM; a soak flags a resident set that rises every
+  round. A crash is the service ending badly (a core dump, a kill, a non-zero
+  exit, systemd's watchdog, the OOM killer); a restart that was asked for (a
+  push, `restart`) ends `Deactivated successfully` and is none.
+- One SSH connection carries every call (`ControlMaster`): a burst of fresh
+  logins went unanswered on the Pi Zero for a minute.
 
 ## Running
 
@@ -173,6 +218,7 @@ Issue severities: `crash` (panic, abort, watchdog, brownout, reboot, OOM),
 - **A new benchmark**: a folder in `tools/frame-bench/benchmarks/`, a line in
   `framebench/benchmarks.py`, its metric in `records.frame_metrics` and, if
   it scores, `scoring.CATEGORIES`; bump `WORKLOAD`.
+- **A new Linux frame**: "Linux frames" above.
 - **A new frame**: plug it in, attach it to the backend (copy its scenes into
   the backend frame FIRST — `usb_api scene-list` / `scene-get` on 2026.11.7 and
   later — then `set backend`, `set api_key`, `set frame_id`, `restart` on its

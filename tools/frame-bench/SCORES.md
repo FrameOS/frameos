@@ -100,6 +100,23 @@ times what a `sampled` one does on a slow panel. The counts are shown with it.
   the SenseCAP, probably because its RGB LCD reads its frame buffer from PSRAM
   all the time (not measured). A CPU score is the board as it ships, not the
   chip at its best.
+- **A Linux frame** (a Raspberry Pi, benched over SSH: `framebench/linux.py`)
+  runs the same benchmark scenes in the same runtime, so CPU, Graphics and
+  Image compare as they do between ESP32s, with its panel's megapixels. Three
+  things differ:
+  - its boot (`resp.boot.first_render_ms`) is the runtime's restart
+    (`systemctl restart frameos`), not the computer's: an ESP32's is the whole
+    chip, Wi-Fi included. A Pi's own boot is a minute and is not measured;
+  - its frame rate comes from the two frames its runtime logs every ten
+    seconds of an animation (the render log pauses in between), not from a
+    count of every frame;
+  - it has no Memory score: its RAM is not PSRAM (its memory metrics,
+    `mem.idle.ram_available`, `mem.process.rss`, `mem.bench.process_peak_rss`,
+    stand unscored).
+  Its build is the release when the hash it prints after its version is the
+  release's `versions.json` `frameos` (`records.release_frameos_hash`). It runs
+  at the clock its governor sets (`chip.cpu_governor_mhz`): the Buildroot
+  image runs a Pi Zero W's 1 GHz core at 700 MHz (`powersave`).
 - A dev build is `<release>+<sha>` (`2026.11.12+49345dbb4`); a build made on
   the bench under a release's number is `+elf.<sha>` and is never mistaken for
   the release (the run of 2026-11-18 18:00, long taken for "the last full run

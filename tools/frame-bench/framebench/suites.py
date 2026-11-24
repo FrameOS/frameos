@@ -13,6 +13,7 @@ import threading
 import time
 
 from .console import parse_payload_json, Console
+from .linux import open_console
 from .parse import RENDER_DONE, RENDER_FAILED, event, stats, summarize
 
 ANIMATION_MIN_FPS_RATIO = 0.8   # an animation below 80 % of its scene's target rate is `slow`
@@ -82,11 +83,15 @@ class Ctx:
         self.consoles: dict[str, Console] = {}
 
     def console(self, frame) -> Console:
+        """The frame's console, held open for the run: its serial port, or
+        for a Linux frame (`ssh:<target>`) its journal and HTTP API (linux.py)."""
         port = frame['port']
         if port not in self.consoles:
             name = frame.get('name') or port
             safe = ''.join(c if c.isalnum() else '_' for c in name)
-            self.consoles[port] = Console(port, f'{self.out_dir}/{safe}.raw.log')
+            self.consoles[port] = open_console(port, f'{self.out_dir}/{safe}.raw.log')
+            if getattr(self.consoles[port], 'linux', False):
+                self.consoles[port].frame_id = frame.get('frame_id')
         return self.consoles[port]
 
     def close(self):
@@ -213,6 +218,12 @@ def recover_after_boot(con, frame):
     con.idle(2)
 
 
+def unlogged_since(con, t) -> bool:
+    """Whether a Linux frame's runtime left a switch since `t` unlogged (its
+    render-log pause, linux.py `bench:unlogged`): it happened, untimed."""
+    return any('"bench:unlogged"' in x for x in con.history_since(t))
+
+
 def tap(con, frame, x_frac=0.5, y_frac=0.5):
     x, y = int(32767 * x_frac), int(32767 * y_frac)
     con.send('event pointerDown {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","button":0,"buttons":1}' % (x, y))
@@ -277,6 +288,12 @@ def suite_scenes(ctx, frame, scene_filter=None):
             'panel': [p['line'] for p in w['panel']][-3:],
             'errors': w['errors'][:5],
         }
+        if unlogged_since(con, t_cmd):
+            # A Linux frame's runtime did not log this switch's render (its
+            # render-log pause, linux.py): it happened, untimed.
+            entry['switch'].update({'unlogged': True, 'wall_ms': None, 'done_ms': None})
+            issues.append(issue('note', 'switch_unlogged', where, "the runtime's render log was paused (after an animation "
+                                'or a scene ticking fast): this switch is not timed'))
         if not ok:
             issues.append(issue('fail', 'switch', where, line or 'no render within timeout'))
         elif entry['switch']['wall_ms'] and entry['switch']['done_ms'] is not None:
@@ -429,6 +446,8 @@ def suite_builtin(ctx, frame):
             res[step] = {'wall_ms': round((t_done - t) * 1000) if t_done else None,
                          'done_ms': w['done'][-1]['ms'] if w['done'] else None,
                          'render': w['renders'][-1] if w['renders'] else None}
+            if t_done and unlogged_since(con, t):
+                res[step].update({'wall_ms': None, 'done_ms': None, 'unlogged': True})
             if not t_done:
                 issues.append(issue('fail', 'builtin', f'{name} {step}', 'no render'))
             con.idle(1.5)
@@ -454,10 +473,14 @@ def suite_input(ctx, frame):
     w = summarize(con.idle(5 + frame.get('refresh_s', 0)))
     out['drag'] = {'renders': [d['ms'] for d in w['done']], 'burst': [b.get('frames') for b in w['burst']],
                    'errors': w['errors'][:5]}
-    for direction in ('next', 'previous'):
+    # The contract's directions are `next` and `prev` (events_gen
+    # SceneDirections): `previous` was refused on every board, and a scene
+    # that ticks (the E1003's clock) hid it by rendering anyway. Recorded
+    # under `previous` as before.
+    for direction, sent in (('next', 'next'), ('previous', 'prev')):
         con.drain()
         t = time.time()
-        con.send('event setCurrentScene {"direction":"%s"}' % direction)
+        con.send('event setCurrentScene {"direction":"%s"}' % sent)
         t_done, line, got = wait_render(con, render_timeout(frame))
         out[direction] = {'wall_ms': round((t_done - t) * 1000) if t_done else None}
         if not t_done:
@@ -496,6 +519,11 @@ def suite_storm(ctx, frame):
                       'internalFree': (st.get('memory') or {}).get('internalFree')}, 'issues': issues}
 
 
+# What a soak samples after each round: an ESP32's heaps, a Linux frame's RAM
+# and the runtime's resident set (linux.py).
+SOAK_MEMORY = ('psramFree', 'internalFree', 'internalLargestBlock', 'ramAvailable', 'processRss')
+
+
 def suite_soak(ctx, frame, rounds=None):
     """Every scene once per round; memory after each round. A steady fall is a leak."""
     rounds = rounds or getattr(ctx, 'soak_rounds', 5)
@@ -512,7 +540,7 @@ def suite_soak(ctx, frame, rounds=None):
     t0 = time.time()
     samples = []
     st = status(con)
-    samples.append({'round': 0, **{k: (st.get('memory') or {}).get(k) for k in ('psramFree', 'internalFree', 'internalLargestBlock')}})
+    samples.append({'round': 0, **{k: (st.get('memory') or {}).get(k) for k in SOAK_MEMORY}})
     for r in range(1, rounds + 1):
         for s in scenes:
             con.drain()
@@ -521,12 +549,16 @@ def suite_soak(ctx, frame, rounds=None):
             con.idle(0.5)
         con.idle(3)
         st = status(con)
-        samples.append({'round': r, **{k: (st.get('memory') or {}).get(k) for k in ('psramFree', 'internalFree', 'internalLargestBlock')}})
+        samples.append({'round': r, **{k: (st.get('memory') or {}).get(k) for k in SOAK_MEMORY}})
     issues = incidents_since(con, t0, 'soak')
-    for key, tol in (('internalFree', 4096), ('psramFree', 65536)):
+    for key, tol in (('internalFree', 4096), ('psramFree', 65536), ('ramAvailable', 4 << 20)):
         vals = [s[key] for s in samples[1:] if s.get(key) is not None]
         if len(vals) >= min(5, rounds) and len(vals) >= 3 and all(b < a for a, b in zip(vals, vals[1:])) and vals[0] - vals[-1] > tol:
             issues.append(issue('fail', 'leak', 'soak', f'{key} fell every round: {vals}'))
+    # A Linux frame: the runtime's resident memory climbing every round.
+    vals = [s['processRss'] for s in samples[1:] if s.get('processRss') is not None]
+    if len(vals) >= 3 and all(b > a for a, b in zip(vals, vals[1:])) and vals[-1] - vals[0] > (2 << 20):
+        issues.append(issue('fail', 'leak', 'soak', f'processRss rose every round: {vals}'))
     return {'soak': samples, 'issues': issues, 'left_out': left_out}
 
 
@@ -569,6 +601,11 @@ class Tarpit:
 
 def suite_offline(ctx, frame, tarpit_port=8998):
     """The frame's backend hangs: scene switches and renders must still be prompt."""
+    if frame.get('linux'):
+        # Its backend address is frame.json's, read once at start (a change is
+        # a push and a restart), and a Linux runtime makes no backend round
+        # trip on its render path: no console `set backend` to point it away.
+        return {'skipped': 'a Linux frame: its backend cannot be pointed away for a while', 'issues': []}
     con = ctx.console(frame)
     if frame['kind'] != 'local' or not ctx.host_ip or not frame.get('backend_url'):
         return {'skipped': 'needs a local-rendering frame with a backend, and --host-ip', 'issues': []}
@@ -817,6 +854,8 @@ def suite_desktop(ctx, frame, layouts=None):
                 win = {'scene': s.get('name'), 'wall_ms': round((t_done - t) * 1000) if t_done else None,
                        'done_ms': w['done'][-1]['ms'] if w['done'] else None, 'freePsram': ev.get('freePsram'),
                        'in_place': (w['renders'][-1] if w['renders'] else {}).get('in_place')}
+                if t_done and unlogged_since(con, t):
+                    win.update({'wall_ms': None, 'done_ms': None, 'unlogged': True})
                 if frame['touch'] and t_done:
                     con.drain()
                     tt = time.time()
@@ -834,7 +873,7 @@ def suite_desktop(ctx, frame, layouts=None):
             t = time.time()
             con.send('event setCurrentScene {"sceneId":"%s"}' % open_list[0]['id'])
             t_done, _, got = wait_render(con, render_timeout(frame))
-            entry['refocus_first_ms'] = round((t_done - t) * 1000) if t_done else None
+            entry['refocus_first_ms'] = round((t_done - t) * 1000) if t_done and not unlogged_since(con, t) else None
             entry['loaded_again'] = any('loadScene' in x for _, x in got)
             st = status(con)
             entry['after'] = {k: (st.get('memory') or {}).get(k) for k in ('psramFree', 'internalFree')}
@@ -882,7 +921,10 @@ def _asked_restart(con, frame, t, where, rotate=None):
     came back rotated ten seconds later" (the reTerminal Sticky, 2026-11-22).
     Returns (measurements, issues); the asked-for boot leaves `con.boots`."""
     issues = []
-    t_boot, _, _ = con.wait_for(lambda x: '"event":"bootup"' in x, 120)
+    # A Linux frame takes a pushed setting by reloading its config, or by a
+    # restart (linux.py): either is the apply asked for.
+    linux = frame.get('linux')
+    t_boot, line, _ = con.wait_for(lambda x: '"event":"bootup"' in x or (linux and '"event":"event:reload"' in x), 120)
     if not t_boot:
         return {'restart_ms': None}, [issue('fail', 'no_restart', where, 'the board did not restart within 120 s')]
     t_done, _, _ = wait_render(con, render_timeout(frame) + 60)
@@ -897,6 +939,8 @@ def _asked_restart(con, frame, t, where, rotate=None):
     out = {'restart_ms': round((t_boot - t) * 1000), 'to_render_ms': round((t_done - t) * 1000) if t_done else None,
            'wake': causes[-1] if causes else None, 'rotate': turned[-1] if turned else None, 'boots': len(boots),
            'notice': notices[-1] if notices else None}
+    if linux:
+        out['applied_by'] = 'restart' if '"event":"bootup"' in (line or '') else 'reload'
     if notices and notices[-1] != 'ESP_OK':
         issues.append(issue('note', 'restart_notice', where, f'the restart notice was not drawn: {notices[-1]}'))
     if out['restart_ms'] > 25000:
