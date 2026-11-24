@@ -169,7 +169,11 @@ buffers had ffmpeg warn that all of them were in use.
 **A decoder that is behind.** A launch whose frames take more than 1.2 frame
 times to make over its first 12 is started again where it was with a slow
 decoder's shortcuts: no loop filter (`-skip_loop_filter all -flags2 fast`)
-and the scaler's `fast_bilinear`. A machine of one core (a Pi Zero, a Pi 1)
+and the scaler's `fast_bilinear`, or its nearest pixel (`neighbor`) when it
+makes the picture smaller (`scaleFlags`): it reads only the source's rows it
+keeps, and reading a VideoCore's frames is what costs a Pi Zero most (157 ms
+of ffmpeg a 1080p frame into 720x405 with the fast bilinear, 98 with the
+nearest pixel; aliasing on fine detail is the price). A machine of one core (a Pi Zero, a Pi 1)
 starts with them, a relaunch costing it seconds. Such a decoder also starts a
 file at the keyframe before the time asked for (ffprobe's `-read_intervals
 t%+#1`, `keyframeBefore`), the clock from there: an exact start decodes every

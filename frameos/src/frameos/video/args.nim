@@ -189,8 +189,16 @@ proc frameSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): (i
 
 proc scaleFlags*(fast: bool, srcWidth, srcHeight, width, height: int): string =
   ## The scaler: bilinear; a decoder that is behind (a Pi Zero from its first
-  ## frame) the fast bilinear, a sixth less of a Pi Zero's 720p frame.
-  if fast: "fast_bilinear" else: "bilinear"
+  ## frame) the fast bilinear, and the nearest pixel when it makes a picture
+  ## smaller, which reads only the source's rows it keeps: what costs a Pi
+  ## Zero most is reading the VideoCore's frames, which the CPU sees uncached.
+  ## There, its VideoCore decoding (2026-11-24), 1080p into 720x405 was 157
+  ## ms of ffmpeg a frame with the fast bilinear and 98 with the nearest
+  ## pixel; 720p 107 and 92. A picture made bigger keeps the fast bilinear:
+  ## the nearest pixel would be blocks there, and saves little.
+  if not fast: "bilinear"
+  elif srcWidth > width and srcHeight > height: "neighbor"
+  else: "fast_bilinear"
 
 proc fitFilter*(width, height: int, fit: VideoFit, fast = false, srcWidth = 0, srcHeight = 0): string =
   ## Scaled to the frame's size (frameSize): a contained picture of a known

@@ -70,6 +70,16 @@ suite "video args":
     check contained[contained.find("-vf") + 1] == "fps=30,scale=720:405:flags=bilinear,setsar=1"
     let unknown = decodeArgs(source, 720, 720, vfContain, vpRgb565, 0, 30, loopFile = true, threads = 0)
     check "pad=720:720:(ow-iw)/2:(oh-ih)/2:color=black" in unknown[unknown.find("-vf") + 1]
+    # A decoder that is behind: the nearest pixel to make a picture smaller,
+    # the fast bilinear to make one bigger.
+    let behind = VideoDecode(fast: true)
+    let smaller = decodeArgs(source, 720, 720, vfContain, vpRgb565, 0, 30, loopFile = true, threads = 0,
+      decode = behind, srcWidth = 1920, srcHeight = 1080)
+    check smaller[smaller.find("-vf") + 1] == "fps=30,scale=720:405:flags=neighbor,setsar=1"
+    let bigger = decodeArgs(source, 720, 720, vfContain, vpRgb565, 0, 30, loopFile = true, threads = 0,
+      decode = behind, srcWidth = 640, srcHeight = 360)
+    check bigger[bigger.find("-vf") + 1] == "fps=30,scale=720:405:flags=fast_bilinear,setsar=1"
+    check scaleFlags(false, 1920, 1080, 720, 405) == "bilinear"
     # A still is the box, padded (one frame: nothing to save).
     let still = stillArgs(source, 3, 720, 720, vfContain, vpRgb565)
     check "pad=720:720" in still[still.find("-vf") + 1]
