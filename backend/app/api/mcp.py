@@ -49,6 +49,11 @@ async def api_mcp(
             status_code=HTTPStatus.NOT_IMPLEMENTED,
             detail="The MCP server is not available through Home Assistant ingress",
         )
+    # JSON-RPC is JSON: a `text/plain` body is what a page on another origin
+    # can post without a preflight, and no MCP client sends one.
+    media_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if media_type != "application/json":
+        return _rpc_error(INVALID_REQUEST, "Content-Type must be application/json", HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
     body = await read_body_limited(request, MAX_MCP_BODY_BYTES, "Request too large")
     try:
         payload = json.loads(body) if body else None

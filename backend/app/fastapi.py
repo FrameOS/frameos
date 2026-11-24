@@ -41,6 +41,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)
 app.add_middleware(GzipRequestMiddleware)
+if config.HASSIO_RUN_MODE != "ingress":
+    # A mutation that rides the session cookie must come from one of our own
+    # pages (app/utils/same_origin.py). Under ingress the credential is Home
+    # Assistant's, not our cookie, and its proxy is the only peer.
+    from app.utils.same_origin import SameOriginGuard
+
+    app.add_middleware(SameOriginGuard)
 if config.HASSIO_RUN_MODE == "ingress":
     # Added last = outermost: the ingress routers carry no user auth (Home
     # Assistant does that), so nothing but the Supervisor's proxy may reach

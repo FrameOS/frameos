@@ -1,6 +1,5 @@
 import datetime
 from typing import Optional
-from urllib.parse import urlparse
 
 from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -31,7 +30,8 @@ from app.utils.session_cookie import (
     decode_session_cookie_claims,
 )
 from app.utils.rate_limit import clear_rate_limit, hit_rate_limit, over_rate_limit, rate_limit_key
-from app.utils.request_ip import client_ip_for_request, peer_is_trusted_proxy
+from app.utils.request_ip import client_ip_for_request
+from app.utils.same_origin import hosts_match as _hosts_match, origin_is_ours  # noqa: F401
 
 from . import api_open, api_user
 
@@ -318,20 +318,6 @@ async def get_current_user_from_request(
     return db.query(User).filter(User.email == email).first()
 
 
-def _hosts_match(origin_host: str, candidate: str) -> bool:
-    """host[:port] equality, case-insensitive, with the default ports the
-    browser leaves off its Origin (`https://x` vs `Host: x:443`) treated as
-    absent on both sides."""
-    def normalize(value: str) -> str:
-        value = value.strip().lower()
-        for default in (":443", ":80"):
-            if value.endswith(default):
-                value = value[: -len(default)]
-        return value
-
-    return bool(candidate) and normalize(origin_host) == normalize(candidate)
-
-
 def websocket_origin_allowed(websocket: WebSocket) -> bool:
     """Whether a WebSocket handshake comes from a page on this backend.
 
@@ -339,38 +325,14 @@ def websocket_origin_allowed(websocket: WebSocket) -> bool:
     set by page script, so a mismatch against the host the browser dialled
     is a cross-site page opening a socket with the user's cookie (SameSite=Lax
     does not cover WebSockets). Non-browser clients send no Origin and pass;
-    the cookie check that follows still applies to them.
-
-    The host the browser dialled is `Host`, or — behind a proxy that rewrites
-    `Host` to the upstream (nginx without `proxy_set_header Host $host`, the
-    vite dev proxy with `changeOrigin`) — `X-Forwarded-Host`, honoured from
-    trusted proxy peers only (app/utils/request_ip.py). A configured
-    `FRAMEOS_PUBLIC_URL` is always an accepted origin. Compared as host:port,
-    scheme ignored: a TLS-terminating proxy changes the scheme the browser
-    sees, never the host it dialled.
-    """
+    the cookie check that follows still applies to them. What counts as the
+    host the browser dialled is `origin_is_ours` (app/utils/same_origin.py),
+    shared with the guard on cookie-authenticated mutations."""
     origin = websocket.headers.get("origin")
     if not origin:
         return True
-    try:
-        origin_host = urlparse(origin).netloc
-    except ValueError:
-        return False
-    if not origin_host:
-        return False
-
-    candidates = [websocket.headers.get("host", "")]
     peer = websocket.client.host if websocket.client else None
-    if peer_is_trusted_proxy(peer):
-        forwarded_host = websocket.headers.get("x-forwarded-host", "").split(",", 1)[0]
-        candidates.append(forwarded_host)
-    public_url = (app_config.config.FRAMEOS_PUBLIC_URL or "").strip()
-    if public_url:
-        try:
-            candidates.append(urlparse(public_url).netloc)
-        except ValueError:
-            pass
-    return any(_hosts_match(origin_host, candidate) for candidate in candidates)
+    return origin_is_ours(origin, websocket.headers, peer)
 
 
 def get_current_user_from_websocket(

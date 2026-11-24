@@ -35,7 +35,7 @@ Environment variables on the backend (`backend/app/config.py`):
 | an `http://` origin | only for localhost, RFC1918 and `.local` hosts — everything the link carries (the token, grants, identity claims) is forgeable by an on-path attacker over plain HTTP |
 | `disabled` | hide the cloud link feature entirely |
 
-Behind a reverse proxy, also set the two variables below. Every WebSocket handshake (the live log stream, the Terminal panel) is refused unless the browser's `Origin` matches the host the backend sees, so a proxy that rewrites `Host` to the upstream must either pass it through (`proxy_set_header Host $host` in nginx) or send `X-Forwarded-Host` from an address listed in `FRAMEOS_TRUSTED_PROXIES`; a `FRAMEOS_PUBLIC_URL` origin is always accepted.
+Behind a reverse proxy, also set the two variables below. Every WebSocket handshake (the live log stream, the Terminal panel) is refused unless the browser's `Origin` matches the host the backend sees, and so is every change made with the session cookie (a save, a deploy, a reboot: 403 `cross_site_request`) when the browser reports another origin: `Sec-Fetch-Site` where the browser sends it (https and localhost), else `Origin` against that same host (`backend/app/utils/same_origin.py`). So a proxy that rewrites `Host` to the upstream must either pass it through (`proxy_set_header Host $host` in nginx) or send `X-Forwarded-Host` from an address listed in `FRAMEOS_TRUSTED_PROXIES`; a `FRAMEOS_PUBLIC_URL` origin is always accepted. Bearer callers (API tokens, the MCP clients, the iOS app, frames) are not asked.
 
 | Variable | Meaning |
 |---|---|

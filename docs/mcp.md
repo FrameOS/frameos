@@ -87,7 +87,8 @@ minted filled in.
 
 `backend/app/api/mcp.py` answers one JSON-RPC request per POST and keeps
 nothing: JSON responses, no SSE stream, no session id (`GET` and `DELETE`
-are 405). The protocol itself — `initialize`, `ping`, `tools/list`,
+are 405). The body is `application/json` (415 otherwise: any other type is
+what a page on another origin could post without a preflight). The protocol itself — `initialize`, `ping`, `tools/list`,
 `tools/call`, `resources/list`, `resources/templates/list`,
 `resources/read`, `prompts/list`, `prompts/get`, batches for older clients —
 is `backend/app/mcp/protocol.py`, small enough to own rather than add the
