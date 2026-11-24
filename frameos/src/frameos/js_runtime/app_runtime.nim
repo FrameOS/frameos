@@ -2006,41 +2006,64 @@ when not defined(frameosEmbedded):
 ## Streams let apps pass around and process data bigger than memory allows in
 ## one piece: a data app can return a streamRef (it travels between nodes as
 ## plain JSON), and the consumer reads it chunk by chunk. Backed by simple
-## string streams or files inside the assets folder. The registry is global so
-## refs resolve across app runtimes; it is capped, evicting (and closing) the
-## oldest stream, so forgotten handles cannot pile up.
+## string streams or files inside the assets folder. The registry is one for
+## every app runtime, so a ref resolves in any app of the scene that opened
+## it, and in no other scene: the ids count up, and a scene that guessed one
+## read, wrote or closed a file another scene had open. It is capped, evicting
+## (and closing) the oldest stream, the opener's own first, so forgotten
+## handles cannot pile up and one scene's cannot push out another's.
 const MaxOpenJsStreams = 64
 const DefaultJsStreamChunkBytes = 65536
+const MaxStringStreamBytes = when defined(frameosEmbedded): 512 * 1024 else: 16 * 1024 * 1024
+  ## What a scene's string streams hold together: they are memory of the
+  ## runtime's own, outside the JS heap's ceiling, and `streamWrite` grew one
+  ## without end.
 
 type JsStream = object
   stream: Stream
   lines: LineReader ## set by openLines: what nextLine reads
   spool: Spool ## the bytes a line reader reads, kept as long as it is open
+  scene: string ## the scene whose app opened it
 
 var jsStreamsGlobal = initOrderedTable[int, JsStream]()
 var jsNextStreamId = 0
 
-proc registerJsStream(stream: Stream, lines: LineReader = nil, spool: Spool = nil): JsonNode =
+proc registerJsStream(scene: string, stream: Stream, lines: LineReader = nil, spool: Spool = nil): JsonNode =
   while jsStreamsGlobal.len >= MaxOpenJsStreams:
-    for id in jsStreamsGlobal.keys:
-      try:
-        jsStreamsGlobal[id].stream.close()
-      except CatchableError:
-        discard
-      jsStreamsGlobal.del(id)
-      break
+    var oldest = 0
+    for id, held in jsStreamsGlobal.pairs:
+      if oldest == 0:
+        oldest = id
+      if held.scene == scene:
+        oldest = id
+        break
+    try:
+      jsStreamsGlobal[oldest].stream.close()
+    except CatchableError:
+      discard
+    jsStreamsGlobal.del(oldest)
   inc jsNextStreamId
-  jsStreamsGlobal[jsNextStreamId] = JsStream(stream: stream, lines: lines, spool: spool)
+  jsStreamsGlobal[jsNextStreamId] = JsStream(stream: stream, lines: lines, spool: spool, scene: scene)
   return %*{"__frameosType": "streamRef", "id": jsNextStreamId}
 
-proc jsStreamById(options: JsonNode): Stream =
+proc jsStreamOf(scene: string, id: int): bool =
+  ## Whether `id` is a stream an app of `scene` opened.
+  id != 0 and jsStreamsGlobal.hasKey(id) and jsStreamsGlobal[id].scene == scene
+
+proc jsStreamById(scene: string, options: JsonNode): Stream =
   let id = options{"id"}.getInt(0)
-  if id != 0 and jsStreamsGlobal.hasKey(id):
+  if jsStreamOf(scene, id):
     return jsStreamsGlobal[id].stream
   return nil
 
-proc closeJsStream(id: int): bool =
-  if id == 0 or not jsStreamsGlobal.hasKey(id):
+proc stringStreamBytes(scene: string): int =
+  ## What the scene's string streams hold now.
+  for held in jsStreamsGlobal.values:
+    if held.scene == scene and held.stream of StringStream:
+      result += StringStream(held.stream).data.len
+
+proc closeJsStream(scene: string, id: int): bool =
+  if not jsStreamOf(scene, id):
     return false
   try:
     jsStreamsGlobal[id].stream.close()
@@ -2053,7 +2076,7 @@ proc closeLineStreams(runtime: JsAppRuntime) =
   ## card for as long as a reader holds it.
   for id in runtime.lineStreamIds:
     try:
-      discard closeJsStream(id)
+      discard closeJsStream(runtime.sceneId, id)
     except CatchableError:
       discard
   runtime.lineStreamIds.setLen(0)
@@ -2076,20 +2099,21 @@ proc jsOpenLines(ctx: ptr JSContext, text: JSValue, optionsJson: JSValue): JSVal
   if e == nil:
     return jsUndefSentinel(ctx)
   var options = optionsArg(ctx, optionsJson)
+  let scene = e.runtime.sceneId
   try:
     let source = options{"source"}
     var reference: JsonNode = nil
     if source.isNil or source.kind == JNull:
-      reference = registerJsStream(newStringStream(toNimString(ctx, text)))
+      reference = registerJsStream(scene, newStringStream(toNimString(ctx, text)))
     elif source{"spool"}.getStr("").len > 0:
       let field = source{"spool"}.getStr()
       if not e.runtime.spoolFields.hasKey(field):
         return jsNull(ctx)
       let spool = e.runtime.spoolFields[field]
-      reference = registerJsStream(newStream(spool), spool = spool)
+      reference = registerJsStream(scene, newStream(spool), spool = spool)
     else:
       let id = source{"id"}.getInt(0)
-      if not jsStreamsGlobal.hasKey(id):
+      if not jsStreamOf(scene, id):
         return jsNull(ctx)
       reference = %*{"__frameosType": "streamRef", "id": id}
     let id = reference{"id"}.getInt()
@@ -2102,32 +2126,33 @@ proc jsOpenLines(ctx: ptr JSContext, text: JSValue, optionsJson: JSValue): JSVal
 
 proc jsNextLine(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
   ## The next line, or null at the end. Called once per line of a feed.
+  let e = env(ctx)
   let streamId = toNimFloat(ctx, id).int
-  if not jsStreamsGlobal.hasKey(streamId) or jsStreamsGlobal[streamId].lines.isNil:
+  if e == nil or not jsStreamOf(e.runtime.sceneId, streamId) or jsStreamsGlobal[streamId].lines.isNil:
     return jsNull(ctx)
   var line = ""
   try:
     if jsStreamsGlobal[streamId].lines.nextLine(line):
       return nimStringToJS(ctx, line)
   except CatchableError as err:
-    let e = env(ctx)
-    if e != nil:
-      frameos_apps.logError(e.owner, "JS app nextLine failed: " & err.msg)
+    frameos_apps.logError(e.owner, "JS app nextLine failed: " & err.msg)
   return jsNull(ctx)
 
 proc jsNextBlock(ctx: ptr JSContext, id: JSValue, stop: JSValue): JSValue {.nimcall.} =
   ## The lines up to the next one starting with `stop`, or null at the end.
+  let e = env(ctx)
   let streamId = toNimFloat(ctx, id).int
-  if not jsStreamsGlobal.hasKey(streamId) or jsStreamsGlobal[streamId].lines.isNil:
+  # `stop` as text before the stream is looked up: the conversion can run
+  # the app's code, which can close it.
+  let stopAt = toNimString(ctx, stop)
+  if e == nil or not jsStreamOf(e.runtime.sceneId, streamId) or jsStreamsGlobal[streamId].lines.isNil:
     return jsNull(ctx)
   var text = ""
   try:
-    if jsStreamsGlobal[streamId].lines.nextBlock(toNimString(ctx, stop), text):
+    if jsStreamsGlobal[streamId].lines.nextBlock(stopAt, text):
       return nimStringToJS(ctx, text)
   except CatchableError as err:
-    let e = env(ctx)
-    if e != nil:
-      frameos_apps.logError(e.owner, "JS app nextBlock failed: " & err.msg)
+    frameos_apps.logError(e.owner, "JS app nextBlock failed: " & err.msg)
   return jsNull(ctx)
 
 proc jsTimeZoneInfo(ctx: ptr JSContext, name: JSValue): JSValue {.nimcall.} =
@@ -2170,25 +2195,36 @@ proc streamOpenAsset(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JS
     return jsNull(ctx)
   if stream.isNil:
     return jsNull(ctx)
-  jsonToJS(ctx, registerJsStream(stream))
+  jsonToJS(ctx, registerJsStream(e.runtime.sceneId, stream))
+
+proc streamCreate(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JSValue =
+  let bytes = decode(options{"base64"}.getStr(""))
+  if stringStreamBytes(e.runtime.sceneId) + bytes.len > MaxStringStreamBytes:
+    frameos_apps.logError(e.owner, "JS app createStream: this scene's streams hold too much already")
+    return jsNull(ctx)
+  jsonToJS(ctx, registerJsStream(e.runtime.sceneId, newStringStream(bytes)))
 
 proc streamRead(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JSValue =
-  let stream = jsStreamById(options)
+  let stream = jsStreamById(e.runtime.sceneId, options)
   if stream.isNil:
     return jsNull(ctx)
   let length = clamp(options{"length"}.getInt(DefaultJsStreamChunkBytes), 1, jsAssetReadMaxBytes(e))
   nimStringToJS(ctx, encode(stream.readStr(length)))
 
-proc streamWrite(options: JsonNode): bool =
-  let stream = jsStreamById(options)
+proc streamWrite(e: JsAppEvalEnv, options: JsonNode): bool =
+  let stream = jsStreamById(e.runtime.sceneId, options)
   if stream.isNil:
     return false
-  stream.write(decode(options{"base64"}.getStr("")))
+  let bytes = decode(options{"base64"}.getStr(""))
+  if stream of StringStream and stringStreamBytes(e.runtime.sceneId) + bytes.len > MaxStringStreamBytes:
+    frameos_apps.logError(e.owner, "JS app streamWrite: this scene's streams hold too much already")
+    return false
+  stream.write(bytes)
   true
 
-proc streamRewind(options: JsonNode): bool =
+proc streamRewind(scene: string, options: JsonNode): bool =
   let id = options{"id"}.getInt(0)
-  if not jsStreamsGlobal.hasKey(id):
+  if not jsStreamOf(scene, id):
     return false
   if jsStreamsGlobal[id].lines.isNil:
     jsStreamsGlobal[id].stream.setPosition(0)
@@ -2214,18 +2250,18 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
     of "openAsset":
       return streamOpenAsset(ctx, e, options)
     of "create":
-      return jsonToJS(ctx, registerJsStream(newStringStream(decode(options{"base64"}.getStr("")))))
+      return streamCreate(ctx, e, options)
     of "read":
       return streamRead(ctx, e, options)
     of "write":
-      return nimBoolToJS(ctx, streamWrite(options))
+      return nimBoolToJS(ctx, streamWrite(e, options))
     of "atEnd":
-      let stream = jsStreamById(options)
+      let stream = jsStreamById(e.runtime.sceneId, options)
       return nimBoolToJS(ctx, stream.isNil or stream.atEnd())
     of "rewind":
-      return nimBoolToJS(ctx, streamRewind(options))
+      return nimBoolToJS(ctx, streamRewind(e.runtime.sceneId, options))
     of "close":
-      return nimBoolToJS(ctx, closeJsStream(options{"id"}.getInt(0)))
+      return nimBoolToJS(ctx, closeJsStream(e.runtime.sceneId, options{"id"}.getInt(0)))
     else:
       frameos_apps.logError(e.owner, "JS app streams: unknown operation: " & opStr)
       return jsUndefSentinel(ctx)
