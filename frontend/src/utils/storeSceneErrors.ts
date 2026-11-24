@@ -111,6 +111,8 @@ export function storeSceneErrorMessage(
       return 'The ZIP has no template.json'
 
     // Images
+    case 'duplicate_scene_files':
+      return 'The ZIP has more than one scenes.json or template.json'
     case 'image_too_large':
       return 'Image too large (max 4 MB)'
     case 'unsupported_image':

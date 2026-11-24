@@ -42,7 +42,7 @@ import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
 import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layouts";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
-import { unzipBounded } from "./zip-bounded";
+import { readSceneZipScenes } from "./scene-zip";
 import { sceneHashes } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
@@ -1828,36 +1828,18 @@ export async function storeServiceSettingGroups(
     .where(eq(frames.id, frameId));
 }
 
-// Pull the shallowest scenes.json out of a published template zip. The zip is
-// untrusted input (an old version row, a future publish path), so it gets the
-// same entry-count and uncompressed-size caps validateSceneZip enforces at
-// publish time — zip-bomb defence in depth. `bytes` is the raw scenes.json
-// length, used to bound the assembled payload before it is re-serialized.
+// Pull scenes.json out of a published template zip: the file its checks read
+// when it was published (scene-zip.ts, the one rule for which file that is;
+// a frame must never be sent another). The zip is untrusted input (an old
+// version row, a future publish path), so it gets the same entry-count and
+// uncompressed-size caps validateSceneZip enforces at publish time — zip-bomb
+// defence in depth. `bytes` is the raw scenes.json length, used to bound the
+// assembled payload before it is re-serialized.
 export function extractScenesJson(
   zip: Buffer,
 ): { bytes: number; scenes: unknown[] } | undefined {
-  try {
-    let best: { path: string; data: Uint8Array } | undefined;
-    // Inflate only scenes.json; other entries still count against the caps
-    // but are never decompressed.
-    const entries = unzipBounded(new Uint8Array(zip), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    for (const [path, data] of Object.entries(entries)) {
-      if (!best || path.split("/").length < best.path.split("/").length) {
-        best = { data, path };
-      }
-    }
-    if (!best || best.data.length > maxSceneZipUncompressedBytes) {
-      return undefined;
-    }
-    const parsed = JSON.parse(Buffer.from(best.data).toString("utf8"));
-    return Array.isArray(parsed)
-      ? { bytes: best.data.length, scenes: parsed }
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  const extracted = readSceneZipScenes(zip);
+  return extracted && extracted.bytes <= maxSceneZipUncompressedBytes ? extracted : undefined;
 }
 
 // Resolve the store_scene_versions row an assignment actually pins: the

@@ -21,7 +21,7 @@ import { readSession } from "../../../../../../src/lib/session";
 import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 import { photoLinkRefusal } from "../../../../../../src/lib/store-photo-links";
-import { unzipBounded } from "../../../../../../src/lib/zip-bounded";
+import { readSceneZipScenes } from "../../../../../../src/lib/scene-zip";
 
 export const runtime = "nodejs";
 
@@ -193,25 +193,10 @@ function versionParam(request: NextRequest): number | undefined | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-// The zip was validated at publish (validateSceneZip); this re-extract only
-// inflates the one file it returns.
+// The zip was validated at publish (validateSceneZip); this reads the file
+// that was checked then (scene-zip.ts) and inflates nothing else.
 function extractScenesJson(content: Buffer): unknown[] | undefined {
-  try {
-    const files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    const path = Object.keys(files).sort(
-      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
-    )[0];
-    const bytes = path ? files[path] : undefined;
-    if (!bytes) {
-      return undefined;
-    }
-    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-    return Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+  return readSceneZipScenes(content)?.scenes;
 }
 
 // Cache policy is per-response here (see storeRoute): anything this

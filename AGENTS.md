@@ -354,6 +354,10 @@
   scenes only, no service key ever granted, refused while the settings on the
   screen are off; `show: false` installs without leaving the store. Only a
   frame with no plane installs by itself. Keep the two routes alike.
+- **A store zip's scenes.json is found by one function**, the cloud's
+  `src/lib/scene-zip.ts` (the file beside the shallowest template.json): the
+  checks at publish and every reader of a stored zip. A new reader goes
+  through it, never its own walk of the entries.
 
 ## The terminal: `docs/terminal.md`
 

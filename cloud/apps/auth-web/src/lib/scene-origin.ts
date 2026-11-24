@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from "fflate";
 import { withAppPermissions } from "../../../../../frontend/src/utils/sceneAccess";
 import { getScenesBaseUrl } from "./env";
-import { unzipBounded } from "./zip-bounded";
+import { readSceneZip } from "./scene-zip";
 
 // Where an installed scene came from — the `origin` field on every scene
 // object that leaves the store. The frameos workspace reads it to say
@@ -90,25 +90,8 @@ export function rebuildZipWithSceneOrigins(
   source: StoreSceneOriginSource,
 ): Buffer | undefined {
   try {
-    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort(
-        (a, b) =>
-          a.split("/").length - b.split("/").length || a.localeCompare(b),
-      )[0];
-    if (!manifestPath) {
-      return undefined;
-    }
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenesBytes = files[`${folder}scenes.json`];
-    const manifestBytes = files[manifestPath];
-    if (!scenesBytes || !manifestBytes) {
+    const files = readSceneZip(zipBytes);
+    if (!files?.scenes) {
       return undefined;
     }
     const scenes: unknown = JSON.parse(Buffer.from(scenesBytes).toString("utf8"));
@@ -116,14 +99,16 @@ export function rebuildZipWithSceneOrigins(
       return undefined;
     }
     const next: Record<string, Uint8Array> = {
+    const { folder, manifestPath } = files;
+    const scenesBytes = files.scenes;
+    const manifestBytes = files.manifest;
       [manifestPath]: manifestBytes,
       [`${folder}scenes.json`]: strToU8(
         JSON.stringify(withStoreSceneOrigin(scenes, source), null, 2),
       ),
     };
-    const image = files[`${folder}image.jpg`];
-    if (image) {
-      next[`${folder}image.jpg`] = image;
+    if (files.image) {
+      next[`${folder}image.jpg`] = files.image;
     }
     return Buffer.from(zipSync(next));
   } catch {
