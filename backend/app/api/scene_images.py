@@ -216,12 +216,18 @@ async def get_scene_image(
 
 # One scene snapshot, as posted by the frame or copied from a cover.
 MAX_SCENE_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_SCENE_IMAGE_PIXELS = 7680 * 4320
 
 
 def _normalize_scene_image(body: bytes) -> tuple[bytes, int, int, bytes, int, int]:
     """PNG + thumbnail from whatever bytes arrived. Pure CPU (two PIL passes),
     so the async routes run it on a thread rather than the event loop."""
     with Image.open(io.BytesIO(body)) as img:
+        # Checked on the header, before the decode: 32 MB of a well-compressed
+        # PNG is billions of pixels, and Pillow's own ceiling is a warning
+        # under 178 MP. The largest real snapshot is an 8K panel's.
+        if img.size[0] * img.size[1] > MAX_SCENE_IMAGE_PIXELS:
+            raise ValueError("image too large")
         if img.mode != "RGB":
             img = img.convert("RGB")
         width, height = img.size
