@@ -172,9 +172,12 @@ export function bridgeFirmwareSource(connection: BridgeConnection): FirmwareSour
         )
       }
       const bytes = new Uint8Array(answer.bytes)
-      await verifyReleaseImage(bytes, answer.minisig, listing.release, platform)
+      // The release the page's plane served these bytes from, which its
+      // release cache may have moved to since the listing.
+      const release = /^v?\d+(\.\d+)*$/.test(answer.release) ? answer.release : (listing.release ?? '')
+      await verifyReleaseImage(bytes, answer.minisig, release, platform)
       log(`Checked ${asset.name} against the FrameOS release signature.`)
-      return { bytes, name: asset.name, release: listing.release ?? '', signed: true }
+      return { bytes, name: asset.name, release, signed: true }
     },
   }
 }

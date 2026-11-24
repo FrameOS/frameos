@@ -468,13 +468,14 @@ async function downloadFirmware(
 ): Promise<Uint8Array> {
   log(`Downloading ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)…`)
   const query = `?platform=${encodeURIComponent(asset.platform)}`
-  const firmwareResponse = await fetch(`${firmwareApiUrl}${query}`)
+  const firmwareResponse = await fetch(`${firmwareApiUrl}${query}`, { cache: 'no-store' })
   if (!firmwareResponse.ok) {
     throw await releaseLookupErrorFromResponse(firmwareResponse, 'firmware download')
   }
   const bytes = new Uint8Array(await firmwareResponse.arrayBuffer())
+  const servedRelease = firmwareResponse.headers.get('x-frameos-release')
   const signature = await fetch(`${firmwareApiUrl}${query}&signature=1`, { cache: 'no-store' })
-  if (signature.status === 409 && firmwareResponse.headers.get('x-frameos-release') === 'local-dev') {
+  if (signature.status === 409 && servedRelease === 'local-dev') {
     log(`${asset.name} is a development build with no release signature: writing it unverified.`)
     return bytes
   }
@@ -484,7 +485,9 @@ async function downloadFirmware(
       'signature_unavailable'
     )
   }
-  await verifyReleaseImage(bytes, await signature.text(), release, asset.platform)
+  // The release that served these bytes, which the cloud's release cache may
+  // have moved to since the listing.
+  await verifyReleaseImage(bytes, await signature.text(), servedRelease || release, asset.platform)
   log(`Checked ${asset.name} against the FrameOS release signature.`)
   return bytes
 }

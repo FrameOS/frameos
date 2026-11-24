@@ -153,7 +153,10 @@ export function httpFirmwareSource(
 ): FirmwareSource {
   return {
     async listing() {
-      const response = await fetcher(baseUrl)
+      // Never the browser's copy: a backend's listing may be cached for
+      // minutes, and a release named by a stale listing is not the one whose
+      // image and signature come next.
+      const response = await fetcher(baseUrl, { cache: 'no-store' })
       if (!response.ok) {
         throw new Error('Could not look up the latest FrameOS release.')
       }
@@ -171,9 +174,12 @@ export function httpFirmwareSource(
         throw new Error('Could not download the firmware image.')
       }
       const bytes = new Uint8Array(await response.arrayBuffer())
-      const release = listing.release ?? ''
-      // A plane serves its development build under "local-dev"; nothing signs it.
-      const localDev = response.headers.get('x-frameos-release') === 'local-dev'
+      // The release that served these bytes (a plane's release cache can move
+      // on between the listing and the download). A plane serves its
+      // development build under "local-dev"; nothing signs it.
+      const servedRelease = response.headers.get('x-frameos-release')
+      const localDev = servedRelease === 'local-dev'
+      const release = servedRelease && !localDev ? servedRelease : (listing.release ?? '')
       const signature = await fetcher(`${baseUrl}${query}&signature=1`, { cache: 'no-store' })
       if (signature.status === 409 && localDev && !requireSignature) {
         log(`${asset.name} is a development build with no release signature: writing it unverified.`)

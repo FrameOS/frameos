@@ -268,3 +268,42 @@ describe("bridgeFirmwareSource", () => {
     );
   });
 });
+
+describe("httpFirmwareSource", () => {
+  it("checks the bytes as the release that served them, and never writes an unsigned release image", async () => {
+    const { httpFirmwareSource } = await import("../../../../../../frontend/src/scenes/workspace/releaseFirmware");
+    const key = testSigningKey();
+    overrideReleaseSigningKeyForTests(key.publicKeyBase64);
+    const bytes = new Uint8Array([5, 6, 7]);
+    // The listing was read just before a new release; the bytes are the new one's.
+    const listing = {
+      release: "v2026.11.14",
+      assets: [{ name: "frameos-2026.11.14-esp32-s3-generic.bin", platform: "esp32-s3-generic", size: 3 }],
+    };
+    const fetcher = (signedAs: string | null, servedRelease = "v2026.11.15") =>
+      vi.fn(async (url: string) => {
+        if (url.endsWith("&signature=1")) {
+          return signedAs ? new Response(key.minisigFor(bytes, { signedAs })) : Response.json({}, { status: 409 });
+        }
+        return new Response(bytes.slice(), { headers: { "x-frameos-release": servedRelease } });
+      });
+
+    const newer = httpFirmwareSource(fetcher("frameos-2026.11.15-esp32-s3-generic.bin"), { requireSignature: true });
+    await expect(newer.image("esp32-s3-generic", listing, () => undefined)).resolves.toMatchObject({
+      release: "v2026.11.15",
+      signed: true,
+    });
+
+    // A release image with no signature is refused even by a plane's own
+    // flasher; only its local-dev build is written unverified, and never by
+    // flash.frameos.net.
+    const unsigned = httpFirmwareSource(fetcher(null), { requireSignature: false });
+    await expect(unsigned.image("esp32-s3-generic", listing, () => undefined)).rejects.toThrow(/could not be fetched/);
+    const localDev = httpFirmwareSource(fetcher(null, "local-dev"), { requireSignature: false });
+    await expect(localDev.image("esp32-s3-generic", listing, () => undefined)).resolves.toMatchObject({ signed: false });
+    const localDevOnFlasher = httpFirmwareSource(fetcher(null, "local-dev"), { requireSignature: true });
+    await expect(localDevOnFlasher.image("esp32-s3-generic", listing, () => undefined)).rejects.toThrow(
+      /could not be fetched/
+    );
+  });
+});
