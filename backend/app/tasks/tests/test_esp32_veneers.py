@@ -36,6 +36,24 @@ def test_every_file_with_iram_code_is_left_out():
     assert excluded - with_iram == set()
 
 
+def test_the_components_give_it_only_to_files_without_iram_code():
+    components = REPO_ROOT / "embedded" / "esp32" / "components"
+    given = {}
+    for name in ("frameos_display", "frameos_nim"):
+        text = (components / name / "CMakeLists.txt").read_text()
+        match = re.search(r'set_property\(SOURCE ((?:"[^"]+"\s*)+)\s*APPEND PROPERTY COMPILE_OPTIONS "-include" '
+                          r'"\$\{CMAKE_CURRENT_LIST_DIR\}/\.\./\.\./main/fos_veneers\.h"\)', text)
+        assert match, f"{name}/CMakeLists.txt no longer names its veneered files"
+        given[name] = re.findall(r'"([^"]+)"', match.group(1))
+    assert given["frameos_display"] and given["frameos_nim"]
+    for name, files in given.items():
+        for file in files:
+            source = (components / name / file).read_text()
+            assert "IRAM_ATTR" not in source and "ESP_INTR_FLAG_IRAM" not in source, f"{name}/{file}"
+    # The raster loops' helper on the other core keeps its direct calls.
+    assert "fos_rows.c" not in given["frameos_nim"]
+
+
 def test_the_header_is_forced_into_main_on_xtensa_only():
     text = CMAKE.read_text()
     block = text[text.index("if(CONFIG_IDF_TARGET_ARCH_XTENSA)\n    get_target_property(fos_veneered_srcs"):]

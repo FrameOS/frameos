@@ -100,3 +100,13 @@ if(NOT CMAKE_SCRIPT_MODE_FILE AND vendor_srcs)
     set_source_files_properties(${vendor_srcs}
         PROPERTIES COMPILE_OPTIONS "-Wno-error=format")
 endif()
+
+# The display layer's C that stands among the shell's objects (link_order.txt)
+# calls ROM and IRAM through the shell's veneers (main/fos_veneers.h,
+# test_esp32_veneers.py). Neither file has IRAM code: the RGB panel's
+# frame-done callback runs in an interrupt that is not IRAM-safe, so it is
+# masked whenever the flash is busy.
+if(NOT CMAKE_SCRIPT_MODE_FILE AND CONFIG_IDF_TARGET_ARCH_XTENSA)
+    set_property(SOURCE "frameos_display.c" "lcd_st7701s_rgb.c"
+        APPEND PROPERTY COMPILE_OPTIONS "-include" "${CMAKE_CURRENT_LIST_DIR}/../../main/fos_veneers.h")
+endif()
