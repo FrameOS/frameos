@@ -29,8 +29,10 @@ import {
   recentApprovalMaxAgeSeconds,
   recentAuthMaxAgeSeconds,
 } from "../../lib/recent-auth";
+import { googleAuthenticatedAt } from "../../lib/google-auth-time";
 import { hashSecret } from "../../lib/secrets";
 import { createSession, sessionCookieName } from "../../lib/session";
+import { completeFirstFactor } from "../../lib/sign-in";
 import { totpCodeAtStep, totpStepFor } from "../../lib/two-factor";
 import { webauthnChallengeCookieName } from "../../lib/webauthn";
 
@@ -450,6 +452,43 @@ describe("sensitive routes require a recent credential check", () => {
       params: Promise.resolve({ frameId }),
     });
     expect(revoke.status).toBe(200);
+  });
+
+  // A Google round trip is silent while the browser is signed in to Google.
+  // With the operator's auth_time switch on, the session it mints is only as
+  // fresh as Google's own last sign-in (src/lib/google-auth-time.ts).
+  it("a provider sign-in dated by the provider's auth_time is recent only if that is", async () => {
+    const user = await googleUser();
+    const profile = {
+      accountId: user.accountId,
+      email: user.email,
+      providerIssuer: googleIssuer,
+      providerSubject: `reauth-google-${userCounter}`,
+    };
+    const { frameId } = await seedFrame(user.accountId);
+    const tryRevoke = () =>
+      revokeFrame(request(`/api/frames/${frameId}/revoke`, { body: {} }), {
+        params: Promise.resolve({ frameId }),
+      });
+
+    const silent = await completeFirstFactor(db, {
+      authenticatedAt: googleAuthenticatedAt(Date.now() / 1000 - 3 * 86_400, true),
+      method: "google",
+      profile,
+    });
+    expect(silent.kind).toBe("session");
+    cookieJar.set(sessionCookieName, (silent as { token: string }).token);
+    const refused = await tryRevoke();
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("reauth_required");
+
+    const prompted = await completeFirstFactor(db, {
+      authenticatedAt: googleAuthenticatedAt(Date.now() / 1000 - 5, true),
+      method: "google",
+      profile,
+    });
+    cookieJar.set(sessionCookieName, (prompted as { token: string }).token);
+    expect((await tryRevoke()).status).toBe(200);
   });
 
   it("passkey re-authentication issues a challenge bound to the account and rejects junk", async () => {

@@ -1132,6 +1132,10 @@ export const frameEnrollmentTokens = pgTable(
       () => frames.id,
       { onDelete: "set null" },
     ),
+    // Minted with a personal API token (a script's credential, not the
+    // person's): every enrollment of such a token is born `pending`, whatever
+    // its max_uses, and waits for the owner's Confirm click (migration 0085).
+    mintedByApiToken: boolean("minted_by_api_token").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

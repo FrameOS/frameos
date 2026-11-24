@@ -12,6 +12,7 @@ import {
   maxPreviewImageBytes,
 } from "../../../../../../src/lib/store";
 import { registerStoreImage } from "../../../../../../src/lib/store-images";
+import { storeBanRefusal } from "../../../../../../src/lib/store-ban";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
 import {
   accountLimits,
@@ -45,6 +46,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   if (scene.status === "pulled") {
     return jsonError("scene_pulled", 403);
+  }
+  // A banned publisher adds nothing to a public scene (store-ban.ts).
+  if (scene.visibility === "public") {
+    const banned = await storeBanRefusal(db, session.accountId!);
+    if (banned) {
+      return banned;
+    }
   }
 
   const parsed = await readBoundedJsonObject(request, maxImageBodyBytes);

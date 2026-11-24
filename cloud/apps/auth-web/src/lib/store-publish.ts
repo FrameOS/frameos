@@ -1,9 +1,5 @@
 import { and, eq, gt, sql } from "drizzle-orm";
-import {
-  accounts,
-  type createDb,
-  storeScenes,
-} from "@frameos-cloud/db";
+import { type createDb, storeScenes } from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
 import { notifyScenePublished } from "./activity-notifications";
 import { recordAuditEvent } from "./audit";
@@ -14,6 +10,7 @@ import { moderateStoreContent } from "./moderation";
 import { meterAiUsage } from "./billing";
 import { classifyStoreScene, ruleCategory, ruleTags } from "./store-classify";
 import { isLayoutCategory } from "./categories";
+import { storeBanRefusal } from "./store-ban";
 import { newSceneDailyLimit } from "./store-publish-limit";
 import {
   detectImageContentType,
@@ -254,13 +251,9 @@ export async function publishStoreScene(
   const { accountId, actor, linkedClientId } = input;
   const content = input.content;
 
-  const [publisher] = await db
-    .select({ storeBannedAt: accounts.storeBannedAt })
-    .from(accounts)
-    .where(eq(accounts.id, accountId))
-    .limit(1);
-  if (publisher?.storeBannedAt) {
-    return jsonError("store_banned", 403);
+  const banned = await storeBanRefusal(db, accountId);
+  if (banned) {
+    return banned;
   }
 
   if (content.length === 0) {

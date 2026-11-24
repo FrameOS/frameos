@@ -16,6 +16,7 @@ import {
   getGoogleCallbackUrl,
   getGoogleOAuthConfig,
 } from "../../../../../src/lib/env";
+import { googleAuthTimeClaims } from "../../../../../src/lib/google-auth-time";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { reportError } from "../../../../../src/lib/log";
 
@@ -58,10 +59,18 @@ export async function GET(request: NextRequest) {
   // credentials; the callback then mints a fresh session as usual.
   const reauth = request.nextUrl.searchParams.get("reauth") === "1";
 
+  // Whether Google re-prompted is not ours to see in the answer unless the
+  // ID token says when the person last signed in to Google: asked for on
+  // every start when the operator turned that on (google-auth-time.ts).
+  const extraParams = {
+    ...(config.requireAuthTime ? { claims: googleAuthTimeClaims } : {}),
+    ...(reauth ? { prompt: "login" } : {}),
+  };
+
   const authorizationUrl = buildAuthorizationUrl(discovery, {
     clientId: config.clientId,
     codeChallenge: pkce.challenge,
-    ...(reauth ? { extraParams: { prompt: "login" } } : {}),
+    extraParams,
     nonce,
     redirectUri: getGoogleCallbackUrl(),
     scopes: [...frameosCloudAuthScopes],

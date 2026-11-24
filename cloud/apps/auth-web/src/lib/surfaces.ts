@@ -128,7 +128,40 @@ export const playgroundRootRewrite = {
 export type SurfaceRoute =
   | { kind: "redirect"; destination: URL }
   // The playground host's root (playgroundRootRewrite).
-  | { kind: "playgroundRoot" };
+  | { kind: "playgroundRoot" }
+  // An API path the playground host does not serve (playgroundServesApi).
+  | { kind: "notFound" };
+
+// The playground runs anyone's store scene in a page whose origin shares the
+// session cookie's domain. So its host is no door to the API: it answers the
+// three anonymous things the playground itself asks for (the store's listing
+// for frames, a public scene's files, the preview proxy) and nothing else,
+// and proxy.ts takes the session cookie and any bearer off every request
+// that arrives on it, so even those three are answered as to a stranger.
+const playgroundApiReads = ["/api/store/device", "/api/store/scenes"] as const;
+const playgroundPreviewProxyPath = "/api/store/preview-proxy";
+
+export function playgroundServesApi(pathname: string, method = "GET") {
+  if (pathname === playgroundPreviewProxyPath) {
+    return true;
+  }
+  const verb = method.toUpperCase();
+  return (
+    (verb === "GET" || verb === "HEAD" || verb === "OPTIONS") &&
+    matchesAny(pathname, playgroundApiReads)
+  );
+}
+
+// Whether a request arrived on the playground's own host (false while the
+// playground is a path of the cloud origin, as in development).
+export function isPlaygroundHost(requestUrl: URL, requestHost?: string | null) {
+  const playground = new URL(getPlaygroundBaseUrl());
+  if (playground.origin === new URL(getCloudBaseUrl()).origin) {
+    return false;
+  }
+  const host = (requestHost ?? requestUrl.host).trim().toLowerCase();
+  return host === playground.host.toLowerCase();
+}
 
 // All the hostnames reach one Next.js process. Human pages get canonical
 // hosts and clean account paths, while API routes stay available everywhere
@@ -136,6 +169,7 @@ export type SurfaceRoute =
 export function resolveSurfaceRoute(
   requestUrl: URL,
   requestHost?: string | null,
+  method = "GET",
 ): SurfaceRoute | undefined {
   const account = new URL(getAccountBaseUrl());
   const cloud = new URL(getCloudBaseUrl());
@@ -150,6 +184,13 @@ export function resolveSurfaceRoute(
 
   const host = (requestHost ?? requestUrl.host).trim().toLowerCase();
   const pathname = requestUrl.pathname;
+  if (
+    pathMatchesPrefix(pathname, "/api") &&
+    isPlaygroundHost(requestUrl, requestHost) &&
+    !playgroundServesApi(pathname, method)
+  ) {
+    return { kind: "notFound" };
+  }
   if (isApiOrAsset(pathname)) {
     return undefined;
   }

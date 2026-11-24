@@ -2804,6 +2804,17 @@ export const boundClaimTokenMaxTtlMs = 7 * 24 * 60 * 60 * 1000;
 // Spend one use of a claim token, atomically: concurrent enrollments race on
 // use_count < max_uses, so a budget of N admits exactly N frames. used_at is
 // stamped when the budget is spent (single-use tokens: on their only use).
+// Whether an enrollment with this claim token is born `active` (no Confirm
+// click): only a single-use code that a person minted in the browser. Every
+// card off a multi-use code, and every code a personal API token minted, lands
+// `pending` and gets no scenes and no service keys until the owner confirms.
+export function claimTokenEnrollsActive(token: {
+  maxUses: number;
+  mintedByApiToken: boolean;
+}) {
+  return token.maxUses === 1 && !token.mintedByApiToken;
+}
+
 export async function redeemClaimToken(
   db: FramesDatabase,
   claimToken: string,

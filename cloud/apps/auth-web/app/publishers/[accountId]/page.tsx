@@ -1,4 +1,4 @@
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { PublicShell } from "../../../src/components/PublicShell";
@@ -36,6 +36,8 @@ export async function generateMetadata({
         eq(storeScenes.visibility, "public"),
         eq(storeScenes.status, "active"),
         gt(storeScenes.latestVersion, 0),
+        // A banned publisher has no page (src/lib/store-ban.ts).
+        isNull(accounts.storeBannedAt),
       ),
     )
     .limit(1);
@@ -82,6 +84,8 @@ export default async function PublisherPage({
         eq(storeScenes.visibility, "public"),
         eq(storeScenes.status, "active"),
         gt(storeScenes.latestVersion, 0),
+        // A banned publisher has no page (src/lib/store-ban.ts).
+        isNull(accounts.storeBannedAt),
       ),
     )
     .orderBy(desc(storeScenes.downloadCount), desc(storeScenes.updatedAt))

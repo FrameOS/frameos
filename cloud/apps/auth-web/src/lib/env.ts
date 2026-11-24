@@ -2,6 +2,10 @@ export type GoogleOAuthConfig = {
   clientId: string;
   clientSecret: string;
   issuerUrl: string;
+  // GOOGLE_REQUIRE_AUTH_TIME=1: a Google sign-in counts as a recent proof of
+  // credentials only as far as Google's `auth_time` says it is
+  // (src/lib/google-auth-time.ts, docs/auth.md "Re-authentication").
+  requireAuthTime: boolean;
 };
 
 export const googleIssuerUrl = "https://accounts.google.com";
@@ -306,6 +310,9 @@ export function getGoogleOAuthConfig(): GoogleOAuthConfig | undefined {
     clientId,
     clientSecret,
     issuerUrl: optionalEnv("GOOGLE_ISSUER_URL") ?? googleIssuerUrl,
+    requireAuthTime: ["1", "true", "yes"].includes(
+      (optionalEnv("GOOGLE_REQUIRE_AUTH_TIME") ?? "").toLowerCase(),
+    ),
   };
 }
 

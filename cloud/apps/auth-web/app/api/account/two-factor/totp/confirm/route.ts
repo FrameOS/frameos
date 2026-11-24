@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
   notifySecurityChange,
+  revokeOtherSessions,
   revokedTokensDetail,
   readJsonBody,
 } from "../../../../../../src/lib/account-security";
@@ -50,6 +51,11 @@ export async function POST(request: NextRequest) {
   // Revoke them all; the owner re-mints from the Developer page, which asks
   // for fresh credentials and is now behind 2FA.
   const apiTokensRevoked = await revokeApiTokensForAccount(db, context.accountId);
+  // And when this is the factor that turns two-factor ON, every other
+  // browser session goes too: none of them ever answered a second factor.
+  const sessionsRevoked = before.enabled
+    ? 0
+    : await revokeOtherSessions(db, context.accountId);
   await recordAuditEvent(db, {
     accountId: context.accountId,
     actor: {
@@ -57,13 +63,14 @@ export async function POST(request: NextRequest) {
       providerSubject: context.providerSubject,
     },
     eventType: "account.totp_enabled",
-    metadata: { apiTokensRevoked, method: "totp" },
+    metadata: { apiTokensRevoked, method: "totp", sessionsRevoked },
   });
   await notifySecurityChange(context, "totp_enabled", revokedTokensDetail(apiTokensRevoked));
   return NextResponse.json({
     api_tokens_revoked: apiTokensRevoked,
     ok: true,
     ...(recoveryCodes ? { recovery_codes: recoveryCodes } : {}),
+    sessions_revoked: sessionsRevoked,
   });
 }
 

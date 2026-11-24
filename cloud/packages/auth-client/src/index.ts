@@ -20,6 +20,10 @@ export type TokenSet = {
 };
 
 export type VerifiedIdTokenClaims = JWTPayload & {
+  // When the provider last had the person prove who they are (seconds since
+  // the epoch). Google sends it only when the request's `claims` parameter
+  // asks and the client has the claim switched on.
+  auth_time?: number;
   email?: string;
   email_verified?: boolean;
   name?: string;

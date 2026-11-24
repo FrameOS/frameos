@@ -7,7 +7,11 @@
 // identical, so limits hold across both services.
 import type { IncomingMessage } from "node:http";
 import { sql } from "drizzle-orm";
-import { createDb, rateLimitBuckets } from "@frameos-cloud/db";
+import {
+  createDb,
+  rateLimitAddressKey,
+  rateLimitBuckets,
+} from "@frameos-cloud/db";
 
 export interface RateLimitOptions {
   limit: number;
@@ -139,6 +143,12 @@ export function clientIpFromRequest(req: IncomingMessage) {
   // Not `X-Real-IP`: no proxy of ours sets it, so it is the client's own word.
   // The socket address is the one thing a client cannot choose.
   return req.socket.remoteAddress || "local";
+}
+
+// What the per-address throttle counts by: an IPv6 address folded to its /64
+// (rateLimitAddressKey says why), like auth-web's clientLimitKey.
+export function clientLimitKeyFromRequest(req: IncomingMessage) {
+  return rateLimitAddressKey(clientIpFromRequest(req));
 }
 
 export function resetRateLimitsForTests() {

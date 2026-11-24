@@ -10,6 +10,7 @@ import {
   sessionCookieMaxAgeSeconds,
 } from "./src/lib/session-refresh";
 import {
+  isPlaygroundHost,
   playgroundRootHeader,
   resolveSurfaceRoute,
 } from "./src/lib/surfaces";
@@ -17,18 +18,27 @@ import {
 export async function proxy(request: NextRequest) {
   const response = routeSurface(request);
   // A surface redirect carries no session decision; the request it sends the
-  // browser to will refresh instead.
-  if (response.status < 300 || response.status >= 400) {
+  // browser to will refresh instead. Nor does anything on the playground
+  // host: it is served as to a stranger (routeSurface), so its responses
+  // never extend a session.
+  if (
+    (response.status < 300 || response.status >= 400) &&
+    !isPlaygroundHost(request.nextUrl, request.headers.get("host"))
+  ) {
     await refreshSessionCookie(request, response);
   }
   return response;
 }
 
 function routeSurface(request: NextRequest) {
-  const route = resolveSurfaceRoute(
-    request.nextUrl,
-    request.headers.get("host"),
-  );
+  const host = request.headers.get("host");
+  const route = resolveSurfaceRoute(request.nextUrl, host, request.method);
+  if (route?.kind === "notFound") {
+    return NextResponse.json(
+      { error: "not_found" },
+      { status: 404, headers: { "cache-control": "no-store" } },
+    );
+  }
   if (route?.kind === "redirect") {
     // 307, never 308: which host serves which path is deployment config, and
     // it has changed under browsers before — the cloud root used to redirect
@@ -45,7 +55,16 @@ function routeSurface(request: NextRequest) {
   // (playgroundRootRewrite in surfaces.ts says why not here). The mark is the
   // proxy's alone: one a client sent is dropped from every other request.
   const playgroundRoot = route?.kind === "playgroundRoot";
-  if (!playgroundRoot && !request.headers.has(playgroundRootHeader)) {
+  // The playground runs anyone's scene on an origin the session cookie is
+  // also sent to (it is scoped to the registrable domain). Nothing served on
+  // that host may see who is asking: the cookie and any bearer are taken off
+  // before a page or a route handler reads the request.
+  const anonymous = isPlaygroundHost(request.nextUrl, host);
+  if (
+    !playgroundRoot &&
+    !anonymous &&
+    !request.headers.has(playgroundRootHeader)
+  ) {
     return NextResponse.next();
   }
   const headers = new Headers(request.headers);
@@ -53,6 +72,10 @@ function routeSurface(request: NextRequest) {
     headers.set(playgroundRootHeader, "1");
   } else {
     headers.delete(playgroundRootHeader);
+  }
+  if (anonymous) {
+    headers.delete("cookie");
+    headers.delete("authorization");
   }
   return NextResponse.next({ request: { headers } });
 }

@@ -25,6 +25,7 @@ import {
 import { goingPublicRefusal } from "../../../../../src/lib/store-image-moderation";
 import { imageSetForVersion } from "../../../../../src/lib/store-images";
 import { sceneSummary, sceneVisibilities } from "../../../../../src/lib/store";
+import { storeBanRefusal } from "../../../../../src/lib/store-ban";
 import { loadOwnedScene } from "../../../../../src/lib/store-owner";
 import {
   photoLinkRefusal,
@@ -279,6 +280,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   // moderated while the scene was private (store-image-moderation.ts).
   const makingPublic = visibility === "public" && scene.visibility !== "public";
   if (makingPublic) {
+    // A banned publisher puts nothing in the store (store-ban.ts). Making a
+    // scene private, above, stays open: that is how one steps back.
+    const banned = await storeBanRefusal(db, session.accountId!);
+    if (banned) {
+      return banned;
+    }
     const refusal = await goingPublicRefusal(db, {
       accountId: session.accountId!,
       actor: {

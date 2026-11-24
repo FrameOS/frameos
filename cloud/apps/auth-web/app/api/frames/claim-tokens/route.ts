@@ -81,6 +81,16 @@ export async function POST(request: NextRequest) {
   // someone else's frame id is a 404 — invisible, not forbidden.
   const boundFrameId = parseOptionalString(body.frame_id);
   let boundFrame: Awaited<ReturnType<typeof frameForAccount>>;
+  // A personal API token is a script's credential, not the person's. A
+  // re-enrollment token hands whoever redeems it the identity of a frame that
+  // is already active (its link token, the service keys it was granted), with
+  // no confirmation step to put a person in between, so a token may not mint
+  // one. An ordinary code it may mint, but every enrollment of that code is
+  // born pending (`mintedByApiToken` below; the enroll route) and waits for
+  // the owner's Confirm click, which a token cannot give either.
+  if (boundFrameId !== undefined && session.apiToken) {
+    return jsonError("api_token_not_allowed", 403);
+  }
   if (boundFrameId !== undefined) {
     boundFrame = await frameForAccount(db, session.accountId, boundFrameId);
     if (!boundFrame) {
@@ -228,6 +238,7 @@ export async function POST(request: NextRequest) {
       boundFrameId: boundFrame?.id ?? null,
       expiresAt,
       maxUses,
+      mintedByApiToken: Boolean(session.apiToken),
       name: name ?? null,
       sceneSourceFrameId: sceneSourceFrame?.id ?? null,
       timezone,
@@ -247,7 +258,7 @@ export async function POST(request: NextRequest) {
     eventType: boundFrame
       ? "frame.rebind_token_created"
       : "frame.claim_token_created",
-    metadata: { maxUses },
+    metadata: { maxUses, ...(session.apiToken ? { viaApiToken: true } : {}) },
     target: {
       claimTokenId: row.id,
       ...(boundFrame ? { frameId: boundFrame.id } : {}),
@@ -258,6 +269,9 @@ export async function POST(request: NextRequest) {
     claim_token: token,
     expires_at: expiresAt.toISOString(),
     max_uses: maxUses,
+    // A code minted with an API token enrolls its frame as pending: the owner
+    // confirms it in the browser (the enroll route).
+    ...(session.apiToken ? { needs_confirmation: true } : {}),
     ...(sceneSourceFrame ? { scene_source_frame_id: sceneSourceFrame.id } : {}),
     // Echoed so the flasher can assert it is provisioning the frame the user
     // started from, rather than inferring one from a new-frame watch.

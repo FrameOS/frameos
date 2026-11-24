@@ -4,6 +4,8 @@ import {
   checkRateLimit,
   claimSingleUse,
   clientKey,
+  clientLimitKey,
+  rateLimitResponse,
   resetRateLimitForTests,
   singleUseClaimed,
 } from "./rate-limit";
@@ -105,5 +107,34 @@ describe("clientKey", () => {
         }),
       ),
     ).toBe("local");
+  });
+});
+
+// One IPv6 customer holds a /64 at the least; a limit keyed on the whole
+// address would be 2^64 tries.
+describe("clientLimitKey", () => {
+  const from = (address: string) =>
+    requestWithHeaders({ "x-forwarded-for": address });
+
+  it("counts an IPv6 /64 as one client and leaves the address itself whole", () => {
+    process.env.RATE_LIMIT_TRUSTED_PROXY_COUNT = "1";
+    expect(clientLimitKey(from("2001:db8:1:2:aaaa::1"))).toBe("2001:db8:1:2::/64");
+    expect(clientLimitKey(from("2001:db8:1:2:bbbb::2"))).toBe("2001:db8:1:2::/64");
+    expect(clientLimitKey(from("2001:db8:1:3::1"))).toBe("2001:db8:1:3::/64");
+    expect(clientLimitKey(from("203.0.113.7"))).toBe("203.0.113.7");
+    expect(clientLimitKey(requestWithHeaders({}))).toBe("untrusted");
+    // What audit rows and Turnstile get is not folded.
+    expect(clientKey(from("2001:db8:1:2:aaaa::1"))).toBe("2001:db8:1:2:aaaa::1");
+  });
+
+  it("limits a /64 as one, whichever of its addresses asks", async () => {
+    process.env.RATE_LIMIT_TRUSTED_PROXY_COUNT = "1";
+    const options = { limit: 2, windowMs: 60_000 };
+    expect(await rateLimitResponse(from("2001:db8:9:9::1"), "test:fold", options)).toBeUndefined();
+    expect(await rateLimitResponse(from("2001:db8:9:9::2"), "test:fold", options)).toBeUndefined();
+    const refused = await rateLimitResponse(from("2001:db8:9:9:ffff::3"), "test:fold", options);
+    expect(refused?.status).toBe(429);
+    // The neighbouring /64 has its own window.
+    expect(await rateLimitResponse(from("2001:db8:9:a::1"), "test:fold", options)).toBeUndefined();
   });
 });
