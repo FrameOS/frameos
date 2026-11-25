@@ -25,6 +25,22 @@ export function registeredAddFramePanel(): ComponentType | null {
   return registeredPanel
 }
 
+// Whether the panel should open at page load: the cloud's "Link a frame that
+// already runs" goes through a re-authentication page when the session's
+// proof is old, which comes back to the workspace with every drawer closed.
+// The panel waits with the code parked; this opens the drawer it lives in,
+// so the round trip does not look like the drawer vanishing.
+let reopenCheck: (() => boolean) | null = null
+
+export function registerAddFramePanelReopen(check: () => boolean): void {
+  reopenCheck = check
+}
+
+/** True when the registered panel has something to pick up at load. */
+export function addFramePanelWantsOpen(): boolean {
+  return reopenCheck?.() ?? false
+}
+
 // The first-run panel: what the frames home shows in the middle of the
 // workspace when the fleet has loaded and is empty. The cloud registers its
 // enrollment panel (the same one its "Add frame" drawer hosts) so a new

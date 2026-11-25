@@ -15,7 +15,7 @@ import type { FrameListEntry } from './enrollmentWatch'
 // you there and back. The same three calls the /device page makes fit in the
 // drawer: look the code up (GET /api/device/request), approve it (POST
 // /api/device/authorize), then watch the frames list until the newly linked
-// frame shows up and open it — the frame enrols itself the moment it sees
+// frame shows up and open it — the frame enrolls itself the moment it sees
 // the approval, so there is nothing else to click.
 //
 // Deliberately NOT a copy of DeviceApprovalPanel (auth-web, a different React
@@ -46,6 +46,22 @@ export function stashLinkCode(code: string): void {
     window.sessionStorage.setItem(pendingCodeKey, JSON.stringify({ at: Date.now(), code }))
   } catch {
     // Storage blocked: the user types the code again after signing in.
+  }
+}
+
+/** Whether a fresh code is parked, leaving it there for the panel to take. */
+export function hasStashedLinkCode(): boolean {
+  try {
+    const raw = window.sessionStorage.getItem(pendingCodeKey)
+    const parsed = raw ? (JSON.parse(raw) as { at?: unknown; code?: unknown }) : null
+    return (
+      !!parsed &&
+      typeof parsed.code === 'string' &&
+      typeof parsed.at === 'number' &&
+      Date.now() - parsed.at < pendingCodeTtlMs
+    )
+  } catch {
+    return false
   }
 }
 
@@ -224,8 +240,8 @@ export function LinkRunningFrameForm({ initialCode, onLinked }: LinkRunningFrame
   return (
     <div className="space-y-3">
       <p className="frameos-muted text-xs">
-        On the frame, open Settings → FrameOS Cloud → Connect (or read the code off its screen). Type that code here to
-        link the frame to this account — the code proves you can see the device.
+        On the frame, open Settings, then the gear, then Link to cloud, and type the code it shows here. The code
+        proves you can see the frame.
       </p>
       {phase.kind !== 'approved' ? (
         <form className="flex items-end gap-2" onSubmit={submit}>
@@ -317,7 +333,7 @@ export function LinkRunningFrameForm({ initialCode, onLinked }: LinkRunningFrame
           ) : (
             <>
               <p className="frameos-muted">
-                Approved. The frame picks the approval up on its next check-in and enrols itself — it opens here as soon
+                Approved. The frame picks the approval up on its next check-in and enrolls itself. It opens here as soon
                 as it does.
               </p>
               {hintDue ? (

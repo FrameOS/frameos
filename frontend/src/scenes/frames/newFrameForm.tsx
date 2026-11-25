@@ -9,6 +9,7 @@ import { loaders } from 'kea-loaders'
 import { BUILDROOT_RASPBERRY_PI_64, EMBEDDED_ESP32_S3 } from '../../devices'
 import { settingsLogic } from '../settings/settingsLogic'
 import { defaultNewFrameServerHost } from '../../utils/backendAddress'
+import { addFramePanelWantsOpen } from '../workspace/addFramePanelRegistry'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
 function defaultWifiNetwork(settings: FrameOSSettings): NonNullable<NewFrameFormType['network']> {
@@ -406,9 +407,13 @@ export const newFrameForm = kea<newFrameFormType>([
       }
     },
   })),
-  afterMount(() => {
+  afterMount(({ actions }) => {
     if (!framesModel.values.framesLoading && Object.keys(framesModel.values.frames).length === 0) {
       framesModel.actions.loadFrames()
+    }
+    // Back from re-authenticating a link approval: its drawer opens again.
+    if (addFramePanelWantsOpen()) {
+      actions.showForm()
     }
   }),
 ])
