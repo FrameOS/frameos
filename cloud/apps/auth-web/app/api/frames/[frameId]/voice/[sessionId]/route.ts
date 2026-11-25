@@ -34,11 +34,14 @@ import {
   voiceChatId,
   voiceContextBlock,
   voiceHistoryForModel,
+  voiceProgressStream,
   voiceSessions,
   voiceTools,
   voiceTurnLog,
+  wantsVoiceProgress,
   type VoiceAlbums,
   type VoicePreview,
+  type VoiceProgress,
   type VoiceQueue,
   type VoiceScene,
   type VoiceSettingsUpdate,
@@ -105,6 +108,13 @@ export const maxDuration = 300;
 //   -> 403 no_microphone / voice_chat_off        the frame reports no
 //      microphone, or its owner's switch off (voiceRefusal)
 //
+// A closing chunk sent with `Accept: application/x-ndjson` (firmware from
+// 2026.11.25) is answered as it goes: `{"progress": stage, "text": …}` per
+// stage of the turn (transcribing, heard, each tool that starts, and every
+// 15 s without news), the words the frame draws over its picture, and last
+// the same object as above (voiceProgressStream, docs/voice-chat.md
+// "Progress on the panel").
+//
 // The chunks are held in this process's memory until `done` (voiceSessions);
 // the audio is kept nowhere after the turn. The turn is the AI chat's loop
 // with the voice prompt, the frame's context and ONLY the voice tools, each
@@ -128,10 +138,10 @@ export const maxDuration = 300;
 // Monday must not fire on Friday.
 const commandTtlMs = 5 * 60 * 1000;
 
-function failure(error: string, detail: string) {
-  // 200 on purpose: the frame reads the body and sounds the error; a 5xx
-  // would read as "the cloud is down" when the cloud is fine.
-  return NextResponse.json({ detail: detail.slice(0, 500), error, ok: false });
+function failure(error: string, detail: string): Record<string, unknown> {
+  // Sent with 200 on purpose: the frame reads the body and sounds the error;
+  // a 5xx would read as "the cloud is down" when the cloud is fine.
+  return { detail: detail.slice(0, 500), error, ok: false };
 }
 
 export async function POST(
@@ -206,460 +216,485 @@ export async function POST(
     return jsonError("unknown_session", 409);
   }
 
-  const accountId = frame.accountId;
-  const access = await resolveAiAccess(db, accountId, {
-    inFlightMicros: inFlightSpendMicros(accountId),
-    surface: "voice_chat",
-  });
-  if (!access.ok) {
-    logWarn("frames.voice_refused", { frameId: frame.id, reason: access.refusal.reason });
-    return failure("ai_unavailable", access.refusal.detail);
-  }
-  const { credentials } = access;
-  if (pcm.length < VOICE_MIN_AUDIO_BYTES) {
-    return failure("nothing_heard", "the recording was too short");
-  }
-  const peak = pcmPeak(pcm);
-  if (peak < VOICE_SILENCE_PEAK) {
-    return failure("nothing_heard", `silence (peak ${peak})`);
-  }
-
-  // What the frame holds, by store id and name, and which one it reports
-  // showing (a runtime id, mapped back to its store scene). A layout is not
-  // something to switch to (docs/scene-layouts.md).
-  const scenes: VoiceScene[] = (await assignedScenes(db, frame.id))
-    .filter((row) => !row.isLayout)
-    .map((row) => ({
-      id: row.sceneId,
-      name: row.name,
-    }));
-  const reportedActive = reportedActiveSceneId(frame.lastState);
-  const activeStoreId = reportedActive
-    ? await resolveStoreSceneForFrameScene(db, frame.id, reportedActive)
-    : undefined;
-  const showing = scenes.find((scene) => scene.id === activeStoreId) ?? null;
-
-  const turnId = `voice-${frame.id}-${sessionId}`;
-  let transcript: string;
-  try {
-    const heard = await transcribePcm(pcm, {
-      apiKey: credentials.apiKey,
-      prompt: scenes.map((scene) => scene.name).join(", ") || undefined,
+  // The turn, its answer as an object: sent whole, or as a frame that asked
+  // for progress hears it, each stage a line before it (voiceProgressStream,
+  // docs/voice-chat.md "Progress on the panel").
+  const answer = async (progress: VoiceProgress): Promise<Record<string, unknown>> => {
+    const accountId = frame.accountId;
+    const access = await resolveAiAccess(db, accountId, {
+      inFlightMicros: inFlightSpendMicros(accountId),
+      surface: "voice_chat",
     });
-    transcript = heard.text;
-    if (heard.usage) {
-      meterAiUsageInBackground({
-        accountId,
-        credentialSource: credentials.source,
-        model: TRANSCRIPTION_MODEL,
-        surface: "voice_chat",
-        turnId: `${turnId}-stt`,
-        usage: heard.usage,
-      });
+    if (!access.ok) {
+      logWarn("frames.voice_refused", { frameId: frame.id, reason: access.refusal.reason });
+      return failure("ai_unavailable", access.refusal.detail);
     }
-  } catch (error) {
-    reportError("frames.voice_transcription_failed", error, { accountId, frameId: frame.id });
-    return failure("transcription_failed", error instanceof Error ? error.message : String(error));
-  }
-  if (!transcript) {
-    return failure("nothing_heard", "the transcription came back empty");
-  }
-  if (transcriptIsHintEcho(transcript, scenes.map((scene) => scene.name))) {
-    return failure("nothing_heard", "only the scene names came back");
-  }
+    const { credentials } = access;
+    if (pcm.length < VOICE_MIN_AUDIO_BYTES) {
+      return failure("nothing_heard", "the recording was too short");
+    }
+    const peak = pcmPeak(pcm);
+    if (peak < VOICE_SILENCE_PEAK) {
+      return failure("nothing_heard", `silence (peak ${peak})`);
+    }
 
-  const startedAt = Date.now();
-  const now = new Date();
-  const chat = await ensureChat(db, accountId, {
-    chatId: voiceChatId(frame.id),
-    contextType: "frame",
-    frameId: frame.id,
-  });
-  // The earlier exchanges, each with its age and the log of what was done:
-  // three rows per exchange, a few more for the workspace's own messages.
-  const rows = chat ? (await chatMessages(db, chat.id)).slice(-4 * MAX_VOICE_HISTORY_TURNS) : [];
-  const history = voiceHistoryForModel(rows, { now });
-  // The scene the frame shows for now without holding it (the editor's or
-  // an earlier turn's preview): the model is told, and change_scene edits it.
-  const preview = (await scenePreviewsByFrame(db, [frame.id])).get(frame.id) ?? null;
-  const previewScene = preview ? ((await scenePreviewScene(db, frame.id))?.scene as JsonObject | undefined) ?? null : null;
-  const context = await frameContextBlock(db, accountId, frame.id);
+    // What the frame holds, by store id and name, and which one it reports
+    // showing (a runtime id, mapped back to its store scene). A layout is not
+    // something to switch to (docs/scene-layouts.md).
+    const scenes: VoiceScene[] = (await assignedScenes(db, frame.id))
+      .filter((row) => !row.isLayout)
+      .map((row) => ({
+        id: row.sceneId,
+        name: row.name,
+      }));
+    const reportedActive = reportedActiveSceneId(frame.lastState);
+    const activeStoreId = reportedActive
+      ? await resolveStoreSceneForFrameScene(db, frame.id, reportedActive)
+      : undefined;
+    const showing = scenes.find((scene) => scene.id === activeStoreId) ?? null;
 
-  // Each tool queues what the workspace's rail would, on this frame alone.
-  const queue: VoiceQueue = async (type, payload) => {
-    const audit = async (commandType: string, commandId: string | undefined) => {
+    const turnId = `voice-${frame.id}-${sessionId}`;
+    let transcript: string;
+    progress("transcribing");
+    try {
+      const heard = await transcribePcm(pcm, {
+        apiKey: credentials.apiKey,
+        prompt: scenes.map((scene) => scene.name).join(", ") || undefined,
+      });
+      transcript = heard.text;
+      if (heard.usage) {
+        meterAiUsageInBackground({
+          accountId,
+          credentialSource: credentials.source,
+          model: TRANSCRIPTION_MODEL,
+          surface: "voice_chat",
+          turnId: `${turnId}-stt`,
+          usage: heard.usage,
+        });
+      }
+    } catch (error) {
+      reportError("frames.voice_transcription_failed", error, { accountId, frameId: frame.id });
+      return failure("transcription_failed", error instanceof Error ? error.message : String(error));
+    }
+    if (!transcript) {
+      return failure("nothing_heard", "the transcription came back empty");
+    }
+    if (transcriptIsHintEcho(transcript, scenes.map((scene) => scene.name))) {
+      return failure("nothing_heard", "only the scene names came back");
+    }
+    progress("heard", transcript);
+
+    const startedAt = Date.now();
+    const now = new Date();
+    const chat = await ensureChat(db, accountId, {
+      chatId: voiceChatId(frame.id),
+      contextType: "frame",
+      frameId: frame.id,
+    });
+    // The earlier exchanges, each with its age and the log of what was done:
+    // three rows per exchange, a few more for the workspace's own messages.
+    const rows = chat ? (await chatMessages(db, chat.id)).slice(-4 * MAX_VOICE_HISTORY_TURNS) : [];
+    const history = voiceHistoryForModel(rows, { now });
+    // The scene the frame shows for now without holding it (the editor's or
+    // an earlier turn's preview): the model is told, and change_scene edits it.
+    const preview = (await scenePreviewsByFrame(db, [frame.id])).get(frame.id) ?? null;
+    const previewScene = preview ? ((await scenePreviewScene(db, frame.id))?.scene as JsonObject | undefined) ?? null : null;
+    const context = await frameContextBlock(db, accountId, frame.id);
+
+    // Each tool queues what the workspace's rail would, on this frame alone.
+    const queue: VoiceQueue = async (type, payload) => {
+      const audit = async (commandType: string, commandId: string | undefined) => {
+        await recordAuditEvent(db, {
+          accountId,
+          actor: { accountId, frameId: frame.id, kind: "voice_chat" },
+          eventType: "frame.command_sent",
+          metadata: { source: "voice_chat", type: commandType },
+          target: { commandId, frameId: frame.id },
+        });
+      };
+      if (type === "set_current_scene") {
+        const storeSceneId = typeof payload?.scene_id === "string" ? payload.scene_id : "";
+        const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
+        // A scene the device does not hold yet: re-push the assigned set with
+        // this one active, as the event route does for the same case.
+        const assigned = (await currentSceneAssignments(db, frame.id)).some(
+          (assignment) => assignment.sceneId.toLowerCase() === storeSceneId.toLowerCase(),
+        );
+        if (!frameHoldsAssignedScenes(frame) && assigned) {
+          const redeploy = await redeployAssignedScenesToFrame(db, {
+            accountId,
+            activeSceneId: deviceSceneId,
+            frame,
+          });
+          if (redeploy.ok) {
+            await audit("set_scenes", redeploy.commandId);
+            return { command_id: redeploy.commandId, ok: true, type: "set_scenes" };
+          }
+        }
+        const command = await enqueueFrameCommand(db, {
+          createdByAccountId: accountId,
+          frameId: frame.id,
+          payload: { scene_id: deviceSceneId },
+          ttlMs: commandTtlMs,
+          type: "set_current_scene",
+        });
+        await audit("set_current_scene", command?.id);
+        return { command_id: command?.id, ok: true, type: "set_current_scene" };
+      }
+      if (type === "scene_event") {
+        // `setSceneState` rides scene_event from FrameOS 2026.9.21; an older
+        // frame cannot take it, and the model is told so instead of a command
+        // sitting in the queue looking delivered.
+        const routed = cloudEventRouting("setSceneState", frameContractProfile(frame), frame.frameosVersion);
+        if (!routed.ok || routed.verb !== "scene_event") {
+          return { error: routed.ok ? "unsupported_event" : routed.error, ok: false };
+        }
+        const state = (payload?.payload as JsonObject | undefined)?.state as Record<string, unknown> | undefined;
+        const event = sceneStateEventCommand(state);
+        if (!event.ok) {
+          return { error: event.error, ok: false };
+        }
+        const command = await enqueueFrameCommand(db, {
+          createdByAccountId: accountId,
+          frameId: frame.id,
+          payload: event.payload,
+          ttlMs: commandTtlMs,
+          type: "scene_event",
+        });
+        await audit("scene_event", command?.id);
+        return { command_id: command?.id, ok: true, type: "scene_event" };
+      }
+      const command = await enqueueFrameCommand(db, {
+        createdByAccountId: accountId,
+        frameId: frame.id,
+        ttlMs: commandTtlMs,
+        type: "render",
+      });
+      await audit("render", command?.id);
+      return { command_id: command?.id, ok: true, type: "render" };
+    };
+    // Which picture sources the frame can draw: the service keys the owner
+    // granted its scenes (the same answer the device's service-settings pull
+    // gives), and no others. The voice turn never widens a grant.
+    let grantedGroups = readServiceSettingGroups(frame.serviceSettingGroups);
+    if (!grantedGroups) {
+      try {
+        grantedGroups = await computeAndStoreServiceSettingGroups(db, frame.id);
+      } catch (error) {
+        reportError("frames.voice_service_settings_failed", error, { accountId, frameId: frame.id });
+        grantedGroups = [];
+      }
+    }
+    const revealed = await storedAccountSettings(db, accountId, { reveal: true });
+    const stored: Record<string, Record<string, string>> = {};
+    for (const [group, value] of Object.entries(revealed)) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        stored[group] = Object.fromEntries(
+          Object.entries(value as Record<string, unknown>).filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        );
+      }
+    }
+    const imageSources = imageSourcesForSettings(buildServiceSettingsPayload(grantedGroups, stored).settings);
+
+    // The editor's "Preview on frame" (the event route's uploadScenes): a
+    // set_scenes push of the assigned scenes with the picture in them
+    // (sceneListWithPreview), so an ESP32 is sent the picture alone as a patch
+    // and keeps its list. A later push carries the picture along, so it stays
+    // selectable until installed or discarded (docs/scene-previews.md).
+    const previewScenes: VoicePreview = async (previewed, sceneId) => {
+      const bundle = scenesForFrame(previewed, frame.frameosVersion);
+      const assigned = await buildScenesPayloadForFrame(db, frame.id);
+      const delivered = "scenes" in assigned ? sceneListWithPreview(assigned.scenes, bundle) : bundle;
+      const checksum = createHash("sha256").update(JSON.stringify(delivered)).digest("hex");
+      await supersedePendingCommands(db, frame.id, "set_scenes");
+      // `preview` outlives the bundle (spentCommandPayload keeps it): the
+      // workspace's preview row reads it (scenePreviewsByFrame).
+      const shown = previewed.find((scene) => scene.id === sceneId);
+      const command = await enqueueFrameCommand(db, {
+        createdByAccountId: accountId,
+        frameId: frame.id,
+        payload: {
+          checksum,
+          // `scene` is the shown scene itself, for the preview row's "Install";
+          // only the newest push keeps it (enqueueFrameCommand trims the rest).
+          preview: {
+            name: typeof shown?.name === "string" ? shown.name : "Preview",
+            scene: shown ?? null,
+            scene_id: sceneId,
+            source: "voice",
+          },
+          scene_id: sceneId,
+          scenes: delivered,
+        },
+        type: "set_scenes",
+      });
       await recordAuditEvent(db, {
         accountId,
         actor: { accountId, frameId: frame.id, kind: "voice_chat" },
         eventType: "frame.command_sent",
-        metadata: { source: "voice_chat", type: commandType },
-        target: { commandId, frameId: frame.id },
+        metadata: { checksum, scene_count: delivered.length, source: "voice_chat", type: "set_scenes" },
+        target: { commandId: command?.id, frameId: frame.id },
+      });
+      return { command_id: command?.id, ok: true, type: "set_scenes" };
+    };
+
+    // The Settings panel's push (PATCH /api/frames/{id}/settings): validated
+    // against the contract and the frame's firmware, mirrored into the frame
+    // row, queued as set_settings.
+    const updateSettings: VoiceSettingsUpdate = async (settings) => {
+      const validated = validateFrameSettings(settings);
+      if (validated.error || !validated.settings) {
+        return { error: validated.error ?? "invalid_settings", ok: false };
+      }
+      const refusal = frameSettingsRefusal(frame, validated.settings);
+      if (refusal) {
+        return { error: refusal.error, ok: false };
+      }
+      const merged = mergeFrameSettings(frame.settings, validated.settings);
+      if (merged) {
+        await db.update(frames).set({ settings: merged, updatedAt: new Date() }).where(eq(frames.id, frame.id));
+      }
+      const command = await enqueueFrameSettingsPush(db, frame, validated.settings, { createdByAccountId: accountId });
+      await recordAuditEvent(db, {
+        accountId,
+        actor: { accountId, frameId: frame.id, kind: "voice_chat" },
+        eventType: "frame.settings_pushed",
+        metadata: { keys: Object.keys(validated.settings), source: "voice_chat" },
+        target: { commandId: command?.id, frameId: frame.id },
+      });
+      return { command_id: command?.id, ok: true, type: "set_settings" };
+    };
+
+    // The photo library (docs/photos.md), for the album tools: the albums at
+    // the root, and an install that does what the MCP's photo_album_install
+    // does for this frame — the frame's own share link to the folder (made now
+    // if it has none), the album scene saved as a private scene of the account
+    // (the same path as the workspace's save, moderation included) and
+    // assigned next to the frame's scenes, pushed with it active. The frame's
+    // linked client is the publishing actor: a frame's token is not the owner's.
+    const photoError = (error: unknown) =>
+      error instanceof PhotoError
+        ? { detail: error.message, error: error.code, ok: false as const }
+        : { detail: error instanceof Error ? error.message : String(error), error: "photos_unavailable", ok: false as const };
+    const albums: VoiceAlbums = {
+      async install(path, options) {
+        let share;
+        try {
+          await assertPhotosAvailable(db, accountId);
+          share = (await createPhotoShare(db, accountId, path, frame.id)).share;
+        } catch (error) {
+          return { ...photoError(error), error: "album_unavailable" };
+        }
+        const scene = buildPhotoAlbumScene({
+          albumUrl: photoShareUrl(getPublicOrigin(request), share.token),
+          fit: "cover",
+          name: photoBasename(share.path),
+          order: options.order ?? "random",
+          seconds: options.seconds ?? defaultPhotoAlbumSeconds,
+          shapes: photoAlbumShapes.map((shape) => shape.value),
+        });
+        const created = await createAccountScene(db, {
+          accountId,
+          actor: { linkedClientId: frame.linkedClientId },
+          name: typeof scene.name === "string" ? scene.name : photoBasename(share.path),
+          scenes: [scene],
+        });
+        const body = (await created.json().catch(() => ({}))) as { error?: string; scene?: { id?: string } };
+        if (!created.ok || typeof body.scene?.id !== "string") {
+          return { error: body.error ?? `save_failed_${created.status}`, ok: false };
+        }
+        const existing = await currentSceneAssignments(db, frame.id);
+        const outcome = await assignScenesToFrame(db, {
+          accountId,
+          activeSceneId: typeof scene.id === "string" ? scene.id : undefined,
+          actor: { accountId, frameId: frame.id, kind: "voice_chat" },
+          frame,
+          requested: [...existing, { latest: true, sceneId: body.scene.id, sceneVersion: null }],
+          via: "voice_chat",
+        });
+        if (!outcome.ok) {
+          return { error: outcome.failure.code, ok: false };
+        }
+        return {
+          album: share.path,
+          command_id: outcome.result.commandId,
+          ok: true,
+          scene: typeof scene.name === "string" ? scene.name : undefined,
+          scene_id: body.scene.id,
+          type: "set_scenes",
+        };
+      },
+      async list() {
+        try {
+          await assertPhotosAvailable(db, accountId);
+          const entries = await listPhotoFolder(db, accountId, "");
+          return {
+            albums: entries
+              .filter((entry) => entry.kind === "folder")
+              .map((entry) => ({ name: entry.name, path: entry.path, photos: entry.items ?? 0 })),
+          };
+        } catch (error) {
+          return photoError(error);
+        }
+      },
+    };
+
+    // An installed scene's runtime JSON, for change_scene: the bundle the
+    // frame was sent, by the store id's device id.
+    const sceneContent = async (storeSceneId: string): Promise<JsonObject | null> => {
+      const built = await buildScenesPayloadForFrame(db, frame.id);
+      if ("error" in built) {
+        return null;
+      }
+      const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
+      const found = built.scenes.find(
+        (scene) => scene && typeof scene === "object" && (scene as JsonObject).id === deviceSceneId,
+      );
+      return (found as JsonObject | undefined) ?? null;
+    };
+    // The scene AI as a sub-turn (voice-scene-builder.ts): the editor and
+    // catalog tools alone, the scene rendered in the frame's memory before it
+    // is handed back; the tool then pushes it as the preview above. Each of
+    // its rounds is metered like the turn's own.
+    let sceneTurns = 0;
+    const buildScene = async (request: string, base: JsonObject | null, name: string | null) => {
+      sceneTurns += 1;
+      const sceneTurnId = `${turnId}-scene-${sceneTurns}`;
+      logInfo("frames.voice_scene_build", { base: base ? String(base.name) : null, frameId: frame.id, request: request.slice(0, 200) });
+      return buildSceneByVoice({
+        accountId,
+        apiKey: credentials.apiKey,
+        base,
+        db,
+        frameBlock: context.block,
+        frameId: frame.id,
+        model: credentials.model,
+        name,
+        onUsage: (result) => {
+          meterAiUsageInBackground({
+            accountId,
+            chatId: chat?.id ?? null,
+            credentialSource: credentials.source,
+            model: credentials.model,
+            rounds: result.rounds,
+            surface: "voice_chat",
+            turnId: `${sceneTurnId}-${result.rounds}`,
+            usage: result.usage,
+          });
+        },
+        reasoningEffort: credentials.reasoningEffort,
+        renderDevice: context.renderDevice ?? null,
+        renderScale: context.renderScale ?? null,
+        renderSize: context.resolution ?? null,
+        request,
       });
     };
-    if (type === "set_current_scene") {
-      const storeSceneId = typeof payload?.scene_id === "string" ? payload.scene_id : "";
-      const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
-      // A scene the device does not hold yet: re-push the assigned set with
-      // this one active, as the event route does for the same case.
-      const assigned = (await currentSceneAssignments(db, frame.id)).some(
-        (assignment) => assignment.sceneId.toLowerCase() === storeSceneId.toLowerCase(),
-      );
-      if (!frameHoldsAssignedScenes(frame) && assigned) {
-        const redeploy = await redeployAssignedScenesToFrame(db, {
-          accountId,
-          activeSceneId: deviceSceneId,
-          frame,
-        });
-        if (redeploy.ok) {
-          await audit("set_scenes", redeploy.commandId);
-          return { command_id: redeploy.commandId, ok: true, type: "set_scenes" };
-        }
-      }
-      const command = await enqueueFrameCommand(db, {
-        createdByAccountId: accountId,
-        frameId: frame.id,
-        payload: { scene_id: deviceSceneId },
-        ttlMs: commandTtlMs,
-        type: "set_current_scene",
-      });
-      await audit("set_current_scene", command?.id);
-      return { command_id: command?.id, ok: true, type: "set_current_scene" };
-    }
-    if (type === "scene_event") {
-      // `setSceneState` rides scene_event from FrameOS 2026.9.21; an older
-      // frame cannot take it, and the model is told so instead of a command
-      // sitting in the queue looking delivered.
-      const routed = cloudEventRouting("setSceneState", frameContractProfile(frame), frame.frameosVersion);
-      if (!routed.ok || routed.verb !== "scene_event") {
-        return { error: routed.ok ? "unsupported_event" : routed.error, ok: false };
-      }
-      const state = (payload?.payload as JsonObject | undefined)?.state as Record<string, unknown> | undefined;
-      const event = sceneStateEventCommand(state);
-      if (!event.ok) {
-        return { error: event.error, ok: false };
-      }
-      const command = await enqueueFrameCommand(db, {
-        createdByAccountId: accountId,
-        frameId: frame.id,
-        payload: event.payload,
-        ttlMs: commandTtlMs,
-        type: "scene_event",
-      });
-      await audit("scene_event", command?.id);
-      return { command_id: command?.id, ok: true, type: "scene_event" };
-    }
-    const command = await enqueueFrameCommand(db, {
-      createdByAccountId: accountId,
-      frameId: frame.id,
-      ttlMs: commandTtlMs,
-      type: "render",
-    });
-    await audit("render", command?.id);
-    return { command_id: command?.id, ok: true, type: "render" };
-  };
-  // Which picture sources the frame can draw: the service keys the owner
-  // granted its scenes (the same answer the device's service-settings pull
-  // gives), and no others. The voice turn never widens a grant.
-  let grantedGroups = readServiceSettingGroups(frame.serviceSettingGroups);
-  if (!grantedGroups) {
-    try {
-      grantedGroups = await computeAndStoreServiceSettingGroups(db, frame.id);
-    } catch (error) {
-      reportError("frames.voice_service_settings_failed", error, { accountId, frameId: frame.id });
-      grantedGroups = [];
-    }
-  }
-  const revealed = await storedAccountSettings(db, accountId, { reveal: true });
-  const stored: Record<string, Record<string, string>> = {};
-  for (const [group, value] of Object.entries(revealed)) {
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      stored[group] = Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string",
-        ),
-      );
-    }
-  }
-  const imageSources = imageSourcesForSettings(buildServiceSettingsPayload(grantedGroups, stored).settings);
 
-  // The editor's "Preview on frame" (the event route's uploadScenes): a
-  // set_scenes push of the assigned scenes with the picture in them
-  // (sceneListWithPreview), so an ESP32 is sent the picture alone as a patch
-  // and keeps its list. A later push carries the picture along, so it stays
-  // selectable until installed or discarded (docs/scene-previews.md).
-  const previewScenes: VoicePreview = async (previewed, sceneId) => {
-    const bundle = scenesForFrame(previewed, frame.frameosVersion);
-    const assigned = await buildScenesPayloadForFrame(db, frame.id);
-    const delivered = "scenes" in assigned ? sceneListWithPreview(assigned.scenes, bundle) : bundle;
-    const checksum = createHash("sha256").update(JSON.stringify(delivered)).digest("hex");
-    await supersedePendingCommands(db, frame.id, "set_scenes");
-    // `preview` outlives the bundle (spentCommandPayload keeps it): the
-    // workspace's preview row reads it (scenePreviewsByFrame).
-    const shown = previewed.find((scene) => scene.id === sceneId);
-    const command = await enqueueFrameCommand(db, {
-      createdByAccountId: accountId,
-      frameId: frame.id,
-      payload: {
-        checksum,
-        // `scene` is the shown scene itself, for the preview row's "Install";
-        // only the newest push keeps it (enqueueFrameCommand trims the rest).
-        preview: {
-          name: typeof shown?.name === "string" ? shown.name : "Preview",
-          scene: shown ?? null,
-          scene_id: sceneId,
-          source: "voice",
-        },
-        scene_id: sceneId,
-        scenes: delivered,
-      },
-      type: "set_scenes",
+    const permissions = readVoicePermissions(frame.voicePermissions);
+    const tools = voiceTools({
+      activeSceneId: showing?.id,
+      albums,
+      buildScene,
+      imageSources,
+      permissions,
+      previewScene,
+      previewScenes,
+      queue,
+      sceneContent,
+      scenes,
+      updateSettings,
     });
-    await recordAuditEvent(db, {
+    const toolContext: ToolContext = {
       accountId,
-      actor: { accountId, frameId: frame.id, kind: "voice_chat" },
-      eventType: "frame.command_sent",
-      metadata: { checksum, scene_count: delivered.length, source: "voice_chat", type: "set_scenes" },
-      target: { commandId: command?.id, frameId: frame.id },
-    });
-    return { command_id: command?.id, ok: true, type: "set_scenes" };
-  };
-
-  // The Settings panel's push (PATCH /api/frames/{id}/settings): validated
-  // against the contract and the frame's firmware, mirrored into the frame
-  // row, queued as set_settings.
-  const updateSettings: VoiceSettingsUpdate = async (settings) => {
-    const validated = validateFrameSettings(settings);
-    if (validated.error || !validated.settings) {
-      return { error: validated.error ?? "invalid_settings", ok: false };
-    }
-    const refusal = frameSettingsRefusal(frame, validated.settings);
-    if (refusal) {
-      return { error: refusal.error, ok: false };
-    }
-    const merged = mergeFrameSettings(frame.settings, validated.settings);
-    if (merged) {
-      await db.update(frames).set({ settings: merged, updatedAt: new Date() }).where(eq(frames.id, frame.id));
-    }
-    const command = await enqueueFrameSettingsPush(db, frame, validated.settings, { createdByAccountId: accountId });
-    await recordAuditEvent(db, {
-      accountId,
-      actor: { accountId, frameId: frame.id, kind: "voice_chat" },
-      eventType: "frame.settings_pushed",
-      metadata: { keys: Object.keys(validated.settings), source: "voice_chat" },
-      target: { commandId: command?.id, frameId: frame.id },
-    });
-    return { command_id: command?.id, ok: true, type: "set_settings" };
-  };
-
-  // The photo library (docs/photos.md), for the album tools: the albums at
-  // the root, and an install that does what the MCP's photo_album_install
-  // does for this frame — the frame's own share link to the folder (made now
-  // if it has none), the album scene saved as a private scene of the account
-  // (the same path as the workspace's save, moderation included) and
-  // assigned next to the frame's scenes, pushed with it active. The frame's
-  // linked client is the publishing actor: a frame's token is not the owner's.
-  const photoError = (error: unknown) =>
-    error instanceof PhotoError
-      ? { detail: error.message, error: error.code, ok: false as const }
-      : { detail: error instanceof Error ? error.message : String(error), error: "photos_unavailable", ok: false as const };
-  const albums: VoiceAlbums = {
-    async install(path, options) {
-      let share;
-      try {
-        await assertPhotosAvailable(db, accountId);
-        share = (await createPhotoShare(db, accountId, path, frame.id)).share;
-      } catch (error) {
-        return { ...photoError(error), error: "album_unavailable" };
-      }
-      const scene = buildPhotoAlbumScene({
-        albumUrl: photoShareUrl(getPublicOrigin(request), share.token),
-        fit: "cover",
-        name: photoBasename(share.path),
-        order: options.order ?? "random",
-        seconds: options.seconds ?? defaultPhotoAlbumSeconds,
-        shapes: photoAlbumShapes.map((shape) => shape.value),
-      });
-      const created = await createAccountScene(db, {
-        accountId,
-        actor: { linkedClientId: frame.linkedClientId },
-        name: typeof scene.name === "string" ? scene.name : photoBasename(share.path),
-        scenes: [scene],
-      });
-      const body = (await created.json().catch(() => ({}))) as { error?: string; scene?: { id?: string } };
-      if (!created.ok || typeof body.scene?.id !== "string") {
-        return { error: body.error ?? `save_failed_${created.status}`, ok: false };
-      }
-      const existing = await currentSceneAssignments(db, frame.id);
-      const outcome = await assignScenesToFrame(db, {
-        accountId,
-        activeSceneId: typeof scene.id === "string" ? scene.id : undefined,
-        actor: { accountId, frameId: frame.id, kind: "voice_chat" },
-        frame,
-        requested: [...existing, { latest: true, sceneId: body.scene.id, sceneVersion: null }],
-        via: "voice_chat",
-      });
-      if (!outcome.ok) {
-        return { error: outcome.failure.code, ok: false };
-      }
-      return {
-        album: share.path,
-        command_id: outcome.result.commandId,
-        ok: true,
-        scene: typeof scene.name === "string" ? scene.name : undefined,
-        scene_id: body.scene.id,
-        type: "set_scenes",
-      };
-    },
-    async list() {
-      try {
-        await assertPhotosAvailable(db, accountId);
-        const entries = await listPhotoFolder(db, accountId, "");
-        return {
-          albums: entries
-            .filter((entry) => entry.kind === "folder")
-            .map((entry) => ({ name: entry.name, path: entry.path, photos: entry.items ?? 0 })),
-        };
-      } catch (error) {
-        return photoError(error);
-      }
-    },
-  };
-
-  // An installed scene's runtime JSON, for change_scene: the bundle the
-  // frame was sent, by the store id's device id.
-  const sceneContent = async (storeSceneId: string): Promise<JsonObject | null> => {
-    const built = await buildScenesPayloadForFrame(db, frame.id);
-    if ("error" in built) {
-      return null;
-    }
-    const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
-    const found = built.scenes.find(
-      (scene) => scene && typeof scene === "object" && (scene as JsonObject).id === deviceSceneId,
-    );
-    return (found as JsonObject | undefined) ?? null;
-  };
-  // The scene AI as a sub-turn (voice-scene-builder.ts): the editor and
-  // catalog tools alone, the scene rendered in the frame's memory before it
-  // is handed back; the tool then pushes it as the preview above. Each of
-  // its rounds is metered like the turn's own.
-  let sceneTurns = 0;
-  const buildScene = async (request: string, base: JsonObject | null, name: string | null) => {
-    sceneTurns += 1;
-    const sceneTurnId = `${turnId}-scene-${sceneTurns}`;
-    logInfo("frames.voice_scene_build", { base: base ? String(base.name) : null, frameId: frame.id, request: request.slice(0, 200) });
-    return buildSceneByVoice({
-      accountId,
-      apiKey: credentials.apiKey,
-      base,
+      baseTools: false,
       db,
-      frameBlock: context.block,
+      editorAvailable: false,
+      emitScenes: () => undefined,
+      extraTools: tools,
       frameId: frame.id,
+      prompt: transcript,
+    };
+    let result;
+    try {
+      result = await runAgentLoop({
+        apiKey: credentials.apiKey,
+        // No browser reads the turn's events: a tool starting is the frame's
+        // next stage.
+        emit: (event) => {
+          if (event.type === "tool" && event.status === "start") {
+            progress(event.name);
+          }
+        },
+        input: buildInitialInput({
+          contextBlock: voiceContextBlock(
+            context.block,
+            showing,
+            typeof readFrameSettings(frame.settings).rotate === "number"
+              ? (readFrameSettings(frame.settings).rotate as number)
+              : 0,
+            imageSources,
+            permissions,
+            preview,
+            now,
+          ),
+          history,
+          prompt: transcript,
+        }),
+        instructions: buildVoiceSystemPrompt(),
+        maxRounds: MAX_VOICE_ROUNDS,
+        model: credentials.model,
+        reasoningEffort: credentials.reasoningEffort,
+        toolContext,
+      });
+    } catch (error) {
+      reportError("frames.voice_turn_failed", error, { accountId, frameId: frame.id });
+      const detail = error instanceof OpenAiRequestError ? error.message : `AI chat failed: ${String(error)}`;
+      return failure("chat_failed", detail);
+    }
+    meterAiUsageInBackground({
+      accountId,
+      chatId: chat?.id ?? null,
+      credentialSource: credentials.source,
       model: credentials.model,
-      name,
-      onUsage: (result) => {
-        meterAiUsageInBackground({
-          accountId,
-          chatId: chat?.id ?? null,
-          credentialSource: credentials.source,
-          model: credentials.model,
-          rounds: result.rounds,
-          surface: "voice_chat",
-          turnId: `${sceneTurnId}-${result.rounds}`,
-          usage: result.usage,
-        });
-      },
-      reasoningEffort: credentials.reasoningEffort,
-      renderDevice: context.renderDevice ?? null,
-      renderScale: context.renderScale ?? null,
-      renderSize: context.resolution ?? null,
-      request,
+      rounds: result.rounds,
+      surface: "voice_chat",
+      turnId,
+      usage: result.usage,
     });
+    const reply = result.reply.trim() || "Done.";
+    const seconds = (Date.now() - startedAt) / 1000;
+    if (chat) {
+      // The exchange, three rows: what was heard, the log of what was done
+      // (the workspace draws it as a log bubble; the next turn reads it as
+      // history), the reply.
+      await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: VOICE_TURN_TOOL });
+      await appendChatMessage(db, chat.id, {
+        content: voiceTurnLog(tools.actions, { at: new Date(), seconds, sessionId }),
+        role: "assistant",
+        tool: VOICE_LOG_TOOL,
+      });
+      await appendChatMessage(db, chat.id, { content: reply, role: "assistant", tool: VOICE_TURN_TOOL });
+    }
+    logInfo("frames.voice_turn", {
+      frameId: frame.id,
+      rounds: result.rounds,
+      seconds: Math.round(seconds * 10) / 10,
+      tools: result.toolCalls.join(","),
+    });
+    return { ok: true, reply, tools: result.toolCalls, transcript };
   };
-
-  const permissions = readVoicePermissions(frame.voicePermissions);
-  const tools = voiceTools({
-    activeSceneId: showing?.id,
-    albums,
-    buildScene,
-    imageSources,
-    permissions,
-    previewScene,
-    previewScenes,
-    queue,
-    sceneContent,
-    scenes,
-    updateSettings,
-  });
-  const toolContext: ToolContext = {
-    accountId,
-    baseTools: false,
-    db,
-    editorAvailable: false,
-    emitScenes: () => undefined,
-    extraTools: tools,
-    frameId: frame.id,
-    prompt: transcript,
-  };
-  let result;
-  try {
-    result = await runAgentLoop({
-      apiKey: credentials.apiKey,
-      emit: () => undefined,
-      input: buildInitialInput({
-        contextBlock: voiceContextBlock(
-          context.block,
-          showing,
-          typeof readFrameSettings(frame.settings).rotate === "number"
-            ? (readFrameSettings(frame.settings).rotate as number)
-            : 0,
-          imageSources,
-          permissions,
-          preview,
-          now,
-        ),
-        history,
-        prompt: transcript,
-      }),
-      instructions: buildVoiceSystemPrompt(),
-      maxRounds: MAX_VOICE_ROUNDS,
-      model: credentials.model,
-      reasoningEffort: credentials.reasoningEffort,
-      toolContext,
-    });
-  } catch (error) {
-    reportError("frames.voice_turn_failed", error, { accountId, frameId: frame.id });
-    const detail = error instanceof OpenAiRequestError ? error.message : `AI chat failed: ${String(error)}`;
-    return failure("chat_failed", detail);
+  if (!wantsVoiceProgress(request.headers.get("accept"))) {
+    return NextResponse.json(await answer(() => undefined));
   }
-  meterAiUsageInBackground({
-    accountId,
-    chatId: chat?.id ?? null,
-    credentialSource: credentials.source,
-    model: credentials.model,
-    rounds: result.rounds,
-    surface: "voice_chat",
-    turnId,
-    usage: result.usage,
+  return new Response(voiceProgressStream(answer), {
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      // nginx buffers a proxied response by default: every stage would reach
+      // the frame with the answer.
+      "X-Accel-Buffering": "no",
+    },
   });
-  const reply = result.reply.trim() || "Done.";
-  const seconds = (Date.now() - startedAt) / 1000;
-  if (chat) {
-    // The exchange, three rows: what was heard, the log of what was done
-    // (the workspace draws it as a log bubble; the next turn reads it as
-    // history), the reply.
-    await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: VOICE_TURN_TOOL });
-    await appendChatMessage(db, chat.id, {
-      content: voiceTurnLog(tools.actions, { at: new Date(), seconds, sessionId }),
-      role: "assistant",
-      tool: VOICE_LOG_TOOL,
-    });
-    await appendChatMessage(db, chat.id, { content: reply, role: "assistant", tool: VOICE_TURN_TOOL });
-  }
-  logInfo("frames.voice_turn", {
-    frameId: frame.id,
-    rounds: result.rounds,
-    seconds: Math.round(seconds * 10) / 10,
-    tools: result.toolCalls.join(","),
-  });
-  return NextResponse.json({ ok: true, reply, tools: result.toolCalls, transcript });
 }

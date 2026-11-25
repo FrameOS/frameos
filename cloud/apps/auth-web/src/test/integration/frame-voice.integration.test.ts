@@ -274,6 +274,7 @@ function chunk(
   done: boolean,
   bytes: number,
   body?: Uint8Array<ArrayBuffer>,
+  headers: Record<string, string> = {},
 ) {
   return voiceRoute(
     new NextRequest(new URL(`/api/frames/${frameId}/voice/${session}?seq=${seq}&done=${done ? 1 : 0}`, baseUrl), {
@@ -282,6 +283,7 @@ function chunk(
         authorization: `Bearer ${token}`,
         "content-length": String(bytes),
         "content-type": "audio/L16; rate=16000; channels=1",
+        ...headers,
       },
       method: "POST",
     }),
@@ -397,6 +399,59 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
         `activate_scene {"scene_id":"${calendar.id}"} -> {"ok":true,"scene":"Calendar","type":"set_scenes"}]`,
     );
     expect(texts[3]).toBe("and back");
+  });
+
+  it("tells a frame that asks how far the turn got, a line per stage, and the answer last", async () => {
+    // docs/voice-chat.md "Progress on the panel": the closing chunk sent with
+    // Accept: application/x-ndjson, as firmware from 2026.11.25 sends it.
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const clock = await createStoreScene(frame.accountId, "Clock", "clock-rt");
+    const calendar = await createStoreScene(frame.accountId, "Calendar", "calendar-rt");
+    await assignScenes(frame.frame_id, [clock.id, calendar.id]);
+    script.rounds.push(
+      { calls: [{ arguments: {}, call_id: "c1", name: "list_scenes" }], text: "" },
+      { calls: [{ arguments: { scene_id: calendar.id }, call_id: "c2", name: "activate_scene" }], text: "" },
+      { calls: [], text: "Switched to Calendar." },
+    );
+    const ndjson = { accept: "application/x-ndjson" };
+    const lines = async (response: Response) =>
+      (await response.text())
+        .split("\n")
+        .filter((line) => line)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+
+    const response = await chunk(frame.frame_id, frame.access_token, "sess-0101", 0, true, SECOND, undefined, ndjson);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/x-ndjson");
+    expect(response.headers.get("x-accel-buffering")).toBe("no");
+    // A tool without words (the listing) is no news.
+    expect(await lines(response)).toEqual([
+      { progress: "transcribing", text: "Transcribing…" },
+      { progress: "heard", text: '"switch to the calendar please"\nThinking…' },
+      { progress: "activate_scene", text: '"switch to the calendar please"\nSwitching the scene…' },
+      {
+        ok: true,
+        reply: "Switched to Calendar.",
+        tools: ["list_scenes", "activate_scene"],
+        transcript: "switch to the calendar please",
+      },
+    ]);
+    // The same turn as a frame that did not ask: the exchange is stored.
+    const rows = await db
+      .select()
+      .from(aiChatMessages)
+      .where(eq(aiChatMessages.chatId, voiceChatId(frame.frame_id)))
+      .orderBy(aiChatMessages.id);
+    expect(rows.map((row) => [row.role, row.tool])).toEqual([["user", "voice"], ["assistant", "log"], ["assistant", "voice"]]);
+
+    // A turn that fails ends with the failure, after the stages before it.
+    heard.text = "   ";
+    const blank = await chunk(frame.frame_id, frame.access_token, "sess-0102", 0, true, SECOND, undefined, ndjson);
+    expect(await lines(blank)).toEqual([
+      { progress: "transcribing", text: "Transcribing…" },
+      { detail: "the transcription came back empty", error: "nothing_heard", ok: false },
+    ]);
   });
 
   it("offers the model only what the owner's switches allow, and refuses the rest", async () => {
