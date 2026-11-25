@@ -997,5 +997,26 @@ block the_frames_home_stays:
   scene.send("open", %*{"sceneId": SceneSwitcherId})
   doAssert not scene.state.hasKey("home")
 
+block the_frames_home_on_a_portrait_e_paper:
+  # A reTerminal Sticky fresh from the flasher, as it starts: its set's
+  # categories as headings, System first, and no Close.
+  listed = @[
+    SwitcherEntry(id: "clock", name: "Clock", category: "Clocks & time"),
+    SwitcherEntry(id: "scene-store", name: "Scene store", category: "System"),
+    SwitcherEntry(id: "flip-clock", name: "Flip clock", category: "Clocks & time"),
+    SwitcherEntry(id: "asset-browser", name: "Files", category: "System"),
+    SwitcherEntry(id: "pixel-toys", name: "Pixel toys", category: "Fun & animations"),
+    SwitcherEntry(id: "terminal-app", name: "Terminal", category: "System"),
+    SwitcherEntry(id: "weather", name: "Weather", category: "Weather"),
+    SwitcherEntry(id: "calculator", name: "Calculator", category: "System")]
+  sent.setLen(0)
+  let scene = SceneSwitcherScene(switcher.exportedScene.init(SceneSwitcherId.SceneId,
+    config(800, 480, "waveshare.EPD_7in5_V2", rotate = 90), logger, %*{}))
+  scene.send("setCurrentScene", %*{"sceneId": SceneSwitcherId, "state": {"home": true}})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert scene.entries[0].category == "System", scene.entries[0].name
+  preview("switcher-home-480x800-eink-bw", oneBit(scene.draw(newImage(480, 800))))
+  doAssert sent.len == 0, $sent
+
 localEventSink = nil
 echo "scene switcher: ok"
