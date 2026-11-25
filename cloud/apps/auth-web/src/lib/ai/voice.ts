@@ -33,6 +33,7 @@ import { OpenAiRequestError } from "./openai";
 import type { JsonObject } from "./scene-utils";
 import type { ExtraTools, ToolOutput } from "./tools";
 import { untrustedResult } from "./tools";
+import { screenToolDefinitions, screenToolLabels, type VoiceDeviceEvent, type VoiceScreen, type VoiceScreenTools } from "./voice-actions";
 import {
   defaultVoicePermissions,
   voicePermissionAllows,
@@ -78,6 +79,10 @@ export type VoiceSession = {
   nextSeq: number;
   received: number;
   updatedAt: number;
+  /** The frame's screen digest, sent before the audio (docs/voice-chat.md
+   * "Voice actions", voice-actions.ts readScreen); absent from a frame that
+   * sends none. */
+  screen?: VoiceScreen;
 };
 
 export type VoiceAppendError = "seq_mismatch" | "session_too_long" | "unknown_session";
@@ -129,6 +134,26 @@ export class VoiceSessionStore {
     session.nextSeq += 1;
     session.updatedAt = this.now();
     return session;
+  }
+
+  /** The screen digest for a session, before (or between) its chunks: it
+   * starts the session when it is the first to arrive. */
+  setScreen(frameId: string, sessionId: string, screen: VoiceScreen): VoiceSession {
+    this.sweep();
+    const key = `${frameId}:${sessionId}`;
+    let session = this.sessions.get(key);
+    if (!session) {
+      session = { chunks: [], frameId, nextSeq: 0, received: 0, sessionId, updatedAt: this.now() };
+      this.sessions.set(key, session);
+    }
+    session.screen = screen;
+    session.updatedAt = this.now();
+    return session;
+  }
+
+  /** The session's screen digest, if the frame sent one. */
+  screenOf(frameId: string, sessionId: string): VoiceScreen | undefined {
+    return this.sessions.get(`${frameId}:${sessionId}`)?.screen;
   }
 
   /** The finished session's audio, removed from the store: the audio is kept
@@ -666,6 +691,7 @@ export function voiceTools({
   previewScene,
   sceneContent,
   permissions = defaultVoicePermissions,
+  screenTools,
 }: {
   scenes: VoiceScene[];
   activeSceneId: string | null | undefined;
@@ -686,7 +712,10 @@ export function voiceTools({
    * a tool they turned off is not offered at all, and refused when named
    * anyway (a model's habit from an earlier turn). */
   permissions?: VoicePermissions;
-}): ExtraTools & { changed: string[]; actions: VoiceAction[] } {
+  /** press / type_text / scene_action, when the frame sent its screen
+   * (voice-actions.ts, docs/voice-chat.md "Voice actions"). */
+  screenTools?: VoiceScreenTools | undefined;
+}): ExtraTools & { changed: string[]; actions: VoiceAction[]; events: () => VoiceDeviceEvent[] } {
   const changed: string[] = [];
   const actions: VoiceAction[] = [];
   const text = (value: unknown): ToolOutput => ({ images: [], text: JSON.stringify(value) });
@@ -711,6 +740,16 @@ export function voiceTools({
           error: "not_allowed",
           ok: false,
         });
+      }
+      if (name in screenToolLabels) {
+        if (!screenTools) {
+          return text({ detail: "The frame sent no screen.", error: "no_screen", ok: false });
+        }
+        const outcome = screenTools.call(name, args);
+        if (outcome.ok) {
+          changed.push(name);
+        }
+        return text(outcome);
       }
       switch (name) {
         case "list_scenes":
@@ -898,8 +937,12 @@ export function voiceTools({
       actions.push({ args: { ...args }, name, result: actionResult(output.text) });
       return output;
     },
-    definitions: voiceToolDefinitions.filter((tool) => voicePermissionAllows(permissions, tool.name)),
-    labels: voiceToolLabels,
+    definitions: [...voiceToolDefinitions, ...(screenTools ? screenToolDefinitions : [])].filter((tool) =>
+      voicePermissionAllows(permissions, tool.name),
+    ),
+    // What the screen tools added for the frame to do, in order.
+    events: () => (screenTools ? [...screenTools.events] : []),
+    labels: { ...voiceToolLabels, ...screenToolLabels },
   };
 }
 

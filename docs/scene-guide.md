@@ -1008,6 +1008,16 @@ in the scene's `customEvents` as `{ name }` (at most 63 characters). A
 schedule or the cloud may send one only when its declaration lists them in
 `origins`: `{ "name": "nextPage", "origins": ["schedule"] }`.
 
+The frame's voice key can name a custom event too: give it a `description`
+(what it does, in a few words) and `aliases` (other ways to say it), and what
+is said goes to it with `{ text, at }` as its payload. One custom event may be
+`"voice": "fallback"`: what was said goes there when nothing on the screen
+matches (a memo scene saves it); `"voice": "never"` keeps one away from voice.
+An element with an `onClick` and no text of its own (an icon, a checkbox)
+says what it does with `title` (or `aria-label`): `<div title="Delete"
+onClick={...}>`. That is what the voice key reads to press it ("delete the
+milk one" finds the bin on the milk's row).
+
 A scene with pages or a set of pictures listens for `back` and `forward`
 rather than a custom event or a swipe of its own: a touch screen's swipe in
 from the left or the right edge is one of them on every frame (as a phone's
@@ -1048,6 +1058,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `sceneSettings` |  | yes | `page`? string | all | Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. |
 | `back` | yes |  |  | all | Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher moves its highlight a screenful back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. |
 | `forward` | yes |  |  | all | Go forward, the other way from `back`: the next photo or page (the scene switcher moves its highlight a screenful on). |
+| `uiAction` |  | yes | `target` string, `do`? string, `text`? string, `submit`? boolean, `by`? float | all | Do to an element of a JSX UI what a person would, by its place in the tree instead of a position: press it (`tap`), type `text` into a field (`type`: the field gets the focus, the text goes in as the on-screen keyboard would put it, at the end, and with `submit` the field's Enter follows; `set` replaces what the field says), or scroll a box that scrolls by `by` of its height (`scroll`). |
 <!-- END GENERATED: events -->
 
 ## JS API reference
@@ -1517,6 +1528,8 @@ interface FrameOSEventPayloads {
   back: Record<string, never>;
   /** Go forward, the other way from `back`: the next photo or page (the scene switcher moves its highlight a screenful on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */
   forward: Record<string, never>;
+  /** Do to an element of a JSX UI what a person would, by its place in the tree instead of a position: press it (`tap`), type `text` into a field (`type`: the field gets the focus, the text goes in as the on-screen keyboard would put it, at the end, and with `submit` the field's Enter follows; `set` replaces what the field says), or scroll a box that scrolls by `by` of its height (`scroll`). `target` is `<node>:<key>` of a UI of the scene showing, as its screen digest lists it (docs/voice-chat.md, "Voice actions"); a target that is no longer there does nothing. */
+  uiAction: { target: string; do?: string; text?: string; submit?: boolean; by?: number };
 }
 
 interface FrameOSContext {

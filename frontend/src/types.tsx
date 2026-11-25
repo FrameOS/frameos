@@ -1510,6 +1510,17 @@ export interface FrameEvent {
    * checks it (docs/events.md).
    */
   origins?: EventOrigin[]
+  /**
+   * Custom events only: other ways to say it, for the frame's voice key
+   * (docs/voice-chat.md "Voice actions"). The frame ignores them.
+   */
+  aliases?: string[]
+  /**
+   * Custom events only: how the voice key may name it. `match` (the default:
+   * offered when it has a description or aliases), `fallback` (what was said
+   * goes here when nothing on the screen matches) or `never`.
+   */
+  voice?: 'match' | 'fallback' | 'never'
 }
 
 export interface FrameOSSettings {

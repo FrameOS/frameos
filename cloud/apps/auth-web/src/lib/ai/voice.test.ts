@@ -4,6 +4,7 @@
 // backend's copy (backend/app/utils/voice_chat.py).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { screenToolDefinitions } from "./voice-actions";
 import { describe, expect, it } from "vitest";
 import {
   actionLine,
@@ -322,7 +323,7 @@ describe("voiceTools", () => {
     expect(context).toContain("- Voice chat may: nothing but list the scenes");
     expect(context).toContain(
       "- Voice chat may not: change the frame's settings (rotate_frame); use the installed scenes: switch between " +
-        "them, set their fields, redraw (activate_scene, set_scene_state, render_now); put new scenes on the frame (show_image, create_scene, change_scene); " +
+        "them, set their fields, redraw, press and type on the screen (activate_scene, set_scene_state, render_now, press, type_text, scene_action); put new scenes on the frame (show_image, create_scene, change_scene); " +
         "play the photo albums: list them, show one on the frame (list_albums, show_album)",
     );
     const defaults = voiceContextBlock("frame", null, 0, []);
@@ -480,7 +481,9 @@ describe("voiceTools", () => {
     });
     // Every tool but the listing answers to a switch, and the table names real tools.
     expect(new Set(Object.keys(voiceToolPermissions))).toEqual(
-      new Set(voiceToolDefinitions.map((tool) => tool.name).filter((name) => name !== "list_scenes")),
+      new Set(
+        [...voiceToolDefinitions, ...screenToolDefinitions].map((tool) => tool.name).filter((name) => name !== "list_scenes"),
+      ),
     );
   });
 });

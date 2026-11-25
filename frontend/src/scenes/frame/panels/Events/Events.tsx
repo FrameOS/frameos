@@ -5,7 +5,7 @@ import { Button } from '../../../../components/Button'
 import { Field } from '../../../../components/Field'
 import { H6 } from '../../../../components/H6'
 
-import { customEventOriginOptions, eventsLogic } from './eventsLogic'
+import { customEventOriginOptions, customEventVoiceOptions, eventsLogic } from './eventsLogic'
 import { Checkbox } from '../../../../components/Checkbox'
 import { Tabs } from '../../../../components/panels/Tabs'
 import { Tab } from '../../../../components/panels/Tab'
@@ -51,6 +51,8 @@ export function Events({ frameId, sceneId }: EventsProps) {
     removeCustomEvent,
     setCustomEventFields,
     setCustomEventOrigin,
+    setCustomEventAliases,
+    setCustomEventVoice,
     addCustomEventField,
     editCustomEventField,
     closeCustomEventField,
@@ -184,6 +186,27 @@ export function Events({ frameId, sceneId }: EventsProps) {
                             No payload fields.
                           </div>
                         ) : null}
+                      </div>
+                      <div className="space-y-2">
+                        <H6>Voice</H6>
+                        <TextInput
+                          placeholder="Other ways to say it, comma-separated: take a note, memo"
+                          defaultValue={(event.aliases ?? []).join(', ')}
+                          onBlur={(e) => setCustomEventAliases(index, e.target.value)}
+                        />
+                        <div className="flex flex-col gap-1.5">
+                          {customEventVoiceOptions.map(({ value, label }) => (
+                            <Checkbox
+                              key={value}
+                              label={label}
+                              value={(event.voice ?? 'match') === value}
+                              onChange={() => setCustomEventVoice(index, value)}
+                            />
+                          ))}
+                        </div>
+                        <div className="frame-tool-muted text-sm">
+                          The frame's voice key can send it, with what was said as its text.
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <H6>Who else may send it</H6>

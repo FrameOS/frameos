@@ -12,7 +12,8 @@
     "cloud": "FrameOS Cloud, through a hub verb.",
     "system": "The runtime itself: boot, the portal, settings apply, device flow.",
     "eventMap": "The frame's or an installed scene's event map (docs/events.md, \"Event map\") replacing an event it matched with the one its rule names: the owner's configuration speaking, never a key or a request itself. What it emits is never mapped again.",
-    "panel": "The frame page of the settings on the frame's own screen (docs/scene-settings.md, \"The frame page\"): a person at the frame pressing Render again, Restart FrameOS or Reboot. Only when the frame's control plane leaves that page on."
+    "panel": "The frame page of the settings on the frame's own screen (docs/scene-settings.md, \"The frame page\"): a person at the frame pressing Render again, Restart FrameOS or Reboot. Only when the frame's control plane leaves that page on.",
+    "voice": "The control plane's answer to what was said at the frame's voice key (docs/voice-chat.md, \"Voice actions\"): the events the reply carries, dispatched by the frame itself — a UI target pressed or typed into, a scene switched or its state set, the scene's custom event. The person holding the key is asking; the plane picked what they meant from what the frame said was on its screen."
   },
   "classes": {
     "lifecycle": "Sent by the host to a scene as it is loaded, shown, rendered and left.",
@@ -23,8 +24,12 @@
   "customEvents": {
     "$comment": "A name that is not in `events` is a custom scene event (a scene's `customEvents`). Every host delivers it to the current scene's listeners of that name. `origins` is who may always send one; `declarableOrigins` are the ones a scene opts into per event, with `origins` on its declaration (`{name: \"nextPage\", origins: [\"schedule\"]}`).",
     "maxNameLength": 63,
-    "origins": ["driver", "preview", "scene", "http:write", "http:admin", "system"],
+    "origins": ["driver", "preview", "scene", "http:write", "http:admin", "system", "voice"],
     "declarableOrigins": ["schedule", "cloud"],
+    "$voiceComment": "What a control plane reads to match a spoken request to a custom event (docs/voice-chat.md, \"Voice actions\"); the frame ignores these keys. `description` says what it does, `aliases` are other ways to say it, `voice` is `match` (the default: offered when it has a description or aliases), `fallback` (what everything said goes to when nothing else on the screen matches: one per scene) or `never`. Sent by voice, its payload is `{text, at}`: what was said and when.",
+    "voiceKeys": ["description", "aliases", "voice"],
+    "voiceRoles": ["match", "fallback", "never"],
+    "maxAliases": 12,
     "cloud": {"verb": "scene_event", "since": "2026.9.21"},
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -641,7 +646,7 @@
         {"name": "render", "label": "Render", "type": "boolean", "required": false, "catalog": false}
       ],
       "sceneState": "payload",
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap", "voice"],
       "cloud": {
         "verb": "scene_event",
         "since": "2026.9.21",
@@ -663,7 +668,7 @@
         {"name": "direction", "label": "Direction", "type": "string", "required": false, "unit": "scene-direction"},
         {"name": "state", "label": "State", "type": "json", "required": false, "catalog": false}
       ],
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap", "voice"],
       "cloud": {"verb": "set_current_scene"},
       "schedule": {"label": "Show a scene"},
       "renderAfter": "always",
@@ -681,7 +686,7 @@
       "payload": [
         {"name": "swap", "label": "Swap", "type": "boolean", "required": false}
       ],
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap", "voice"],
       "renderAfter": "always",
       "coalesce": "none",
       "log": "full",
@@ -712,7 +717,7 @@
       "listen": true,
       "dispatch": false,
       "payload": [],
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap", "voice"],
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",
@@ -726,7 +731,7 @@
       "listen": true,
       "dispatch": false,
       "payload": [],
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap", "voice"],
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "full",
@@ -807,6 +812,26 @@
       "coalesce": "none",
       "log": "full",
       "hosts": {"linux": true, "esp32": true, "wasm": false}
+    },
+    {
+      "name": "uiAction",
+      "class": "scene-command",
+      "description": "Do to an element of a JSX UI what a person would, by its place in the tree instead of a position: press it (`tap`), type `text` into a field (`type`: the field gets the focus, the text goes in as the on-screen keyboard would put it, at the end, and with `submit` the field's Enter follows; `set` replaces what the field says), or scroll a box that scrolls by `by` of its height (`scroll`). `target` is `<node>:<key>` of a UI of the scene showing, as its screen digest lists it (docs/voice-chat.md, \"Voice actions\"); a target that is no longer there does nothing.",
+      "listen": false,
+      "dispatch": true,
+      "payload": [
+        {"name": "target", "label": "Target", "type": "string", "required": true},
+        {"name": "do", "label": "Do", "type": "string", "required": false},
+        {"name": "text", "label": "Text", "type": "string", "required": false, "unit": "text"},
+        {"name": "submit", "label": "Submit", "type": "boolean", "required": false},
+        {"name": "by", "label": "By", "type": "float", "required": false}
+      ],
+      "origins": ["voice", "preview", "scene", "http:write", "http:admin", "system"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.11.14"
     },
     {
       "name": "voiceChat",

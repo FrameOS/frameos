@@ -148,6 +148,11 @@ void frameos_nim_current_scene(char *id, size_t id_len, char *name, size_t name_
  * a caller can tell "unknown right now" from "genuinely nothing" and leave
  * a field out rather than report an empty one as the truth. */
 const char *frameos_nim_scene_info_json_wait(int timeout_ms);
+/* The voice key's screen digest (frameos/voice_screen.nim: what a person
+ * could press, type into or scroll on the scene showing), copied into PSRAM
+ * under the runtime lock: the caller frees it. NULL when the runtime is busy
+ * past timeout_ms, has no scene, or there was no memory. */
+char *frameos_nim_voice_screen_copy(int timeout_ms);
 /* JSON state for the active interpreted scene. */
 const char *frameos_nim_scene_state_json(void);
 const char *frameos_nim_scene_state_json_wait(int timeout_ms);

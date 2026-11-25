@@ -14,7 +14,7 @@ export const SCENE_SETTINGS_WINDOW_PREFIX = 'system/sceneSettings#'
 /** What a layout's scene node names for the scene it wraps (docs/scene-layouts.md). */
 export const SCENE_YIELD_ID = 'system/yield'
 
-export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap' | 'panel'
+export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap' | 'panel' | 'voice'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
 export type EventDevice = 'keyboard' | 'pointer' | 'button'
 export type EventRenderAfter = 'never' | 'always' | 'if-state-changed'
@@ -59,6 +59,7 @@ export type ContractEventName =
   | 'restart'
   | 'reboot'
   | 'uploadScenes'
+  | 'uiAction'
   | 'voiceChat'
 
 export interface ContractEventSpec {
@@ -748,7 +749,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:admin",
       "cloud",
       "system",
-      "eventMap"
+      "eventMap",
+      "voice"
     ],
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -781,7 +783,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:admin",
       "cloud",
       "system",
-      "eventMap"
+      "eventMap",
+      "voice"
     ],
     "renderAfter": "always",
     "coalesce": "none",
@@ -809,7 +812,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "system",
-      "eventMap"
+      "eventMap",
+      "voice"
     ],
     "renderAfter": "always",
     "coalesce": "none",
@@ -855,7 +859,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "system",
-      "eventMap"
+      "eventMap",
+      "voice"
     ],
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -878,7 +883,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "system",
-      "eventMap"
+      "eventMap",
+      "voice"
     ],
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -1013,6 +1019,28 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "verb": "set_scenes"
     }
   },
+  "uiAction": {
+    "class": "scene-command",
+    "listen": false,
+    "dispatch": true,
+    "origins": [
+      "voice",
+      "preview",
+      "scene",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.14"
+  },
   "voiceChat": {
     "class": "device-command",
     "listen": false,
@@ -1039,7 +1067,8 @@ export const customEventPolicy: Pick<ContractEventSpec, 'origins' | 'renderAfter
     "scene",
     "http:write",
     "http:admin",
-    "system"
+    "system",
+    "voice"
   ],
   "renderAfter": "if-state-changed",
   "coalesce": "none",
@@ -1202,6 +1231,8 @@ interface FrameOSEventPayloads {
   back: Record<string, never>;
   /** Go forward, the other way from \`back\`: the next photo or page (the scene switcher moves its highlight a screenful on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */
   forward: Record<string, never>;
+  /** Do to an element of a JSX UI what a person would, by its place in the tree instead of a position: press it (\`tap\`), type \`text\` into a field (\`type\`: the field gets the focus, the text goes in as the on-screen keyboard would put it, at the end, and with \`submit\` the field's Enter follows; \`set\` replaces what the field says), or scroll a box that scrolls by \`by\` of its height (\`scroll\`). \`target\` is \`<node>:<key>\` of a UI of the scene showing, as its screen digest lists it (docs/voice-chat.md, "Voice actions"); a target that is no longer there does nothing. */
+  uiAction: { target: string; do?: string; text?: string; submit?: boolean; by?: number };
 }
 `
 
