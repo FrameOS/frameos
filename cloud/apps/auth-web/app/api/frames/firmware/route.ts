@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../src/lib/device-flow";
 import {
   fetchLatestRelease,
+  fetchReleaseAssetText,
   findAsset,
   provisioningAssets,
   streamablePlatforms,
@@ -11,7 +12,6 @@ import {
   type Release,
 } from "../../../../src/lib/firmware-release";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
-import { readSession } from "../../../../src/lib/session";
 
 export const runtime = "nodejs";
 
@@ -27,7 +27,7 @@ export const runtime = "nodejs";
 // src/lib/firmware-release.ts, shared with the device-authed OTA routes
 // (app/api/frames/[frameId]/firmware).
 //
-// Two shapes:
+// Three shapes:
 //   GET /api/frames/firmware
 //     -> { release, assets: [{ name, platform, size }] } for every provisioning
 //        artifact in the latest release. It lists the ESP32 firmware *and* the
@@ -37,10 +37,19 @@ export const runtime = "nodejs";
 //        has its own (much tighter) budget for gigabyte-sized images.
 //   GET /api/frames/firmware?platform=esp32-s3-epd7in5v2
 //     -> the .bin bytes, streamed.
+//   GET /api/frames/firmware?platform=esp32-s3-generic&signature=1
+//     -> that image's .minisig text: the browser checks the bytes against it
+//        before writing them (frontend/src/utils/releaseSigning.ts), as the
+//        SD image builder does with app/api/frames/sd-image's.
 //
 // Like the SD image route this is a dumb byte pipe over public release
 // artifacts, and it is not an "image proxy" in the sense the project forbids:
 // that rule is about frame *content* fetched on every render.
+//
+// No sign-in: flash.frameos.net (cloud/docs/flasher.md), a page for anyone
+// with a board and no account, flashes from here, and its host serves every
+// request as to a stranger. The bytes are public release assets; what bounds
+// this route is the per-address budget below, which it always had.
 
 // Development / self-hosted escape hatch: until a release publishes the
 // all-panels build, FRAMEOS_ESP32_GENERIC_FIRMWARE can point at a locally
@@ -86,10 +95,6 @@ export async function GET(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  const session = await readSession();
-  if (!session?.accountId) {
-    return jsonError("login_required", 401);
-  }
   if (!listing && !streamablePlatforms.has(platform)) {
     return jsonError("invalid_platform", 400);
   }
@@ -128,6 +133,10 @@ export async function GET(request: NextRequest) {
     (entry) => entry.platform === platform,
   );
   const asset = requested ? findAsset(release, requested.suffix) : undefined;
+  const wantsSignature = request.nextUrl.searchParams.get("signature");
+  if (wantsSignature === "1" || wantsSignature === "true") {
+    return signatureResponse(release, asset, platform);
+  }
   if (!asset && platform === "esp32-s3-generic") {
     const local = await localGenericFirmware();
     if (local) {
@@ -153,4 +162,47 @@ export async function GET(request: NextRequest) {
   // Host-pinned and streamed straight through: the route never buffers the
   // firmware (streamReleaseAssetResponse in src/lib/firmware-release.ts).
   return streamReleaseAssetResponse(asset, release.tag_name ?? "");
+}
+
+// The image's .minisig, named. 409 unsigned_release without one (a local
+// development image never has one): the browser flashers then refuse, or on
+// a plane's own flasher write it saying it is unsigned.
+async function signatureResponse(
+  release: Release,
+  asset: { name: string } | undefined,
+  platform: string,
+) {
+  if (!asset) {
+    if (platform === "esp32-s3-generic" && (await localGenericFirmware())) {
+      return jsonError("unsigned_release", 409, { platform });
+    }
+    return jsonError("firmware_not_published", 404, {
+      platform,
+      release: release.tag_name ?? null,
+    });
+  }
+  const signatureAsset = release.assets?.find(
+    (candidate) => candidate.name === `${asset.name}.minisig`,
+  );
+  if (!signatureAsset) {
+    return jsonError("unsigned_release", 409, {
+      platform,
+      release: release.tag_name ?? null,
+    });
+  }
+  const minisig = await fetchReleaseAssetText(signatureAsset);
+  if (!minisig) {
+    return jsonError("release_lookup_failed", 502);
+  }
+  // The URL names a platform, not a release: a cached signature is the
+  // previous release's once a new one ships.
+  return new NextResponse(minisig, {
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+      "x-frameos-image-name": asset.name,
+      "x-frameos-release": release.tag_name ?? "",
+    },
+    status: 200,
+  });
 }

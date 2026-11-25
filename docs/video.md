@@ -120,7 +120,102 @@ A scene's `get()` runs every frame: keep a player's light (no `fetch` in it,
 `useFetch` or `remember` for what it shows besides). On a desktop of windows
 the desktop around a playing window does not run (`rhythmVisitChrome`). The
 runner tells the web sockets about a new picture once a second, not every
-frame (`runner.nim`, as for a scene under a second).
+frame (`runner.nim`, as for a scene under a second). A video on a display
+plane ("Planes") is not drawn by renders at all, and its scene renders about
+once a second.
+
+## Planes
+
+On a Raspberry Pi whose panel is a vc4 DPI output (a HyperPixel), a video
+can be shown on one of the display's overlay planes (`video/planes.nim`): the
+display's scaler (the HVS) scales the frame and turns its YUV into RGB as it
+scans the panel out, so the CPU neither scales, converts, renders nor pushes
+it. ffmpeg writes YUV420 at the source's own size (`decodeArgs` with `plane`:
+no scaler, `-pix_fmt yuv420p`) straight into one of three of the plane's
+buffers (DRM dumb buffers, the reader's, kept across a seek), and the reader
+shows each when it is due by a clock of its own (pause, a resync when behind,
+a live source at once), as the render thread does for the canvas.
+
+The rule is that a plane is only ever where the picture is exactly right,
+and the canvas plays the video everywhere else, as it always did:
+
+- **The UI stays on `/dev/fb0`.** The frameBuffer driver, the loading mark and
+  the cursor write it as before, and the kernel's fbdev emulation scans it out
+  on the CRTC's primary plane. The runtime opens the DRM device behind it as
+  its master (the fbdev emulation is none) and puts overlay planes on that
+  CRTC. When the process ends the kernel restores the fbdev's picture and turns
+  the planes off (lastclose), so a crash leaves no video on the glass. Another
+  program that holds DRM master (a desktop) keeps the runtime off it.
+- **Which frames.** A vc4 device behind `/dev/fb0` (`vc4drmfb`) whose CRTC
+  drives a DPI encoder, the one output seen right on the glass; the panel's
+  kept 565 canvas (`panel_canvas.nim`); a frame that neither turns (the HVS
+  cannot turn by 90 or 270) nor mirrors it. HDMI (1080p, 4K, a Pi 4 or 5's
+  desktop), a 32 bpp canvas, a turned panel, a Pi 5's RP1 DPI and anything
+  that is not vc4 keep the canvas. So does a video once every plane is taken
+  (four).
+- **Where.** A video's `<img>` is a plane when it is a clean hole of a UI that
+  is drawn whole at its size into the panel canvas or a view of it: the scene
+  a layout wraps (`<yield />`), a `<Scene>` hole and a desktop's window are
+  views (`interpreter.drawIntoHole`), placed on the panel by the view's corner
+  (`onPanelCanvas`), and a layout gives a scene a view only while nothing of
+  its own is painted over it (`seekHoles`): another window, a menu, a dialog,
+  the taskbar over a window make it a picture of its own, and its video the
+  canvas's. In the UI itself the same rule (`seekImageHoles`): nothing drawn
+  over the `<img>`, opaque, not in a scroller, no popup. Render scale and a
+  refitted desktop come in through the UI's scale and the view's corner
+  (`holeOnPanel`); the plane is cut to the view it is drawn in (`clipped`).
+  The plane goes where the picture would be drawn (`planeRect`: contain's own
+  size in the box's middle, cover's middle of the frame, fill's whole frame).
+- **What the frame draws over every scene** takes a video off its plane: the
+  keyboard (`frameKeyboard`, docked or in its window), the mouse cursor (drawn
+  into `/dev/fb0` by `cursor_panel.nim`: one that lands on a plane takes it off
+  at once, and its video goes to the canvas at the render that asks for:
+  `planesCursor`, `cursorOver`), the loading mark (`hidePlanes`), the presence
+  code, the control QR and the link code, and a colour correction a plane
+  would not get.
+- **Moving.** A video whose box moved since the last render (a window dragged,
+  a desktop refitted) stays in the canvas until it stays put: no plane follows
+  a drag a render late.
+- **Each pass.** A scene with a video on a plane runs in every pass, a
+  window's on a desktop included (`markVideoPlaneScenesDue`), so every pass
+  says where each plane goes or that it must go. The runner settles them
+  around the push (`settlePlanesBefore`, `settlePlanesAfter`): before the
+  frame goes up, a plane no video claimed in the pass, one that moved and all
+  under what the frame draws over the scenes go off; after it, the rest may
+  show. No frame of a plane is ever on the glass over what the new picture
+  put there.
+- **Back to the canvas.** A video under the UI again (the Video player's
+  controls) relaunches in the canvas with the plane's frame copied into its
+  image first, so the picture does not step back; the plane goes once that
+  pass is on the panel. A plane the display would not show (a size its scaler
+  refuses) or no room for its buffers keeps that player in the canvas.
+- **What the canvas holds.** The plane's frame is copied into the player's
+  image once a second and when it pauses or ends (`PlaneCopySeconds`,
+  `yuvInto`): what `GET /image`, the scene snapshot and the web sockets show,
+  and what is there the moment the plane goes. The scene renders that often
+  for it; nothing else of the video is a render's.
+- `FRAMEOS_VIDEO_PLANES=0` keeps every video in the canvas; the frame's log
+  says once whether planes are on and why not (`video:planes`).
+
+Measured on a Pi Zero W (Cloud-W, HyperPixel 4 Square, the VideoCore
+decoding, 2026-11-24), frames a second into the 720x720 panel, plane against
+canvas: 360p (24 a second) 24.0 against 8.4, real time with 60% of the core
+idle; 720p (30) 23.5 against 6.9; 1080p 10.8 against 6.8. What is left of the
+CPU is the two copies of each frame: ffmpeg's out of the decoder's uncached
+buffer (63% of the core at 720p), and the reader's from the pipe into the
+plane's (35%). The video on the plane through a seek with the controls over
+it (the canvas, the plane back about 5 s later when they go), the next video
+(a phone's tall one on a 405x720 plane), a scene switch (the plane off at
+once) and back, and FrameOS stopping (the kernel's fbdev picture back, no
+plane). Tests: `video/tests/test_video_planes.nim` (planes in memory: frames
+shown when due, held, paused, back to the canvas, refused, buffers with
+longer rows; the cut, a box on the panel through a view and render scale,
+the settling around the push, the cursor; the ioctls against the kernel's
+headers), `js_runtime/tests/test_video_js.nim` (a video nothing covers on a
+plane, one under a box and one under the cursor in the canvas) and
+`tests/test_video_scenes.nim` (the Video player in a desktop's window on a
+plane, in the canvas while another window covers part of it and on the
+plane again after; in a layout's yield on a plane where the yield is).
 
 ## Hardware
 
@@ -237,6 +332,10 @@ plain at 700 MHz, 3.3 with the shortcuts; 3.2 and 4.0 at 1 GHz. A Pi left in
 the `powersave` governor (an image from before the kernel's
 `cpufreq.default_governor=ondemand`) decodes a fifth slower. `-skip_frame
 nonref` made no frame at all of an x264 clip: not used.
+
+What a decoder makes is scaled and turned into the panel's colours by the
+CPU, unless the video is on a display plane, where the display does both as
+it shows it ("Planes").
 
 **Where.**
 - **Buildroot images, Pi 0 to 4**: the kernel keeps the VideoCore's codec
@@ -377,16 +476,20 @@ box). All three skip without ffmpeg.
      is left is the runtime's own ("Holes"). Its decoder client
      (`video/v4l2_decoder.nim`) hands out the decoded frames as dma-bufs,
      which is what a plane takes.
-  2. *DRM planes*: the decoder's buffers handed to KMS as a plane over the
-     video's box, the HVS scaling and converting as it scans out: no CPU a
-     frame at all, 1080p at 30 and four cameras at once. FrameOS would drive
-     KMS on a vc4 frame instead of `/dev/fb0` (a buffer it draws into and
-     flips; the loading mark and the cursor into it, or the cursor plane),
-     the UI over a video in a plane above it with alpha, a video that cannot
-     be a plane (opacity, a window over it, a turn of 90 or 270 degrees,
-     which the HVS cannot do) drawn by the CPU as now, and the scene's
-     picture (`GET /image`, its snapshot) given a still of the video. A
-     Pi 5's software decode gains too: a YUV plane, no scaler.
+  2. *DRM planes*: done for a video nothing covers ("Planes"), its frames
+     still copied twice on the way (out of the decoder by ffmpeg, through
+     the pipe into the plane's buffer: a 1080p frame is 3 MB). What is left:
+     - *Zero copy*: the decoder's own buffers (dma-bufs, the ISP way's V4L2
+       client) handed to the plane, for 1080p at 30 and four cameras at once.
+     - *The UI over a video* (the Video player's controls) in a plane above
+       it with alpha, rather than the canvas meanwhile; and a video's name
+       over it while it loads keeps it in the canvas until it plays.
+     - *Other panels*: an RGBA canvas (a 32 bpp HDMI screen, which is not
+       the panel canvas), and a turned panel, which the HVS cannot turn by
+       90 or 270 (the frames would be turned by ffmpeg, which costs what the
+       plane saves). A Pi 5's DPI goes through the RP1, which has no such
+       planes; its HDMI is vc4's, for a Pi 5's software decode with no
+       scaler.
 - **A Pi 5's HEVC** once ffmpeg drives v4l2-request.
 - **Audio**: frames have no speakers; ALSA is not in the image.
 - **The preview**: the browser could play the video itself.

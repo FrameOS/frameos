@@ -106,6 +106,8 @@
     "src/test/shared-spa/frame-status-groups.test.ts",
     // Same story: the check-in helpers live in decorators/frame.tsx too.
     "src/test/shared-spa/frame-checkin.test.ts",
+    // Same story: frameIsHealthy and frameIsActive live there too.
+    "src/test/shared-spa/frame-health.test.ts",
     // Same story: the firmware-update progress reader lives there as well.
     "src/test/shared-spa/frame-firmware-update.test.ts",
     // Same story: the deploy-progress bar reads decorators/frame.tsx (bare
@@ -214,6 +216,16 @@
     // same reason.
     "src/test/shared-spa/home-page.test.ts",
     // Mounts scenesLogic (→ frameLogic, framesModel), same reason.
-    "src/test/shared-spa/scene-preview-plane-first.test.ts"
+    "src/test/shared-spa/scene-preview-plane-first.test.ts",
+    // Mounts flasherBridgeLogic (→ framesModel), same reason.
+    "src/test/shared-spa/flasher-bridge-opener.test.ts",
+    // The bridge's types come from embeddedFlashRun, whose graph reaches
+    // embeddedFlashShared and embeddedUsbLogsModel (see embedded-flash-shared
+    // above), same reason.
+    "src/test/shared-spa/flasher-bridge.test.ts",
+    // The flasher's board list reads esp32Hardware.ts, which reaches
+    // components/Select.tsx through devices.ts (see device-catalog-mirror),
+    // same reason.
+    "src/test/shared-spa/flasher-standalone.test.ts"
   ]
 }

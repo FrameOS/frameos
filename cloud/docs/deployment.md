@@ -637,6 +637,7 @@ FRAMEOS_CLOUD_APP_URL=https://cloud.frameos.net
 # origin and getAccountBaseUrl() falls back to it.
 FRAMEOS_SCENES_APP_URL=https://scenes.frameos.net
 FRAMEOS_PLAYGROUND_APP_URL=https://playground.frameos.net
+FRAMEOS_FLASHER_APP_URL=https://flash.frameos.net
 FRAMEOS_SESSION_COOKIE_DOMAIN=frameos.net
 ```
 
@@ -647,6 +648,15 @@ for the box and a `server_name` on the nginx server block that includes the
 proxy snippet. Without `FRAMEOS_PLAYGROUND_APP_URL` the playground is
 `https://cloud.frameos.net/playground`. It is no app origin
 (`getAppOrigins`): nobody signs in there.
+
+`flash.frameos.net` is the browser flasher (`docs/flasher.md`), set up the
+same way: a proxied Cloudflare record, a `server_name` on the same server
+block, its root rewritten to `/flash`. Without `FRAMEOS_FLASHER_APP_URL` it
+is `https://cloud.frameos.net/flash`, but self-hosted backends open
+`https://flash.frameos.net` by default (their `FRAMEOS_FLASHER_URL` can name
+another), so production needs the host. It must not send a
+`Cross-Origin-Opener-Policy` header: the backend page that opened it talks to
+it through `window.opener`.
 
 `FRAMEOS_WEBAUTHN_RP_ID` is unset in production: passkeys default to the cloud
 origin's hostname (`cloud.frameos.net`), which is also where `/login` and

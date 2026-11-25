@@ -15,6 +15,8 @@ import {
   wifiInputError,
 } from "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher";
 import { resetReleaseListingCacheForTests } from "../../../../../../cloud-frontend/src/lib/release-lookup";
+import { overrideReleaseSigningKeyForTests } from "../../../../../../frontend/src/utils/releaseSigning";
+import { testSigningKey } from "./fixtures/releaseSigning";
 
 // esptool-js drives real USB hardware; the tests only care that the flasher
 // calls it, hands the port back, and provisions afterwards.
@@ -194,6 +196,19 @@ function stubSerial(port: FakePort) {
   });
 }
 
+// Every image is checked against the release signature before it is written
+// (releaseFirmware.ts verifyReleaseImage): the fake cloud signs what it
+// serves with a throwaway key, AS that release's image for the platform the
+// URL names, and the verifier is pointed at that key.
+const signingKey = testSigningKey();
+
+function signatureResponse(url: string, release = "v1.2.3", bytes: Uint8Array = firmwareBytes) {
+  const platform = new URL(url, "http://x").searchParams.get("platform") ?? "";
+  return Promise.resolve(
+    new Response(signingKey.minisigFor(bytes, { signedAs: `frameos-${release.replace(/^v/, "")}-${platform}.bin` })),
+  );
+}
+
 function mockCloudApi(
   firmware: () => Promise<Response> = () =>
     Promise.resolve(
@@ -210,6 +225,9 @@ function mockCloudApi(
     const url = String(input);
     if (url === "/api/frames/firmware") {
       return Promise.resolve(Response.json(metadata));
+    }
+    if (url.startsWith("/api/frames/firmware?") && url.endsWith("&signature=1")) {
+      return signatureResponse(url, metadata.release);
     }
     if (url.startsWith("/api/frames/firmware?")) {
       return firmware();
@@ -255,10 +273,12 @@ beforeEach(() => {
   // The listing is memoised in the browser; each test mocks its own release.
   resetReleaseListingCacheForTests();
   vi.stubGlobal("fetch", fetchMock);
+  overrideReleaseSigningKeyForTests(signingKey.publicKeyBase64);
 });
 
 afterEach(() => {
   cleanup();
+  overrideReleaseSigningKeyForTests(undefined);
   fetchMock.mockReset();
   esptool.calls.main.mockReset();
   esptool.calls.main.mockImplementation(() => Promise.resolve());
@@ -490,6 +510,9 @@ describe("Esp32CloudFlasher", () => {
       const url = String(input);
       if (url === "/api/frames/firmware") {
         return Promise.resolve(Response.json(metadataPayload));
+      }
+      if (url.startsWith("/api/frames/firmware?") && url.endsWith("&signature=1")) {
+        return signatureResponse(url, metadataPayload.release);
       }
       if (url.startsWith("/api/frames/firmware?")) {
         return Promise.resolve(

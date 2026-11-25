@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isPlaygroundHost, resolveSurfaceRoute } from "./surfaces";
+import { flasherServesApi, isFlasherHost, isPlaygroundHost, resolveSurfaceRoute } from "./surfaces";
 
 const originalAccountUrl = process.env.FRAMEOS_ACCOUNT_APP_URL;
 const originalCloudUrl = process.env.FRAMEOS_CLOUD_APP_URL;
 const originalScenesUrl = process.env.FRAMEOS_SCENES_APP_URL;
 const originalPlaygroundUrl = process.env.FRAMEOS_PLAYGROUND_APP_URL;
+const originalFlasherUrl = process.env.FRAMEOS_FLASHER_APP_URL;
 
 function restore(key: string, value: string | undefined) {
   if (value) {
@@ -19,9 +20,77 @@ afterEach(() => {
   restore("FRAMEOS_CLOUD_APP_URL", originalCloudUrl);
   restore("FRAMEOS_SCENES_APP_URL", originalScenesUrl);
   restore("FRAMEOS_PLAYGROUND_APP_URL", originalPlaygroundUrl);
+  restore("FRAMEOS_FLASHER_APP_URL", originalFlasherUrl);
 });
 
 describe("surface routing", () => {
+  // cloud/docs/flasher.md: flash.frameos.net in production, /flash on the
+  // cloud origin without one.
+  it("serves the flasher at the root of its own host", () => {
+    configureMergedOrigins();
+    process.env.FRAMEOS_FLASHER_APP_URL = "https://flash.frameos.net";
+
+    expect(resolveSurfaceRoute(new URL("https://flash.frameos.net/"))).toEqual({ kind: "flasherRoot" });
+    expect(resolveSurfaceRoute(new URL("https://localhost:3000/?board=seeed_reterminal_e1002"), "flash.frameos.net")).toEqual({
+      kind: "flasherRoot",
+    });
+    expectRoute("https://flash.frameos.net/flash?board=custom", {
+      kind: "redirect",
+      url: "https://flash.frameos.net/?board=custom",
+    });
+    expectRoute("https://cloud.frameos.net/flash", {
+      kind: "redirect",
+      url: "https://flash.frameos.net/",
+    });
+    // Any other page is the cloud's; its bundle, logos and the firmware are
+    // served on the flasher host as they are.
+    expectRoute("https://flash.frameos.net/frames", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/frames",
+    });
+    for (const path of [
+      "/frames-app/static/flasher.js",
+      "/frames-app/flasher-scenes.json",
+      "/logo-light.svg",
+      "/api/frames/firmware",
+    ]) {
+      expect(resolveSurfaceRoute(new URL(`https://flash.frameos.net${path}`))).toBeUndefined();
+    }
+    expect(isFlasherHost(new URL("https://localhost:3000/"), "flash.frameos.net")).toBe(true);
+    expect(isFlasherHost(new URL("https://cloud.frameos.net/"))).toBe(false);
+  });
+
+  // The flasher takes jobs from pages it does not know, on an origin the
+  // session cookie is sent to: its host answers the firmware and nothing else.
+  it("answers no API on the flasher host but the firmware", () => {
+    configureMergedOrigins();
+    process.env.FRAMEOS_FLASHER_APP_URL = "https://flash.frameos.net";
+
+    for (const path of [
+      "/api/settings?reveal=1",
+      "/api/frames",
+      "/api/frames/new",
+      "/api/frames/firmware/extra",
+      "/api/store/device/scenes",
+      "/api/photos/albums",
+    ]) {
+      expect(resolveSurfaceRoute(new URL(`https://flash.frameos.net${path}`))).toEqual({ kind: "notFound" });
+    }
+    expect(resolveSurfaceRoute(new URL("https://flash.frameos.net/api/frames/firmware"), null, "POST")).toEqual({
+      kind: "notFound",
+    });
+    expect(flasherServesApi("/api/frames/firmware", "GET")).toBe(true);
+    expect(flasherServesApi("/api/frames/firmware", "HEAD")).toBe(true);
+    // The cloud host is not the flasher's: its API stays as it is.
+    expect(resolveSurfaceRoute(new URL("https://cloud.frameos.net/api/frames"))).toBeUndefined();
+  });
+
+  it("keeps the flasher a path of the cloud origin without its own host", () => {
+    configureMergedOrigins();
+    expect(resolveSurfaceRoute(new URL("https://cloud.frameos.net/flash"))).toBeUndefined();
+    expect(isFlasherHost(new URL("https://cloud.frameos.net/flash"))).toBe(false);
+  });
+
   // cloud/docs/playground.md: its own host in production, /playground on the
   // cloud origin without one.
   it("serves the playground at the root of its own host", () => {
@@ -505,6 +574,7 @@ function configureSplitOrigins() {
   process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
   process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
   delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
+  delete process.env.FRAMEOS_FLASHER_APP_URL;
 }
 
 // Production since 2026-08: the account surface shares the cloud origin and
@@ -514,4 +584,5 @@ function configureMergedOrigins() {
   process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
   process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
   delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
+  delete process.env.FRAMEOS_FLASHER_APP_URL;
 }

@@ -10,7 +10,8 @@ import {
   sessionCookieMaxAgeSeconds,
 } from "./src/lib/session-refresh";
 import {
-  isPlaygroundHost,
+  flasherRootHeader,
+  isAnonymousHost,
   playgroundRootHeader,
   resolveSurfaceRoute,
 } from "./src/lib/surfaces";
@@ -18,12 +19,12 @@ import {
 export async function proxy(request: NextRequest) {
   const response = routeSurface(request);
   // A surface redirect carries no session decision; the request it sends the
-  // browser to will refresh instead. Nor does anything on the playground
-  // host: it is served as to a stranger (routeSurface), so its responses
-  // never extend a session.
+  // browser to will refresh instead. Nor does anything on the playground or
+  // flasher host: it is served as to a stranger (routeSurface), so its
+  // responses never extend a session.
   if (
     (response.status < 300 || response.status >= 400) &&
-    !isPlaygroundHost(request.nextUrl, request.headers.get("host"))
+    !isAnonymousHost(request.nextUrl, request.headers.get("host"))
   ) {
     await refreshSessionCookie(request, response);
   }
@@ -51,19 +52,24 @@ function routeSurface(request: NextRequest) {
     });
   }
 
-  // The playground host's root is rewritten by next.config.ts on this mark
-  // (playgroundRootRewrite in surfaces.ts says why not here). The mark is the
-  // proxy's alone: one a client sent is dropped from every other request.
+  // The playground's and the flasher's host roots are rewritten by
+  // next.config.ts on these marks (playgroundRootRewrite in surfaces.ts says
+  // why not here). The marks are the proxy's alone: one a client sent is
+  // dropped from every other request.
   const playgroundRoot = route?.kind === "playgroundRoot";
-  // The playground runs anyone's scene on an origin the session cookie is
-  // also sent to (it is scoped to the registrable domain). Nothing served on
-  // that host may see who is asking: the cookie and any bearer are taken off
-  // before a page or a route handler reads the request.
-  const anonymous = isPlaygroundHost(request.nextUrl, host);
+  const flasherRoot = route?.kind === "flasherRoot";
+  // The playground runs anyone's scene, and the flasher takes jobs from
+  // pages it does not know, on origins the session cookie is also sent to
+  // (it is scoped to the registrable domain). Nothing served on those hosts
+  // may see who is asking: the cookie and any bearer are taken off before a
+  // page or a route handler reads the request.
+  const anonymous = isAnonymousHost(request.nextUrl, host);
   if (
     !playgroundRoot &&
+    !flasherRoot &&
     !anonymous &&
-    !request.headers.has(playgroundRootHeader)
+    !request.headers.has(playgroundRootHeader) &&
+    !request.headers.has(flasherRootHeader)
   ) {
     return NextResponse.next();
   }
@@ -72,6 +78,11 @@ function routeSurface(request: NextRequest) {
     headers.set(playgroundRootHeader, "1");
   } else {
     headers.delete(playgroundRootHeader);
+  }
+  if (flasherRoot) {
+    headers.set(flasherRootHeader, "1");
+  } else {
+    headers.delete(flasherRootHeader);
   }
   if (anonymous) {
     headers.delete("cookie");

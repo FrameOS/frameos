@@ -1367,6 +1367,38 @@
   virtual frame and not on the cloud's (yet); the plan gate and the hub
   device exist on the cloud alone.
 
+## The browser flasher: `cloud/docs/flasher.md`
+
+- `flash.frameos.net` (GitHub #904) flashes an ESP32 with no account: a
+  standalone frame (the S3 hardware presets, `?board=` links from
+  frameos.net), a frame whose backend is on plain http (the backend's USB
+  card opens it in a window and hands it the frame: the bridge,
+  `frontend/src/utils/flasherBridge.ts`), or a setup file. It is
+  cloud-frontend's second entry (`src/flasher`, `build.mjs`), served by
+  auth-web's `app/flash` and host-routed like the playground
+  (`surfaces.ts`, `FRAMEOS_FLASHER_APP_URL`); its host strips the cookie and
+  serves no API but `GET /api/frames/firmware` (`flasherServesApi`).
+- **One engine**: `scenes/workspace/embeddedFlashRun.ts` (`flashAndSetUpBoard`,
+  `updateBoardKeepingSettings`, `provisionOverUsb`) is what the backend's
+  USB buttons and the flasher run. A fix to how a board is flashed goes
+  there once. It and `embeddedFlashShared.tsx` import no workspace and no
+  `framesModel` (they cost the page 5 MB): keep UI in its own file
+  (`EmbeddedUsbConnectionButton.tsx`).
+- **Every browser flasher checks every image against the release signature**
+  before writing it (`releaseFirmware.ts`, `utils/releaseSigning.ts`; both
+  planes' `/api/frames/firmware?platform=…&signature=1`, the trusted comment
+  must name `frameos-<release>-<platform>.bin`). The flasher writes nothing
+  unsigned; a plane's own flasher writes its `local-dev` build after saying
+  so. A new way to get firmware bytes into a browser goes through a
+  `FirmwareSource` that verifies.
+- **The setup document** is backend `GET /api/frames/{id}/embedded/setup`:
+  the provisioning plan plus `embedded_scenes_payload` (what the board's own
+  pull gets: never the stored list as it is). The backend's own flasher takes
+  its post-flash scenes from it too. A field added to it is read by
+  `parseFrameSetupDocument` and pinned by `test_embedded_setup.py`. A setup
+  never carries `cloud_url` / `claim_token`: a board joins the cloud from the
+  cloud's flasher. Backend-only by nature (the cloud is always a secure page).
+
 ## The playground: `cloud/docs/playground.md`
 
 - `playground.frameos.net` is a page of auth-web (`app/playground`,

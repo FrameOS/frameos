@@ -1,0 +1,10 @@
+{
+  "name": "Spotify remote",
+  "description": "See what plays on Spotify and control it: skip, seek, the volume, Liked Songs, the speaker it plays on and your playlists. On e-paper the picture changes with the track. Signs in with a Spotify app of your own (Premium).",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

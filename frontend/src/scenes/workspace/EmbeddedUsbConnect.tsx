@@ -17,7 +17,13 @@ import {
 import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
 import type { FrameType } from '../../types'
-import { webSerialSupported as isWebSerialSupported, webSerialUnavailableReason } from '../../utils/webSerial'
+import {
+  webSerialNeedsFlasher,
+  webSerialSupported as isWebSerialSupported,
+  webSerialUnavailableReason,
+} from '../../utils/webSerial'
+import { FlasherBridgeCard } from './FlasherBridgeCard'
+import { workspaceMode } from './workspaceSurfaces'
 import { EmbeddedReleaseFlasher } from './EmbeddedReleaseFlasher'
 import { EmbeddedUsbFirmwareUpdate } from './EmbeddedUsbFirmwareUpdate'
 import { embeddedUsbConnectLogic } from './embeddedUsbConnectLogic'
@@ -587,7 +593,15 @@ export function EmbeddedUsbConnect({
       </div>
 
       {!webSerialSupported ? (
-        <div className="frame-tool-muted text-xs leading-5">{webSerialUnavailableReason('Connecting over USB')}</div>
+        // No USB on this page (plain http, a frame of another origin), but
+        // this browser has it on a secure one: flash.frameos.net does the USB
+        // part (FlasherBridgeCard, cloud/docs/flasher.md). Only a backend
+        // hands a frame's setup over: the cloud is always a secure page.
+        webSerialNeedsFlasher() && workspaceMode() === 'backend' ? (
+          <FlasherBridgeCard frame={frame} uf2={uf2} />
+        ) : (
+          <div className="frame-tool-muted text-xs leading-5">{webSerialUnavailableReason('Connecting over USB')}</div>
+        )
       ) : !connected ? (
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={connectUsb} disabled={streamBusy} className={primaryButtonClass}>

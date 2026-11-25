@@ -285,16 +285,23 @@ proc fpsText(fps: float): string =
   let hundredths = max(1, int(round(fps * 100)))
   if hundredths mod 100 == 0: $(hundredths div 100) else: $hundredths & "/100"
 
+proc planeFrameSize*(srcWidth, srcHeight: int): (int, int) =
+  ## A plane's frames (video/planes.nim): the source's own size, the display
+  ## scaling it, made even for 4:2:0 (an odd one loses its last row or column).
+  (max(srcWidth - srcWidth mod 2, 2), max(srcHeight - srcHeight mod 2, 2))
+
 proc decodeArgs*(source: VideoSource, width, height: int, fit: VideoFit, pixels: VideoPixels,
     startAt, fps: float, loopFile: bool, threads: int, decode = VideoDecode(),
-    srcWidth = 0, srcHeight = 0): seq[string] =
+    srcWidth = 0, srcHeight = 0, plane = false): seq[string] =
   ## ffmpeg playing `source` from `startAt` seconds as raw frames on stdout:
   ## for a `width` x `height` box (frameSize: a contained picture of a known
   ## `srcWidth` x `srcHeight` comes at its own size), `pixels`, `fps` a
   ## second. `loopFile`: a file plays again from its start for ever
   ## (`-stream_loop`, no gap); anything else is started again by the player.
   ## `decode`: a hardware decoder, and the shortcuts of a decoder that is
-  ## behind (pickDecode).
+  ## behind (pickDecode). `plane`: for a display plane, YUV420 at the
+  ## source's own size (planeFrameSize), no scaler, no colour conversion: the
+  ## display does both as it shows it.
   result = @["-hide_banner", "-loglevel", "error", "-nostdin", "-nostats"]
   if threads > 0 and decode.decoder.len == 0:
     result.add @["-threads", $threads]
@@ -314,6 +321,13 @@ proc decodeArgs*(source: VideoSource, width, height: int, fit: VideoFit, pixels:
     result.add @["-ss", formatFloat(startAt, ffDecimal, 3)]
   if loopFile and source.scheme.len == 0:
     result.add @["-stream_loop", "-1"]
+  if plane and srcWidth > 0 and srcHeight > 0:
+    let (w, h) = planeFrameSize(srcWidth, srcHeight)
+    let size = if w == srcWidth and h == srcHeight: "" else: "scale=" & $w & ":" & $h & ":flags=neighbor,"
+    result.add @["-i", source.input, "-an", "-sn", "-dn",
+      "-vf", "fps=" & fpsText(fps) & "," & size & "setsar=1",
+      "-f", "rawvideo", "-pix_fmt", "yuv420p", "pipe:1"]
+    return
   result.add @["-i", source.input, "-an", "-sn", "-dn",
     "-vf", "fps=" & fpsText(fps) & "," & fitFilter(width, height, fit, decode.fast, srcWidth, srcHeight),
     "-f", "rawvideo", "-pix_fmt", pixels.pixFmt, "pipe:1"]

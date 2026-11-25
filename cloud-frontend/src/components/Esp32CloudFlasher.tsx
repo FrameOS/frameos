@@ -9,6 +9,8 @@ import {
   releaseChipMismatch,
 } from '../../../frontend/src/scenes/workspace/embeddedFlashImage'
 import { watchdogResetAfterFlash } from '../../../frontend/src/scenes/workspace/esp32WatchdogReset'
+import { verifyReleaseImage } from '../../../frontend/src/scenes/workspace/releaseFirmware'
+import { ReleaseSignatureError } from '../../../frontend/src/utils/releaseSigning'
 import { writeWithTimeout } from '../../../frontend/src/scenes/workspace/serialWrite'
 import { loadEsptool } from '../lib/esptool'
 import { fetchReleaseListing, releaseLookupErrorFromResponse } from '../lib/release-lookup'
@@ -453,13 +455,41 @@ function pickFirmwareAsset(release: FirmwareListing, platform: string): Firmware
   return asset
 }
 
-async function downloadFirmware(asset: FirmwareAsset, log: (line: string) => void): Promise<Uint8Array> {
+// The bytes are checked against the release signature before anything is
+// written (verifyReleaseImage: the FrameOS release key, signed AS this
+// release's image for this platform), as every browser flasher does
+// (frontend/src/scenes/workspace/releaseFirmware.ts). A development image
+// the cloud serves in place of the release (`local-dev`) has no signature
+// and is written after saying so.
+async function downloadFirmware(
+  asset: FirmwareAsset,
+  release: string | undefined,
+  log: (line: string) => void
+): Promise<Uint8Array> {
   log(`Downloading ${asset.name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)…`)
-  const firmwareResponse = await fetch(`${firmwareApiUrl}?platform=${encodeURIComponent(asset.platform)}`)
+  const query = `?platform=${encodeURIComponent(asset.platform)}`
+  const firmwareResponse = await fetch(`${firmwareApiUrl}${query}`, { cache: 'no-store' })
   if (!firmwareResponse.ok) {
     throw await releaseLookupErrorFromResponse(firmwareResponse, 'firmware download')
   }
-  return new Uint8Array(await firmwareResponse.arrayBuffer())
+  const bytes = new Uint8Array(await firmwareResponse.arrayBuffer())
+  const servedRelease = firmwareResponse.headers.get('x-frameos-release')
+  const signature = await fetch(`${firmwareApiUrl}${query}&signature=1`, { cache: 'no-store' })
+  if (signature.status === 409 && servedRelease === 'local-dev') {
+    log(`${asset.name} is a development build with no release signature: writing it unverified.`)
+    return bytes
+  }
+  if (!signature.ok) {
+    throw new ReleaseSignatureError(
+      `The release signature could not be fetched (${signature.status}) — refusing to write an unverified image.`,
+      'signature_unavailable'
+    )
+  }
+  // The release that served these bytes, which the cloud's release cache may
+  // have moved to since the listing.
+  await verifyReleaseImage(bytes, await signature.text(), servedRelease || release, asset.platform)
+  log(`Checked ${asset.name} against the FrameOS release signature.`)
+  return bytes
 }
 
 // Send console commands over the freshly flashed firmware's serial REPL and
@@ -934,7 +964,10 @@ export function Esp32CloudFlasher({
             log(`Could not read the flash size; using the ${platform} image.`)
           }
           if (!firmware || firmware.platform !== platform) {
-            firmware = { platform, bytes: await downloadFirmware(pickFirmwareAsset(release, platform), log) }
+            firmware = {
+              platform,
+              bytes: await downloadFirmware(pickFirmwareAsset(release, platform), release.release, log),
+            }
           }
           await loader.writeFlash({
             compress: true,

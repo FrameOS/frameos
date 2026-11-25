@@ -4502,9 +4502,20 @@ static void client_task(void *arg)
             /* Say what this pass decided and from what: the one line that tells
              * "deep sleep silently off" from "the owner switched it off". Only
              * where it can say something — a stay-connected frame without a
-             * cell would just repeat "off" every interval. */
-            if (config->deep_sleep || config->deep_sleep_on_battery || power.suspect ||
-                power.critical) {
+             * cell would just repeat "off" every interval. In a steady run (an
+             * animation, a burst, a fast loop: a pass a second) only when what
+             * it decided changes, not every second with a reading a few
+             * millivolts off the last one. */
+            static int s_power_logged_decision = -1;
+            int power_decision = (!deep_sleep_now ? 0 : config->deep_sleep ? 1 : battery_critical ? 2 : 3) |
+                                 (power.on_battery ? 4 : 0) | (power.suspect ? 8 : 0) |
+                                 (charger_known ? 16 : 0) | (charger_known && charger.usb_power ? 32 : 0) |
+                                 (charger_known && charger.charging ? 64 : 0);
+            bool power_line_due = !fos_animation_steady(&s_anim, power_now_us) ||
+                                  power_decision != s_power_logged_decision;
+            if (power_line_due && (config->deep_sleep || config->deep_sleep_on_battery || power.suspect ||
+                                   power.critical)) {
+                s_power_logged_decision = power_decision;
                 char line[256];
                 size_t used = (size_t)snprintf(
                     line, sizeof(line),
@@ -4591,9 +4602,10 @@ static void client_task(void *arg)
                              * garbage (clock jump, stale RTC) — render */
                             s_next_render_due < wall_now + 7 * 86400 + 3600;
         /* A render the scene asked for is not one somebody asked for: a run
-         * of them is a burst, logged like an animation. Not on a frame about
-         * to deep-sleep, which would never make up a quiet frame's skips. */
-        bool scene_render = s_scene_render && !deep_sleep_now;
+         * of them is a burst, logged like an animation, and so is a fast
+         * loop's timed render (fos_animation.h). Not on a frame about to
+         * deep-sleep, which would never make up a quiet frame's skips. */
+        bool scene_render = (s_scene_render || (s_anim.loop && !force_render)) && !deep_sleep_now;
         s_scene_render = false;
         if (force_render && !scene_render) s_loud_next = true;
         force_render = false;
@@ -4738,6 +4750,11 @@ static void client_task(void *arg)
                 set_quiet(false);
             }
         }
+        /* The same scene on e-paper: the whole-second loop below renders it
+         * every pass, and its frames are a burst's (fos_animation.h). */
+        fos_animation_set_loop(&s_anim, renders_locally(config) && !battery_critical &&
+                                            !s_render_paused_for_memory && !deep_sleep_now &&
+                                            fos_animation_fast_loop(scene_interval, s_anim.active));
         if (s_anim.active) {
             if (rendered) {
                 /* logic/nextSleepDuration, in the animation's own units. */

@@ -1,30 +1,24 @@
 // What every browser flash flow shares: the esptool loader wrapper, the USB
 // log terminal esptool writes into, the transport trace ring buffer, the
-// post-flash "wait for the board to answer" loop and scene upload, and the
-// USB connect button. The flows themselves are EmbeddedReleaseFlasher (a
-// blank board: the published release image + provisioning over the cable)
-// and EmbeddedUsbFirmwareUpdate (an enrolled board: the same release bytes
+// post-flash "wait for the board to answer" loop and scene upload. No React
+// and no workspace here: flash.frameos.net imports it too (the USB connect
+// button is EmbeddedUsbConnectionButton.tsx). The flows themselves are
+// embeddedFlashRun.ts: a blank board (the published release image +
+// provisioning over the cable) and an enrolled board (the same release bytes
 // written around its settings partition). The self-hosted backend builds no
 // firmware — like the cloud, it only ever flashes signed release images.
-import { CommandLineIcon, StopCircleIcon } from '@heroicons/react/24/outline'
-import { useActions, useValues } from 'kea'
 import type { IEspLoaderTerminal, Transport as EspTransport } from 'esptool-js'
 
-import { Spinner } from '../../components/Spinner'
 import {
   appendEmbeddedUsbLogLine,
-  embeddedUsbLogsModel,
-  isEmbeddedUsbLogStreamOpen,
   resolveLiveSerialPort,
   runEmbeddedUsbApiCommand,
   serialPortReconnectRequiresReselection,
-  startEmbeddedUsbLogStream,
   summarizeUsbStatusJson,
 } from '../../models/embeddedUsbLogsModel'
-import { embeddedUsbUploadTimeoutMs } from '../../models/framesModel'
-import type { FrameType, FrameId } from '../../types'
+import { embeddedUsbUploadTimeoutMs } from '../../utils/embeddedUsbUpload'
+import type { FrameId } from '../../types'
 import { loadEsptool } from './esptoolLoader'
-import { workspaceLogic } from './workspaceLogic'
 
 export { watchdogResetAfterFlash } from './esp32WatchdogReset'
 
@@ -216,16 +210,17 @@ export function recordTransportTrace(frameId: FrameId, transport: EspTransport):
   }
 }
 
-/** Send the workspace's scenes to a board that has just come back on USB.
- * Retries: the board answers `status` before its scene store is settled often
- * enough that one attempt loses a first deploy. Returns false when the frame
- * has no scenes to send. */
+/** Send a frame's scenes to a board that has just come back on USB: what
+ * the board's own pull would get (a backend's setup document, never the
+ * workspace's list as it is). Retries: the board answers `status` before its
+ * scene store is settled often enough that one attempt loses a first deploy.
+ * Returns false when there are no scenes to send. */
 export async function uploadScenesOverUsbAfterFlash(
-  frame: FrameType,
+  frameId: FrameId,
+  scenes: unknown[],
   port: SerialPort,
   onStatus: (message: string) => void
 ): Promise<boolean> {
-  const scenes = frame.scenes ?? []
   if (scenes.length === 0) {
     return false
   }
@@ -239,7 +234,7 @@ export async function uploadScenesOverUsbAfterFlash(
         : `Retrying scene upload over USB (${attempt}/${POST_FLASH_SCENE_UPLOAD_ATTEMPTS})`
     )
     try {
-      await runEmbeddedUsbApiCommand(frame.id, 'upload-scenes', {
+      await runEmbeddedUsbApiCommand(frameId, 'upload-scenes', {
         payload,
         port,
         timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
@@ -266,7 +261,7 @@ function usbStatusSummary(text: string | undefined): string {
 // re-enumerates the USB device, so the original SerialPort object may have
 // been replaced by a fresh grant from getPorts().
 export async function waitForUsbApiReadyAfterFlash(
-  frame: FrameType,
+  frameId: FrameId,
   port: SerialPort,
   onStatus: (message: string) => void,
   initialMessage?: string,
@@ -289,7 +284,7 @@ export async function waitForUsbApiReadyAfterFlash(
     attempt += 1
     const livePort = await resolveLiveSerialPort(port)
     if (livePort && livePort !== port) {
-      appendBrowserFlashLog(frame.id, 'USB device re-enumerated after reboot; switching to the new port.')
+      appendBrowserFlashLog(frameId, 'USB device re-enumerated after reboot; switching to the new port.')
       port = livePort
     } else if (!livePort && serialPortReconnectRequiresReselection(port)) {
       throw new Error(
@@ -297,14 +292,14 @@ export async function waitForUsbApiReadyAfterFlash(
       )
     }
     try {
-      const result = await runEmbeddedUsbApiCommand(frame.id, 'status', {
+      const result = await runEmbeddedUsbApiCommand(frameId, 'status', {
         port,
         timeoutMs: Math.min(POST_FLASH_USB_READY_COMMAND_TIMEOUT_MS, Math.max(1000, deadline - Date.now())),
         mirrorOutput: false,
         keepOpen: true,
         probe: true,
       })
-      appendBrowserFlashLog(frame.id, usbStatusSummary(result.text))
+      appendBrowserFlashLog(frameId, usbStatusSummary(result.text))
       return port
     } catch (error) {
       lastError = error
@@ -315,7 +310,7 @@ export async function waitForUsbApiReadyAfterFlash(
         const stillBooting = /Timed out waiting for USB command (?:response|ready)/i.test(detail)
         const waited = Math.round((Date.now() - started) / 1000)
         appendBrowserFlashLog(
-          frame.id,
+          frameId,
           stillBooting
             ? `Waiting for the board to boot (attempt ${attempt}, ${waited}s)`
             : `Waiting for the board to boot (attempt ${attempt}, ${waited}s): ${detail}`
@@ -333,64 +328,4 @@ export async function waitForUsbApiReadyAfterFlash(
 
   const detail = lastError instanceof Error ? lastError.message : lastError ? String(lastError) : 'no response'
   throw new Error(`Timed out waiting for board USB API after reboot: ${detail}`)
-}
-
-function usbConnectionButtonLabel(
-  usbLogStreamState: { status?: string } | undefined,
-  usbLogStreamOpen: boolean
-): string {
-  return usbLogStreamState?.status === 'selecting'
-    ? 'Select USB port'
-    : usbLogStreamState?.status === 'connecting'
-      ? 'Connecting USB'
-      : usbLogStreamState?.status === 'stopping'
-        ? 'Disconnecting USB'
-        : usbLogStreamOpen
-          ? 'Disconnect USB'
-          : 'Connect USB'
-}
-
-export function EmbeddedUsbConnectionButton({
-  frame,
-  disabled = false,
-  className = '',
-}: {
-  frame: FrameType
-  disabled?: boolean
-  className?: string
-}): JSX.Element {
-  const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
-  const { stopUsbLogStream } = useActions(embeddedUsbLogsModel)
-  const { usbLogStreamStatesByFrameId } = useValues(embeddedUsbLogsModel)
-  const usbLogStreamState = usbLogStreamStatesByFrameId[frame.id]
-  const usbLogStreamOpen = isEmbeddedUsbLogStreamOpen(usbLogStreamState)
-  const usbLogStreamBusy =
-    usbLogStreamState?.status === 'selecting' ||
-    usbLogStreamState?.status === 'connecting' ||
-    usbLogStreamState?.status === 'stopping'
-
-  const connectUsb = async (): Promise<void> => {
-    const started = await startEmbeddedUsbLogStream(frame.id)
-    if (started) {
-      openFrameToolBehindDrawer(frame.id, 'logs')
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={usbLogStreamOpen ? () => stopUsbLogStream(frame.id) : connectUsb}
-      disabled={disabled || usbLogStreamBusy}
-      className={`frameos-secondary-button inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40 ${className}`}
-    >
-      {usbLogStreamState?.status === 'selecting' || usbLogStreamState?.status === 'connecting' ? (
-        <Spinner />
-      ) : usbLogStreamOpen ? (
-        <StopCircleIcon className="h-4 w-4" />
-      ) : (
-        <CommandLineIcon className="h-4 w-4" />
-      )}
-      {usbConnectionButtonLabel(usbLogStreamState, usbLogStreamOpen)}
-    </button>
-  )
 }
