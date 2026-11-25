@@ -17,6 +17,7 @@ import {
 import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
 import type { FrameType } from '../../types'
+import { NOT_A_LOGIN } from '../../utils/notALogin'
 import {
   webSerialNeedsFlasher,
   webSerialSupported as isWebSerialSupported,
@@ -142,7 +143,13 @@ function WifiSection({ frame }: { frame: FrameType }): JSX.Element {
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-[10rem] flex-1">
           <span className="frame-tool-muted mb-1 block text-xs font-semibold">Network name (SSID)</span>
-          <TextInput value={ssid} onChange={setSsid} placeholder="Scan or type an SSID" disabled={busy} />
+          <TextInput
+            value={ssid}
+            onChange={setSsid}
+            placeholder="Scan or type an SSID"
+            disabled={busy}
+            {...NOT_A_LOGIN}
+          />
         </label>
         <label className="min-w-[10rem] flex-1">
           <span className="frame-tool-muted mb-1 block text-xs font-semibold">Password</span>
@@ -152,7 +159,7 @@ function WifiSection({ frame }: { frame: FrameType }): JSX.Element {
             onChange={setPassword}
             placeholder="Leave empty for open networks"
             disabled={busy}
-            autoComplete="off"
+            {...NOT_A_LOGIN}
           />
         </label>
         <button type="button" onClick={applyWifi} disabled={busy || !ssid.trim()} className={primaryButtonClass}>

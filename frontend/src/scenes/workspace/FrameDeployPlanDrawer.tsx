@@ -75,6 +75,7 @@ import type {
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
 import { publicBackendOrigin } from '../../utils/backendAddress'
+import { NOT_A_LOGIN } from '../../utils/notALogin'
 import { secureToken } from '../../utils/secureToken'
 import { Button } from '../../components/Button'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
@@ -1778,7 +1779,7 @@ function BuildrootSdCardSection({
               value={network.wifiSSID ?? ''}
               onChange={(value) => updateNetwork('wifiSSID', value)}
               placeholder="Home WiFi"
-              autoComplete="off"
+              {...NOT_A_LOGIN}
             />
           </label>
           <label className="block space-y-1">
@@ -1788,7 +1789,7 @@ function BuildrootSdCardSection({
               onChange={(value) => updateNetwork('wifiPassword', value)}
               type="password"
               placeholder="Network password"
-              autoComplete="new-password"
+              {...NOT_A_LOGIN}
             />
           </label>
         </div>

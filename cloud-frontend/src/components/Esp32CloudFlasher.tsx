@@ -10,6 +10,7 @@ import {
 } from '../../../frontend/src/scenes/workspace/embeddedFlashImage'
 import { watchdogResetAfterFlash } from '../../../frontend/src/scenes/workspace/esp32WatchdogReset'
 import { verifyReleaseImage } from '../../../frontend/src/scenes/workspace/releaseFirmware'
+import { NOT_A_LOGIN } from '../../../frontend/src/utils/notALogin'
 import { ReleaseSignatureError } from '../../../frontend/src/utils/releaseSigning'
 import { writeWithTimeout } from '../../../frontend/src/scenes/workspace/serialWrite'
 import { loadEsptool } from '../lib/esptool'
@@ -1270,6 +1271,7 @@ export function Esp32CloudFlasher({
           onChange={(event) => setWifiSsid(event.target.value)}
           placeholder="WiFi network (optional — portal works too)"
           value={wifiSsid}
+          {...NOT_A_LOGIN}
         />
         <input
           aria-label="WiFi password"
@@ -1280,6 +1282,7 @@ export function Esp32CloudFlasher({
           placeholder="WiFi password"
           type="password"
           value={wifiPassword}
+          {...NOT_A_LOGIN}
         />
         <label className="frameos-muted flex items-center gap-2 text-xs">
           <input

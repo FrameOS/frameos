@@ -38,6 +38,7 @@ import {
 } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
 import { normalizedTimezone } from '../../utils/timezone'
+import { NOT_A_LOGIN } from '../../utils/notALogin'
 import { timezoneOptions } from '../../decorators/timezones'
 import { Spinner } from '../../components/Spinner'
 import { Field } from '../../components/Field'
@@ -1598,7 +1599,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
                 setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
               }
               placeholder="Home WiFi"
-              autoComplete="off"
+              {...NOT_A_LOGIN}
             />
           </FormField>
           <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
@@ -1610,7 +1611,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               }
               placeholder="Network password"
               type="password"
-              autoComplete="new-password"
+              {...NOT_A_LOGIN}
             />
           </FormField>
           <Field name="rememberWifi">
@@ -1762,7 +1763,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
                 setNewFrameValue('network', { ...(newFrame.network ?? {}), wifiSSID: event.target.value })
               }
               placeholder="Home WiFi"
-              autoComplete="off"
+              {...NOT_A_LOGIN}
             />
           </FormField>
           <FormField label="WiFi password" error={newFrameErrors.network?.wifiPassword}>
@@ -1774,7 +1775,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               }
               placeholder="Network password"
               type="password"
-              autoComplete="new-password"
+              {...NOT_A_LOGIN}
             />
           </FormField>
           <Field name="rememberWifi">

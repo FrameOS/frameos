@@ -45,6 +45,7 @@ import {
   FLASHER_SAMPLES_URL,
   flasherSampleGroups,
   storeCoversFromListing,
+  withGroupPicked,
   type FlasherSampleGroup,
   type StoreCover,
 } from './sampleList'
@@ -180,6 +181,7 @@ export interface flasherLogicActions {
     error: string | null
   }
   togglePicked: (name: string) => { name: string }
+  setGroupPicked: (names: string[], picked: boolean) => { names: string[]; picked: boolean }
   applyPreset: (preset: ScenePresetKey) => { preset: ScenePresetKey }
   setPicks: (
     picked: string[],
@@ -230,6 +232,7 @@ export const flasherLogic = kea<flasherLogicType>([
     setStoreCovers: (covers: Record<string, StoreCover>) => ({ covers }),
     setSamples: (samples: FlasherSample[] | null, error: string | null) => ({ samples, error }),
     togglePicked: (name: string) => ({ name }),
+    setGroupPicked: (names: string[], picked: boolean) => ({ names, picked }),
     applyPreset: (preset: ScenePresetKey) => ({ preset }),
     setPicks: (picked: string[], preset: ScenePresetKey | null, noRoom: string[]) => ({ picked, preset, noRoom }),
     setQuery: (query: string) => ({ query }),
@@ -271,14 +274,18 @@ export const flasherLogic = kea<flasherLogicType>([
         setPicks: (_, { picked }) => picked,
         togglePicked: (state, { name }) =>
           state.includes(name) ? state.filter((picked) => picked !== name) : [...state, name],
+        setGroupPicked: (state, { names, picked }) => withGroupPicked(state, names, picked),
       },
     ],
     // The preset the picks came from; null once a sample is ticked by hand.
     preset: [
       defaultScenePreset() as ScenePresetKey | null,
-      { setPicks: (_, { preset }) => preset, togglePicked: () => null },
+      { setPicks: (_, { preset }) => preset, togglePicked: () => null, setGroupPicked: () => null },
     ],
-    noRoom: [[] as string[], { setPicks: (_, { noRoom }) => noRoom, togglePicked: () => [] }],
+    noRoom: [
+      [] as string[],
+      { setPicks: (_, { noRoom }) => noRoom, togglePicked: () => [], setGroupPicked: () => [] },
+    ],
     query: ['', { setQuery: (_, { query }) => query }],
     phase: ['idle' as FlashPhase, { setPhase: (_, { phase }) => phase, setJob: () => 'idle' }],
     message: [null as string | null, { setMessage: (_, { message }) => message, setJob: () => null }],

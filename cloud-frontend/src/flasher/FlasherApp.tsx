@@ -4,6 +4,7 @@ import type { ChangeEvent, DragEvent, ReactNode } from 'react'
 
 import { Spinner } from '../../../frontend/src/components/Spinner'
 import { ESP32_HARDWARE_PRESET_CONFIGS } from '../../../frontend/src/scenes/frame/panels/FrameSettings/esp32Hardware'
+import { NOT_A_LOGIN } from '../../../frontend/src/utils/notALogin'
 import { sceneNeedLabel } from '../../../frontend/src/utils/sceneNeeds'
 import { esp32Panels } from '../lib/generated-devices'
 import { FLASHER_FRAME_ID, flasherLogic } from './flasherLogic'
@@ -237,7 +238,7 @@ function ScenePicker(): JSX.Element {
     scenesIssue,
     uploadSeconds,
   } = useValues(flasherLogic)
-  const { applyPreset, togglePicked, setQuery } = useActions(flasherLogic)
+  const { applyPreset, togglePicked, setGroupPicked, setQuery } = useActions(flasherLogic)
   const presetShown = scenePresets.find((option) => option.key === preset) ?? null
   return (
     <div className="space-y-3">
@@ -293,7 +294,26 @@ function ScenePicker(): JSX.Element {
             {sampleGroups.map((group) => (
               <section key={group.category} className="space-y-1.5">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
-                  {group.category}
+                  {/* Ticks every scene of the category shown (a search narrows it); the store is always in. */}
+                  <label
+                    className={clsx(
+                      'flex items-center gap-2 px-1',
+                      group.pickable.length > 0 ? 'cursor-pointer' : 'cursor-default'
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={group.picked === 'all'}
+                      ref={(element) => {
+                        if (element) {
+                          element.indeterminate = group.picked === 'some'
+                        }
+                      }}
+                      disabled={group.pickable.length === 0}
+                      onChange={() => setGroupPicked(group.pickable, group.picked !== 'all')}
+                    />
+                    {group.category}
+                  </label>
                 </h3>
                 {group.rows.map(({ sample, picked, cover, picture }) => (
                   <label
@@ -432,7 +452,7 @@ function StandaloneCard(): JSX.Element {
           <input
             className={inputClass}
             value={ssid}
-            autoComplete="off"
+            {...NOT_A_LOGIN}
             onChange={(event) => setSsid(event.target.value)}
           />
         </Field>
@@ -441,7 +461,7 @@ function StandaloneCard(): JSX.Element {
             className={inputClass}
             type="password"
             value={password}
-            autoComplete="new-password"
+            {...NOT_A_LOGIN}
             onChange={(event) => setPassword(event.target.value)}
           />
         </Field>
@@ -553,13 +573,18 @@ function BoardToolsCard(): JSX.Element {
       </div>
       <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <Field label="Wi-Fi network">
-          <input className={inputClass} value={toolSsid} onChange={(event) => setToolSsid(event.target.value)} />
+          <input
+            className={inputClass}
+            value={toolSsid}
+            {...NOT_A_LOGIN}
+            onChange={(event) => setToolSsid(event.target.value)}
+          />
         </Field>
         <Field label="Password">
           <input
             className={inputClass}
             type="password"
-            autoComplete="new-password"
+            {...NOT_A_LOGIN}
             value={toolPassword}
             onChange={(event) => setToolPassword(event.target.value)}
           />

@@ -55,9 +55,36 @@ export interface FlasherSampleRow {
   picture: string | null
 }
 
+/** How much of a group is picked, for the tickbox before its heading. */
+export type FlasherGroupPicked = 'all' | 'some' | 'none'
+
 export interface FlasherSampleGroup {
   category: string
   rows: FlasherSampleRow[]
+  /** The rows its tickbox picks: the ones shown that can be left out (the
+   * Scene store is always in). */
+  pickable: string[]
+  /** How many of those are picked. A group with none to pick is 'all'. */
+  picked: FlasherGroupPicked
+}
+
+/** The picks with a group's samples all added (`on`) or all taken out. */
+export function withGroupPicked(picked: readonly string[], names: readonly string[], on: boolean): string[] {
+  if (on) {
+    return [...picked, ...names.filter((name) => !picked.includes(name))]
+  }
+  return picked.filter((name) => !names.includes(name))
+}
+
+function groupOf(category: string, rows: FlasherSampleRow[]): FlasherSampleGroup {
+  const pickable = rows.filter((row) => !row.sample.store)
+  const count = pickable.filter((row) => row.picked).length
+  return {
+    category,
+    rows,
+    pickable: pickable.map((row) => row.sample.name),
+    picked: count === pickable.length ? 'all' : count === 0 ? 'none' : 'some',
+  }
 }
 
 function matchesQuery(sample: FlasherSample, query: string): boolean {
@@ -92,6 +119,6 @@ export function flasherSampleGroups(
   }
   const hasStore = (group: FlasherSampleGroup): number => Number(group.rows.some((row) => row.sample.store))
   return [...groups.entries()]
-    .map(([category, rows]) => ({ category, rows }))
+    .map(([category, rows]) => groupOf(category, rows))
     .sort((a, b) => hasStore(b) - hasStore(a) || compareFlasherCategories(a.category, b.category))
 }

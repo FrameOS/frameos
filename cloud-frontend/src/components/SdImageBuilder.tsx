@@ -23,6 +23,7 @@ import {
 import { useValues } from 'kea'
 import { SshKeysSection } from '../../../frontend/src/components/sshKeys/SshKeysSection'
 import { sshKeysLogic } from '../../../frontend/src/components/sshKeys/sshKeysLogic'
+import { NOT_A_LOGIN } from '../../../frontend/src/utils/notALogin'
 
 // The zone the card's frame should keep its clock in: the browser's, since
 // the person making the card is almost always where the frame will hang.
@@ -921,6 +922,7 @@ export function SdImageBuilder({
                 onChange={(event) => setWifiSsid(event.target.value)}
                 placeholder="WiFi network (optional — the setup hotspot works too)"
                 value={wifiSsid}
+                {...NOT_A_LOGIN}
               />
             </FormRow>
             <FormRow label="Password">
@@ -933,6 +935,7 @@ export function SdImageBuilder({
                 placeholder="WiFi password"
                 type="password"
                 value={wifiPassword}
+                {...NOT_A_LOGIN}
               />
             </FormRow>
             <FormRow label="Country">

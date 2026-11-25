@@ -2,7 +2,11 @@
 // flasherSampleGroups): each row's picture and its store page.
 import { describe, expect, it } from "vitest";
 import type { FlasherSample } from "../../../../../../cloud-frontend/src/flasher/sampleCatalog";
-import { flasherSampleGroups, type StoreCover } from "../../../../../../cloud-frontend/src/flasher/sampleList";
+import {
+  flasherSampleGroups,
+  withGroupPicked,
+  type StoreCover,
+} from "../../../../../../cloud-frontend/src/flasher/sampleList";
 
 function rows(...args: Parameters<typeof flasherSampleGroups>) {
   return flasherSampleGroups(...args).flatMap((group) => group.rows);
@@ -51,6 +55,51 @@ describe("the flasher's list of samples", () => {
       "Clock face": cover("clock-face").image,
     });
     expect(list.find((row) => row.sample.name === "Counter")?.cover).toBeNull();
+  });
+
+  it("ticks a category's box when every scene in it is picked, half when some are", () => {
+    const samples = [
+      sample("Clock", { category: "Clocks & time" }),
+      sample("World clock", { category: "Clocks & time" }),
+      sample("Counter"),
+      sample("Notes"),
+      sample("Photos", { category: "Photos" }),
+    ];
+    const groups = Object.fromEntries(
+      flasherSampleGroups(samples, ["Clock", "World clock", "Counter"], {}, "").map((group) => [
+        group.category,
+        { pickable: group.pickable, picked: group.picked },
+      ]),
+    );
+    expect(groups).toEqual({
+      "Clocks & time": { pickable: ["Clock", "World clock"], picked: "all" },
+      "Notes & tools": { pickable: ["Counter", "Notes"], picked: "some" },
+      Photos: { pickable: ["Photos"], picked: "none" },
+    });
+  });
+
+  it("leaves the Scene store out of its category's box: it is always in", () => {
+    const [group] = flasherSampleGroups(
+      [sample("Scene store", { store: true, category: "Store" }), sample("Files", { category: "Store" })],
+      [],
+      {},
+      "",
+    );
+    expect(group?.pickable).toEqual(["Files"]);
+    expect(group?.picked).toBe("none");
+    const [alone] = flasherSampleGroups([sample("Scene store", { store: true })], [], {}, "");
+    expect(alone?.pickable).toEqual([]);
+    expect(alone?.picked).toBe("all");
+  });
+
+  it("ticks only the scenes a search shows", () => {
+    const [group] = flasherSampleGroups([sample("Counter"), sample("Notes")], [], {}, "counter");
+    expect(group?.pickable).toEqual(["Counter"]);
+  });
+
+  it("adds a category's scenes once, keeping the order, and takes them all out", () => {
+    expect(withGroupPicked(["Clock", "Notes"], ["Notes", "Counter"], true)).toEqual(["Clock", "Notes", "Counter"]);
+    expect(withGroupPicked(["Clock", "Notes", "Counter"], ["Notes", "Counter"], false)).toEqual(["Clock"]);
   });
 
   it("finds a sample by its folder's name too", () => {
