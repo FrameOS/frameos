@@ -22,6 +22,7 @@ import {
   standaloneProvisioning,
   standaloneSceneRoom,
   starterSceneSet,
+  storeCoversFromListing,
   type StandaloneChoices,
 } from "../../../../../../cloud-frontend/src/flasher/standalone";
 
@@ -261,8 +262,8 @@ describe("the scenes to start with", () => {
     ]);
   });
 
-  it("ticks everything that runs on the board, fast scenes only on a fast screen", () => {
-    expect(presetPicks("everything", samples, paper).picked).not.toContain("Star shooter");
+  it("ticks everything on any board: a fast scene runs on e-paper too", () => {
+    expect(presetPicks("everything", samples, paper).picked).toContain("Star shooter");
     expect(presetPicks("everything", samples, lcd).picked).toHaveLength(samples.length);
     expect(presetPicks("store", samples, lcd)).toEqual({ picked: ["Scene store"], noRoom: [] });
   });
@@ -279,15 +280,40 @@ describe("the scenes to start with", () => {
   it("refuses a set the board cannot take", () => {
     const tooBig = pickedScenes(samples, ["Big photo", "Clock"]);
     expect(pickedScenesProblem(tooBig, small, samples)).toMatch(/keeps about 717 KB of scenes.*untick some/);
-    expect(pickedScenesProblem(pickedScenes(samples, ["Star shooter"]), paper, samples)).toMatch(
-      /Star shooter needs a fast screen/,
-    );
+    // No panel holds a scene back: the DVD logo runs on a fast e-paper.
+    expect(pickedScenesProblem(pickedScenes(samples, ["Star shooter"]), paper, samples)).toBeNull();
     const many = Array.from({ length: 130 }, (_, index) => sample(`Scene ${index}`, { bytes: 1024 }));
     expect(
       pickedScenesProblem(pickedScenes(many, many.map((entry) => entry.name)), paper, many),
     ).toMatch(/up to 128 scenes/);
     // The store is always among the picked, ticked or not.
     expect(pickedScenes(samples, []).samples.map((entry) => entry.name)).toEqual(["Scene store"]);
+  });
+
+  it("reads the store's listing for the samples' thumbnails, by name", () => {
+    const listingUrl = "https://flash.frameos.net/api/store/repository.json";
+    const covers = storeCoversFromListing(
+      {
+        templates: [
+          {
+            name: "Clock",
+            image: "./scenes/49f88a34-92ac-4090-9afd-1c5affb4bfec/image?v=8",
+            url: "https://scenes.frameos.net/s/clock",
+          },
+          { name: "No page", image: "./scenes/x/image" },
+          { name: "Bad page", image: "./scenes/x/image", url: "javascript:alert(1)" },
+        ],
+      },
+      listingUrl,
+    );
+    expect(covers).toEqual({
+      clock: {
+        image: "https://flash.frameos.net/api/store/scenes/49f88a34-92ac-4090-9afd-1c5affb4bfec/image?v=8",
+        url: "https://scenes.frameos.net/s/clock",
+      },
+    });
+    expect(storeCoversFromListing(null, listingUrl)).toEqual({});
+    expect(storeCoversFromListing({ templates: "nope" }, listingUrl)).toEqual({});
   });
 
   it("says how long the scenes take over the cable", () => {

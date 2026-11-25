@@ -238,9 +238,43 @@ export function standaloneSceneRoom(kind: StandaloneBoardKind): StandaloneSceneR
   }
 }
 
-/** Why a sample cannot go on this board, or null: a fast scene on e-paper. */
-export function sampleUnfitReason(sample: FlasherSample, kind: StandaloneBoardKind): string | null {
-  return kind.fast === false && sample.needs.includes('fast') ? 'Needs a fast screen' : null
+/** A sample's store listing, for its thumbnail: its cover and its page. */
+export interface StoreCover {
+  /** The cover, as the flasher's own host serves it (surfaces.ts flasherServesApi). */
+  image: string
+  /** The scene's store page, opened in a new tab. */
+  url: string
+}
+
+/** The store's public listing (/api/store/repository.json), read for the
+ * covers of the samples it carries, by name in lower case. A sample the store
+ * does not carry has none; a listing that is not one gives none. */
+export function storeCoversFromListing(listing: unknown, listingUrl: string): Record<string, StoreCover> {
+  const covers: Record<string, StoreCover> = {}
+  const templates =
+    listing && typeof listing === 'object' ? (listing as Record<string, unknown>).templates : undefined
+  if (!Array.isArray(templates)) {
+    return covers
+  }
+  for (const entry of templates) {
+    if (!entry || typeof entry !== 'object') {
+      continue
+    }
+    const { name, image, url } = entry as Record<string, unknown>
+    if (typeof name !== 'string' || typeof image !== 'string' || typeof url !== 'string') {
+      continue
+    }
+    try {
+      const page = new URL(url)
+      if (page.protocol !== 'https:' && page.protocol !== 'http:') {
+        continue
+      }
+      covers[name.toLowerCase()] = { image: new URL(image, listingUrl).href, url: page.href }
+    } catch {
+      // Not a URL: no thumbnail for it.
+    }
+  }
+  return covers
 }
 
 /** The console reads at 115200 baud on a USB-UART bridge: about 11 KB a second. */
@@ -298,9 +332,12 @@ function interactive(sample: FlasherSample): boolean {
   return sample.needs.some((need) => need === 'touch' || need === 'keys' || need === 'fast')
 }
 
-/** The samples a preset ticks on this board, in the order they are tried. */
+/** The samples a preset ticks on this board, in the order they are tried.
+ * Any sample may go on any board: a fast scene runs on e-paper too (the DVD
+ * logo on a fast e-paper, the kitchen sink), so nothing is held back by the
+ * panel; the e-paper preset only suggests what changes slowly. */
 function presetCandidates(key: ScenePresetKey, samples: FlasherSample[], kind: StandaloneBoardKind): FlasherSample[] {
-  const fits = samples.filter((sample) => !sample.store && !sampleUnfitReason(sample, kind))
+  const fits = samples.filter((sample) => !sample.store)
   const byName = (names: string[]) =>
     names.map((name) => fits.find((sample) => sample.name === name)).filter((sample) => sample !== undefined)
   switch (key) {
@@ -389,10 +426,6 @@ export function pickedScenesProblem(
 ): string | null {
   if (samples === null) {
     return null
-  }
-  const unfit = picked.samples.filter((sample) => sampleUnfitReason(sample, kind))
-  if (unfit.length > 0) {
-    return `${unfit.map((sample) => sample.name).join(', ')} need${unfit.length === 1 ? 's' : ''} a fast screen.`
   }
   if (picked.scenes > STANDALONE_MAX_SCENES) {
     return `A frame keeps up to ${STANDALONE_MAX_SCENES} scenes: untick some.`
