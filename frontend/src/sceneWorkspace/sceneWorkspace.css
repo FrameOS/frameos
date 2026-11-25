@@ -1228,6 +1228,15 @@ canvas.lightbox__image {
   font-size: 13px;
 }
 
+/* "Show logs" on the left, the frame's cursor on the right of one row where
+   both fit, the cursor under it where they do not. */
+.live-preview__toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
 /* The preview's Layout settings dialog (SceneLivePreview): the layout's
    fields in the rows of the preview's own form. */
 .layout-settings-dialog {

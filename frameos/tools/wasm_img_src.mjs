@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 // `<img src="https://…">` in the wasm runtime, where nothing pumps, so the
 // render fetches the pictures. A plane's render (a board's picture, a render
-// check) gets every one in that render; the browser preview, which shows each
-// frame as it comes (frameos_wasm_set_pictures_one_a_render), one a render
-// with the next render soon, and no more renders once they are in. Until
+// check) gets every one in that render. The browser preview, which shows each
+// frame as it comes (frameos_wasm_set_pictures_one_a_render), has its worker
+// fetch them all at once, ahead, and renders as they come in
+// (frameos_library.js `fos_wasm_picture`, Module.onFrameosPictures); one it
+// cannot fetch ahead (no browser here, the page's own origin) comes one a
+// render, the worker told to render again soon, and no more renders once
+// they are in. Until 2026-11-25 every one came one a render, at the
+// preview's one render a second. Until
 // 2026-11-16 the runtime fetched in the render only on e-paper, so an LCD's
 // preview never drew a picture (the playground's Scene store showed no
 // covers), and the preview took a new render's context for the last one and
@@ -99,11 +104,15 @@ const { default: createFrameOS } = await import(pathToFileURL(join(wasmDir, 'fra
 const wasmBinary = await readFile(join(wasmDir, 'frameos.wasm'))
 const wanted = COLORS.map((_, i) => `https://img.test/${i}.png`)
 
-// Rendered as the preview worker renders: again as soon as the scene asks.
-// Answers how many renders it took.
-async function play(label, oneARender) {
+// Rendered as the preview worker renders: again as soon as the scene asks,
+// or the worker says pictures came. With `ahead`, as in a browser page: the
+// worker's fetch() answers, after the render that asked. Answers how many
+// renders it took.
+async function play(label, oneARender, ahead = false) {
   asked = []
+  const fetched = []
   const problems = []
+  let pictures = false
   const Module = await createFrameOS({
     wasmBinary,
     print: () => {},
@@ -111,7 +120,21 @@ async function play(label, oneARender) {
     onFrameosLog: (line) => {
       if (/<img>|jsApp:error|scene:error|failed/.test(line)) problems.push(line)
     },
+    onFrameosPictures: () => {
+      pictures = true
+    },
   })
+  const realFetch = globalThis.fetch
+  if (ahead) {
+    // A page on the internet, whose worker may fetch the pictures itself.
+    globalThis.self = { location: new URL('https://preview.test/s/scene') }
+    globalThis.fetch = async (url) => {
+      fetched.push(String(url))
+      const match = /^https:\/\/img\.test\/(\d+)\.png$/.exec(String(url))
+      const bytes = match && COLORS[Number(match[1])] ? png(COLORS[Number(match[1])]) : Buffer.alloc(0)
+      return new Response(bytes, { status: bytes.length ? 200 : 404, headers: { 'content-type': 'image/png' } })
+    }
+  }
   const call = (name, ret, types, args) => Module.ccall(name, ret, types, args)
   const lastError = () => call('frameos_wasm_last_error', 'string', [], [])
   if (!call('frameos_wasm_init', 'boolean', ['number', 'number', 'string', 'string', 'string'],
@@ -127,18 +150,29 @@ async function play(label, oneARender) {
   let renders = 0
   let soon = true
   while (soon && renders < 20) {
+    pictures = false
     const rc = call('frameos_wasm_render', 'number', [], [])
     renders += 1
     if (rc !== 0) fail(`${label}: render ${renders} returned ${rc}: ${lastError()}`)
     const nextSleep = call('frameos_wasm_next_sleep', 'number', [], [])
-    soon = (nextSleep >= 0 && nextSleep < 1) || call('frameos_wasm_render_requested', 'boolean', [], [])
+    if (nextSleep >= 0 && nextSleep < 1) fail(`${label}: render ${renders} asked for a render in ${nextSleep} s`)
+    // What the worker fetches ahead comes in between renders.
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve))
+    soon = pictures || call('frameos_wasm_render_requested', 'boolean', [], [])
+  }
+  if (ahead) {
+    delete globalThis.self
+    globalThis.fetch = realFetch
   }
   if (soon) fail(`${label}: still asking for renders after ${renders} (asked for ${asked.length} pictures)`)
   if (problems.length > 0) fail(`${label}: the scene reported:\n${problems.slice(0, 5).join('\n')}`)
 
-  const missing = wanted.filter((url) => !asked.includes(url))
-  if (missing.length > 0) fail(`${label}: never asked for ${missing.join(', ')} (asked: ${asked.join(', ') || 'nothing'})`)
-  if (asked.length !== wanted.length) fail(`${label}: asked ${asked.length} times for ${wanted.length} pictures`)
+  // Each picture once, by the runtime's own request or fetched ahead.
+  const got = ahead ? fetched : asked
+  const missing = wanted.filter((url) => !got.includes(url))
+  if (missing.length > 0) fail(`${label}: never asked for ${missing.join(', ')} (asked: ${got.join(', ') || 'nothing'})`)
+  if (got.length !== wanted.length) fail(`${label}: asked ${got.length} times for ${wanted.length} pictures`)
+  if (ahead && asked.length > 0) fail(`${label}: the runtime fetched ${asked.join(', ')} itself`)
 
   const start = call('frameos_wasm_buffer', 'number', [], [])
   const pixels = Module.HEAPU8.slice(start, start + WIDTH * HEIGHT * 4)
@@ -154,4 +188,8 @@ async function play(label, oneARender) {
 }
 
 if ((await play("a plane's render", false)) !== 1) fail("a plane's render took more than one render")
-if ((await play('the browser preview', true)) !== wanted.length) fail('the preview did not take one picture a render')
+if ((await play('pictures the preview cannot fetch ahead', true)) !== wanted.length) {
+  fail('the preview did not take one picture a render')
+}
+// Asked for in the first render, all in by the second.
+if ((await play('the browser preview', true, true)) !== 2) fail('the preview did not take every picture at once')

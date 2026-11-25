@@ -726,9 +726,20 @@ else:
 when defined(frameosWasm):
   var urlImagesOneARender* = false
     ## The browser preview's (frameos_wasm_set_pictures_one_a_render): a page
-    ## that shows every frame as it comes gets an `<img>` page's pictures one
-    ## a render. A plane's render is the one picture a board or a check gets,
-    ## so it waits for all of them.
+    ## that shows every frame as it comes gets an `<img>` page's pictures as
+    ## they come, not all of them before its first frame. A plane's render is
+    ## the one picture a board or a check gets, so it waits for all of them.
+
+  const PicturesNsARender = 120_000_000'i64
+    ## What one render of the preview spends decoding pictures that came in,
+    ## before it leaves the rest for the next render.
+
+  proc wasmPicture(url: cstring): cint {.importc: "fos_wasm_picture", cdecl.}
+    ## The preview worker's copy of `url` (tools/wasm/frameos_library.js): 0
+    ## it does not fetch that one ahead, 1 it is coming (asked for now if it
+    ## was not), 2 it is here, and a request for it is answered at once.
+  proc wasmPicturesWaiting() {.importc: "fos_wasm_pictures_waiting", cdecl.}
+    ## Pictures are here that this render left: the worker renders again soon.
 
 proc fitName(fit: ScaledDecodeFit): string =
   case fit
@@ -796,18 +807,34 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
             state: uiLoading, at: getMonoTime()))
     when defined(frameosWasm):
       # The preview: nothing pumps, and a render that fetched every picture of
-      # a page one after the other would show nothing for seconds. One picture
-      # a render, and the next render soon. Marked on the render's context: a
-      # pointer to the last one was kept before, and a new render's context
-      # made where the last was freed passed for it, so no picture came after
-      # that and the scene asked for a render every 50 ms.
+      # a page one after the other would show nothing for seconds. The worker
+      # fetches every picture asked for at once, several in parallel, keeps
+      # them, and renders again as each comes in: a render draws the ones that
+      # are in, as many as PicturesNsARender of decoding takes, and leaves the
+      # rest coming. One a render, and the next render soon, came at the
+      # preview's one render a second (24 seconds for a page of the Scene
+      # store, 2026-11-25). One the worker does not fetch ahead (the page's
+      # own origin, a private host) still comes one a render. Marked on the
+      # render's context: a pointer to the last one was kept before, and a new
+      # render's context made where the last was freed passed for it.
+      var timed = false
       if now and urlImagesOneARender and not url.startsWith("data:") and not context.isNil:
-        if context.urlImageFetched:
-          if context.nextSleep < 0 or context.nextSleep > 0.05:
-            context.nextSleep = 0.05
+        let here = wasmPicture(url.cstring)
+        if here == 1:
+          now = false
+        elif here == 2:
+          if context.urlImageNs >= PicturesNsARender:
+            wasmPicturesWaiting()
+            now = false
+          else:
+            timed = true
+        elif context.urlImageFetched:
+          wasmPicturesWaiting()
           now = false
         else:
           context.urlImageFetched = true
+          timed = true
+      let decodeStarted = if timed: getMonoTime() else: MonoTime()
     if now:
       let e = JsAppEvalEnv(runtime: runtime, owner: owner, context: context)
       let answer = fetchImageJson(e, url, %*{"width": width, "height": height, "fit": fitName(fit)},
@@ -821,6 +848,9 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
       else:
         urlImageFailed(owner, url, answer{"error"}.getStr())
       runtime.rememberUrlImage(entry)
+      when defined(frameosWasm):
+        if timed:
+          context.urlImageNs += (getMonoTime() - decodeStarted).inNanoseconds
       if entry.state == uiReady:
         return runtime.images.getOrDefault(entry.id, nil)
   # Meanwhile: the same picture at another size.

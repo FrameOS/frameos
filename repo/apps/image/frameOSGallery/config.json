@@ -2,7 +2,7 @@
   "name": "FrameOS Gallery",
   "description": "Random image from the FrameOS gallery",
   "category": "data",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "fields": [
     { "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries." },
     {
@@ -48,8 +48,17 @@
       "label": "Scale to the target",
       "hint": "The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
       "showIf": [{ "field": "format", "operator": "ne", "value": "original" }]
+    },
+    {
+      "name": "hold",
+      "type": "float",
+      "value": "0",
+      "required": false,
+      "label": "Show each picture for (seconds)",
+      "hint": "0: a new picture every render. Otherwise one picture for this long (connect the scene's interval), the same one drawn again in between (a window moved, resized or uncovered), and the next one at once when the scene is tapped or swiped with a finger, a frame's button pressed, or a key: right or down arrow, Page Down, Space, Enter or N. Turn the node's cache off with it. Not on an ESP32, whose memory is the picture's size: there a new picture every render, as with 0."
     }
   ],
   "output": [{ "name": "image", "type": "image" }],
+  "events": ["tap", "keyDown", "button", "swipe", "forward", "back"],
   "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" }
 }

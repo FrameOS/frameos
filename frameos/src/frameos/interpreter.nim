@@ -2774,6 +2774,11 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       elif self of InterpretedFrameScene:
         (if passStarted: ensureLayoutScene(InterpretedFrameScene(self)) else: self.wornLayout)
       elif self.ownRun.isNil: nil
+      # The switch that opens a built-in scene says which layout it wears and
+      # what it opened over (`state.layout`): it goes on once the scene has
+      # read that, not before. Made here, a layout chosen on the frame came
+      # up without it, and a taskbar lost the scene's button (2026-11-25).
+      elif context.event == "setCurrentScene": self.wornLayout
       else: builtInLayout(self, not yieldScene.isNil)
     # The frame's `back` while the scene's UI or its layout's has a field with
     # the keyboard (a <select>'s list, a link's code) up: that goes away, as

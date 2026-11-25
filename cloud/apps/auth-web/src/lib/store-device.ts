@@ -1,4 +1,4 @@
-import { and, arrayOverlaps, desc, eq, isNotNull, not, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, desc, eq, inArray, isNotNull, not, notInArray, sql, type SQL } from "drizzle-orm";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { formerCategorySlugs, storeCategories } from "./categories";
 import { storeBrowseConditions } from "./store-browse";
@@ -62,12 +62,15 @@ export type StoreDeviceSceneInfo = StoreDeviceScene & { description: string };
 // weighing most). The app before needs asked `prefer=realtime` /
 // `exclude=realtime` of the Real time shelf, which was the fast scenes: both
 // still mean that.
+// `featured=1` is the app's Featured: what an admin featured, then each
+// shelf's best by turns, one page (listStoreScenesForDevice).
 export type StoreDeviceOptions = {
   limit?: number;
   prefer?: string;
   preferNeeds?: string[];
   exclude?: string[];
   without?: string[];
+  featured?: boolean;
 };
 
 const categorySlugs = new Set(storeCategories.map((category) => category.slug));
@@ -102,6 +105,7 @@ export function parseStoreDeviceOptions(params: URLSearchParams): StoreDeviceOpt
     ...(preferNeeds.length > 0 ? { preferNeeds } : {}),
     exclude,
     without: [...without],
+    ...(params.get("featured") === "1" ? { featured: true } : {}),
   };
 }
 
@@ -173,6 +177,63 @@ const deviceColumns = {
   publisher: accounts.displayName,
 };
 
+// The app's Featured (`featured=1`, no search and no shelf): what an admin
+// featured, newest first, then the best of each shelf by turns, the shelves
+// in the store front's order: each one's first, then each one's second, and
+// so on, so the page shows the store's range rather than its most
+// downloaded shelf. A shelf's best is what the frame puts first (`prefer`:
+// the fast scenes on an LCD), then the most downloaded. One page, no more:
+// before it was every scene in the store, the fast ones first (2026-11-25).
+async function featuredForDevice(
+  db: Database,
+  filters: StoreBrowseFilters,
+  options: StoreDeviceOptions,
+  size: number,
+): Promise<StoreDeviceScene[]> {
+  const needsFirst = (options.preferNeeds ?? []).map((need) => sql`(${need} = any(${storeScenes.needs})) desc`);
+  const rank = sql<number>`row_number() over (partition by ${storeScenes.category} order by ${sql.join(
+    [...needsFirst, sql`${storeScenes.downloadCount} desc`, sql`${storeScenes.updatedAt} desc`, sql`${storeScenes.id}`],
+    sql`, `,
+  )})`;
+  const shelves = sql`array[${sql.join(
+    storeCategories.map((category) => sql`${category.slug}`),
+    sql`, `,
+  )}]::text[]`;
+  const ranked = db
+    .select({
+      id: storeScenes.id,
+      category: storeScenes.category,
+      featuredAt: storeScenes.featuredAt,
+      rank: rank.as("rank"),
+    })
+    .from(storeScenes)
+    .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
+    .where(and(...storeDeviceConditions(filters, options.exclude, options.without)))
+    .as("ranked");
+  const picked = await db
+    .select({ id: ranked.id })
+    .from(ranked)
+    .orderBy(
+      sql`(${ranked.featuredAt} is not null) desc`,
+      sql`${ranked.featuredAt} desc nulls last`,
+      ranked.rank,
+      sql`array_position(${shelves}, ${ranked.category}) nulls last`,
+      ranked.id,
+    )
+    .limit(size);
+  if (picked.length === 0) {
+    return [];
+  }
+  const ids = picked.map((row) => row.id);
+  const rows = await db
+    .select(deviceColumns)
+    .from(storeScenes)
+    .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
+    .where(inArray(storeScenes.id, ids));
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return deviceScenes(ids.map((id) => byId.get(id)).filter((row): row is DeviceRow => !!row));
+}
+
 export async function listStoreScenesForDevice(
   db: Database,
   filters: StoreBrowseFilters,
@@ -180,6 +241,9 @@ export async function listStoreScenesForDevice(
   options: StoreDeviceOptions = {},
 ): Promise<{ scenes: StoreDeviceScene[]; more: boolean }> {
   const size = options.limit ?? storeDevicePageSize;
+  if (options.featured && !filters.query && !filters.category && !filters.tag) {
+    return { more: false, scenes: page === 1 ? await featuredForDevice(db, filters, options, size) : [] };
+  }
   // One row past the page says whether there is another, without a count.
   const rows = await db
     .select(deviceColumns)

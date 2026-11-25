@@ -126,9 +126,10 @@ export interface FrameOSPreviewOptions {
    * scenes keep inside the circle (docs/scene-guide.md "Round panels"). */
   round?: boolean
   /** Offer the frame's own page in the scene settings (a desktop's Control
-   * Panel), for a page that is a frame of its own rather than an editor's
-   * preview. Its Restart and Reboot arrive as `onSceneEvent` `restart` /
-   * `reboot`, a new render scale as `frameSettings` `{renderScale}`. */
+   * Panel, a layout's settings), as a frame shows it: the playground and the
+   * scene workspace's preview turn it on. Its Restart and Reboot arrive as
+   * `onSceneEvent` `restart` / `reboot`, a new render scale as
+   * `frameSettings` `{renderScale}`: the page restarts the preview. */
   framePage?: boolean
   /** Draw the frame's own mouse cursor over the picture, as a frame with a
    * mouse draws it, with the page's cursor hidden over the canvas; off (the

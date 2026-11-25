@@ -301,6 +301,47 @@ describe("GET /api/store/device/scenes", () => {
     expect(shelf.scenes).toEqual([]);
   });
 
+  it("gives Featured as one page: what was featured, then each shelf's best by turns", async () => {
+    const { accountId } = await account("Publisher");
+    const scene = async (name: string, category: string, downloads: number, needs: string[] = []) => {
+      const made = await storeScene(accountId, name, { category, needs });
+      await db.update(storeScenes).set({ downloadCount: downloads }).where(eq(storeScenes.id, made.id));
+      return made.id;
+    };
+    const weather = [await scene("Weather 1", "weather", 50), await scene("Weather 2", "weather", 40), await scene("Weather 3", "weather", 30)];
+    const photos = [await scene("Photos 1", "photos", 5), await scene("Photos 2", "photos", 4)];
+    const clock = await scene("Clock", "clocks", 1);
+    const demo = await scene("Demo", "demos", 1000);
+    const picked = await scene("Picked", "weather", 0);
+    await db.update(storeScenes).set({ featuredAt: new Date() }).where(eq(storeScenes.id, picked));
+    const read = async (query: string) =>
+      (await (await getDeviceStore(get(`/api/store/device/scenes?${query}`))).json()) as {
+        more: boolean;
+        scenes: { id: string }[];
+      };
+    const ids = async (query: string) => (await read(query)).scenes.map((row) => row.id);
+
+    // What was featured, then every shelf's first in the store front's order
+    // (Photos, Clocks, Weather), then every shelf's second, and so on.
+    const featured = await read("featured=1&exclude=demos");
+    expect(featured.more).toBe(false);
+    expect(featured.scenes.map((row) => row.id)).toEqual([picked, photos[0], clock, weather[0], photos[1], weather[1], weather[2]]);
+    // One page: none after it, and a smaller page is cut where it ends.
+    expect(await ids("featured=1&exclude=demos&page=2")).toEqual([]);
+    expect(await ids("featured=1&exclude=demos&limit=3")).toEqual([picked, photos[0], clock]);
+    // A shelf left out is, however much it was downloaded.
+    expect(await ids("featured=1")).toContain(demo);
+    // A fast panel gets a shelf's fast scenes first.
+    const mover = await scene("Mover", "weather", 0, ["fast"]);
+    expect((await ids("featured=1&exclude=demos&prefer=fast")).slice(0, 4)).toEqual([picked, photos[0], clock, mover]);
+    // A shelf or a search is not Featured.
+    expect(await ids("featured=1&category=photos")).toEqual(photos);
+    expect(await ids("featured=1&q=Clock")).toEqual([clock]);
+    // Without it, every scene, as an app from before asks.
+    const everything = await read("limit=24");
+    expect(everything.scenes).toHaveLength(9);
+  });
+
   it("takes the page size of the frame's grid, what to put first and what it cannot run", async () => {
     const { accountId } = await account("Publisher");
     for (let i = 0; i < 4; i += 1) {

@@ -583,10 +583,11 @@ proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
 
 # ------------------------------------------------------------- frame page
 # The frame's own page in the scene settings (docs/scene-settings.md "The frame
-# page") for a page that runs this runtime as a frame of its own, the windowed
-# browser frame: no Wi-Fi, a rotation it cannot take (the browser window is the
-# panel), the scale live, and Restart and Reboot, which the page carries out
-# when it hears them (they reach it as any event the runtime sends out).
+# page") in the browser: the playground's frame and every scene preview, so a
+# layout's Control Panel and its settings are what a frame shows. No Wi-Fi, a
+# rotation it cannot take (the browser window is the panel), the scale live,
+# and Restart and Reboot, which the page carries out when it hears them (they
+# reach it as any event the runtime sends out).
 
 proc wasmFrameSettingsRead(): JsonNode {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
@@ -626,8 +627,9 @@ proc wasmFrameSettingsAction(action: string) {.nimcall, gcsafe, raises: [].} =
 
 proc frameos_wasm_set_frame_page(enabled: bool) {.exportc, cdecl.} =
   ## Offer the frame page (the gear in the scene settings, a layout's Control
-  ## Panel), as a page that runs this runtime as a frame of its own does. Off
-  ## by default, as in an editor's preview; every frameos_wasm_init turns it off.
+  ## Panel), as on a frame: the playground and the scene workspace's preview
+  ## (SceneLivePreview) turn it on. Off by default, as for a plane's render;
+  ## every frameos_wasm_init turns it off.
   framePage = enabled
   framePageNote = ""
   sceneSettings.frameSettingsRead = wasmFrameSettingsRead
@@ -667,9 +669,11 @@ proc frameos_wasm_set_windowed(enabled: bool) {.exportc, cdecl.} =
 
 proc frameos_wasm_set_pictures_one_a_render(enabled: bool) {.exportc, cdecl.} =
   ## For a page that shows every frame as it comes (the preview worker): an
-  ## `<img src>` page's pictures come one a render, the next render soon,
-  ## instead of a first frame that waits for all of them. Off by default (a
-  ## plane's render is the one picture a board gets); every
+  ## `<img src>` page's pictures come as they come, not all before a first
+  ## frame: the worker fetches them ahead, all at once, and renders again as
+  ## each lands (js_async.nim `urlImage`, frameos_library.js
+  ## `fos_wasm_picture`); one it cannot fetch ahead comes one a render. Off
+  ## by default (a plane's render is the one picture a board gets); every
   ## frameos_wasm_init turns it off.
   urlImagesOneARender = enabled
 

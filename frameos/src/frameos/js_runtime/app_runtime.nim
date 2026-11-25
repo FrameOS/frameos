@@ -655,7 +655,10 @@ proc storeChooseLayout(asker, argsJson: string) =
   ## layout the frame's scenes wear, chosen on the frame as its settings page
   ## chooses it ("" each scene's own). The frame's own to keep, so no host is
   ## asked; the scene asking is shown again, wearing it, the way the page's
-  ## Back shows the scene it came from.
+  ## Back shows the scene it came from. A layout goes on at the start of a
+  ## pass, and the store asks from inside one: a switch to the scene already
+  ## showing switches nothing, so a pass is asked for too, or the store wore
+  ## it only once something else drew (the browser preview's Try, 2026-11-25).
   var id = ""
   try:
     id = parseJson(argsJson){"id"}.getStr()
@@ -666,6 +669,7 @@ proc storeChooseLayout(asker, argsJson: string) =
   chooseLayout(id)
   if asker.len > 0:
     sendEvent("setCurrentScene", %*{"sceneId": asker}, eoScene)
+  sendEvent("render", newJObject(), eoScene)
 
 proc jsStoreAction(ctx: ptr JSContext, action: JSValue, argsJson: JSValue): JSValue {.nimcall.} =
   ## `frameos.storeAction(action, args)`: the host starts it and redraws the

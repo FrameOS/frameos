@@ -32,6 +32,7 @@ import ./types
 import ./driver_abi
 import ./input_state
 import ./event_map
+import ./layout_choice
 import ./scene_rhythm
 import ./frame_settings_hooks
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
@@ -502,16 +503,23 @@ proc settingsOf*(scene: FrameScene, state: JsonNode) =
 
 proc layoutAround(current: FrameScene): JsonNode =
   ## The layout a built-in scene opened over `current` is drawn in: the one
-  ## `current` wears, made afresh around it with what it has open going along
-  ## by name (`openedOver`), for a taskbar to keep showing. nil without one.
-  if current of InterpretedFrameScene and InterpretedFrameScene(current).layoutSceneId.string.len > 0:
-    result = newJObject()
-    result.put("sceneId", newJString(InterpretedFrameScene(current).layoutSceneId.string))
-    let layoutState =
-      if InterpretedFrameScene(current).layoutState.isNil: newJObject()
-      else: copy(InterpretedFrameScene(current).layoutState)
-    layoutState.put("openedOver", newJString(current.shownName))
-    result.put("state", layoutState)
+  ## `current` wears (its own, or the frame's choice: `layoutFor`), made
+  ## afresh around it with what it has open going along by name
+  ## (`openedOver`), for a taskbar to keep showing. nil without one. Only its
+  ## own comes with what the install set for it; a chosen one starts from what
+  ## was set on the frame, as it does around the scene.
+  if current of InterpretedFrameScene:
+    let
+      own = InterpretedFrameScene(current).layoutSceneId.string
+      worn = layoutFor(own)
+    if worn.len > 0:
+      result = newJObject()
+      result.put("sceneId", newJString(worn))
+      let layoutState =
+        if worn != own or InterpretedFrameScene(current).layoutState.isNil: newJObject()
+        else: copy(InterpretedFrameScene(current).layoutState)
+      layoutState.put("openedOver", newJString(current.shownName))
+      result.put("state", layoutState)
 
 proc backFrom(loop: EventLoop, current: FrameScene): string =
   ## Where a built-in scene goes back to: the scene it was opened from, else

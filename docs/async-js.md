@@ -67,9 +67,14 @@ Scene store puts the scene's initial under each cover).
   and render the scene once more however many land together. E-paper, a
   board that deep-sleeps and every wasm runtime fetch it in the render
   (e-paper: one refresh with every picture; a plane's render for a board:
-  every picture in that render; the browser preview, which shows each frame
-  as it comes: one picture a render and the next render soon, turned on by
-  its worker with `frameos_wasm_set_pictures_one_a_render`).
+  every picture in that render). The browser preview, which shows each frame
+  as it comes (turned on by its worker with
+  `frameos_wasm_set_pictures_one_a_render`), is the one that fetches ahead:
+  its worker fetches every picture a render asks for at once, six at a time,
+  keeps them, and renders again as each comes in, the render drawing what is
+  in (`fos_wasm_picture` in `tools/wasm/frameos_library.js`). One it cannot
+  fetch ahead (the page's own origin, a private host) comes one a render, the
+  worker told to render again soon.
 - The picture is a kept picture (`fetchImage` `keep`: 48 small ones,
   `docs/jsx-ui.md` "Photos that stay"): the same url at the same size is
   one picture while the interpreter lives. At a new size (the box changed)

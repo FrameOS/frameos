@@ -3,6 +3,7 @@ import pixie
 import ../interpreter
 import ../types
 import ../utils/app_images
+from ../utils/memory import setSimulatedEmbedded
 
 # The interpreter's decode-target hint, from the interpreter's side.
 #
@@ -264,6 +265,10 @@ var shippedScenesChecked = 0
 var shippedProducerCalls = 0
 var coveredTemplates: seq[string] = @[]
 
+# As an ESP32, whose decode this guards: `app.frame.embedded` is true, so the
+# gallery app downloads into its target every render and keeps no picture to
+# hold (repo/apps/image/frameOSGallery `hold`, which a Pi and the browser use).
+setSimulatedEmbedded(true)
 for scenesPath in walkDirRec(RepoScenesDir):
   if scenesPath.splitPath().tail != "scenes.json":
     continue
@@ -317,6 +322,7 @@ for scenesPath in walkDirRec(RepoScenesDir):
         label & ": decode target " & $target.width & "x" & $target.height &
         " is larger than the 800x480 canvas"
 
+setSimulatedEmbedded(false)
 setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 contextDownloadHook = nil
 

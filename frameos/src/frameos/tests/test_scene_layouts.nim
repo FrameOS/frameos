@@ -1242,6 +1242,58 @@ suite "the layout chosen on the frame":
     check scene.layoutOf.state{"title"}.getStr() == "From the frame"
     saveLayoutState("tests/uiLayout", %*{})
 
+  test "the scene list opened over a scene goes on in the chosen layout, told what it opened over":
+    # The scene store's Try puts a layout on the frame: a scene with none of its
+    # own wears it, and so does the scene list Start opens over it, which keeps
+    # the scene's button in a taskbar by its name (`openedOver`). Without it the
+    # list's Windows 98 lost the store's button, and only Start brought it back
+    # (2026-11-25).
+    var scene: FrameScene
+    var selected: seq[JsonNode]
+    let loop = newEventLoop(EventHost(
+      requestRender: (proc () = discard),
+      selectScene: (proc (payload: JsonNode): bool = selected.add(payload); true),
+      sceneFor: (proc (target: Option[SceneId]): FrameScene = scene),
+      runScene: (proc (scene: FrameScene, event: string, payload: JsonNode) = discard),
+      sceneListens: (proc (scene: FrameScene, event: string): bool = false),
+      log: (proc (entry: JsonNode) = discard)), config)
+    chooseLayout("tests/uiLayout")
+    for id in ["tests/child", "tests/styled"]:
+      scene = newScene(id)
+      discard pass(scene)
+      check scene.layoutOf.id.string == "tests/uiLayout"
+      selected.setLen(0)
+      loop.enqueue(eoScene, evSceneSwitcher, %*{"swap": true})
+      discard loop.drain()
+      check selected.len == 1
+      let worn = selected[0]{"state", "layout"}
+      check worn{"sceneId"}.getStr() == "tests/uiLayout"
+      check worn{"state", "openedOver"}.getStr() == scene.shownName
+      # Not what the install set for the layout it would have worn.
+      check worn{"state", "title"}.isNil
+      check selected[0]{"state", "from"}.getStr() == scene.id.string
+      let list = switcher.exportedScene.init(SceneSwitcherId.SceneId, config, logger(), %*{})
+      switcher.exportedScene.runEvent(list, ExecutionContext(scene: list, event: "setCurrentScene",
+        payload: selected[0], loopIndex: 0, loopKey: ".", nextSleep: -1))
+      discard pass(list)
+      check list.layoutOf.id.string == "tests/uiLayout"
+      check list.layoutOf.state{"openedOver"}.getStr() == scene.shownName
+    # Its own layout, nothing chosen: that one, with what the install set.
+    chooseLayout("")
+    scene = newScene("tests/styled")
+    discard pass(scene)
+    selected.setLen(0)
+    loop.enqueue(eoScene, evSceneSwitcher, %*{"swap": true})
+    discard loop.drain()
+    check selected[0]{"state", "layout", "sceneId"}.getStr() == "tests/layout"
+    check selected[0]{"state", "layout", "state", "title"}.getStr() == "Mine"
+    # Every layout taken off: the list wears none either.
+    chooseLayout(NoLayout)
+    selected.setLen(0)
+    loop.enqueue(eoScene, evSceneSwitcher, %*{"swap": true})
+    discard loop.drain()
+    check selected[0]{"state", "layout"}.isNil
+
 suite "a layout around the built-in scenes":
   setup:
     rhythmClockOverride = 1000.0
