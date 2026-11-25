@@ -4,9 +4,17 @@ import type { ChangeEvent, DragEvent, ReactNode } from 'react'
 
 import { Spinner } from '../../../frontend/src/components/Spinner'
 import { ESP32_HARDWARE_PRESET_CONFIGS } from '../../../frontend/src/scenes/frame/panels/FrameSettings/esp32Hardware'
+import { sceneNeedLabel } from '../../../frontend/src/utils/sceneNeeds'
 import { esp32Panels } from '../lib/generated-devices'
 import { FLASHER_FRAME_ID, flasherLogic } from './flasherLogic'
-import { CUSTOM_BOARD, standaloneBoard, standaloneBoards, standaloneHostname } from './standalone'
+import {
+  CUSTOM_BOARD,
+  sceneBytesLabel,
+  scenePresets,
+  standaloneBoard,
+  standaloneBoards,
+  standaloneHostname,
+} from './standalone'
 
 // flash.frameos.net's page (cloud/docs/flasher.md). Words and layout only:
 // what it does is flasherLogic's.
@@ -206,6 +214,129 @@ function JobCard(): JSX.Element | null {
   )
 }
 
+/** "about 3 min" for the time the scenes take over the cable. */
+function uploadTimeLabel(seconds: number): string {
+  return seconds < 90 ? `about ${Math.max(seconds, 1)} s` : `about ${Math.round(seconds / 60)} min`
+}
+
+// The needs a row shows: what decides where a scene fits.
+const SHOWN_NEEDS = ['fast', 'touch', 'keys'] as const
+
+function ScenePicker(): JSX.Element {
+  const {
+    samples,
+    samplesError,
+    preset,
+    noRoom,
+    query,
+    sampleGroups,
+    chosenScenes,
+    sceneRoom,
+    scenesIssue,
+    uploadSeconds,
+  } = useValues(flasherLogic)
+  const { applyPreset, togglePicked, setQuery } = useActions(flasherLogic)
+  const presetShown = scenePresets.find((option) => option.key === preset) ?? null
+  return (
+    <div className="space-y-3">
+      <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Scenes to start with</div>
+      {samplesError ? <div className="text-xs font-semibold text-red-500">{samplesError}</div> : null}
+      {samples === null && !samplesError ? <Spinner /> : null}
+      {samples !== null ? (
+        <>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Pick a set of scenes">
+            {scenePresets.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                aria-pressed={preset === option.key}
+                className={clsx(
+                  'rounded-full border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+                  preset === option.key
+                    ? 'border-blue-500 bg-blue-500 text-white'
+                    : 'frameos-inset text-[color:var(--tool-strong)]'
+                )}
+                onClick={() => applyPreset(option.key)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="frame-tool-muted text-xs leading-5">
+            {presetShown ? presetShown.description : 'Picked by hand.'}
+            {noRoom.length > 0
+              ? ` ${noRoom.length} more of this set did not fit the room the board has for scenes.`
+              : ''}
+          </div>
+          <div
+            className={clsx('text-sm', scenesIssue ? 'font-semibold text-red-500' : 'text-[color:var(--tool-strong)]')}
+          >
+            {scenesIssue ??
+              `${chosenScenes.scenes} scene${chosenScenes.scenes === 1 ? '' : 's'}, ${sceneBytesLabel(
+                chosenScenes.bytes
+              )}: the board has room for about ${sceneBytesLabel(sceneRoom.bytes)}${
+                sceneRoom.assumed ? ' (counted for an 8 MB board)' : ''
+              }. They take ${uploadTimeLabel(uploadSeconds)} over the cable.`}
+          </div>
+          <input
+            className={inputClass}
+            type="search"
+            placeholder={`Search ${samples.length} scenes`}
+            aria-label="Search the scenes"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div className="frameos-inset max-h-[28rem] space-y-4 overflow-y-auto rounded-xl border p-3">
+            {sampleGroups.length === 0 ? <div className="frame-tool-muted text-sm">No scene matches that.</div> : null}
+            {sampleGroups.map((group) => (
+              <section key={group.category} className="space-y-1.5">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
+                  {group.category}
+                </h3>
+                {group.rows.map(({ sample, picked, unfit }) => (
+                  <label
+                    key={sample.name}
+                    className={clsx(
+                      'flex items-start gap-2 rounded-lg px-1 py-1 text-sm',
+                      sample.store || unfit ? 'cursor-default' : 'cursor-pointer'
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={picked}
+                      disabled={sample.store || (Boolean(unfit) && !picked)}
+                      onChange={() => togglePicked(sample.name)}
+                    />
+                    <span className={clsx('min-w-0 flex-1', unfit && !picked ? 'opacity-50' : null)}>
+                      <span className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="font-semibold text-[color:var(--tool-strong)]">{sample.name}</span>
+                        {SHOWN_NEEDS.filter((need) => sample.needs.includes(need)).map((need) => (
+                          <span key={need} className="frame-tool-muted text-[11px]">
+                            {sceneNeedLabel(need)}
+                          </span>
+                        ))}
+                      </span>
+                      <span className="frame-tool-muted line-clamp-2 block text-xs leading-5">
+                        {sample.store ? 'Always on the frame: it installs the rest. ' : ''}
+                        {unfit ? `${unfit}. ` : ''}
+                        {sample.description}
+                      </span>
+                    </span>
+                    <span className="frame-tool-muted shrink-0 text-xs tabular-nums">
+                      {sceneBytesLabel(sample.bytes)}
+                    </span>
+                  </label>
+                ))}
+              </section>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 function StandaloneCard(): JSX.Element {
   const {
     board,
@@ -215,16 +346,13 @@ function StandaloneCard(): JSX.Element {
     ssid,
     password,
     timeZone,
-    templates,
-    templatesError,
-    picked,
     busy,
     usbSupported,
     standaloneIssue,
+    scenesIssue,
     choices,
   } = useValues(flasherLogic)
-  const { setBoard, setPanel, setPins, setName, setSsid, setPassword, setTimeZone, togglePicked, runSetup } =
-    useActions(flasherLogic)
+  const { setBoard, setPanel, setPins, setName, setSsid, setPassword, setTimeZone, runSetup } = useActions(flasherLogic)
   const chosen = standaloneBoard(board)
   const custom = board === CUSTOM_BOARD
   return (
@@ -303,35 +431,12 @@ function StandaloneCard(): JSX.Element {
           onChange={(event) => setTimeZone(event.target.value.trim() || null)}
         />
       </Field>
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Scenes to start with</div>
-        {templatesError ? <div className="text-xs font-semibold text-red-500">{templatesError}</div> : null}
-        {templates === null && !templatesError ? <Spinner /> : null}
-        <div className="grid gap-2 sm:grid-cols-2">
-          {(templates ?? []).map((template) => (
-            <label
-              key={template.name}
-              className="frameos-inset flex cursor-pointer items-start gap-2 rounded-xl border p-3 text-sm"
-            >
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={picked.includes(template.name)}
-                onChange={() => togglePicked(template.name)}
-              />
-              <span>
-                <span className="block font-semibold text-[color:var(--tool-strong)]">{template.name}</span>
-                <span className="frame-tool-muted block text-xs leading-5">{template.description}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </div>
+      <ScenePicker />
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
           className={primaryButtonClass}
-          disabled={busy || !usbSupported || Boolean(standaloneIssue)}
+          disabled={busy || !usbSupported || Boolean(standaloneIssue) || Boolean(scenesIssue)}
           onClick={runSetup}
         >
           Flash FrameOS & set it up

@@ -36,6 +36,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/public-store-front.test.tsx",
       // Same exclusion, same reason: mounts EmbeddedWebFlasher.
       "**/src/test/shared-spa/embedded-flash-shared.test.ts",
+      // Same exclusion, same reason: imports embeddedFlashShared.
+      "**/src/test/shared-spa/usb-scenes-upload-plan.test.ts",
       // Same exclusion, same reason: mounts EmbeddedReleaseFlasher.
       "**/src/test/shared-spa/embedded-release-flasher.test.tsx",
       // The USB board classifier type-imports embeddedUsbLogsModel; the

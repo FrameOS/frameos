@@ -37,33 +37,54 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
 
 // The samples a standalone frame can start with on flash.frameos.net, read
 // from repo/scenes at build time (so a sample's fix reaches the flasher with
-// the next deploy). The Scene store is always offered first: with it the
-// frame installs everything else itself.
-const flasherStarterTemplates = [
-  { name: 'Scene store', preselected: true },
-  { name: 'Clock', preselected: true },
-  { name: 'Flip clock' },
-  { name: 'Big typographic clock' },
-  { name: 'Analog clock face' },
-  { name: 'Word clock' },
-  { name: 'Countdown' },
-  { name: 'Files' },
-  { name: 'Terminal app' },
-  { name: 'Pixel toys' },
-]
+// the next deploy): src/flasher/sampleCatalog.ts decides which can run on such
+// a frame, from the scenes themselves. The page loads the light index
+// (flasher-scenes/index.json) and fetches a sample's scenes only when it is
+// picked (flasher-scenes/<file>).
 {
-  const samplesDir = path.resolve(__dirname, '../repo/scenes/samples')
-  const starters = []
-  for (const { name, preselected = false } of flasherStarterTemplates) {
-    const dir = path.join(samplesDir, name)
-    const meta = JSON.parse(await fs.readFile(path.join(dir, 'template.json'), 'utf8'))
-    const scenes = JSON.parse(await fs.readFile(path.join(dir, String(meta.scenes ?? './scenes.json')), 'utf8'))
-    if (!Array.isArray(scenes) || scenes.length === 0) {
-      throw new Error(`flasher starter "${name}" has no scenes`)
+  const bundled = await build({
+    absWorkingDir: __dirname,
+    entryPoints: [path.resolve(__dirname, 'src/flasher/sampleCatalog.ts')],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'node',
+    logLevel: 'warning',
+    tsconfig: path.resolve(__dirname, 'tsconfig.json'),
+  })
+  const catalog = await import(
+    `data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`
+  )
+  const scenesRoot = path.resolve(__dirname, '../repo/scenes')
+  const sources = []
+  for (const shelf of ['samples', 'gallery']) {
+    const entries = await fs.readdir(path.join(scenesRoot, shelf), { withFileTypes: true })
+    for (const entry of entries.filter((entry) => entry.isDirectory())) {
+      const dir = path.join(scenesRoot, shelf, entry.name)
+      const meta = JSON.parse(await fs.readFile(path.join(dir, 'template.json'), 'utf8'))
+      const scenes = JSON.parse(await fs.readFile(path.join(dir, String(meta.scenes ?? './scenes.json')), 'utf8'))
+      sources.push({
+        name: entry.name,
+        description: String(meta.description ?? ''),
+        scenes: Array.isArray(scenes) ? scenes : [],
+      })
     }
-    starters.push({ name, description: String(meta.description ?? ''), preselected, scenes })
   }
-  await fs.writeFile(path.join(outputDir, 'flasher-scenes.json'), JSON.stringify(starters))
+  const index = catalog.flasherSampleIndex(sources)
+  const sampleDir = path.join(outputDir, 'flasher-scenes')
+  await fs.mkdir(sampleDir, { recursive: true })
+  const byName = new Map(sources.map((source) => [source.name, source]))
+  for (const sample of index.samples) {
+    await fs.writeFile(path.join(sampleDir, sample.file), catalog.flasherScenesJson(byName.get(sample.name).scenes))
+  }
+  const indexJson = JSON.stringify({ samples: index.samples })
+  await fs.writeFile(path.join(sampleDir, 'index.json'), indexJson)
+  const total = index.samples.reduce((sum, sample) => sum + sample.bytes, 0)
+  console.log(
+    `🧩 flasher: ${index.samples.length} samples (${Math.round(total / 1024)} KB of scenes, index ${Math.round(
+      indexJson.length / 1024
+    )} KB), ${index.leftOut.length} left out`
+  )
 }
 
 // cloud/apps/auth-web/app/frames/[[...path]]/route.ts injects server-side

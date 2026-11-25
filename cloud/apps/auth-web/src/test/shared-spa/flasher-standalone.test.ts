@@ -1,15 +1,26 @@
 // A standalone ESP32 set up by flash.frameos.net
 // (cloud-frontend/src/flasher/standalone.ts, cloud/docs/flasher.md): what the
 // console is told, in what order, and which scenes the frame starts with.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import type { FlasherSample } from "../../../../../../cloud-frontend/src/flasher/sampleCatalog";
 import {
   CUSTOM_BOARD,
+  TOUCH_PRESETS,
   boardFromQuery,
+  defaultScenePreset,
+  pickedScenes,
+  pickedScenesProblem,
   pinSpecProblem,
+  presetPicks,
+  sceneUploadSeconds,
+  standaloneBoardKind,
   standaloneBoards,
   standaloneHostname,
   standaloneProblem,
   standaloneProvisioning,
+  standaloneSceneRoom,
   starterSceneSet,
   type StandaloneChoices,
 } from "../../../../../../cloud-frontend/src/flasher/standalone";
@@ -106,22 +117,182 @@ describe("standaloneProvisioning", () => {
 });
 
 describe("starterSceneSet", () => {
-  const templates = [
-    { name: "Scene store", description: "", preselected: true, scenes: [{ id: "scene-store", default: true }] },
-    { name: "Clock", description: "", preselected: true, scenes: [{ id: "clock" }] },
-    { name: "Flip clock", description: "", preselected: false, scenes: [{ id: "flip-clock" }] },
-  ];
+  const store = [{ id: "scene-store", default: true }];
+  const clock = [{ id: "clock" }];
+  const layoutAndScene = [{ id: "a-layout", settings: { isLayout: true } }, { id: "flip-clock", default: true }];
 
-  it("shows the first picked scene that is not the store", () => {
-    const scenes = starterSceneSet(templates, new Set(["Scene store", "Clock"]));
+  it("boots a board of keys into the first picked scene that is not the store", () => {
+    const scenes = starterSceneSet([clock, store], { touch: false });
     expect(scenes.map((scene) => scene.id)).toEqual(["scene-store", "clock"]);
     expect(scenes.filter((scene) => scene.default).map((scene) => scene.id)).toEqual(["clock"]);
-    // The templates themselves are left as they were.
-    expect(templates[0]!.scenes[0]).toEqual({ id: "scene-store", default: true });
+    // What was fetched is left as it was.
+    expect(store[0]).toEqual({ id: "scene-store", default: true });
+  });
+
+  it("never marks a layout", () => {
+    const scenes = starterSceneSet([store, layoutAndScene], { touch: false });
+    expect(scenes.filter((scene) => scene.default).map((scene) => scene.id)).toEqual(["flip-clock"]);
   });
 
   it("shows the store when it is all there is", () => {
-    const scenes = starterSceneSet(templates, new Set(["Scene store"]));
-    expect(scenes).toEqual([{ id: "scene-store", default: true }]);
+    expect(starterSceneSet([store], { touch: false })).toEqual([{ id: "scene-store", default: true }]);
+  });
+
+  it("marks nothing on a board that takes taps: it opens on its scene list", () => {
+    const scenes = starterSceneSet([store, clock, layoutAndScene], { touch: true });
+    expect(scenes.some((scene) => "default" in scene)).toBe(false);
+  });
+});
+
+describe("the boards' screens", () => {
+  const repoRoot = fileURLToPath(new URL("../../../../../../", import.meta.url));
+
+  it("takes taps on exactly the boards whose firmware event map swipes", () => {
+    // A standalone frame runs the event map its firmware has for its preset.
+    const board = readFileSync(`${repoRoot}embedded/esp32/main/fos_board.c`, "utf8");
+    const swiping = [...board.matchAll(/\{"([a-z0-9_]+)",[^\n]*\btrue\},/g)].map((match) => match[1]);
+    expect(swiping.length).toBeGreaterThan(3);
+    expect(new Set(swiping)).toEqual(TOUCH_PRESETS);
+    for (const option of standaloneBoards) {
+      expect(option.touch).toBe(TOUCH_PRESETS.has(option.key));
+    }
+  });
+
+  it("knows a fast screen and the flash of each board", () => {
+    expect(standaloneBoardKind("seeed_sensecap_indicator_d1")).toEqual({ touch: true, fast: true, flashSize: "8MB" });
+    expect(standaloneBoardKind("seeed_reterminal_sticky")).toEqual({ touch: true, fast: false, flashSize: "32MB" });
+    expect(standaloneBoardKind("seeed_reterminal_e1002")).toEqual({ touch: false, fast: false, flashSize: "32MB" });
+    expect(standaloneBoardKind(CUSTOM_BOARD)).toEqual({ touch: false, fast: false, flashSize: null });
+    expect(standaloneBoardKind("")).toEqual({ touch: false, fast: null, flashSize: null });
+  });
+
+  it("keeps a share of /state for scenes, by layout", () => {
+    expect(standaloneSceneRoom({ touch: false, fast: false, flashSize: "32MB" })).toEqual({
+      bytes: Math.floor(24 * 1024 * 1024 * 0.7),
+      flashSize: "32MB",
+      assumed: false,
+    });
+    expect(standaloneSceneRoom({ touch: false, fast: false, flashSize: "16MB" }).bytes).toBe(
+      Math.floor(8 * 1024 * 1024 * 0.7),
+    );
+    // Another S3 board: counted as the smallest layout until esptool reads it.
+    expect(standaloneSceneRoom({ touch: false, fast: false, flashSize: null })).toEqual({
+      bytes: Math.floor(1024 * 1024 * 0.7),
+      flashSize: "8MB",
+      assumed: true,
+    });
+  });
+});
+
+describe("the scenes to start with", () => {
+  function sample(name: string, overrides: Partial<FlasherSample> = {}): FlasherSample {
+    return {
+      name,
+      description: "",
+      category: "Clocks & time",
+      needs: [],
+      bytes: 10 * 1024,
+      scenes: 1,
+      file: `${name.toLowerCase().replace(/\W+/g, "-")}.json`,
+      store: false,
+      ...overrides,
+    };
+  }
+  const samples = [
+    sample("Scene store", { store: true, category: "Notes & tools", needs: ["touch"], bytes: 64 * 1024 }),
+    sample("Clock"),
+    sample("Weather", { category: "Weather" }),
+    sample("Word clock"),
+    sample("Year progress"),
+    sample("Files", { category: "Notes & tools", needs: ["touch", "keys"] }),
+    sample("Code editor", { category: "System", needs: ["touch", "keys"] }),
+    sample("Calculator", { category: "Notes & tools", needs: ["touch"] }),
+    sample("Snake", { category: "Games", needs: ["touch", "keys"] }),
+    sample("Star shooter", { category: "Games", needs: ["fast", "touch"] }),
+    sample("Touch test", { category: "Demos & examples", needs: ["touch"] }),
+    sample("Big photo", { category: "Photos", bytes: 700 * 1024 }),
+  ];
+  const paper = { touch: false, fast: false, flashSize: "32MB" };
+  const stickyKind = { touch: true, fast: false, flashSize: "32MB" };
+  const lcd = { touch: true, fast: true, flashSize: "16MB" };
+  const small = { touch: false, fast: false, flashSize: "8MB" };
+
+  it("starts a board of keys on the store, a clock and a few calm scenes", () => {
+    expect(defaultScenePreset()).toBe("starter");
+    expect(presetPicks("starter", samples, paper).picked).toEqual([
+      "Scene store",
+      "Clock",
+      "Weather",
+      "Word clock",
+      "Year progress",
+    ]);
+  });
+
+  it("starts a touch board with the frame's tools", () => {
+    expect(presetPicks("starter", samples, stickyKind).picked).toEqual([
+      "Scene store",
+      "Clock",
+      "Weather",
+      "Code editor",
+      "Files",
+      "Calculator",
+    ]);
+  });
+
+  it("ticks what is used by hand on an LCD, and leaves the demos out", () => {
+    expect(presetPicks("interactive", samples, lcd).picked).toEqual([
+      "Scene store",
+      "Files",
+      "Code editor",
+      "Calculator",
+      "Snake",
+      "Star shooter",
+    ]);
+  });
+
+  it("ticks what is only looked at for e-paper", () => {
+    expect(presetPicks("paper", samples, paper).picked).toEqual([
+      "Scene store",
+      "Clock",
+      "Weather",
+      "Word clock",
+      "Year progress",
+      "Big photo",
+    ]);
+  });
+
+  it("ticks everything that runs on the board, fast scenes only on a fast screen", () => {
+    expect(presetPicks("everything", samples, paper).picked).not.toContain("Star shooter");
+    expect(presetPicks("everything", samples, lcd).picked).toHaveLength(samples.length);
+    expect(presetPicks("store", samples, lcd)).toEqual({ picked: ["Scene store"], noRoom: [] });
+  });
+
+  it("fills a small board while it has room, and says what did not fit", () => {
+    const { picked, noRoom } = presetPicks("everything", samples, small);
+    expect(picked).not.toContain("Big photo");
+    expect(noRoom).toEqual(["Big photo"]);
+    const chosen = pickedScenes(samples, picked);
+    expect(chosen.bytes).toBeLessThanOrEqual(standaloneSceneRoom(small).bytes);
+    expect(pickedScenesProblem(chosen, small, samples)).toBeNull();
+  });
+
+  it("refuses a set the board cannot take", () => {
+    const tooBig = pickedScenes(samples, ["Big photo", "Clock"]);
+    expect(pickedScenesProblem(tooBig, small, samples)).toMatch(/keeps about 717 KB of scenes.*untick some/);
+    expect(pickedScenesProblem(pickedScenes(samples, ["Star shooter"]), paper, samples)).toMatch(
+      /Star shooter needs a fast screen/,
+    );
+    const many = Array.from({ length: 130 }, (_, index) => sample(`Scene ${index}`, { bytes: 1024 }));
+    expect(
+      pickedScenesProblem(pickedScenes(many, many.map((entry) => entry.name)), paper, many),
+    ).toMatch(/up to 128 scenes/);
+    // The store is always among the picked, ticked or not.
+    expect(pickedScenes(samples, []).samples.map((entry) => entry.name)).toEqual(["Scene store"]);
+  });
+
+  it("says how long the scenes take over the cable", () => {
+    expect(sceneUploadSeconds(110 * 1024, 4)).toBe(10);
+    // Past one upload, every scene goes alone.
+    expect(sceneUploadSeconds(1100 * 1024, 20)).toBe(140);
   });
 });
