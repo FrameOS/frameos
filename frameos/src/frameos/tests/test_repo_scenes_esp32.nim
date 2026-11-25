@@ -48,14 +48,16 @@ let verboseLogs = getEnv("FRAMEOS_TEST_VERBOSE") == "1"
 # Render-chain crashes (an app raising out of run/get) are logged and
 # swallowed by the interpreter; collect them so they fail the test. App-level
 # "error:<nodeId>" frames (missing API keys etc.) are the expected offline
-# behavior and stay allowed, and so is a JS app's "Please provide …" throw:
-# that is how a JS app reports missing settings, and the interpreter paints
-# it as the same error frame.
+# behavior and stay allowed, and so is a JS app's "Please provide …" or
+# "Add … key in Settings." throw (the AI samples' words): that is how a JS app
+# reports missing settings, and the interpreter paints it as the same error
+# frame.
 var renderChainErrors: seq[string] = @[]
 
 proc isMissingSettingsError(payload: JsonNode): bool =
+  let error = payload{"error"}.getStr()
   payload{"event"}.getStr() == "interpreter:setField:error" and
-    payload{"error"}.getStr().startsWith("Please provide ")
+    (error.startsWith("Please provide ") or (error.startsWith("Add ") and error.endsWith(" in Settings.")))
 
 proc testLogger(): Logger =
   var logger = Logger(enabled: false)
