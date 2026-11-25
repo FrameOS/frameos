@@ -61,6 +61,94 @@ suite "video planes":
     check contain.fits(720, 720)
     check not planeRect(700, 0, 100, 100, ord(vfFill), 100, 100, 64, 64).fits(720, 720) # past the edge
 
+  test "a plane is cut to the canvas its video is drawn in, its source in proportion":
+    # A 200x100 picture at (-50, 10) in a window at (0, 0) of 120x200: its left
+    # quarter and the part right of the window go, the source the same share.
+    let r = PlaneRect(x: -50, y: 10, w: 200, h: 100, srcW: 400, srcH: 200).clipped(0, 0, 120, 200)
+    check r.x == 0 and r.y == 10 and r.w == 120 and r.h == 100
+    check abs(r.srcX - 100) < 0.01 and abs(r.srcW - 240) < 0.01 and r.srcH == 200
+    check PlaneRect(x: 300, y: 0, w: 50, h: 50, srcW: 50, srcH: 50).clipped(0, 0, 200, 200).w == 0
+    let inside = PlaneRect(x: 10, y: 10, w: 20, h: 20, srcW: 64, srcH: 64)
+    check inside.clipped(0, 0, 720, 720) == inside
+    check overlaps(0, 0, 10, 10, 9, 9, 5, 5)
+    check not overlaps(0, 0, 10, 10, 10, 0, 5, 5) # touching is not covering
+
+  test "an <img>'s box on the panel: its canvas's corner, render scale":
+    # Laid out at (10, 12) 100x56 in a window at (120, 20) of 180x120.
+    let r = holeOnPanel(10, 12, 100, 56, 1, 120, 20, 180, 120)
+    check r.ok and r.x == 130 and r.y == 32 and r.w == 100 and r.h == 56
+    # Render scale 2: laid out at half, drawn twice the size.
+    let big = holeOnPanel(10, 12, 100, 56, 2, 0, 0, 720, 720)
+    check big.ok and big.x == 20 and big.y == 24 and big.w == 200 and big.h == 112
+    # Past its canvas (a window's): no plane.
+    check not holeOnPanel(150, 12, 100, 56, 1, 120, 20, 180, 120).ok
+    check not holeOnPanel(-1, 0, 10, 10, 1, 0, 0, 720, 720).ok
+
+  test "settled around the push: off before it unless claimed, kept and unmoved; on after it":
+    useSink()
+    var owner = 1
+    let plane = acquirePlane(addr owner)
+    check plane >= 0
+    let here = PlaneRect(x: 10, y: 10, w: 100, h: 56, srcW: 320, srcH: 180)
+    claimPlane(plane, here)
+    settlePlanes(true)
+    var onGlass = false
+    check presentPlane(plane, addr owner, 7, onGlass)
+    # A pass that claims it where it is: it stays up through the push.
+    claimPlane(plane, here)
+    settlePlanesBefore(true)
+    check hidesSoFar() == 0
+    settlePlanesAfter()
+    # A pass that does not claim it (covered, another scene): off before the push.
+    settlePlanesBefore(true)
+    check hidesSoFar() == 1
+    check not presentPlane(plane, addr owner, 7, onGlass) # held meanwhile
+    settlePlanesAfter()
+    check not presentPlane(plane, addr owner, 7, onGlass)
+    # Claimed again: up after the push.
+    claimPlane(plane, here)
+    settlePlanes(true)
+    check presentPlane(plane, addr owner, 7, onGlass)
+    # Claimed somewhere else (a window moved): off before the push, up after.
+    claimPlane(plane, PlaneRect(x: 40, y: 10, w: 100, h: 56, srcW: 320, srcH: 180))
+    settlePlanesBefore(true)
+    check hidesSoFar() == 2
+    settlePlanesAfter()
+    check presentPlane(plane, addr owner, 7, onGlass)
+    # Something over the scene on the panel (a presence code): off.
+    claimPlane(plane, PlaneRect(x: 40, y: 10, w: 100, h: 56, srcW: 320, srcH: 180))
+    settlePlanesBefore(false)
+    settlePlanesAfter()
+    check not presentPlane(plane, addr owner, 7, onGlass)
+    releasePlane(plane)
+
+  test "the mouse cursor on a plane takes it off, and keeps a video there in the canvas":
+    useSink()
+    var owner = 1
+    let plane = acquirePlane(addr owner)
+    let here = PlaneRect(x: 100, y: 100, w: 200, h: 100, srcW: 320, srcH: 180)
+    claimPlane(plane, here)
+    settlePlanes(true)
+    var onGlass = false
+    check presentPlane(plane, addr owner, 7, onGlass)
+    # Away from it: nothing.
+    check not planesCursor(true, 10, 10, 12, 19)
+    check not cursorOver(100, 100, 200, 100)
+    # Onto it: off now, so the cursor (in /dev/fb0, under it) shows.
+    check planesCursor(true, 150, 150, 12, 19)
+    check hidesSoFar() == 1
+    check cursorOver(100, 100, 200, 100)
+    # A pass that claims it while the cursor is there keeps it off.
+    claimPlane(plane, here)
+    settlePlanes(true)
+    check not presentPlane(plane, addr owner, 7, onGlass)
+    # The cursor goes: the next pass shows it again.
+    discard planesCursor(false, 0, 0, 0, 0)
+    claimPlane(plane, here)
+    settlePlanes(true)
+    check presentPlane(plane, addr owner, 7, onGlass)
+    releasePlane(plane)
+
   test "a frame's YUV420 in one block, and what ffmpeg is told":
     check yuv420Bytes(320, 180) == 320 * 180 * 3 div 2
     check yuv420Bytes(5, 3) == 15 + 2 * 3 * 2 # odd: the chroma rounds up
@@ -118,6 +206,7 @@ suite "video planes":
           kAddFb2 {.importc: "DRM_IOCTL_MODE_ADDFB2", header: "<drm/drm.h>", nodecl.}: culong
           kObjProps {.importc: "DRM_IOCTL_MODE_OBJ_GETPROPERTIES", header: "<drm/drm.h>", nodecl.}: culong
           kSetProp {.importc: "DRM_IOCTL_MODE_OBJ_SETPROPERTY", header: "<drm/drm.h>", nodecl.}: culong
+          kGetEncoder {.importc: "DRM_IOCTL_MODE_GETENCODER", header: "<drm/drm.h>", nodecl.}: culong
         check DrmIoctlVersion == kVersion
         check DrmIoctlSetMaster == kSetMaster
         check DrmIoctlSetClientCap == kClientCap
@@ -134,6 +223,7 @@ suite "video planes":
         check DrmIoctlModeAddFb2 == kAddFb2
         check DrmIoctlModeObjGetProperties == kObjProps
         check DrmIoctlModeObjSetProperty == kSetProp
+        check DrmIoctlModeGetEncoder == kGetEncoder
 
   test "no device: no planes, and a player keeps the canvas":
     setPlaneSinkForTest(PlaneSink())

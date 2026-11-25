@@ -282,23 +282,47 @@ else:
 
   var planesTold: bool
     ## The runtime's log said once whether videos go on display planes here.
+  var planeScenes {.threadvar.}: seq[FrameScene]
+    ## The scenes whose videos are on display planes this pass: each runs in
+    ## the next pass whatever its schedule (markVideoPlaneScenesDue), so every
+    ## pass says whether its planes may stay and where.
+
+  proc markVideoPlaneScenesDue*() =
+    ## Before a render pass (runner.nim): the scenes with a video on a plane
+    ## run in it, a window's on a desktop included, though nothing else of
+    ## theirs is due. A pass that did not run one would leave its plane
+    ## unclaimed (off for that pass) or, worse, standing over what changed.
+    for scene in planeScenes:
+      rhythmMarkDue(scene)
+    planeScenes.setLen(0)
 
   proc videoSpots(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, target: UiTarget,
       requestedWidth, requestedHeight: int, regionScale: float32): seq[(Image, VideoPlaneSpot)] =
     ## The videos whose `<img>` can be a display plane (video/planes.nim,
-    ## docs/video.md "Planes"): a clean hole (ui/layout.nim seekImageHoles:
-    ## nothing drawn over it, opaque, not scrolled) of a UI that is the
-    ## panel's own canvas (panel_canvas.nim), drawn whole at its size, on a
-    ## panel the frame does not turn or mirror (the display's scaler cannot).
+    ## docs/video.md "Planes"), and where on the panel. Only where the plane is
+    ## exactly right, else the canvas plays it:
+    ## - a UI drawn whole at its size into the panel's own canvas or a view
+    ##   of it (a layout's hole, a desktop's window: panel_canvas.onPanelCanvas),
+    ##   which the layout only gives a scene nothing of it is painted over (its
+    ##   `seekHoles`), on a panel the frame neither turns nor mirrors;
+    ## - the `<img>` a clean hole of that UI (ui/layout.nim seekImageHoles:
+    ##   nothing drawn over it, opaque, not scrolled, no popup);
+    ## - nothing the frame draws over every scene on it: the keyboard docked
+    ##   or in its window (`frameKeyboard`), the mouse cursor (planes.cursorOver);
+    ## - where it was the last render: a window being dragged or the desktop
+    ##   refitted keeps it in the canvas until it stays put.
     if owner.isNil or owner.frameConfig.isNil or target.isNil or not context.wholeFrame or
         not context.hasImage or context.image.isNil or context.decodeTargetImage != context.image or
-        requestedWidth != context.image.width or requestedHeight != context.image.height or
-        not context.image.isPanelCanvas:
+        requestedWidth != context.image.width or requestedHeight != context.image.height:
+      return
+    let at = context.image.onPanelCanvas()
+    if not at.ok:
       return
     let config = owner.frameConfig
     if ((config.rotate mod 360) + 360) mod 360 != 0 or config.flip in ["horizontal", "vertical", "both"]:
       return
-    let ready = planesReady(context.image.width, context.image.height)
+    let panel = panelCanvasSize()
+    let ready = panel.width > 0 and planesReady(panel.width, panel.height)
     if not planesTold:
       planesTold = true
       logSignal(owner, %*{"event": "video:planes", "on": ready, "why": planesWhyNot()})
@@ -311,17 +335,27 @@ else:
         if not video.player.image.isNil:
           images.add video.player.image
     for hole in seekImageHoles(target.memo, target.input, images):
-      if not hole.clean:
+      var video = -1
+      for i in 0 ..< runtime.videos.len:
+        let player = runtime.videos[i].player
+        if not player.isNil and (player.placeholder == hole.image or player.image == hole.image):
+          video = i
+      if video < 0:
         continue
-      let
-        left = round(hole.x * regionScale).int
-        top = round(hole.y * regionScale).int
-        right = round((hole.x + hole.w) * regionScale).int
-        bottom = round((hole.y + hole.h) * regionScale).int
-      if left < 0 or top < 0 or right > requestedWidth or bottom > requestedHeight or right <= left or
-          bottom <= top:
+      template v: untyped = runtime.videos[video]
+      let r = holeOnPanel(hole.x, hole.y, hole.w, hole.h, regionScale, at.x, at.y, requestedWidth,
+        requestedHeight)
+      let was = v.spotAt
+      v.spotAt = if r.ok: (r.x, r.y, r.w, r.h) else: (0, 0, 0, 0)
+      if not hole.clean or not r.ok or (r.x, r.y, r.w, r.h) != was:
         continue
-      result.add (hole.image, VideoPlaneSpot(ok: true, x: left, y: top))
+      if frameKeyboard.sceneId.len > 0 and overlaps(r.x, r.y, r.w, r.h, int(frameKeyboard.x),
+          int(frameKeyboard.y), int(ceil(frameKeyboard.w)), int(ceil(frameKeyboard.h))):
+        continue
+      if cursorOver(r.x, r.y, r.w, r.h):
+        continue
+      result.add (hole.image, VideoPlaneSpot(ok: true, x: r.x, y: r.y, clipX: at.x, clipY: at.y,
+        clipW: requestedWidth, clipH: requestedHeight))
 
   proc fillVideosIn(runtime: JsAppRuntime, owner: AppRoot, node: SvgNode, scale: float32, like: Image,
       spots: seq[(Image, VideoPlaneSpot)], wait: var float, taken: var seq[VideoPlayer]) =
@@ -353,6 +387,8 @@ else:
           if image == node.image:
             spot = at
         discard player.take(width, height, fit, like, spot)
+        if player.onPlane and not owner.scene.isNil and owner.scene notin planeScenes:
+          planeScenes.add owner.scene
         logFallback(owner, runtime.videos[i])
         let shown = player.shownImage()
         if node.image != shown:

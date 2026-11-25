@@ -27,7 +27,7 @@
 ## ioctls are made under it too. Tests swap the device for one in memory
 ## (`setPlaneSinkForTest`), which records what would have been shown.
 
-import std/[locks, os, strutils]
+import std/[locks, math, os, strutils]
 
 const
   MaxPlanes* = 4
@@ -69,6 +69,7 @@ type
     rect: PlaneRect   ## where, last said
     shownRect: PlaneRect
     buffer: uint32    ## what is on it, 0 for nothing
+    keep: bool        ## settled before the push: it may show after it
 
 var
   planesLock: Lock
@@ -82,6 +83,8 @@ var
   sink: PlaneSink
   sinkSet: bool
   modeWidth, modeHeight: int
+  cursorShown: bool
+  cursorX, cursorY, cursorW, cursorH: int ## the mouse cursor's box on the panel (planesCursor)
 initLock(planesLock)
 
 proc setWhy(text: string) =
@@ -142,6 +145,46 @@ proc planeRect*(boxX, boxY, boxW, boxH: int, fit: int, frameW, frameH, srcW, src
     result.y = boxY
     result.w = boxW
     result.h = boxH
+
+proc clipped*(rect: PlaneRect, x, y, w, h: int): PlaneRect =
+  ## `rect` cut to the `w` x `h` rectangle at (`x`, `y`) (the canvas it is
+  ## drawn in: a window's, the panel's), its source cut in proportion, so a
+  ## plane never shows outside what its video was drawn in. Empty (`w` 0)
+  ## when nothing of it is inside.
+  if rect.w <= 0 or rect.h <= 0:
+    return PlaneRect()
+  let
+    x0 = max(rect.x, x)
+    y0 = max(rect.y, y)
+    x1 = min(rect.x + rect.w, x + w)
+    y1 = min(rect.y + rect.h, y + h)
+  if x1 <= x0 or y1 <= y0:
+    return PlaneRect()
+  let
+    sx = rect.srcW / rect.w.float
+    sy = rect.srcH / rect.h.float
+  PlaneRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0,
+    srcX: rect.srcX + float(x0 - rect.x) * sx, srcY: rect.srcY + float(y0 - rect.y) * sy,
+    srcW: float(x1 - x0) * sx, srcH: float(y1 - y0) * sy)
+
+proc overlaps*(ax, ay, aw, ah, bx, by, bw, bh: int): bool =
+  ## Two rectangles share a pixel.
+  aw > 0 and ah > 0 and bw > 0 and bh > 0 and ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
+
+proc holeOnPanel*(x, y, w, h: float32, scale: float32, viewX, viewY, viewW, viewH: int):
+    tuple[ok: bool, x, y, w, h: int] =
+  ## An `<img>`'s box laid out in a UI's pixels (`x` .. `h`) on the panel: the
+  ## UI drawn `scale` times bigger (render scale, `regionScale`) into a canvas
+  ## of `viewW` x `viewH` whose corner is at (`viewX`, `viewY`) on the panel (a
+  ## layout's hole, a window). Not ok when any of it is outside that canvas.
+  let
+    left = int(round(x * scale))
+    top = int(round(y * scale))
+    right = int(round((x + w) * scale))
+    bottom = int(round((y + h) * scale))
+  if left < 0 or top < 0 or right > viewW or bottom > viewH or right <= left or bottom <= top:
+    return
+  (true, viewX + left, viewY + top, right - left, bottom - top)
 
 proc fits*(rect: PlaneRect, width, height: int): bool =
   ## Inside a `width` x `height` mode, and something to show.
@@ -226,6 +269,8 @@ when defined(linux):
       offset: uint64
     DrmDestroyDumb {.pure.} = object
       handle: uint32
+    DrmGetEncoder {.pure.} = object
+      encoderId, encoderType, crtcId, possibleCrtcs, possibleClones: uint32
 
   const
     IocNone = 0
@@ -233,6 +278,7 @@ when defined(linux):
     IocRead = 2
     DrmObjectPlane = 0xeeeeeeee'u32
     DrmClientCapUniversalPlanes = 2'u64
+    DrmModeEncoderDpi = 8'u32
 
   func drmIoc(dir, nr, size: int): culong =
     culong((dir shl 30) or (size shl 16) or (ord('d') shl 8) or nr)
@@ -243,6 +289,7 @@ when defined(linux):
     DrmIoctlSetMaster* = drmIoc(IocNone, 0x1e, 0)
     DrmIoctlModeGetResources* = drmIoc(IocRead or IocWrite, 0xA0, sizeof(DrmCardRes))
     DrmIoctlModeGetCrtc* = drmIoc(IocRead or IocWrite, 0xA1, sizeof(DrmCrtc))
+    DrmIoctlModeGetEncoder* = drmIoc(IocRead or IocWrite, 0xA6, sizeof(DrmGetEncoder))
     DrmIoctlModeGetProperty* = drmIoc(IocRead or IocWrite, 0xAA, sizeof(DrmGetProperty))
     DrmIoctlModeRmFb* = drmIoc(IocRead or IocWrite, 0xAF, sizeof(cuint))
     DrmIoctlModeCreateDumb* = drmIoc(IocRead or IocWrite, 0xB2, sizeof(DrmCreateDumb))
@@ -347,7 +394,9 @@ when defined(linux):
       discard posix.close(fd)
       return "no CRTC"
     var crtcs = newSeq[uint32](res.countCrtcs)
-    res = DrmCardRes(crtcIdPtr: cast[uint64](addr crtcs[0]), countCrtcs: uint32(crtcs.len))
+    var encoders = newSeq[uint32](max(int(res.countEncoders), 1))
+    res = DrmCardRes(crtcIdPtr: cast[uint64](addr crtcs[0]), countCrtcs: uint32(crtcs.len),
+      encoderIdPtr: cast[uint64](addr encoders[0]), countEncoders: res.countEncoders)
     if not drm(fd, DrmIoctlModeGetResources, addr res):
       discard posix.close(fd)
       return "no CRTC"
@@ -364,6 +413,17 @@ when defined(linux):
     if crtcIndex < 0:
       discard posix.close(fd)
       return "no CRTC shows a " & $width & "x" & $height & " picture"
+    # Only a DPI panel (a HyperPixel): the one output whose planes were seen
+    # right on the glass (2026-11-25). An HDMI screen, a 4K one, a DSI panel
+    # keep the canvas until one is.
+    var dpi = false
+    for i in 0 ..< min(int(res.countEncoders), encoders.len):
+      var e = DrmGetEncoder(encoderId: encoders[i])
+      if drm(fd, DrmIoctlModeGetEncoder, addr e) and e.crtcId == crtcId and e.encoderType == DrmModeEncoderDpi:
+        dpi = true
+    if not dpi:
+      discard posix.close(fd)
+      return "the panel is not a DPI one (planes are verified there only)"
     var pr: DrmPlaneRes
     if not drm(fd, DrmIoctlModeGetPlaneResources, addr pr) or pr.countPlanes == 0:
       discard posix.close(fd)
@@ -541,34 +601,80 @@ proc claimPlane*(plane: int, rect: PlaneRect, hd = false) =
             setColorEncoding(plane, hd)
             planes[plane].encoded = true
 
-proc settlePlanes*(allowed: bool) =
-  ## After a render pass is on the panel (runner.nim): a plane no video
-  ## claimed in it goes off, and so does every plane when the panel shows
-  ## something over the scene (`allowed` false: a presence code, a QR). One
-  ## that stays is moved to where its video was drawn this time.
+proc underCursor(rect: PlaneRect): bool =
+  ## Under planesLock.
+  cursorShown and overlaps(rect.x, rect.y, rect.w, rect.h, cursorX, cursorY, cursorW, cursorH)
+
+proc settlePlanesBefore*(allowed: bool) =
+  ## Before a render pass goes to the panel (runner.nim): a plane no video
+  ## claimed in it, every plane while the panel shows something over the
+  ## scene (`allowed` false: a presence code, a QR, a colour correction a
+  ## plane would not get), one under the mouse cursor and one that moved go
+  ## off now, so no frame of a plane is ever on the glass over what the new
+  ## picture puts there.
   {.cast(gcsafe).}:
     withLock planesLock:
       for i in 0 ..< MaxPlanes:
         template p: untyped = planes[i]
         if not p.used:
           continue
-        let keep = allowed and p.claimed
+        p.keep = allowed and p.claimed and not underCursor(p.rect)
         p.claimed = false
-        if not keep:
+        if not p.keep or (p.buffer != 0 and p.rect != p.shownRect):
           if p.buffer != 0:
             sink.hide(i)
             p.buffer = 0
           p.allowed = false
-        else:
-          p.allowed = true
-          if p.buffer != 0 and p.rect != p.shownRect:
-            if sink.show(i, p.buffer, p.rect):
-              p.shownRect = p.rect
+
+proc settlePlanesAfter*() =
+  ## After the pass is on the panel: the planes kept may show again, where
+  ## their videos were drawn (their readers put up the next frame).
+  {.cast(gcsafe).}:
+    withLock planesLock:
+      for i in 0 ..< MaxPlanes:
+        template p: untyped = planes[i]
+        if p.used:
+          p.allowed = p.keep
+          p.keep = false
+
+proc settlePlanes*(allowed: bool) =
+  ## Both, for a pass with nothing to push between (tests).
+  settlePlanesBefore(allowed)
+  settlePlanesAfter()
+
+proc planesCursor*(shown: bool, x, y, w, h: int): bool =
+  ## Where the mouse cursor is on the panel (cursor_panel.nim draws it into
+  ## /dev/fb0, under every plane): a plane under it goes off now, so the
+  ## cursor never disappears behind a video. True when one did: its video
+  ## goes to the canvas at the next render (js_video.nim videoSpots), which
+  ## the caller asks for.
+  {.cast(gcsafe).}:
+    withLock planesLock:
+      cursorShown = shown
+      cursorX = x
+      cursorY = y
+      cursorW = w
+      cursorH = h
+      for i in 0 ..< MaxPlanes:
+        template p: untyped = planes[i]
+        if p.used and p.allowed and underCursor(p.rect):
+          if p.buffer != 0:
+            sink.hide(i)
+            p.buffer = 0
+          p.allowed = false
+          result = true
+
+proc cursorOver*(x, y, w, h: int): bool =
+  ## The mouse cursor is on this rectangle of the panel (a video there stays
+  ## in the canvas).
+  {.cast(gcsafe).}:
+    withLock planesLock:
+      result = cursorShown and overlaps(x, y, w, h, cursorX, cursorY, cursorW, cursorH)
 
 proc hidePlanes*() =
-  ## Every video plane off now: a scene switch, before the new scene's first
-  ## frame (runner.nim beginSceneLoading). Each comes back when its video is
-  ## drawn again.
+  ## Every video plane off now: the loading mark is going on the panel
+  ## (loading_mark_panel.nim), which a plane would cover. Each comes back
+  ## after the next pass that draws its video.
   {.cast(gcsafe).}:
     withLock planesLock:
       for i in 0 ..< MaxPlanes:
@@ -633,5 +739,6 @@ proc setPlaneSinkForTest*(value: PlaneSink) =
       planesProbed = false
       planesOk = false
       planesWhyLen = 0
+      cursorShown = false
       for i in 0 ..< MaxPlanes:
         planes[i] = PlaneState()

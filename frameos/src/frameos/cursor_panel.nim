@@ -24,6 +24,7 @@
 import ./loading_mark
 import ./loading_mark_panel
 import ./cursor_sprite
+import ./video/planes
 
 export cursor_sprite, loading_mark_panel.MarkPanel, loading_mark_panel.MarkPanelIo
 
@@ -122,6 +123,25 @@ proc currentPanel(): MarkPanel =
     if cursorPanelDevice(cursorDevice):
       return framebufferPanel(cursorRotation, cursorFlip, false)
 
+var cursorTookPlane: bool
+  ## The cursor went onto a video on a display plane, which went off for it.
+
+proc tellPlanes() =
+  ## Where the cursor is, for the display planes (video/planes.nim): it is
+  ## drawn into /dev/fb0, under them, so a plane it lands on goes off and
+  ## its video to the canvas (the runner asks for a render: takeCursorTookPlane).
+  if cursorWanted and cursorState.drawn:
+    let r = cursorRect(currentPanel().view, cursorWantedAt)
+    if planesCursor(r.w > 0, int(r.x), int(r.y), int(r.w), int(r.h)):
+      cursorTookPlane = true
+  else:
+    discard planesCursor(false, 0, 0, 0, 0)
+
+proc takeCursorTookPlane*(): bool =
+  ## Whether the cursor took a video's plane off since the last ask.
+  result = cursorTookPlane
+  cursorTookPlane = false
+
 proc presentPanelCursor*(device: string, rotation: int, flip: string, shown: bool, at: CursorAt) =
   ## The cursor as the dispatcher has it now (input_state.nim): drawn, moved
   ## or put away, on the panel as it is. Inside `withLoadingMarkAway`.
@@ -133,6 +153,7 @@ proc presentPanelCursor*(device: string, rotation: int, flip: string, shown: boo
   if not cursorWanted and not cursorState.drawn:
     return
   discard cursorState.cursorShow(currentPanel(), cursorWanted, at)
+  tellPlanes()
 
 proc putCursorAway*() =
   ## Before a push to the panel: the panel is then exactly what the driver
@@ -143,6 +164,7 @@ proc putCursorBack*() =
   ## After a push: the cursor over the new picture, if it shows.
   if cursorWanted:
     discard cursorState.cursorShow(currentPanel(), true, cursorWantedAt)
+    tellPlanes()
 
 proc panelCursorDrawn*(): bool =
   cursorState.drawn

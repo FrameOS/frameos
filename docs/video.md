@@ -126,16 +126,18 @@ once a second.
 
 ## Planes
 
-On a Raspberry Pi whose panel is a vc4 KMS output (a HyperPixel on DPI, a Pi
-0 to 4's HDMI), a video can be shown on one of the display's overlay planes
-(`video/planes.nim`): the display's scaler (the HVS) scales the frame and
-turns its YUV into RGB as it scans the panel out, so the CPU neither scales,
-converts, renders nor pushes it. ffmpeg writes YUV420 at the source's own
-size (`decodeArgs` with `plane`: no scaler, `-pix_fmt yuv420p`) straight into
-one of three of the plane's buffers (DRM dumb buffers, the reader's, kept
-across a seek), and the reader shows each when it is due by a clock of its
-own (pause, a resync when behind, a live source at once), as the render
-thread does for the canvas.
+On a Raspberry Pi whose panel is a vc4 DPI output (a HyperPixel), a video
+can be shown on one of the display's overlay planes (`video/planes.nim`): the
+display's scaler (the HVS) scales the frame and turns its YUV into RGB as it
+scans the panel out, so the CPU neither scales, converts, renders nor pushes
+it. ffmpeg writes YUV420 at the source's own size (`decodeArgs` with `plane`:
+no scaler, `-pix_fmt yuv420p`) straight into one of three of the plane's
+buffers (DRM dumb buffers, the reader's, kept across a seek), and the reader
+shows each when it is due by a clock of its own (pause, a resync when behind,
+a live source at once), as the render thread does for the canvas.
+
+The rule is that a plane is only ever where the picture is exactly right,
+and the canvas plays the video everywhere else, as it always did:
 
 - **The UI stays on `/dev/fb0`.** The frameBuffer driver, the loading mark and
   the cursor write it as before, and the kernel's fbdev emulation scans it out
@@ -144,23 +146,44 @@ thread does for the canvas.
   CRTC. When the process ends the kernel restores the fbdev's picture and turns
   the planes off (lastclose), so a crash leaves no video on the glass. Another
   program that holds DRM master (a desktop) keeps the runtime off it.
+- **Which frames.** A vc4 device behind `/dev/fb0` (`vc4drmfb`) whose CRTC
+  drives a DPI encoder, the one output seen right on the glass; the panel's
+  kept 565 canvas (`panel_canvas.nim`); a frame that neither turns (the HVS
+  cannot turn by 90 or 270) nor mirrors it. HDMI (1080p, 4K, a Pi 4 or 5's
+  desktop), a 32 bpp canvas, a turned panel, a Pi 5's RP1 DPI and anything
+  that is not vc4 keep the canvas. So does a video once every plane is taken
+  (four).
 - **Where.** A video's `<img>` is a plane when it is a clean hole of a UI that
-  is the panel's own canvas: nothing drawn over it, opaque, not in a scroller,
-  in a UI drawn whole at the canvas's size into the panel's kept 565 canvas
-  (`panel_canvas.nim`: a HyperPixel), on a frame that neither turns (the HVS
-  cannot turn by 90 or 270) nor mirrors it (`videoSpots` in
-  `js_runtime/js_video.nim`, `seekImageHoles` in `ui/layout.nim`, the rule
-  `seekHoles` keeps for a `<Scene>`). A layout around the scene, a desktop's
-  window, a popup or the keyboard keep the canvas. The plane goes where the
-  picture would be drawn (`planeRect`: contain's own size in the box's middle,
-  cover's middle of the frame, fill's whole frame).
-- **Each pass.** A render that draws the video claims its plane and says
-  where (`claimPlane`); after the frame is on the panel the runner settles them
-  (`settlePlanes`): a plane no render pass claimed goes off, and so do all
-  while the panel shows something over the scene a plane would cover (the
-  presence code, the control QR, the link code) or a colour correction a plane
-  would not get. A scene switch turns them off at once (`hidePlanes`), the
-  loading mark showing meanwhile.
+  is drawn whole at its size into the panel canvas or a view of it: the scene
+  a layout wraps (`<yield />`), a `<Scene>` hole and a desktop's window are
+  views (`interpreter.drawIntoHole`), placed on the panel by the view's corner
+  (`onPanelCanvas`), and a layout gives a scene a view only while nothing of
+  its own is painted over it (`seekHoles`): another window, a menu, a dialog,
+  the taskbar over a window make it a picture of its own, and its video the
+  canvas's. In the UI itself the same rule (`seekImageHoles`): nothing drawn
+  over the `<img>`, opaque, not in a scroller, no popup. Render scale and a
+  refitted desktop come in through the UI's scale and the view's corner
+  (`holeOnPanel`); the plane is cut to the view it is drawn in (`clipped`).
+  The plane goes where the picture would be drawn (`planeRect`: contain's own
+  size in the box's middle, cover's middle of the frame, fill's whole frame).
+- **What the frame draws over every scene** takes a video off its plane: the
+  keyboard (`frameKeyboard`, docked or in its window), the mouse cursor (drawn
+  into `/dev/fb0` by `cursor_panel.nim`: one that lands on a plane takes it off
+  at once, and its video goes to the canvas at the render that asks for:
+  `planesCursor`, `cursorOver`), the loading mark (`hidePlanes`), the presence
+  code, the control QR and the link code, and a colour correction a plane
+  would not get.
+- **Moving.** A video whose box moved since the last render (a window dragged,
+  a desktop refitted) stays in the canvas until it stays put: no plane follows
+  a drag a render late.
+- **Each pass.** A scene with a video on a plane runs in every pass, a
+  window's on a desktop included (`markVideoPlaneScenesDue`), so every pass
+  says where each plane goes or that it must go. The runner settles them
+  around the push (`settlePlanesBefore`, `settlePlanesAfter`): before the
+  frame goes up, a plane no video claimed in the pass, one that moved and all
+  under what the frame draws over the scenes go off; after it, the rest may
+  show. No frame of a plane is ever on the glass over what the new picture
+  put there.
 - **Back to the canvas.** A video under the UI again (the Video player's
   controls) relaunches in the canvas with the plane's frame copied into its
   image first, so the picture does not step back; the plane goes once that
@@ -186,9 +209,13 @@ it (the canvas, the plane back about 5 s later when they go), the next video
 once) and back, and FrameOS stopping (the kernel's fbdev picture back, no
 plane). Tests: `video/tests/test_video_planes.nim` (planes in memory: frames
 shown when due, held, paused, back to the canvas, refused, buffers with
-longer rows; the ioctls against the kernel's headers) and
-`js_runtime/tests/test_video_js.nim` (a video nothing covers on a plane,
-one under a box in the canvas).
+longer rows; the cut, a box on the panel through a view and render scale,
+the settling around the push, the cursor; the ioctls against the kernel's
+headers), `js_runtime/tests/test_video_js.nim` (a video nothing covers on a
+plane, one under a box and one under the cursor in the canvas) and
+`tests/test_video_scenes.nim` (the Video player in a desktop's window on a
+plane, in the canvas while another window covers part of it and on the
+plane again after; in a layout's yield on a plane where the yield is).
 
 ## Hardware
 

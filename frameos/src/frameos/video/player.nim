@@ -174,9 +174,12 @@ type
 
   VideoPlaneSpot* = object
     ## Where a video's `<img>` is on the panel when it can be a display plane
-    ## (js_video.nim): a clean hole of the panel's own canvas.
+    ## (js_video.nim videoSpots): a clean hole of the panel's own canvas or a
+    ## view of it, its box's corner at (`x`, `y`), the canvas it is drawn in
+    ## (`clip*`: a window's, the panel's) what the plane is cut to.
     ok*: bool
     x*, y*: int
+    clipX*, clipY*, clipW*, clipH*: int
 
   PlaneRun = object
     ## A reader's plane buffers (video/planes.nim), kept across its launches
@@ -1464,6 +1467,10 @@ proc pixelsFor*(like: Image): VideoPixels =
     of pfGray8: vpGray
     else: vpRgba
 
+proc onPlane*(player: VideoPlayer): bool =
+  ## Its frames go to a display plane (video/planes.nim).
+  player.planeMode
+
 proc prepareImage(player: VideoPlayer, w, h: int, like: Image, pixels: VideoPixels, framed: Rect): Rect =
   ## `player.image` at the box's size and the canvas's format, black around
   ## where the picture goes (`framed`) when that is new: what a frame then
@@ -1569,7 +1576,9 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
         let (fw, fh) = frameSize(w, h, fit, s.srcWidth, s.srcHeight)
         let (pw, ph) = planeFrameSize(s.srcWidth, s.srcHeight)
         placed = planeRect(spot.x, spot.y, w, h, ord(fit), fw, fh, pw, ph)
-        claim = true
+        if spot.clipW > 0 and spot.clipH > 0:
+          placed = placed.clipped(spot.clipX, spot.clipY, spot.clipW, spot.clipH)
+        claim = placed.w > 0
         hd = s.srcHeight >= 720
       if s.planeShown and s.shownGen == player.gen:
         player.hasFrame = true

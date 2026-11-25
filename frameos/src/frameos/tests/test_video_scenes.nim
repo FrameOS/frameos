@@ -14,6 +14,10 @@ import ../js_runtime/app_runtime
 import ../scene_rhythm
 import ../types
 from ../ids import SceneId
+import ../panel_canvas
+import ../driver_render_hint
+import ../video/planes
+import ../video/tests/plane_sink
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
@@ -471,6 +475,154 @@ suite "the video samples":
       check seen.len >= 3 and seen[0 .. 2] == @["red", "blue", "red"]
       check last.color(50, 90) != "red" and last.color(50, 90) != "blue" # the wrapped scene's half
       check waits.len > 0 and waits[0] < 1.0
+      check problems.len == 0
+      if problems.len > 0: echo problems
+
+  proc drawPanel(scene: FrameScene): tuple[image: Image, wait: float] =
+    ## As the runner draws a HyperPixel's frame: into the panel's own canvas,
+    ## the scenes with a video on a plane due, the planes settled around the
+    ## push (runner.nim, video/planes.nim).
+    let canvas = panelCanvasFor(320, 180, 320, 180, 0, "")
+    markVideoPlaneScenesDue()
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, image: canvas,
+      hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    beginPanelCanvasFrame(canvas)
+    let image = render(scene, context)
+    endPanelCanvasFrame()
+    settlePlanesBefore(true)
+    settlePlanesAfter()
+    (image, context.nextSleep)
+
+  proc desk(windows: string): JsonNode =
+    ## A desktop layout: the scene it wraps on the left, `windows` beside it.
+    %*{"id": "tests/desk", "name": "Desk", "settings": {"execution": "interpreted",
+      "refreshInterval": 300, "backgroundColor": "#ffffff", "isLayout": true}, "fields": [],
+      "apps": {"desk": {"name": "desk", "category": "data", "version": "1.0.0", "fields": [],
+        "output": [{"name": "image", "type": "image"}], "sources": {"config.json": "{}", "app.tsx":
+          "export function get(app) { return (<div className=\"relative w-full h-full bg-white\">" &
+          "<div className=\"absolute left-0 top-0 w-[100px] h-[180px] flex\"><yield /></div>" & windows &
+          "</div>) }"}}},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "desk", "config": {}}},
+        {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+        {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+
+  proc plain(id, color: string, layout = ""): JsonNode =
+    result = %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 600,
+      "backgroundColor": color}, "fields": [], "apps": {},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}}], "edges": []}
+    if layout.len > 0:
+      result["layout"] = %*{"sceneId": layout, "state": {}}
+
+  test "Video player in a desktop's window: on a plane while nothing covers it, the canvas while a window does":
+    if not haveFfmpeg:
+      skip()
+    else:
+      problems = @[]
+      useSink()
+      reportPanelCanvas(320, 180, PanelCanvasRgb565)
+      defer:
+        noSink()
+        reportPanelCanvas(0, 0, 0)
+        discard panelCanvasFor(320, 180, 320, 180, 0, "")
+      # The Video player's window at (120, 20), 180x120; another window over
+      # its right half while the desk says `cover` (painted after it: on top).
+      setUploadedInterpretedScenes(parseInterpretedScenes($(%*[desk(
+        "<div className=\"absolute left-[120px] top-[20px] w-[180px] h-[120px] flex\"><Scene id=\"video-player\" /></div>" &
+        "{app.state.cover ? <div className=\"absolute left-[220px] top-[60px] w-[90px] h-[90px] flex\"><Scene id=\"tests/cover\" /></div> : null}"),
+        plain("tests/front", "#00ff00", "tests/desk"), plain("tests/cover", "#ffff00"),
+        parseFile(Samples / "Video player" / "scenes.json")[0]])))
+      resetInterpretedScenes()
+      let config = frame()
+      logger.frameConfig = config
+      var hosted: seq[FrameScene]
+      hostSceneFor = proc(sceneId: SceneId): FrameScene {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          for scene in hosted:
+            if scene.id == sceneId: return scene
+          result = init(sceneId, config, logger, %*{})
+          hosted.add result
+      defer: hostSceneFor = nil
+      let scene = hostSceneFor("tests/front".SceneId)
+      proc passes(seconds: float, until: proc(): bool): Image =
+        let deadline = epochTime() + seconds
+        while epochTime() < deadline:
+          let (image, wait) = scene.drawPanel()
+          result = image
+          if until(): return
+          sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 0.25) * 1000))
+      # Uncovered: on a plane, where the window puts the picture (16:9 in
+      # 180x120: 180x101, 9 down).
+      discard passes(40, proc(): bool = showsSoFar() >= 5)
+      check showsSoFar() >= 5
+      let first = shownAt(-1)
+      checkpoint $first.rect
+      check first.rect.x == 120 and first.rect.w == 180 and first.rect.h in 100 .. 102 and first.rect.y in 28 .. 30
+      # A window over part of it: off before that frame goes up, and the
+      # canvas plays it (its left half, the window's yellow on the right).
+      scene.wornLayout.state["cover"] = %true
+      rhythmMarkDue(scene.wornLayout)
+      let hidden = hidesSoFar()
+      var shot: Image
+      var colors: seq[string]
+      discard passes(2, proc(): bool = false)
+      let held = showsSoFar()
+      check hidesSoFar() > hidden
+      shot = passes(30, proc(): bool =
+        let c = panelCanvasFor(320, 180, 320, 180, 0, "").color(150, 80)
+        if c in ["red", "blue"] and (colors.len == 0 or colors[^1] != c): colors.add c
+        colors.len >= 2)
+      shot.shot("video-window-covered")
+      check colors.len >= 2 # it plays in the canvas
+      check showsSoFar() == held # and not on the plane
+      check shot.color(260, 100) notin ["red", "blue"] # the covering window is on top
+      # The window goes: the plane again.
+      scene.wornLayout.state["cover"] = %false
+      rhythmMarkDue(scene.wornLayout)
+      discard passes(30, proc(): bool = showsSoFar() >= held + 5)
+      check showsSoFar() >= held + 5
+      check problems.len == 0
+      if problems.len > 0: echo problems
+
+  test "Video player in a layout's yield: on a plane where the yield is":
+    if not haveFfmpeg:
+      skip()
+    else:
+      problems = @[]
+      useSink()
+      reportPanelCanvas(320, 180, PanelCanvasRgb565)
+      defer:
+        noSink()
+        reportPanelCanvas(0, 0, 0)
+        discard panelCanvasFor(320, 180, 320, 180, 0, "")
+      var player = parseFile(Samples / "Video player" / "scenes.json")[0]
+      player["layout"] = %*{"sceneId": "tests/frame", "state": {}}
+      let frameLayout = %*{"id": "tests/frame", "name": "Frame", "settings": {"execution": "interpreted",
+        "refreshInterval": 300, "backgroundColor": "#ffffff", "isLayout": true}, "fields": [],
+        "apps": {"frame": {"name": "frame", "category": "data", "version": "1.0.0", "fields": [],
+          "output": [{"name": "image", "type": "image"}], "sources": {"config.json": "{}", "app.tsx":
+            "export function get(app) { return (<div className=\"relative w-full h-full bg-white\">" &
+            "<div className=\"absolute left-[40px] top-[20px] w-[240px] h-[135px] flex\"><yield /></div>" &
+            "</div>) }"}}},
+        "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+          {"id": "2", "type": "app", "data": {"keyword": "frame", "config": {}}},
+          {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+        "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+          {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+      setUploadedInterpretedScenes(parseInterpretedScenes($(%*[frameLayout, player])))
+      resetInterpretedScenes()
+      let config = frame()
+      logger.frameConfig = config
+      let scene = init("video-player".SceneId, config, logger, %*{})
+      let deadline = epochTime() + 40
+      while epochTime() < deadline and showsSoFar() < 5:
+        let (_, wait) = scene.drawPanel()
+        sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 0.25) * 1000))
+      check showsSoFar() >= 5
+      let at = shownAt(-1)
+      checkpoint $at.rect
+      check at.rect.x == 40 and at.rect.y == 20 and at.rect.w == 240 and at.rect.h == 135
       check problems.len == 0
       if problems.len > 0: echo problems
 

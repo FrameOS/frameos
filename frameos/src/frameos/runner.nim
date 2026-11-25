@@ -14,7 +14,7 @@ import frameos/device_setup
 import frameos/event_log
 import frameos/event_loop
 import frameos/interpreter
-from frameos/js_runtime/app_runtime import pumpJsAsync, nextJsAsyncMs
+from frameos/js_runtime/app_runtime import pumpJsAsync, nextJsAsyncMs, markVideoPlaneScenesDue
 import frameos/display_detect
 import frameos/panel_canvas
 import frameos/driver_render_hint
@@ -404,6 +404,9 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # `hostRun`: what the render dispatches is the scene talking to itself, and
     # renders again only by asking (event_loop.nim).
     beginPanelCanvasFrame(context.image)
+    # A scene with a video on a display plane runs in every pass, so every
+    # pass says where its plane goes or that it must go (video/planes.nim).
+    markVideoPlaneScenesDue()
     try:
       self.sceneEvents.hostRun:
         discard exportedScene.render(scene, context)
@@ -575,9 +578,6 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:
         sceneChangedThisCycle = true
-        # The last scene's videos off the display's planes (video/planes.nim):
-        # the new scene's own come back once a render of it draws them.
-        hidePlanes()
         var sceneInitialized = true
         # The fast-render pause is the scene's that rendered fast, not the
         # next one's: a switch away from an animation logs its first render
@@ -683,14 +683,16 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if self.localAccessDrawn or self.panelOverlayDrawn:
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
-        pushToPanel(lastFrameImage, self.frameConfig.rotate, markSwitch)
         # Videos on the display's planes (video/planes.nim, docs/video.md
-        # "Planes"): those this frame drew stay, moved to where it drew them;
-        # the rest go, and so do all while the panel shows something over the
-        # scene that a plane would cover, or a colour correction a plane would
-        # not get.
-        settlePlanes(not (self.localAccessDrawn or self.panelOverlayDrawn) and
+        # "Planes"): before the frame goes up, every plane this pass did not
+        # claim, one that moved, and all while the panel shows something over
+        # the scene a plane would cover (or a colour correction it would not
+        # get) go off; after it, the rest may show. No plane frame is ever on
+        # the glass over what this frame put there.
+        settlePlanesBefore(not (self.localAccessDrawn or self.panelOverlayDrawn) and
           not frameColorSettings.global.hasAdjustments())
+        pushToPanel(lastFrameImage, self.frameConfig.rotate, markSwitch)
+        settlePlanesAfter()
         if not (self.localAccessDrawn or self.panelOverlayDrawn):
           clearLocalAccessCodeOnPanel()
         # What the new frame has under the mouse may want another shape.
@@ -877,6 +879,10 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         # target (cursorPanelDevice).
         if self.sceneEvents.inputState.takeCursorDirty() and cursorPanelDevice(self.frameConfig.device):
           self.presentCursor()
+          # It went onto a video on a display plane, which went off for it:
+          # a render puts that video in the canvas, under the cursor.
+          if takeCursorTookPlane():
+            self.triggerRenderNext = true
         let nextSleepMs = min(remainingSleepMs,
           if self.sceneEvents.inputState.cursorVisible: CURSOR_SLEEP_SLICE_MS else: RENDER_SLEEP_SLICE_MS)
         # Ended early by an event or a render request: only the time that
@@ -1064,9 +1070,6 @@ proc selectScene(self: RunnerThread, payload: JsonNode): bool =
         "contextEvent": "setCurrentScene", "payload": payload})
     return false
   if sceneId != self.currentSceneId:
-    # Its videos off the display's planes now (video/planes.nim), not when
-    # the next scene's first frame is in: the loading mark shows meanwhile.
-    hidePlanes()
     self.beginSceneLoading()
     # "close" carries nothing: it used to be handed this payload,
     # which names the NEXT scene and holds that scene's state. The
