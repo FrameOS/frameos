@@ -14,7 +14,10 @@ import { logEventIsSceneStateChange } from '../../../../utils/eventsContract'
 import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel, rehydrateCloudFrameScenes } from '../../../../models/framesModel'
-import { grantCloudFrameSceneSettingsGroups } from '../../../../utils/cloudFrameApi'
+import {
+  grantCloudFrameSceneSettingsGroups,
+  setCloudFrameServiceSettingsEnabled,
+} from '../../../../utils/cloudFrameApi'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
 import { frameUsbConsoleHasRendererVerbs } from '../../../workspace/workspaceSurfaces'
 import { isSystemSceneId, sceneIdsRefer } from '../../../../utils/systemScenes'
@@ -45,6 +48,8 @@ export interface controlLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
   activatingSceneId: string | null
+  deliverServiceSettingsError: string | null
+  deliveringServiceSettings: boolean
   fields: StateField[]
   grantSettingsError: string | null
   grantingSettingsSceneId: string | null
@@ -84,6 +89,12 @@ export interface controlLogicActions {
   } // frameLogic
   currentSceneChanged: (sceneId: string) => {
     sceneId: string
+  }
+  deliverServiceSettings: () => {
+    value: true
+  }
+  deliverServiceSettingsSettled: (error: string | null) => {
+    error: string | null
   }
   grantSceneSettingsGroups: (
     storeSceneId: string,
@@ -232,6 +243,12 @@ export const controlLogic = kea<controlLogicType>([
       reactivateSceneId,
     }),
     grantSceneSettingsGroupsSettled: (storeSceneId: string, error: string | null) => ({ storeSceneId, error }),
+    // Cloud frames: let the frame have the account's keys at all (its link's
+    // `settings:services`, the Settings switch "Deliver keys to this frame").
+    // A frame linked from its own screen holds no such scope, so every grant
+    // its scenes have goes nowhere until this.
+    deliverServiceSettings: true,
+    deliverServiceSettingsSettled: (error: string | null) => ({ error }),
   }),
   loaders(({ props, values }) => ({
     stateRecord: [
@@ -336,6 +353,20 @@ export const controlLogic = kea<controlLogicType>([
         grantSceneSettingsGroupsSettled: (_, { error }) => error,
       },
     ],
+    deliveringServiceSettings: [
+      false,
+      {
+        deliverServiceSettings: () => true,
+        deliverServiceSettingsSettled: () => false,
+      },
+    ],
+    deliverServiceSettingsError: [
+      null as null | string,
+      {
+        deliverServiceSettings: () => null,
+        deliverServiceSettingsSettled: (_, { error }) => error,
+      },
+    ],
   }),
   selectors({
     scenes: [
@@ -383,6 +414,18 @@ export const controlLogic = kea<controlLogicType>([
         }
       } catch (error) {
         actions.grantSceneSettingsGroupsSettled(storeSceneId, error instanceof Error ? error.message : String(error))
+      }
+    },
+    deliverServiceSettings: async () => {
+      // The hub closes the frame's session when its link's scopes change; the
+      // frame dials back, hears the scope in `ready` and pulls its keys (an
+      // ESP32 that never had any renders again; a Pi reloads its scenes).
+      try {
+        await setCloudFrameServiceSettingsEnabled(props.frameId, true)
+        framesModel.actions.loadFrame(props.frameId)
+        actions.deliverServiceSettingsSettled(null)
+      } catch (error) {
+        actions.deliverServiceSettingsSettled(error instanceof Error ? error.message : String(error))
       }
     },
     [socketLogic.actionTypes.socketReconnected]: () => {

@@ -961,6 +961,21 @@ appears neither in `settings` nor in `groups`. Assignments made before this
 existed carry no grant and are served everything they declare until the
 owner next saves the frame's scene list, which makes the grant explicit.
 
+**A grant reaches only a frame that is allowed keys at all.** The grant is
+per scene; whether the frame may pull the account's keys is its link's
+`settings:services`, the frame's "Deliver keys to this frame" switch. A
+claim-token enrollment holds it from the start; a link made through the
+device flow (a frame's own **Link to cloud**, the setup portal, the admin
+page) holds what that flow asked for, `frame:link` and `frame:managed`, and
+so gets no key, whatever its scenes were granted (an install of "Word of the
+day" on a reTerminal Sticky linked from its screen said "please provide an
+OpenAI API key" with the key in the account, 2026-11-25). The grant is
+recorded all the same, and `…/scenes/add` answers `keys_withheld`: the
+granted groups such a frame cannot get (`[]` when it can). The workspace
+asks the owner to deliver keys when a scene that uses them is added to such
+a frame, and the scene drawer says so with a **Deliver keys** button; both
+turn the switch on, never by themselves.
+
 **The six groups are cloud-owned on a managed frame.** A group absent from
 `settings` is **deleted** on the device — not left at its previous value.
 That is the whole point: revoking a key in the provider account, or removing

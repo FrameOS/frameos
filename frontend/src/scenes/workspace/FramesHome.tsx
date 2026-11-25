@@ -68,7 +68,7 @@ import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { SceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { settingsDetails } from '../frame/panels/secretSettings'
-import { missingSettingsGroups } from '../../utils/cloudFrameScenes'
+import { missingSettingsGroups, withheldSettingsGroups } from '../../utils/cloudFrameScenes'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
@@ -1419,6 +1419,12 @@ function SceneOriginLine({ origin }: { origin: SceneOrigin }): JSX.Element | nul
  * is looking when that happens, so the fix is a button here, not a hunt
  * through Settings. Allowing re-posts the scene list with the grant and
  * shows the scene again when it is the one on screen.
+ *
+ * The same goes for a grant the frame cannot get at all: a frame linked from
+ * its own screen is not allowed the account's keys (its link holds no
+ * `settings:services`), so a scene installed with its key still renders
+ * "Please provide an OpenAI API key" (2026-11-25). Delivering turns on the
+ * frame Settings' "Deliver keys to this frame" from here.
  */
 function SceneKeysNotice({
   frame,
@@ -1429,12 +1435,45 @@ function SceneKeysNotice({
   scene: FrameScene
   sceneIsActive: boolean
 }): JSX.Element | null {
-  const { grantingSettingsSceneId, grantSettingsError } = useValues(controlLogic({ frameId: frame.id }))
-  const { grantSceneSettingsGroups } = useActions(controlLogic({ frameId: frame.id }))
+  const { grantingSettingsSceneId, grantSettingsError, deliveringServiceSettings, deliverServiceSettingsError } =
+    useValues(controlLogic({ frameId: frame.id }))
+  const { grantSceneSettingsGroups, deliverServiceSettings } = useActions(controlLogic({ frameId: frame.id }))
   const source = frame.cloud_scene_sources?.[scene.id]
   const missing = source ? missingSettingsGroups(source) : []
-  if (!source || missing.length === 0) {
+  const withheld = source ? withheldSettingsGroups(source, frame.service_settings_enabled) : []
+  if (!source || (missing.length === 0 && withheld.length === 0)) {
     return null
+  }
+  if (missing.length === 0) {
+    const withheldNames = withheld.map((group) => settingsDetails[group]?.title ?? group)
+    return (
+      <div className="mb-4 rounded-lg border border-amber-300/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
+        <div className="font-semibold">
+          Uses your {withheldNames.join(' and ')} {withheld.length === 1 ? 'key' : 'keys'}, which this frame does not
+          get
+        </div>
+        <div className="mt-1 leading-5">
+          This frame is not allowed your account&apos;s API keys, so it renders this scene without{' '}
+          {withheld.length === 1 ? 'it' : 'them'}. Deliver keys to send {withheld.length === 1 ? 'it' : 'them'} to the
+          frame. You can turn this off again in the frame&apos;s settings.
+        </div>
+        {deliverServiceSettingsError ? <div className="mt-1 text-red-700">{deliverServiceSettingsError}</div> : null}
+        <button
+          type="button"
+          disabled={deliveringServiceSettings}
+          aria-busy={deliveringServiceSettings || undefined}
+          onClick={() => deliverServiceSettings()}
+          className="frameos-secondary-button mt-2 inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-wait disabled:opacity-70"
+        >
+          {deliveringServiceSettings ? (
+            <Spinner className="h-3 w-3 shrink-0" />
+          ) : (
+            <KeyIcon className="h-3.5 w-3.5 shrink-0" />
+          )}
+          {deliveringServiceSettings ? 'Delivering…' : 'Deliver keys'}
+        </button>
+      </div>
+    )
   }
   const names = missing.map((group) => settingsDetails[group]?.title ?? group)
   const granting = grantingSettingsSceneId === source.scene_id
