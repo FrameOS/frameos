@@ -99,6 +99,47 @@ suite "the ISP path":
     check not ispFits(caps, decode, vfContain, 40, 40, hd) # a 40x23 picture
     check decodeName(VideoDecode(decoder: "h264_v4l2m2m", isp: true)) == "h264_v4l2m2m+isp"
 
+  test "a launch for a display plane shows the decoder's own frames, then ffmpeg's YUV; the canvas the ISP's":
+    let caps = DecodeCaps(v4l2Decoders: @["h264_v4l2m2m"], v4l2Device: "/dev/video10", ispDevice: "/dev/video12")
+    let hd = ProbeResult(ok: true, codec: "h264", width: 1920, height: 1080, fps: 30)
+    let decode = pickDecode("h264", caps, fast = true, software = false)
+    proc pick(flags: LaunchFlags, probe = hd, caps = caps, decode = decode): VideoDecode =
+      pickLaunch(decode, caps, flags, vfContain, 720, 405, probe)
+    # On a plane: the decoder's frames, nothing copied. No ISP needed for it.
+    let plane = pick(LaunchFlags(onPlane: true))
+    check plane.zeroCopy and not plane.isp
+    check decodeName(plane) == "h264_v4l2m2m+plane"
+    check pick(LaunchFlags(onPlane: true),
+      caps = DecodeCaps(v4l2Decoders: @["h264_v4l2m2m"], v4l2Device: "/dev/video10")).zeroCopy
+    # In the canvas: the ISP's pictures.
+    let canvas = pick(LaunchFlags())
+    check canvas.isp and not canvas.zeroCopy
+    # It gave way for this player, or failed on this machine: ffmpeg's YUV on
+    # the plane (its hardware decoder), never the ISP's pictures there.
+    for flags in [LaunchFlags(onPlane: true, zeroCopyOff: true), LaunchFlags(onPlane: true, zeroCopyBroken: true)]:
+      let next = pick(flags)
+      check not next.zeroCopy and not next.isp
+      check decodeName(next) == "h264_v4l2m2m"
+    # The ISP's own giving way is the canvas's business only.
+    check pick(LaunchFlags(onPlane: true, ispOff: true, ispBroken: true)).zeroCopy
+    check not pick(LaunchFlags(ispOff: true)).isp and not pick(LaunchFlags(ispBroken: true)).isp
+    # Not the VideoCore's to decode: ffmpeg's own (it failed here, another
+    # codec), a turned picture, past its 1920, under 32 a side, no decoder.
+    check not pick(LaunchFlags(onPlane: true),
+      decode = pickDecode("h264", caps, fast = true, software = true)).zeroCopy
+    var phone = hd
+    phone.rotation = 90
+    check not pick(LaunchFlags(onPlane: true), probe = phone).zeroCopy
+    check not pick(LaunchFlags(onPlane: true), probe = ProbeResult(ok: true, codec: "h264", width: 3840,
+      height: 2160)).zeroCopy
+    check not pick(LaunchFlags(onPlane: true), probe = ProbeResult(ok: true, codec: "h264", width: 24,
+      height: 24)).zeroCopy
+    check not pick(LaunchFlags(onPlane: true), caps = DecodeCaps(v4l2Decoders: @["h264_v4l2m2m"])).zeroCopy
+    let mpeg4 = DecodeCaps(v4l2Decoders: @["mpeg4_v4l2m2m"], v4l2Device: "/dev/video10")
+    check not pick(LaunchFlags(onPlane: true), caps = mpeg4,
+      decode = pickDecode("mpeg4", mpeg4, fast = true, software = false),
+      probe = ProbeResult(ok: true, codec: "mpeg4", width: 640, height: 360)).zeroCopy
+
   test "the ISP's size: the frame, or for cover the picture covering the box, its middle copied":
     check ispSize(720, 720, vfContain, 1920, 1080) == (720, 405, 0, 0)
     check ispSize(720, 720, vfFill, 1920, 1080) == (720, 720, 0, 0)

@@ -311,17 +311,22 @@ export function get(app) {
       let ui = newUi(player, "tests/video-plane")
       var renders = 0 # once the plane shows: about one a second
       var showsAtFirst = -1
+      var onPlaneSaid = false
       var deadline = epochTime() + 30
       while epochTime() < deadline and ui.videoState{"state"}.getStr() != "ended":
         let wait = ui.renderPanel()
         if showsSoFar() > 0:
           if showsAtFirst < 0: showsAtFirst = showsSoFar()
           inc renders
+          # Its passes are the video's own clock: nobody waits for them, so
+          # the runner puts no loading mark up (which takes the plane off).
+          onPlaneSaid = onPlaneSaid or videoOnPlane(ui.scene)
         sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 1.0) * 1000))
       check ui.videoState{"state"}.getStr() == "ended"
       checkpoint "shows " & $showsSoFar() & ", renders on the plane " & $renders
       check showsSoFar() >= 15 # its frames on the plane
       check renders * 3 < showsSoFar() - showsAtFirst # and not a render each
+      check onPlaneSaid
       # The <img>'s box, 100x56 at (10, 12): the 16:9 clip fills it.
       let at = shownAt(-1)
       check at.rect.x == 10 and at.rect.y == 12 and at.rect.w == 100 and at.rect.h == 56
@@ -350,6 +355,7 @@ export function get(app) {
         sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 0.2) * 1000))
       check drawn
       check showsSoFar() == 0
+      check not videoOnPlane(covered.scene) # a pass for it may show the loading mark
       check canvas.color(50, 35).r > 200 and canvas.color(50, 35).g > 200 # the white box over it
 
   test "the mouse cursor over a video keeps it in the canvas, and the plane when it goes":

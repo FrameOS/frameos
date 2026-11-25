@@ -184,6 +184,10 @@ and the canvas plays the video everywhere else, as it always did:
   under what the frame draws over the scenes go off; after it, the rest may
   show. No frame of a plane is ever on the glass over what the new picture
   put there.
+  Such a pass is the video's own clock, which nobody waits for: it puts no
+  loading mark up (`videoOnPlane`), which would take every plane off (a Pi
+  Zero's pass takes about the mark's 200 ms: a 360p video played 15.9 frames
+  a second instead of 24 until 2026-11-25).
 - **Back to the canvas.** A video under the UI again (the Video player's
   controls) relaunches in the canvas with the plane's frame copied into its
   image first, so the picture does not step back; the plane goes once that
@@ -217,14 +221,75 @@ plane, one under a box and one under the cursor in the canvas) and
 plane, in the canvas while another window covers part of it and on the
 plane again after; in a layout's yield on a plane where the yield is).
 
+### Zero copy
+
+Where the VideoCore decodes the video (H.264 up to 1920 a side, not turned:
+`zeroCopyFits`), the plane shows the decoder's own frames, and no pixel of
+them passes through the CPU: ffmpeg only demuxes (`demuxArgs`, as for the
+ISP path), the reader feeds the decoder (`video/v4l2_decoder.nim`), and each
+of its capture buffers, a dma-buf, is imported into the display once
+(`importPlaneBuffer`: PRIME and AddFB2 with the decoder's format, strides and
+offsets, `importLayout`). The decoder writes NV12 at the coded size (1920x1088
+for 1080p); the framebuffer ends where the picture does, so no source
+rectangle shows the padding, and a picture with a corner of its own is
+reached by `atVisible`.
+
+- **Who holds what.** The decoder keeps the frames it decodes into, and the
+  reader holds at most two more (`PlaneHold`): the one on the glass and the
+  one waiting for its time; a third lets the decoder write meanwhile
+  (`ZeroCopyHeld`). A frame goes back to the decoder only once the plane has
+  moved off it: SETPLANE returns at the vblank that put the next one up. Each
+  is a frame of the coded size in CMA (3 MB at 1080p), which the display
+  shares; such a launch makes no plane buffers of its own.
+- **When.** The reader's clock, as for ffmpeg's frames (`planeStep`): a frame
+  waits for its time; one a whole frame late goes back unseen when a newer
+  one is decoded already, and is shown when none is; far behind, the clock
+  comes to the frames.
+- **A seek, a pause.** The frame on the glass when a launch ends stays there,
+  the display's (its own handle on the dma-buf), until the next launch shows
+  its first one or the plane goes.
+- **The canvas's copy** once a second reads the frame through a mapping of
+  its dma-buf, the CPU's caches synced around it (`readingFrame`).
+- **Giving way.** Where the display will not import or show the decoder's
+  frames, or the decoder fails, the plane plays ffmpeg's YUV from where it
+  got to, as above (the `video:fallback` event, from `h264_v4l2m2m+plane`),
+  then the canvas by the same rules. Failed where that then plays, no player
+  of the runtime tries it again (`zeroCopyFailed`); a decoder that could not
+  take the video now (`hardwareBusy`) is no fault of the launch's.
+  `FRAMEOS_VIDEO_ZERO_COPY=0` plays ffmpeg's YUV on the plane instead
+  (`FRAMEOS_VIDEO_ISP=0` leaves the VideoCore's devices alone, this too).
+
+Measured on a Pi Zero W (Cloud-W, HyperPixel 4 Square, 2026-11-25): frames on
+the glass a second, by the runtime's own count. Zero copy is compared with
+ffmpeg's YUV on the plane and with the ISP into the canvas.
+
+| Clip | Zero copy | ffmpeg's YUV on the plane | ISP into the canvas |
+|---|---|---|---|
+| 1080p (30 a second) | 24.8 | 7.9 | 14.1 |
+| 720p (30) | 25.4 | 19.2 | 16.2 |
+| 360p (24) | 20.4 | 22.1 | 16.5 |
+
+Zero copy took 3 to 5% of the core for ffmpeg's demux and 22 to 27% for the
+runtime, whose share is the canvas's copy once a second and its render. ffmpeg's
+YUV on the plane took 58 to 60% (ffmpeg) and 37 to 39% (the runtime). The ISP
+took 89 to 90% of the runtime's.
+
+- **Four videos at once.** Four 360p videos each take a plane and a decoder.
+- **More than the VideoCore decodes.** Four 720p videos are too much: its
+  decoders all but stop, and afterwards its firmware makes no decoder at all
+  (`failed to create component ... Not enough GPU mem?`) until the Pi restarts.
+  Every player then plays in software.
+
 ## Hardware
 
 What decodes a source is chosen for its codec (ffprobe's), in this order
 (`pickDecode` in `video/args.nim`, then `ispFits`):
 
-- **The VideoCore's decoder and ISP, driven by the player** (H.264 on a Pi 0
-  to 4, "The ISP path" below): ffmpeg only demuxes, and nothing of a frame
-  is scaled or converted on the CPU.
+- **The VideoCore's decoder, driven by the player** (H.264 on a Pi 0 to 4):
+  its frames straight onto a display plane ("Zero copy" in "Planes"), or in
+  the canvas through its ISP ("The ISP path" below). ffmpeg only demuxes,
+  and nothing of a frame is scaled or converted on the CPU. Which one a
+  launch takes is `pickLaunch`.
 - **A V4L2 mem2mem decoder** (`-c:v h264_v4l2m2m`): a Pi 0 to 4's VideoCore,
   through its `bcm2835-codec` (`/dev/video10`): H.264, and MPEG-2, MPEG-4 and
   VC-1 where the firmware has them. Used when the machine has a V4L2 decoder
@@ -479,8 +544,13 @@ box). All three skip without ffmpeg.
   2. *DRM planes*: done for a video nothing covers ("Planes"), its frames
      still copied twice on the way (out of the decoder by ffmpeg, through
      the pipe into the plane's buffer: a 1080p frame is 3 MB). What is left:
-     - *Zero copy*: the decoder's own buffers (dma-bufs, the ISP way's V4L2
-       client) handed to the plane, for 1080p at 30 and four cameras at once.
+     - *Zero copy*: done ("Zero copy" in "Planes"). What is left of it:
+       - A cap on what all the players ask of the VideoCore at once, so it
+         is never overloaded and wedged. Four 720p videos did that; whether
+         ffmpeg's decoder does the same was not tried.
+       - Why a 360p video plays 20 of its 24 frames a second.
+       - The Camera wall draws a label over each feed, so its feeds stay in
+         the canvas.
      - *The UI over a video* (the Video player's controls) in a plane above
        it with alpha, rather than the canvas meanwhile; and a video's name
        over it while it loads keeps it in the canvas until it plays.

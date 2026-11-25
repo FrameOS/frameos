@@ -52,6 +52,7 @@ type
     hwaccel*: string ## "vaapi"; ""
     fast*: bool      ## the decoder is behind: no loop filter, the scaler's fast bilinear
     isp*: bool       ## the VideoCore's decoder and ISP driven by the player, ffmpeg only demuxing
+    zeroCopy*: bool  ## the VideoCore's decoder's frames straight onto a display plane, ffmpeg only demuxing
 
 const
   DefaultMaxFps* = 30.0
@@ -250,7 +251,8 @@ proc pickDecode*(codec: string, caps: DecodeCaps, fast: bool, software: bool): V
 
 proc decodeName*(decode: VideoDecode): string =
   ## What a status says decodes it.
-  if decode.isp: decode.decoder & "+isp"
+  if decode.zeroCopy: decode.decoder & "+plane"
+  elif decode.isp: decode.decoder & "+isp"
   elif decode.decoder.len > 0: decode.decoder
   elif decode.hwaccel.len > 0: decode.hwaccel
   else: "software"
@@ -382,6 +384,37 @@ proc ispFits*(caps: DecodeCaps, decode: VideoDecode, fit: VideoFit, width, heigh
     return false
   let (fw, fh) = frameSize(width, height, fit, probe.width, probe.height)
   fw >= IspMinEdge and fh >= IspMinEdge
+
+proc zeroCopyFits*(caps: DecodeCaps, decode: VideoDecode, probe: ProbeResult): bool =
+  ## Whether a launch for a display plane shows the VideoCore decoder's own
+  ## frames (player.nim's zero-copy launch): an H.264 source the VideoCore
+  ## decodes (ffmpeg's `h264_v4l2m2m` picked for it), its decoder there, a
+  ## size it takes, not turned (a plane shows a picture as it is). Nothing is
+  ## scaled: the display does that, so the box's size does not matter.
+  decode.decoder == "h264_v4l2m2m" and caps.v4l2Device.len > 0 and probe.codec == "h264" and
+    probe.rotation == 0 and probe.width >= IspMinEdge and probe.height >= IspMinEdge and
+    probe.width <= V4l2MaxEdge and probe.height <= V4l2MaxEdge
+
+type LaunchFlags* = object
+  ## What has given way for one player, and on this machine, so far.
+  onPlane*: bool         ## the launch is for a display plane
+  zeroCopyOff*: bool     ## the zero-copy launch gave way for this player
+  zeroCopyBroken*: bool  ## ... on this machine (player.nim's zeroCopyFailed)
+  ispOff*: bool          ## the ISP path gave way for this player
+  ispBroken*: bool       ## ... on this machine (ispFailed)
+
+proc pickLaunch*(decode: VideoDecode, caps: DecodeCaps, flags: LaunchFlags, fit: VideoFit, width, height: int,
+    probe: ProbeResult): VideoDecode =
+  ## `decode` (pickDecode's) as one launch takes it (docs/video.md "Which way
+  ## a video plays"). For a display plane: the decoder's frames on it (zero
+  ## copy), else ffmpeg's YUV on it. For the canvas: the VideoCore's decoder
+  ## and ISP, else ffmpeg's decode and scale. Each gives way to the next when
+  ## it fails (player.nim's readerMain).
+  result = decode
+  result.zeroCopy = flags.onPlane and not flags.zeroCopyOff and not flags.zeroCopyBroken and
+    zeroCopyFits(caps, decode, probe)
+  result.isp = not flags.onPlane and not flags.ispOff and not flags.ispBroken and
+    ispFits(caps, decode, fit, width, height, probe)
 
 proc ispSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): tuple[width, height, x, y: int] =
   ## What the ISP makes of a `srcWidth` x `srcHeight` picture for a `width` x

@@ -120,6 +120,7 @@ type
     shownSeq: int64
     shownMedia: float
     shownCount: int        ## frames a plane showed so far, every launch
+    planeSrcX, planeSrcY: int ## where the picture starts in the frames shown (a decoder's, 0 else)
     # The ring: `count` frames from `head`, oldest first, each `frameWidth` x
     # `frameHeight` (frameSize: a contained picture's own size, else the box).
     buf: ptr UncheckedArray[byte]
@@ -210,6 +211,7 @@ var capsRead: bool
 var caps: DecodeCaps
 var hwFailedCodecs: seq[string]
 var ispBroken: bool ## the ISP path failed where ffmpeg's hardware decoder then played
+var zeroCopyBroken: bool ## the zero-copy launch failed where ffmpeg's YUV then played on the plane
 initLock(capsLock)
 
 proc nowSeconds*(): float =
@@ -319,6 +321,7 @@ proc setDecodeCapsForTest*(value: DecodeCaps) =
       capsRead = true
       hwFailedCodecs.setLen(0)
       ispBroken = false
+      zeroCopyBroken = false
 
 proc hardwareFailed*(codec: string): bool =
   ## Its hardware decoder failed here while ffmpeg's own played it.
@@ -337,6 +340,18 @@ proc markIspFailed() =
   {.cast(gcsafe).}:
     withLock capsLock:
       ispBroken = true
+
+proc zeroCopyFailed*(): bool =
+  ## The zero-copy launch failed here while ffmpeg's YUV then played on the
+  ## plane: no player of this runtime tries it again.
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      result = zeroCopyBroken
+
+proc markZeroCopyFailed() =
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      zeroCopyBroken = true
 
 proc markHardwareFailed(codec: string) =
   {.cast(gcsafe).}:
@@ -985,6 +1000,358 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
         withLock s.lock:
           s.setMessage(why)
 
+const
+  ZeroCopyHeld = 3
+    ## A zero-copy launch's decoded frames beyond what the decoder needs for
+    ## itself: the one on the glass, the one waiting for its time, and one the
+    ## decoder writes meanwhile. Each is a frame of the coded size in CMA
+    ## (3 MB at 1080p), which the display's buffers share.
+
+proc dropLingering(s: ptr Shared, lingering: var PlaneBuffer) =
+  ## The decoder's frame a zero-copy launch left on the glass (a seek's, a
+  ## pause's: its decoder is gone, the frame is the display's) goes: out of
+  ## the render thread's reach, then off the glass and the device.
+  if lingering.id == 0:
+    return
+  withLock s.lock:
+    if s.shownBuf.id == lingering.id:
+      s.shownBuf = PlaneBuffer()
+      s.planeShown = false
+  freePlaneBuffer(lingering)
+  lingering = PlaneBuffer()
+
+proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: DecodeCaps, plane: int,
+    startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode, lingering: var PlaneBuffer,
+    made: var int64, exitCode: var int, why: var string, busy: var bool): LaunchEnd =
+  ## One launch for display plane `plane` with nothing copied (docs/video.md
+  ## "Zero copy"): ffmpeg only demuxes (demuxArgs), the VideoCore's decoder
+  ## decodes (video/v4l2_decoder.nim), and each of its frames is a
+  ## framebuffer of the display (importPlaneBuffer: its dma-buf, imported
+  ## once a buffer) that the plane flips to when it is due. The plane scales
+  ## and converts it; the CPU does not touch it, but for the canvas's copy
+  ## once a second. A frame goes back to the decoder once the plane moved
+  ## off it, a late one unseen when a newer one is decoded (PlaneHold,
+  ## planeStep). `made`: frames shown or passed; `lingering`: the frame left
+  ## on the glass when the launch ends, the next one's to let go. Fails
+  ## (and the plane plays ffmpeg's YUV, #1044's way) where the display will
+  ## not take the decoder's frames.
+  let s = arg.shared
+  let shownDecoder = decodeName(decode)
+  withLock s.lock:
+    let n = min(shownDecoder.len, DecoderKeep)
+    for i in 0 ..< n:
+      s.decoder[i] = shownDecoder[i]
+    s.decoderLen = n
+    s.fast = false
+  when not defined(linux):
+    why = "the VideoCore's decoder is a Linux device"
+    busy = true
+    return leFailed
+  else:
+    let srcFps = if probe.fps > 0: probe.fps else: fps
+    let frameTime = 1.0 / fps
+    var skip = 0
+    if not decode.fast and arg.source.scheme.len == 0 and startAt > 0.05:
+      skip = startSkip(keyframeBefore(arg, startAt), startAt, srcFps)
+    var p: Process
+    try:
+      p = startProcessSerialized(ffmpegCommand(), demuxArgs(arg.source, startAt, loopFile), options = {poUsePath})
+    except CatchableError:
+      withLock s.lock:
+        s.setMessage("ffmpeg is not installed on this frame")
+      return leFailed
+    var errText = ""
+    var reason = ""
+    var dec = V4l2Decoder(fd: -1)
+    # The decoder's buffers as framebuffers, by its index, of one configuration.
+    var imported: seq[PlaneBuffer]
+    var importedGen = -1
+    var frames: seq[DecodedFrame]   ## by index: what a hold names
+    var hold = initPlaneHold()
+    var waitingSeq: int64 = 0
+    result = leEof
+    try:
+      discard c_setpriority(0, p.processID.cuint, 5)
+      try:
+        p.inputStream().close()
+      except CatchableError:
+        discard
+      let
+        outFd = cint(p.outputHandle())
+        errFd = cint(p.errorHandle())
+      discard fcntl(outFd, F_SETFL, fcntl(outFd, F_GETFL) or O_NONBLOCK)
+      discard fcntl(errFd, F_SETFL, fcntl(errFd, F_GETFL) or O_NONBLOCK)
+      var
+        errOpen = true
+        streamEnded = false
+        unitFirst, unitLast = -1
+        splitter: AnnexBSplitter
+        errBuf: array[2048, char]
+        kept: int64 = 0           ## frames kept past the skip and the thinning
+        decodedCount: int64 = 0   ## frames out of the decoder past the skip
+        clockStart = 0.0          ## frame `clockSeq` was shown then
+        clockSeq: int64 = 0
+      let launchedAt = nowSeconds()
+      let live = probe.duration <= 0
+      dec = openDecoder(caps.v4l2Device, probe.width, probe.height,
+        codedSize = max(probe.width * probe.height * 3 div 4, 256 * 1024), extraFrames = ZeroCopyHeld)
+      template drainErr() =
+        if errOpen:
+          while true:
+            let n = posix.read(errFd, addr errBuf[0], errBuf.len)
+            if n > 0:
+              for i in 0 ..< n:
+                errText.add errBuf[i]
+              if errText.len > 8192:
+                errText = errText[^4096 .. ^1]
+            elif n == 0:
+              errOpen = false
+              break
+            else:
+              break
+      template letGo(given: int) =
+        # A frame back to the decoder (one of an older configuration is not).
+        # `given` once: a template would run an expression (hold.wait) twice,
+        # and give back the frame that waits as well.
+        let index = given
+        if index >= 0:
+          dec.release(frames[index])
+      proc forgetImports(imported: var seq[PlaneBuffer], hold: var PlaneHold, lingering: var PlaneBuffer) =
+        # A new configuration of the decoder: its old buffers' framebuffers
+        # go, but for the one on the glass, which lingers until a new one shows.
+        if hold.shown >= 0 and hold.shown < imported.len and imported[hold.shown].id != 0:
+          dropLingering(s, lingering)
+          lingering = imported[hold.shown]
+          imported[hold.shown] = PlaneBuffer()
+        for b in imported:
+          if b.id != 0:
+            freePlaneBuffer(b)
+        imported.setLen(0)
+        hold = initPlaneHold()
+      proc nextKept(dec: var V4l2Decoder, frame: var DecodedFrame, skip: var int,
+          decodedCount: var int64): bool =
+        # The decoder's next frame that plays: dropped up to an exact start,
+        # thinned to the output's rate.
+        while dec.nextFrame(frame):
+          if skip > 0:
+            skip -= 1
+            dec.release(frame)
+            continue
+          let keep = keepFrame(decodedCount, srcFps, fps)
+          inc decodedCount
+          if keep:
+            return true
+          dec.release(frame)
+      proc framebuffer(frame: DecodedFrame, dec: V4l2Decoder, imported: var seq[PlaneBuffer],
+          importedGen: var int, hold: var PlaneHold, lingering: var PlaneBuffer, reason: var string): bool =
+        # The frame's buffer as a framebuffer: imported the first time it comes.
+        if frame.generation != importedGen:
+          forgetImports(imported, hold, lingering)
+          importedGen = frame.generation
+          withLock s.lock:
+            s.planeSrcX = dec.format.visible.x
+            s.planeSrcY = dec.format.visible.y
+        if imported.len < dec.format.buffers:
+          imported.setLen(dec.format.buffers)
+        if frame.index >= imported.len:
+          reason = "the decoder gave a frame of a buffer it did not have"
+          return false
+        if imported[frame.index].id == 0:
+          let f = dec.format
+          let layout = importLayout(f.fourcc, f.width, f.height, f.bytesperline, f.sizeimage, f.visible)
+          if not layout.ok:
+            reason = "the display does not take the decoder's frames (" & $f.width & "x" & $f.height &
+              ", " & $f.bytesperline & " a row)"
+            return false
+          if not importPlaneBuffer(frame.dmabuf, layout, imported[frame.index]):
+            reason = "the display would not import the decoder's frames (" & $f.width & "x" & $f.height & ")"
+            return false
+        true
+      block run:
+        while true:
+          var paused = false
+          withLock s.lock:
+            if s.stop or s.gen != gen:
+              result = leSuperseded
+              break run
+            if nowSeconds() - s.lastTake > IdleSeconds:
+              result = leIdle
+              break run
+            paused = s.paused
+          if dec.decoded == 0 and nowSeconds() - launchedAt > hardwareFirstFrameSeconds:
+            reason = "the hardware decoder made no frame in " & $hardwareFirstFrameSeconds & " s"
+            result = leFailed
+            break run
+          # The frame waiting for its time.
+          var timeoutMs = PollMs
+          if hold.waiting >= 0:
+            if paused:
+              # Unpaused, the clock starts again at this frame.
+              clockStart = 0
+              timeoutMs = 50
+            else:
+              let now = nowSeconds()
+              let due = if clockStart <= 0 or live: now
+                        else: clockStart + float(waitingSeq - clockSeq) * frameTime
+              # A frame late by a whole frame time asks the decoder for a newer one.
+              var newer: DecodedFrame
+              let newerReady = now - due > frameTime and nextKept(dec, newer, skip, decodedCount)
+              let step = planeStep(due, now, frameTime, ResyncSeconds, newerReady)
+              case step
+              of psDrop:
+                # The late one goes back unseen; the newer one waits instead.
+                if not framebuffer(newer, dec, imported, importedGen, hold, lingering, reason):
+                  dec.release(newer)
+                  result = leFailed
+                  break run
+                frames.setLen(max(frames.len, newer.index + 1))
+                frames[newer.index] = newer
+                letGo(hold.wait(newer.index))
+                inc made
+                waitingSeq = firstSeq + kept
+                inc kept
+                continue
+              of psWait:
+                timeoutMs = max(1, int(min(due - now, 0.05) * 1000))
+              of psShow, psResync:
+                var onGlass = false
+                if presentPlane(plane, cast[pointer](s), imported[hold.waiting].id, onGlass):
+                  if clockStart <= 0 or step == psResync:
+                    clockStart = nowSeconds()
+                    clockSeq = waitingSeq
+                  let shown = hold.waiting
+                  let back = hold.flipped()
+                  var media = startAt + float(waitingSeq - firstSeq) * frameTime
+                  withLock s.lock:
+                    if s.duration > 0 and loopFile:
+                      media = media mod s.duration
+                    s.shownBuf = imported[shown]
+                    s.shownGen = gen
+                    s.shownSeq = waitingSeq
+                    s.shownMedia = media
+                    s.planeShown = true
+                    inc s.shownCount
+                    s.arrivedAt = nowSeconds()
+                    if s.failed:
+                      s.failed = false
+                      s.retrying = false
+                      s.messageLen = 0
+                    broadcast(s.cond)
+                  # The plane moved off the last one: the decoder's again,
+                  # and a frame an older launch left goes.
+                  letGo(back)
+                  dropLingering(s, lingering)
+                  inc made
+                  continue
+                if onGlass:
+                  # The display would not show the decoder's frames there.
+                  reason = "the display would not show the decoder's frames"
+                  result = leFailed
+                  break run
+                # Not on the glass now: held, and the clock waits as for a pause.
+                clockStart = 0
+                timeoutMs = 50
+          # Wait for any side: ffmpeg's stream (while not far ahead), its
+          # stderr, the decoder (its frames only while none waits: a decoded
+          # frame left in its queue answers every poll).
+          var fds: array[3, TPollfd]
+          var n = 0
+          let wantStream = not streamEnded and splitter.pending < StreamAhead
+          if wantStream:
+            fds[n] = TPollfd(fd: outFd, events: POLLIN)
+            inc n
+          if errOpen:
+            fds[n] = TPollfd(fd: errFd, events: POLLIN)
+            inc n
+          if dec.started and not dec.ended:
+            fds[n] = TPollfd(fd: dec.fd, events: POLLOUT or POLLPRI or (if hold.waiting < 0: POLLIN else: 0))
+            inc n
+          let ready = posix.poll(addr fds[0], n.Tnfds, cint(timeoutMs))
+          if ready < 0 and osLastError().int32 != EINTR:
+            result = leFailed
+            break run
+          drainErr()
+          if wantStream:
+            let dst = splitter.room(65536)
+            let got = posix.read(outFd, dst, 65536)
+            if got > 0:
+              splitter.added(got)
+            elif got == 0:
+              streamEnded = true
+            elif osLastError().int32 notin [EAGAIN, EWOULDBLOCK, EINTR]:
+              streamEnded = true
+          while dec.canFeed():
+            if unitFirst < 0 and not splitter.nextUnit(unitFirst, unitLast, eof = streamEnded):
+              break
+            dec.feed(cast[ptr UncheckedArray[byte]](addr splitter.buf[unitFirst]), unitLast - unitFirst)
+            unitFirst = -1
+          if streamEnded and unitFirst < 0 and splitter.pending == 0 and not dec.draining:
+            if dec.fed == 0:
+              result = leFailed
+              break run
+            dec.drain()
+          if dec.started:
+            discard dec.reconfigured()
+          # A frame to wait for its time, when none does.
+          if hold.waiting < 0:
+            var frame: DecodedFrame
+            if nextKept(dec, frame, skip, decodedCount):
+              if not framebuffer(frame, dec, imported, importedGen, hold, lingering, reason):
+                dec.release(frame)
+                result = leFailed
+                break run
+              frames.setLen(max(frames.len, frame.index + 1))
+              frames[frame.index] = frame
+              discard hold.wait(frame.index)
+              waitingSeq = firstSeq + kept
+              inc kept
+          # The end: the decoder's last frame came and was shown.
+          if dec.ended and hold.waiting < 0:
+            break run
+    except V4l2Unsupported as e:
+      reason = e.msg
+      busy = true
+      result = leFailed
+    except V4l2Error as e:
+      reason = e.msg
+      busy = hardwareBusy(e.msg)
+      result = leFailed
+    finally:
+      # The frame on the glass stays there (a seek's next launch, a pause)
+      # and the rest go before the decoder does.
+      discard hold.drop()
+      if hold.shown >= 0 and hold.shown < imported.len and imported[hold.shown].id != 0:
+        dropLingering(s, lingering)
+        lingering = imported[hold.shown]
+        imported[hold.shown] = PlaneBuffer()
+      for b in imported:
+        if b.id != 0:
+          freePlaneBuffer(b)
+      dec.close()
+      if p.peekExitCode() == -1:
+        p.stopProcess()
+      try:
+        let errFd = cint(p.errorHandle())
+        var tail: array[2048, char]
+        while true:
+          let n = posix.read(errFd, addr tail[0], tail.len)
+          if n <= 0: break
+          for i in 0 ..< n:
+            errText.add tail[i]
+          if errText.len > 16384: break
+      except CatchableError:
+        discard
+      let code = p.peekExitCode()
+      exitCode = code
+      p.close()
+      if result == leEof and made == 0:
+        result = leFailed
+      if result == leFailed:
+        let said = if reason.len > 0: reason else: cleaned(errText, arg.shownSource, arg.source.input)
+        why = if said.len > 0: said else: "the VideoCore's decoder could not play it on the plane"
+        withLock s.lock:
+          s.setMessage(why)
+
 proc dropPlaneRun(s: ptr Shared, run: var PlaneRun) =
   ## A reader's plane buffers go (a canvas launch, a new size, its end):
   ## first out of the render thread's reach, then off the device. One a plane
@@ -1020,6 +1387,7 @@ proc makePlaneRun(run: var PlaneRun, width, height: int): bool =
 proc readerMain(arg: ReaderArg) {.thread.} =
   let s = arg.shared
   var run = PlaneRun(shown: -1)
+  var lingering: PlaneBuffer ## a decoder's frame a zero-copy launch left on the glass
   try:
     let probe = probeSource(arg)
     withLock s.lock:
@@ -1042,6 +1410,9 @@ proc readerMain(arg: ReaderArg) {.thread.} =
     var suspect = false  ## ... and it is the hardware's fault once ffmpeg's own plays it
     var ispOff = false   ## the ISP path gave way for this player: ffmpeg's hardware decoder
     var suspectIsp = false ## ... and it is the path's fault once ffmpeg's hardware decoder plays it
+    var zeroCopyOff = false ## the zero-copy launch gave way for this player: ffmpeg's YUV on the plane
+    let zeroCopyAllowed = getEnv("FRAMEOS_VIDEO_ZERO_COPY") != "0"
+    var suspectZeroCopy = false ## ... and it is the launch's fault once that plays
     while true:
       var
         gen, width, height: int
@@ -1103,18 +1474,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         s.lastTake = nowSeconds()
       lastGen = gen
       seqNo = 0
-      if onPlane:
-        let (pw, ph) = planeFrameSize(probe.width, probe.height)
-        if run.count > 0 and (run.width != pw or run.height != ph):
-          dropPlaneRun(s, run)
-        if not makePlaneRun(run, pw, ph):
-          # No room for its buffers: the canvas draws it.
-          withLock s.lock:
-            s.planeFailed = true
-            s.planeLaunch = false
-            broadcast(s.cond)
-          continue
-      elif run.count > 0:
+      if not onPlane:
+        dropLingering(s, lingering)
         dropPlaneRun(s, run)
       let fps = outputFps(probe.fps, maxFps)
       # A file plays again from its start inside one ffmpeg; anything else
@@ -1122,14 +1483,30 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       let loopFile = loop and arg.source.scheme.len == 0 and probe.duration > 0
       var launchAt = startAt
       while true:
-        var decode = pickDecode(probe.codec, caps, fast, software or hardwareFailed(probe.codec))
-        # The VideoCore's own decoder and ISP first where they take the video
-        # (video/isp.nim): ffmpeg only demuxes, and nothing of a frame is
-        # scaled or converted on the CPU.
-        # (A launch for a display plane takes ffmpeg's YUV: the ISP's pictures
-        # are the canvas's.)
-        decode.isp = not onPlane and not ispOff and not ispFailed() and
-          ispFits(caps, decode, fit, width, height, probe)
+        # The VideoCore's own decoder first where it takes the video: its
+        # frames straight onto a display plane (zero copy), or through its ISP
+        # into the canvas (video/isp.nim). ffmpeg only demuxes, and nothing of
+        # a frame is scaled or converted on the CPU.
+        let decode = pickLaunch(pickDecode(probe.codec, caps, fast, software or hardwareFailed(probe.codec)),
+          caps, LaunchFlags(onPlane: onPlane, zeroCopyOff: zeroCopyOff or not zeroCopyAllowed,
+            zeroCopyBroken: zeroCopyFailed(),
+            ispOff: ispOff, ispBroken: ispFailed()), fit, width, height, probe)
+        if decode.zeroCopy:
+          # The decoder's frames are the plane's: no buffers of its own (CMA
+          # the decoder needs).
+          dropPlaneRun(s, run)
+        elif onPlane:
+          dropLingering(s, lingering)
+          let (pw, ph) = planeFrameSize(probe.width, probe.height)
+          if run.count > 0 and (run.width != pw or run.height != ph):
+            dropPlaneRun(s, run)
+          if not makePlaneRun(run, pw, ph):
+            # No room for its buffers: the canvas draws it.
+            withLock s.lock:
+              s.planeFailed = true
+              s.planeLaunch = false
+              broadcast(s.cond)
+            break
         let hardware = decode.decoder.len > 0 or decode.hwaccel.len > 0
         if decode.fast and arg.source.scheme.len == 0 and launchAt > 0.5:
           # A slow decoder starts at the keyframe before: an exact start makes
@@ -1142,13 +1519,21 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         var why = ""
         var busy = false
         let ended =
-          if decode.isp:
+          if decode.zeroCopy:
+            runZeroCopyLaunch(arg, gen, probe, caps, plane, launchAt, fps, loopFile, seqNo, decode, lingering,
+              made, code, why, busy)
+          elif decode.isp:
             runIspLaunch(arg, gen, width, height, fit, pixels, probe, caps, launchAt, fps, loopFile, seqNo,
               decode, made, code, why, busy)
           else:
             runLaunch(arg, gen, width, height, fit, pixels, probe.width, probe.height, launchAt, fps,
               loopFile, seqNo, decode, made, code, why, busy, (if onPlane: addr run else: nil), plane)
         seqNo += made
+        if suspectZeroCopy and not decode.zeroCopy and onPlane and made > 0:
+          # ffmpeg's YUV played on the plane where the decoder's own frames
+          # would not: the launch's fault, so no player here tries it again.
+          markZeroCopyFailed()
+          suspectZeroCopy = false
         if suspectIsp and not decode.isp and decode.decoder.len > 0 and made > 0:
           # ffmpeg's hardware decoder played what the ISP path would not: the
           # path's fault, so no player here tries it again.
@@ -1168,6 +1553,20 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         let atEnd = not loopFile and probe.duration > 0 and reached >= probe.duration - 1.0
         if ended == leSlow:
           fast = true
+          launchAt = reached
+          continue
+        if decode.zeroCopy and not atEnd and
+            (ended == leFailed or (ended == leEof and code != 0 and code != -1)):
+          # The decoder's frames would not go on the plane: ffmpeg's YUV on
+          # it (its hardware decoder, then its own), from where it got to. A
+          # decoder that could not take it now is no fault of the launch's.
+          zeroCopyOff = true
+          suspectZeroCopy = not busy
+          var next = decode
+          next.zeroCopy = false
+          withLock s.lock:
+            s.messageLen = 0
+            s.noteFallback(decodeName(decode), decodeName(next), why, busy)
           launchAt = reached
           continue
         if decode.isp and not atEnd and
@@ -1212,6 +1611,7 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           # does not lets its buffers go.
           if onPlane and not planeOnGlass(plane, cast[pointer](s)):
             dropPlaneRun(s, run)
+            dropLingering(s, lingering)
           break
         var again, retry = false
         withLock s.lock:
@@ -1245,6 +1645,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           suspect = false
           ispOff = false
           suspectIsp = false
+          zeroCopyOff = false
+          suspectZeroCopy = false
         launchAt = 0
   except CatchableError as e:
     withLock s.lock:
@@ -1253,6 +1655,7 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       s.setMessage(e.msg)
   finally:
     dropPlaneRun(s, run)
+    dropLingering(s, lingering)
     withLock s.lock:
       if not s.buf.isNil:
         deallocShared(s.buf)
@@ -1425,12 +1828,13 @@ proc copyFrame(image: Image, src: ptr UncheckedArray[byte], width, height, x, y:
       copyMem(dst[(y + r) * stride + x * bpp].addr, src[r * row].addr, row)
 
 proc yuvInto*(image: Image, x, y, w, h: int, buf: PlaneBuffer, srcX, srcY, srcW, srcH: float) =
-  ## A plane's YUV420 frame into `image`'s `w` x `h` at (`x`, `y`), the
-  ## nearest pixel of its (`srcX`, `srcY`, `srcW`, `srcH`): the canvas's copy
-  ## of a video on a plane, once a second (PlaneCopySeconds), not a frame.
+  ## A plane's YUV420 frame (or a decoder's NV12, `interleaved`) into
+  ## `image`'s `w` x `h` at (`x`, `y`), the nearest pixel of its (`srcX`,
+  ## `srcY`, `srcW`, `srcH`): the canvas's copy of a video on a plane, once a
+  ## second (PlaneCopySeconds), not a frame.
   if buf.map.isNil or w <= 0 or h <= 0 or buf.width <= 0 or buf.height <= 0:
     return
-  let cp = (buf.pitch + 1) div 2
+  let cp = if buf.interleaved: buf.pitch else: (buf.pitch + 1) div 2
   var xs = newSeq[int](w)
   for i in 0 ..< w:
     xs[i] = clamp(int(srcX + (i.float + 0.5) * srcW / w.float), 0, buf.width - 1)
@@ -1448,8 +1852,13 @@ proc yuvInto*(image: Image, x, y, w, h: int, buf: PlaneBuffer, srcX, srcY, srcW,
         continue
       let
         sx = xs[col]
-        (r, g, b) = yuvToRgb(int(buf.map[yRow + sx]), int(buf.map[buf.uOffset + cRow + sx div 2]),
-          int(buf.map[buf.vOffset + cRow + sx div 2]))
+        (u, v) =
+          if buf.interleaved:
+            let c = buf.uOffset + cRow + (sx div 2) * 2
+            (int(buf.map[c]), int(buf.map[c + 1]))
+          else:
+            (int(buf.map[buf.uOffset + cRow + sx div 2]), int(buf.map[buf.vOffset + cRow + sx div 2]))
+        (r, g, b) = yuvToRgb(int(buf.map[yRow + sx]), u, v)
         at = ty * image.width + tx
       case image.format
       of pfRgb565: image.data16[at] = uint16(((r shr 3) shl 11) or ((g shr 2) shl 5) or (b shr 3))
@@ -1497,8 +1906,11 @@ proc copyPlaneFrame(player: VideoPlayer, s: ptr Shared, w, h: int, fit: VideoFit
     (fw, fh) = frameSize(w, h, fit, s.srcWidth, s.srcHeight)
     framed = rect(float32((w - fw) div 2), float32((h - fh) div 2), fw.float32, fh.float32)
   result = player.prepareImage(w, h, like, pixels, framed)
-  let r = planeRect(0, 0, w, h, ord(fit), fw, fh, buf.width, buf.height)
+  let r = planeRect(0, 0, w, h, ord(fit), fw, fh, buf.width - s.planeSrcX, buf.height - s.planeSrcY).
+    atVisible(s.planeSrcX, s.planeSrcY)
+  readingFrame(buf, true)
   yuvInto(player.image, r.x, r.y, r.w, r.h, buf, r.srcX, r.srcY, r.srcW, r.srcH)
+  readingFrame(buf, false)
   player.shownGen = s.shownGen
   player.shownSeq = s.shownSeq
   player.shownMedia = s.shownMedia
@@ -1578,6 +1990,8 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
         placed = planeRect(spot.x, spot.y, w, h, ord(fit), fw, fh, pw, ph)
         if spot.clipW > 0 and spot.clipH > 0:
           placed = placed.clipped(spot.clipX, spot.clipY, spot.clipW, spot.clipH)
+        # A decoder's frame holds the picture from (planeSrcX, planeSrcY).
+        placed = placed.atVisible(s.planeSrcX, s.planeSrcY)
         claim = placed.w > 0
         hd = s.srcHeight >= 720
       if s.planeShown and s.shownGen == player.gen:

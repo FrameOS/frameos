@@ -18,6 +18,7 @@ var
   nextId: uint32
   pitchPad*: int  ## the buffers' rows this much longer than the frame's
   refuse: bool    ## the display says no
+  imports, importedFrees: int
 initLock(sinkLock)
 
 proc sinkNew(width, height: int, buffer: var PlaneBuffer): bool {.nimcall, gcsafe, raises: [].} =
@@ -35,6 +36,22 @@ proc sinkNew(width, height: int, buffer: var PlaneBuffer): bool {.nimcall, gcsaf
 proc sinkFree(buffer: PlaneBuffer) {.nimcall, gcsafe, raises: [].} =
   if not buffer.map.isNil:
     deallocShared(buffer.map)
+
+proc sinkImport(dmabuf: cint, layout: ImportLayout, buffer: var PlaneBuffer): bool {.nimcall, gcsafe,
+    raises: [].} =
+  ## A decoder's frame: an id, no memory of its own.
+  {.cast(gcsafe).}:
+    withLock sinkLock:
+      inc nextId
+      inc imports
+      buffer = PlaneBuffer(id: nextId, handle: nextId, width: layout.width, height: layout.height,
+        pitch: layout.pitches[0], uOffset: layout.offsets[1], interleaved: true, imported: true, dmabuf: dmabuf)
+  true
+
+proc sinkFreeImported(buffer: PlaneBuffer) {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    withLock sinkLock:
+      inc importedFrees
 
 proc sinkShow(plane: int, buffer: uint32, rect: PlaneRect): bool {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
@@ -56,8 +73,11 @@ proc useSink*(refusing = false) =
   withLock sinkLock:
     shownCount = 0
     hides = 0
+    imports = 0
+    importedFrees = 0
     refuse = refusing
-  setPlaneSinkForTest(PlaneSink(newBuffer: sinkNew, freeBuffer: sinkFree, show: sinkShow, hide: sinkHide))
+  setPlaneSinkForTest(PlaneSink(newBuffer: sinkNew, freeBuffer: sinkFree, show: sinkShow, hide: sinkHide,
+    importBuffer: sinkImport, freeImported: sinkFreeImported))
   doAssert planesReady(720, 720)
 
 proc noSink*() =
@@ -77,3 +97,7 @@ proc shownAt*(i: int): Shown =
     let at = if i < 0: shownCount + i else: i
     if at >= 0 and at < shownCount:
       result = shown[at]
+
+proc importsSoFar*(): tuple[made, freed: int] =
+  withLock sinkLock:
+    result = (imports, importedFrees)
