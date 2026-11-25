@@ -207,6 +207,11 @@ suite "video planes":
           kObjProps {.importc: "DRM_IOCTL_MODE_OBJ_GETPROPERTIES", header: "<drm/drm.h>", nodecl.}: culong
           kSetProp {.importc: "DRM_IOCTL_MODE_OBJ_SETPROPERTY", header: "<drm/drm.h>", nodecl.}: culong
           kGetEncoder {.importc: "DRM_IOCTL_MODE_GETENCODER", header: "<drm/drm.h>", nodecl.}: culong
+          kPrime {.importc: "DRM_IOCTL_PRIME_FD_TO_HANDLE", header: "<drm/drm.h>", nodecl.}: culong
+          kGemClose {.importc: "DRM_IOCTL_GEM_CLOSE", header: "<drm/drm.h>", nodecl.}: culong
+          kDmaBufSync {.importc: "DMA_BUF_IOCTL_SYNC", header: "<linux/dma-buf.h>", nodecl.}: culong
+          kNv12 {.importc: "DRM_FORMAT_NV12", header: "<drm/drm_fourcc.h>", nodecl.}: uint32
+          kYuv420 {.importc: "DRM_FORMAT_YUV420", header: "<drm/drm_fourcc.h>", nodecl.}: uint32
         check DrmIoctlVersion == kVersion
         check DrmIoctlSetMaster == kSetMaster
         check DrmIoctlSetClientCap == kClientCap
@@ -224,6 +229,120 @@ suite "video planes":
         check DrmIoctlModeObjGetProperties == kObjProps
         check DrmIoctlModeObjSetProperty == kSetProp
         check DrmIoctlModeGetEncoder == kGetEncoder
+        check DrmIoctlPrimeFdToHandle == kPrime
+        check DrmIoctlGemClose == kGemClose
+        check DmaBufIoctlSync == kDmaBufSync
+        check DrmFormatNv12 == kNv12
+        check DrmFormatYuv420 == kYuv420
+
+  test "a decoder's frame as AddFB2 takes it: NV12 or YU12, the padding never in it":
+    # The VideoCore's 1080p: 1920x1088 coded, rows of 1920, the picture 1920x1080.
+    let nv12 = importLayout(DrmFormatNv12, 1920, 1088, 1920, 3133440, (0, 0, 1920, 1080))
+    check nv12.ok
+    check nv12.fourcc == DrmFormatNv12
+    check (nv12.width, nv12.height) == (1920, 1080)
+    check nv12.planes == 2
+    check nv12.pitches[0] == 1920 and nv12.pitches[1] == 1920
+    check nv12.offsets[0] == 0 and nv12.offsets[1] == 1920 * 1088
+    check nv12.size == 3133440
+    # Rows longer than the picture (a 360p's 640 in rows of 640, 368 coded).
+    let small = importLayout(DrmFormatNv12, 640, 368, 640, 640 * 368 * 3 div 2, (0, 0, 640, 360))
+    check small.ok and (small.width, small.height) == (640, 360) and small.offsets[1] == 640 * 368
+    # YU12: U and V each in rows half as long, V after U.
+    let yu12 = importLayout(DrmFormatYuv420, 1920, 1088, 1920, 3133440, (0, 0, 1920, 1080))
+    check yu12.ok and yu12.planes == 3
+    check yu12.pitches[1] == 960 and yu12.pitches[2] == 960
+    check yu12.offsets[1] == 1920 * 1088 and yu12.offsets[2] == 1920 * 1088 + 960 * 544
+    # An odd picture ends on an even edge; a picture with a corner of its
+    # own ends where it does, its source moved there.
+    check importLayout(DrmFormatNv12, 864, 480, 896, 896 * 480 * 3 div 2, (0, 0, 853, 480)).width == 852
+    let cornered = importLayout(DrmFormatNv12, 1920, 1088, 1920, 3133440, (0, 4, 1920, 1080))
+    check cornered.ok and cornered.height == 1084
+    let r = planeRect(0, 0, 720, 405, 1, 720, 405, 1920, 1080).atVisible(0, 4)
+    check r.srcY == 4 and r.srcH == 1080
+    # What does not fit is not imported.
+    check not importLayout(DrmFormatNv12, 1920, 1088, 1920, 3133439, (0, 0, 1920, 1080)).ok
+    check not importLayout(DrmFormatNv12, 1920, 1088, 1600, 3133440, (0, 0, 1920, 1080)).ok
+    check not importLayout(0x56595559'u32, 1920, 1088, 3840, 1920 * 1088 * 2, (0, 0, 1920, 1080)).ok
+    check not importLayout(DrmFormatNv12, 1920, 1088, 1920, 3133440, (0, 0, 1, 1)).ok
+
+  test "a decoder's frames on the glass: each back only once the plane moved off it":
+    var hold = initPlaneHold()
+    check hold.shown == -1 and hold.waiting == -1
+    check hold.wait(4) == -1           # the first waits
+    check hold.flipped() == -1         # ... and is shown: nothing to give back
+    check hold.shown == 4 and hold.waiting == -1
+    check hold.wait(5) == -1
+    check hold.flipped() == 4          # 5 on the glass: 4 goes back
+    check hold.wait(6) == -1
+    check hold.wait(7) == 6            # 6 was late, a newer one came: back unseen
+    check hold.shown == 5              # ... and 5 stays on the glass meanwhile
+    check hold.flipped() == 5
+    check hold.drop() == -1            # the end: nothing waits, 7 stays on the glass
+    check hold.shown == 7
+    check hold.wait(8) == -1
+    check hold.drop() == 8             # a launch that ends gives back what waited
+    # A run of frames, some late: every buffer goes back exactly once, never
+    # while it is on the glass, and the one on the glass never more than one.
+    var back: seq[int]
+    hold = initPlaneHold()
+    for i in 0 ..< 40:
+      let index = i mod 6
+      let r = hold.wait(index)
+      if r >= 0: back.add r
+      if i mod 3 != 1:
+        let f = hold.flipped()
+        if f >= 0:
+          check f != hold.shown
+          back.add f
+    check back.len == 39               # all but the one on the glass
+    check hold.shown == 39 mod 6
+
+  test "when a decoder's frame goes on the glass: due, late, or a newer one in its place":
+    let ft = 1.0 / 24
+    check planeStep(10.0, 9.9, ft, 1.5, false) == psWait
+    check planeStep(10.0, 9.998, ft, 1.5, false) == psShow   # within 3 ms: now
+    check planeStep(10.0, 10.02, ft, 1.5, false) == psShow   # late by less than a frame
+    check planeStep(10.0, 10.1, ft, 1.5, false) == psShow    # late, and nothing newer
+    check planeStep(10.0, 10.1, ft, 1.5, true) == psDrop     # ... a newer one decoded
+    check planeStep(10.0, 10.02, ft, 1.5, true) == psShow    # not a frame late: shown
+    check planeStep(10.0, 12.0, ft, 1.5, false) == psResync  # far behind: the clock comes to it
+    check planeStep(10.0, 12.0, ft, 1.5, true) == psDrop
+
+  test "an imported frame: freed as the decoder's, off the glass first; NV12 into the canvas":
+    useSink()
+    defer: noSink()
+    var b: PlaneBuffer
+    let layout = importLayout(DrmFormatNv12, 64, 32, 64, 64 * 32 * 3 div 2, (0, 0, 64, 32))
+    check importPlaneBuffer(7, layout, b)
+    check b.imported and b.interleaved and b.id != 0
+    check importsSoFar().made == 1
+    check not importPlaneBuffer(7, ImportLayout(), b)
+    let owner = cast[pointer](1)
+    let plane = acquirePlane(owner)
+    claimPlane(plane, PlaneRect(x: 0, y: 0, w: 64, h: 32, srcW: 64, srcH: 32))
+    settlePlanes(true)
+    var onGlass = false
+    check presentPlane(plane, owner, b.id, onGlass)
+    let hides = hidesSoFar()
+    freePlaneBuffer(b)
+    check hidesSoFar() == hides + 1
+    check importsSoFar().freed == 1
+    releasePlane(plane)
+    # NV12: Y, then U and V in pairs. A red left half, a blue right half.
+    let size = 4 * 2 + 4 * 1
+    let mem = cast[ptr UncheckedArray[byte]](allocShared0(size))
+    for i in 0 ..< 8:
+      mem[i] = (if i mod 4 < 2: 81 else: 41).byte
+    mem[8] = 90; mem[9] = 240    # red's U, V
+    mem[10] = 240; mem[11] = 110 # blue's
+    let nv = PlaneBuffer(id: 1, map: mem, size: size, width: 4, height: 2, pitch: 4, uOffset: 8,
+      interleaved: true)
+    let image = newImage565(8, 4)
+    yuvInto(image, 0, 0, 8, 4, nv, 0, 0, 4, 2)
+    check image[1, 1].rgba.r > 200 and image[1, 1].rgba.b < 60
+    check image[6, 2].rgba.b > 200 and image[6, 2].rgba.r < 60
+    deallocShared(mem)
 
   test "no device: no planes, and a player keeps the canvas":
     setPlaneSinkForTest(PlaneSink())

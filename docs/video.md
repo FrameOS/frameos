@@ -217,14 +217,56 @@ plane, one under a box and one under the cursor in the canvas) and
 plane, in the canvas while another window covers part of it and on the
 plane again after; in a layout's yield on a plane where the yield is).
 
+### Zero copy
+
+Where the VideoCore decodes the video (H.264 up to 1920 a side, not turned:
+`zeroCopyFits`), the plane shows the decoder's own frames, and no pixel of
+them passes through the CPU: ffmpeg only demuxes (`demuxArgs`, as for the
+ISP path), the reader feeds the decoder (`video/v4l2_decoder.nim`), and each
+of its capture buffers, a dma-buf, is imported into the display once
+(`importPlaneBuffer`: PRIME and AddFB2 with the decoder's format, strides and
+offsets, `importLayout`). The decoder writes NV12 at the coded size (1920x1088
+for 1080p); the framebuffer ends where the picture does, so no source
+rectangle shows the padding, and a picture with a corner of its own is
+reached by `atVisible`.
+
+- **Who holds what.** The decoder keeps the frames it decodes into, and the
+  reader holds at most two more (`PlaneHold`): the one on the glass and the
+  one waiting for its time; a third lets the decoder write meanwhile
+  (`ZeroCopyHeld`). A frame goes back to the decoder only once the plane has
+  moved off it: SETPLANE returns at the vblank that put the next one up. Each
+  is a frame of the coded size in CMA (3 MB at 1080p), which the display
+  shares; such a launch makes no plane buffers of its own.
+- **When.** The reader's clock, as for ffmpeg's frames (`planeStep`): a frame
+  waits for its time; one a whole frame late goes back unseen when a newer
+  one is decoded already, and is shown when none is; far behind, the clock
+  comes to the frames.
+- **A seek, a pause.** The frame on the glass when a launch ends stays there,
+  the display's (its own handle on the dma-buf), until the next launch shows
+  its first one or the plane goes.
+- **The canvas's copy** once a second reads the frame through a mapping of
+  its dma-buf, the CPU's caches synced around it (`readingFrame`).
+- **Giving way.** Where the display will not import or show the decoder's
+  frames, or the decoder fails, the plane plays ffmpeg's YUV from where it
+  got to, as above (the `video:fallback` event, from `h264_v4l2m2m+plane`),
+  then the canvas by the same rules. Failed where that then plays, no player
+  of the runtime tries it again (`zeroCopyFailed`); a decoder that could not
+  take the video now (`hardwareBusy`) is no fault of the launch's.
+  `FRAMEOS_VIDEO_ZERO_COPY=0` plays ffmpeg's YUV on the plane instead
+  (`FRAMEOS_VIDEO_ISP=0` leaves the VideoCore's devices alone, this too).
+
+ZERO_COPY_MEASURED
+
 ## Hardware
 
 What decodes a source is chosen for its codec (ffprobe's), in this order
 (`pickDecode` in `video/args.nim`, then `ispFits`):
 
-- **The VideoCore's decoder and ISP, driven by the player** (H.264 on a Pi 0
-  to 4, "The ISP path" below): ffmpeg only demuxes, and nothing of a frame
-  is scaled or converted on the CPU.
+- **The VideoCore's decoder, driven by the player** (H.264 on a Pi 0 to 4):
+  its frames straight onto a display plane ("Zero copy" in "Planes"), or in
+  the canvas through its ISP ("The ISP path" below). ffmpeg only demuxes,
+  and nothing of a frame is scaled or converted on the CPU. Which one a
+  launch takes is `pickLaunch`.
 - **A V4L2 mem2mem decoder** (`-c:v h264_v4l2m2m`): a Pi 0 to 4's VideoCore,
   through its `bcm2835-codec` (`/dev/video10`): H.264, and MPEG-2, MPEG-4 and
   VC-1 where the firmware has them. Used when the machine has a V4L2 decoder

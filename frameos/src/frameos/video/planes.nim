@@ -33,6 +33,7 @@ const
   MaxPlanes* = 4
     ## Overlay planes a runtime uses at most: a Camera wall's four.
   DrmFormatYuv420* = 0x32315559'u32 ## fourcc('Y', 'U', '1', '2'): three planes, 4:2:0
+  DrmFormatNv12* = 0x3231564e'u32   ## fourcc('N', 'V', '1', '2'): Y, then U and V interleaved, 4:2:0
 
 type
   PlaneRect* = object
@@ -51,6 +52,18 @@ type
     width*, height*: int ## the frame's
     pitch*: int          ## of the Y plane; the U and V planes' is half
     uOffset*, vOffset*: int
+    interleaved*: bool   ## NV12: U and V in pairs from `uOffset`, rows of `pitch`
+    imported*: bool      ## another device's memory (importPlaneBuffer), `dmabuf` its own
+    dmabuf*: cint
+
+  ImportLayout* = object
+    ## A decoder's frame as AddFB2 takes it (importLayout).
+    ok*: bool
+    fourcc*: uint32      ## DRM's, which is V4L2's for these two
+    width*, height*: int ## the framebuffer's: the picture's corner to its far edge, made even
+    planes*: int
+    pitches*, offsets*: array[3, int]
+    size*: int           ## the buffer's bytes
 
   PlaneSink* = object
     ## The device, or a test's stand-in. Plain procs: no closure, nothing a
@@ -59,6 +72,11 @@ type
     freeBuffer*: proc (buffer: PlaneBuffer) {.nimcall, gcsafe, raises: [].}
     show*: proc (plane: int, buffer: uint32, rect: PlaneRect): bool {.nimcall, gcsafe, raises: [].}
     hide*: proc (plane: int) {.nimcall, gcsafe, raises: [].}
+    importBuffer*: proc (dmabuf: cint, layout: ImportLayout, buffer: var PlaneBuffer): bool {.nimcall, gcsafe,
+      raises: [].}
+      ## Another device's buffer (a decoder's frame, a dma-buf) as a framebuffer
+      ## a plane shows, nothing copied; nil where there is none.
+    freeImported*: proc (buffer: PlaneBuffer) {.nimcall, gcsafe, raises: [].}
 
   PlaneState = object
     used: bool        ## a player has it
@@ -191,6 +209,95 @@ proc fits*(rect: PlaneRect, width, height: int): bool =
   rect.w > 0 and rect.h > 0 and rect.x >= 0 and rect.y >= 0 and rect.x + rect.w <= width and
     rect.y + rect.h <= height and rect.srcW >= 1 and rect.srcH >= 1
 
+proc importLayout*(fourcc: uint32, codedWidth, codedHeight, bytesperline, sizeimage: int,
+    visible: tuple[x, y, width, height: int]): ImportLayout =
+  ## A V4L2 decoder's frame (one buffer: `codedWidth` x `codedHeight`, rows
+  ## of `bytesperline`, `sizeimage` bytes) as a framebuffer, nothing copied.
+  ## NV12: the Y rows for the coded height (1088 for 1080p), then U and V
+  ## interleaved in rows as long, half as many. YU12: Y, then U and V each in
+  ## rows half as long. The framebuffer ends where the `visible` picture does
+  ## (1920x1080 of 1920x1088), so a source rectangle can never show the
+  ## padding; a picture whose corner is not the buffer's is reached by
+  ## `atVisible`. Not ok for another format or a buffer smaller than it says.
+  let bpl = bytesperline
+  let rows = codedHeight
+  let chromaRows = (rows + 1) div 2
+  var need = 0
+  case fourcc
+  of DrmFormatNv12:
+    result.planes = 2
+    result.pitches = [bpl, bpl, 0]
+    result.offsets = [0, bpl * rows, 0]
+    need = bpl * rows + bpl * chromaRows
+  of DrmFormatYuv420:
+    let c = bpl div 2
+    result.planes = 3
+    result.pitches = [bpl, c, c]
+    result.offsets = [0, bpl * rows, bpl * rows + c * chromaRows]
+    need = bpl * rows + 2 * c * chromaRows
+  else:
+    return
+  result.fourcc = fourcc
+  result.size = sizeimage
+  let right = min(visible.x + visible.width, codedWidth)
+  let bottom = min(visible.y + visible.height, codedHeight)
+  result.width = right - right mod 2
+  result.height = bottom - bottom mod 2
+  result.ok = bpl >= codedWidth and codedWidth > 0 and rows > 0 and need <= sizeimage and
+    visible.x >= 0 and visible.y >= 0 and result.width - visible.x >= 2 and result.height - visible.y >= 2
+
+proc atVisible*(rect: PlaneRect, x, y: int): PlaneRect =
+  ## `rect`'s source (in the picture, as planeRect and clipped had it) in a
+  ## decoder's frame whose picture starts at (`x`, `y`).
+  result = rect
+  result.srcX = rect.srcX + x.float
+  result.srcY = rect.srcY + y.float
+
+type PlaneHold* = object
+  ## A decoder's frames on their way to a plane (video/player.nim's
+  ## zero-copy launch): the one on the glass and the one waiting for its
+  ## time, by the decoder's buffer index, -1 for none. Each goes back to the
+  ## decoder only once the plane has moved off it.
+  shown*: int
+  waiting*: int
+
+proc initPlaneHold*(): PlaneHold = PlaneHold(shown: -1, waiting: -1)
+
+proc wait*(hold: var PlaneHold, index: int): int =
+  ## A decoded frame waits for its time: the one that waited before, never
+  ## shown (late), goes back now; -1 for none.
+  result = hold.waiting
+  hold.waiting = index
+
+proc flipped*(hold: var PlaneHold): int =
+  ## The waiting frame is on the glass (its flip done): the one it replaced
+  ## goes back now; -1 for none.
+  result = hold.shown
+  hold.shown = hold.waiting
+  hold.waiting = -1
+
+proc drop*(hold: var PlaneHold): int =
+  ## The waiting frame goes back unseen (late, or the launch ends); -1 for none.
+  result = hold.waiting
+  hold.waiting = -1
+
+type PlaneStep* = enum
+  psWait   ## not due yet
+  psShow   ## on the glass now
+  psResync ## ... and the clock starts again at it: it is `resync` seconds behind
+  psDrop   ## back to the decoder unseen: it is a frame late and a newer one is decoded
+
+proc planeStep*(due, now, frameTime, resync: float, newerReady: bool): PlaneStep =
+  ## What the presenter does with the frame waiting for its time `due`
+  ## (monotonic seconds). A late frame is shown, unless the decoder has a
+  ## newer one already (it is ahead: nothing is lost). Behind by `resync`
+  ## seconds, the clock comes to the frames.
+  let late = now - due
+  if late < -0.003: psWait
+  elif late > frameTime and newerReady: psDrop
+  elif late > resync: psResync
+  else: psShow
+
 proc yuvToRgb*(y, u, v: int): tuple[r, g, b: int] =
   ## BT.601, limited range: what a decoder makes of SD and most HD video
   ## without a colour description. Integer, as the panel's 565 needs no more.
@@ -271,6 +378,11 @@ when defined(linux):
       handle: uint32
     DrmGetEncoder {.pure.} = object
       encoderId, encoderType, crtcId, possibleCrtcs, possibleClones: uint32
+    DrmPrimeHandle {.pure.} = object
+      handle, flags: uint32
+      fd: int32
+    DrmGemClose {.pure.} = object
+      handle, pad: uint32
 
   const
     IocNone = 0
@@ -290,6 +402,8 @@ when defined(linux):
     DrmIoctlModeGetResources* = drmIoc(IocRead or IocWrite, 0xA0, sizeof(DrmCardRes))
     DrmIoctlModeGetCrtc* = drmIoc(IocRead or IocWrite, 0xA1, sizeof(DrmCrtc))
     DrmIoctlModeGetEncoder* = drmIoc(IocRead or IocWrite, 0xA6, sizeof(DrmGetEncoder))
+    DrmIoctlPrimeFdToHandle* = drmIoc(IocRead or IocWrite, 0x2e, sizeof(DrmPrimeHandle))
+    DrmIoctlGemClose* = drmIoc(IocWrite, 0x09, sizeof(DrmGemClose))
     DrmIoctlModeGetProperty* = drmIoc(IocRead or IocWrite, 0xAA, sizeof(DrmGetProperty))
     DrmIoctlModeRmFb* = drmIoc(IocRead or IocWrite, 0xAF, sizeof(cuint))
     DrmIoctlModeCreateDumb* = drmIoc(IocRead or IocWrite, 0xB2, sizeof(DrmCreateDumb))
@@ -502,6 +616,64 @@ when defined(linux):
     var d = DrmDestroyDumb(handle: buffer.handle)
     discard drm(fd, DrmIoctlModeDestroyDumb, addr d)
 
+  proc deviceImport(dmabuf: cint, layout: ImportLayout, buffer: var PlaneBuffer): bool {.nimcall, gcsafe,
+      raises: [].} =
+    ## A dma-buf (a decoder's frame) as a framebuffer: its GEM handle in this
+    ## device (PRIME), AddFB2 with the decoder's format, strides and offsets,
+    ## and a read-only mapping for the canvas's copy (yuvInto).
+    {.cast(gcsafe).}:
+      let fd = drmFd
+    if fd < 0 or dmabuf < 0 or not layout.ok:
+      return false
+    var prime = DrmPrimeHandle(fd: int32(dmabuf))
+    if not drm(fd, DrmIoctlPrimeFdToHandle, addr prime):
+      return false
+    var fb = DrmFbCmd2(width: uint32(layout.width), height: uint32(layout.height), pixelFormat: layout.fourcc)
+    for i in 0 ..< layout.planes:
+      fb.handles[i] = prime.handle
+      fb.pitches[i] = uint32(layout.pitches[i])
+      fb.offsets[i] = uint32(layout.offsets[i])
+    if not drm(fd, DrmIoctlModeAddFb2, addr fb):
+      var c = DrmGemClose(handle: prime.handle)
+      discard drm(fd, DrmIoctlGemClose, addr c)
+      return false
+    # Its own handle on the dma-buf (the decoder closes its own when it
+    # closes, and a frame may stay on the glass past that: a seek's, a
+    # pause's), and a mapping for the canvas's copy.
+    let own = dup(dmabuf)
+    let map = if own < 0: MAP_FAILED else: mmap(nil, layout.size, PROT_READ, MAP_SHARED, own, 0)
+    buffer = PlaneBuffer(id: fb.fbId, handle: prime.handle, width: layout.width, height: layout.height,
+      pitch: layout.pitches[0], uOffset: layout.offsets[1], vOffset: layout.offsets[2],
+      interleaved: layout.fourcc == DrmFormatNv12, imported: true, dmabuf: own, size: layout.size,
+      map: (if map == MAP_FAILED: nil else: cast[ptr UncheckedArray[byte]](map)))
+    true
+
+  proc deviceFreeImported(buffer: PlaneBuffer) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      let fd = drmFd
+    if fd < 0:
+      return
+    var fbId = cuint(buffer.id)
+    discard drm(fd, DrmIoctlModeRmFb, addr fbId)
+    if not buffer.map.isNil:
+      discard munmap(buffer.map, buffer.size)
+    if buffer.dmabuf >= 0:
+      discard posix.close(buffer.dmabuf)
+    var c = DrmGemClose(handle: buffer.handle)
+    discard drm(fd, DrmIoctlGemClose, addr c)
+
+  type DmaBufSync {.pure.} = object
+    flags: uint64
+
+  const
+    DmaBufSyncRead = 1'u64
+    DmaBufSyncEnd = 4'u64
+    DmaBufIoctlSync* = culong((IocWrite shl 30) or (sizeof(DmaBufSync) shl 16) or (ord('b') shl 8) or 0)
+
+  proc deviceSyncRead(dmabuf: cint, start: bool) =
+    var sync = DmaBufSync(flags: DmaBufSyncRead or (if start: 0'u64 else: DmaBufSyncEnd))
+    discard drm(dmabuf, DmaBufIoctlSync, addr sync)
+
   proc fixed(v: float): uint32 = uint32(max(v, 0.0) * 65536.0 + 0.5)
 
   proc deviceShow(plane: int, buffer: uint32, rect: PlaneRect): bool {.nimcall, gcsafe, raises: [].} =
@@ -550,7 +722,7 @@ proc planesReady*(width, height: int): bool =
           setWhy(why)
           return false
         sink = PlaneSink(newBuffer: deviceNewBuffer, freeBuffer: deviceFreeBuffer, show: deviceShow,
-          hide: deviceHide)
+          hide: deviceHide, importBuffer: deviceImport, freeImported: deviceFreeImported)
         planesOk = true
         result = true
       else:
@@ -720,15 +892,37 @@ proc newPlaneBuffer*(width, height: int, buffer: var PlaneBuffer): bool =
   if make.isNil: false else: make(width, height, buffer)
 
 proc freePlaneBuffer*(buffer: PlaneBuffer) =
+  ## A buffer of newPlaneBuffer's or importPlaneBuffer's let go: off the
+  ## glass first if a plane shows it (a device's RMFB would turn it off anyway).
   {.cast(gcsafe).}:
     withLock planesLock:
       for i in 0 ..< MaxPlanes:
         if planes[i].buffer == buffer.id and buffer.id != 0:
-          # Off the glass first (a device's RMFB would turn it off anyway).
           sink.hide(i)
           planes[i].buffer = 0
-      if not sink.freeBuffer.isNil:
+      if buffer.imported:
+        if not sink.freeImported.isNil:
+          sink.freeImported(buffer)
+      elif not sink.freeBuffer.isNil:
         sink.freeBuffer(buffer)
+
+proc importPlaneBuffer*(dmabuf: cint, layout: ImportLayout, buffer: var PlaneBuffer): bool =
+  ## A decoder's frame (a dma-buf) as something a plane shows, nothing copied
+  ## (video/player.nim's zero-copy launch), freed by freePlaneBuffer. False
+  ## where the device would not.
+  {.cast(gcsafe).}:
+    var make: proc (dmabuf: cint, layout: ImportLayout, buffer: var PlaneBuffer): bool {.nimcall, gcsafe,
+      raises: [].}
+    withLock planesLock:
+      make = sink.importBuffer
+  if make.isNil or not layout.ok: false else: make(dmabuf, layout, buffer)
+
+proc readingFrame*(buffer: PlaneBuffer, start: bool) =
+  ## Around the CPU's read of an imported frame (the canvas's copy, yuvInto):
+  ## the CPU's caches as the decoder left the memory (DMA_BUF_IOCTL_SYNC).
+  when defined(linux):
+    if buffer.imported and buffer.dmabuf >= 0:
+      deviceSyncRead(buffer.dmabuf, start)
 
 proc setPlaneSinkForTest*(value: PlaneSink) =
   ## Tests: planes in memory (a nil `show` turns them off again).
