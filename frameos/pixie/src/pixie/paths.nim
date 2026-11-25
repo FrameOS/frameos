@@ -2290,6 +2290,13 @@ proc angleToMiterLimit*(angle: float32): float32 {.inline.} =
   ## Converts miter-limit-angle to miter-limit-ratio.
   1 / sin(angle / 2)
 
+const strokeBatchPolygons = 256
+  ## How many polygons of an opaque stroke's outline are filled at a time
+  ## (strokeShapes' `flush`): a rectangle and a join for each of about a
+  ## hundred points of the path. Smaller batches were faster too, on the
+  ## host: a 1,400-point hand-drawn line 12 ms -> 3 ms, 3,000 short roads
+  ## 55 -> 51 ms (2,048 of them: 64 ms), the most held 8 MB -> 3 MB.
+
 proc strokeShapes(
   shapes: openArray[Polygon],
   strokeWidth: float32,
@@ -2297,8 +2304,15 @@ proc strokeShapes(
   lineJoin: LineJoin,
   miterLimit: float32,
   dashes: seq[float32],
-  pixelScale: float32
+  pixelScale: float32,
+  flush: proc(outline: var seq[Polygon]) {.raises: [PixieError].} = nil
 ): seq[Polygon] =
+  ## The outline of `shapes` stroked: rectangles, joins and caps, which
+  ## together cover the stroke. With `flush`, handed over a few hundred
+  ## polygons at a time as they are made (and the rest returned): an opaque
+  ## stroke filled a batch at a time paints the same, and one long subpath
+  ## (a hand-drawn line flattens to thousands of points) no longer needs
+  ## its whole outline in memory at once.
   if strokeWidth <= 0:
     return
 
@@ -2310,12 +2324,18 @@ proc strokeShapes(
   # it once per stroke, at the origin, and move it. A round-joined outline of
   # an 11-glyph label added 303 of them, each a new Path, an ellipse and an
   # adaptive flattening (2026-11-07); the pictures are identical.
-  var circle: Polygon
+  var
+    circle: Polygon
+    circleTurnsLeft: bool # its winding, which a round join takes
   proc makeCircle(at: Vec2): Polygon =
     if circle.len == 0:
       let path = newPath()
       path.ellipse(vec2(0, 0), halfStroke, halfStroke)
       circle = path.commandsToShapes(true, pixelScale)[0]
+      var area = 0'f32
+      for i in 1 ..< circle.len:
+        area += circle[i - 1].x * circle[i].y - circle[i].x * circle[i - 1].y
+      circleTurnsLeft = area > 0
     result = newSeq[Vec2](circle.len)
     for i, p in circle:
       result[i] = p + at
@@ -2344,13 +2364,74 @@ proc strokeShapes(
 
     @[a, b, c, d, a]
 
+  proc addRoundJoin(shape: var seq[Polygon], pos, prevPos, nextPos: Vec2, minArea: float32) =
+    ## A round join: of the circle at the point, what the two segments'
+    ## rectangles leave out is the sector on the outer side of the turn (a
+    ## point within half the stroke's width of the line is that near a
+    ## segment, inside its rectangle, or nearest a point, which puts it in
+    ## that point's outer sector), so the join is that sector and not the
+    ## whole circle. A long curve flattens to thousands of points, and a
+    ## whole circle at each, dozens of points apiece, was megabytes for one
+    ## stroke: the Sketchbook's 713-point eraser stroke took 6 MB on an
+    ## ESP32 that had 5 (2026-11-25). Along a gentle curve the join is four
+    ## points.
+    let
+      d1 = pos - prevPos
+      d2 = nextPos - pos
+    var
+      u1, u2: Vec2
+      turn = PI.float32 # a repeated point: no turn to measure
+    if d1 != vec2(0, 0) and d2 != vec2(0, 0):
+      u1 = d1.normalize()
+      u2 = d2.normalize()
+      turn = arctan2(u1.x * u2.y - u1.y * u2.x, u1.x * u2.x + u1.y * u2.y)
+    if abs(turn) > PI.float32 - 1e-3:
+      # Straight back (the gap is the half circle ahead, on either side) or
+      # a repeated point: the whole circle, as before.
+      if PI.float32 * halfStroke * halfStroke > minArea:
+        shape.add makeCircle(pos)
+      return
+    if turn == 0:
+      # Straight on: the rectangles meet corner on corner. Any other turn,
+      # however small, gets its join: two rectangles that meet at an angle
+      # leave the rasterizer's rounding along their edge, and a sector
+      # skipped by its area (thin, but from the middle of the stroke to its
+      # edge) was a faint line across the stroke.
+      return
+    discard makeCircle(pos) # flattens `circle` once: its step and its winding
+    let
+      # The outer side is away from the turn: right of a left turn. The
+      # sector spans from one segment's outer edge to the next one's.
+      outer = if turn > 0: vec2(u1.y, -u1.x) else: vec2(-u1.y, u1.x)
+      lo = arctan2(outer.y, outer.x) + min(turn, 0)
+      # Where a join met the rectangles edge to edge, the rasterizer's
+      # rounding showed along the edge, 1/255 to 5/255 short inside the
+      # stroke: on the outer side along the sector's sides, and on the inner
+      # side where two rectangles at a slight angle meet. So the join is the
+      # sector widened half a pixel at both ends and the same arc across
+      # the circle, inside: one convex polygon that holds both segments'
+      # ends with half a pixel to spare, and lies within the old circle.
+      widen = min(0.5'f32 / max(pixelScale * halfStroke, 1e-6), 0.5)
+      sweep = abs(turn) + 2 * widen
+      n = max(1, int(ceil(sweep * max(circle.len - 1, 4).float32 / (2 * PI.float32))))
+      # Wound as the rectangles and the circles are (the angles go up), or
+      # the non-zero fill takes it for a hole where they overlap.
+      backwards = not circleTurnsLeft
+    var join = newSeq[Vec2](2 * n + 3)
+    for side in 0 .. 1:
+      for k in 0 .. n:
+        let
+          a = lo - widen + side.float32 * PI.float32 + sweep * k.float32 / n.float32
+          i = side * (n + 1) + k
+        join[(if backwards: 2 * n + 1 - i else: i)] = pos + vec2(cos(a), sin(a)) * halfStroke
+    join[2 * n + 2] = join[0]
+    shape.add join
+
   proc addJoin(shape: var seq[Polygon], prevPos, pos, nextPos: Vec2) =
     let minArea = pixelErrorMargin / pixelScale
 
     if lineJoin == RoundJoin:
-      let area = PI.float32 * halfStroke * halfStroke
-      if area > minArea:
-        shape.add makeCircle(pos)
+      shape.addRoundJoin(pos, prevPos, nextPos, minArea)
       return
 
     let angle = fixAngle(angle(nextPos - pos) - angle(prevPos - pos))
@@ -2422,6 +2503,7 @@ proc strokeShapes(
       let
         pos = shape[i]
         prevPos = shape[i - 1]
+        mark = shapeStroke.len # where this segment's polygons start
 
       if dashes.len > 0:
         var distance = dist(prevPos, pos)
@@ -2443,6 +2525,16 @@ proc strokeShapes(
       # If we need a line join
       if i < shape.len - 1:
         shapeStroke.addJoin(prevPos, pos, shape[i + 1])
+
+      if flush != nil and result.len + shapeStroke.len >= strokeBatchPolygons:
+        # This segment's rectangle and join go into the next batch again:
+        # the edge it shares with the next rectangle is then inside one
+        # fill, not the soft edge of two across the stroke.
+        let again = shapeStroke[mark .. ^1]
+        result.add(shapeStroke)
+        flush(result)
+        result.setLen(0)
+        shapeStroke = again
 
     if shape[0] == shape[^1]:
       shapeStroke.addJoin(shape[^2], shape[^1], shape[1])
@@ -3828,34 +3920,25 @@ proc strokeSolidShapes(
       pathProbeNs[ppStroke] += (getMonoTime() - probeStart).inNanoseconds
       inc pathProbeCount[ppStroke]
   let
-    # An opaque color blended normally is outlined and filled a batch of
-    # subpaths at a time: what one batch paints, the next painting again
-    # leaves as it was (bar the soft edge where two batches cross). A
-    # stroke outlines every point (a round join is a circle) and the fill
-    # holds every edge of the outline at once, so a long path (a map's
-    # roads, thousands of subpaths) outlined whole needed megabytes that
-    # a frame does not have. A translucent stroke stays one fill: two
-    # batches over the same pixels would show where they cross.
+    # An opaque color blended normally is filled a batch of its outline at
+    # a time (strokeShapes' `flush`): what one batch paints, the next
+    # painting again leaves as it was (bar the soft edge where two batches
+    # cross). A stroke outlines every point and the fill holds every edge
+    # of what it is given at once, so a long path outlined whole needed
+    # megabytes that a frame does not have: a map's roads (thousands of
+    # subpaths), a hand-drawn line (one subpath, thousands of points). A
+    # translucent stroke stays one fill: two batches over the same pixels
+    # would show where they cross.
     batches = color.a >= 1 and blendMode == NormalBlend
-  var
-    first = 0
-    points = 0
-  for i in 0 ..< shapes.len:
-    points += shapes[i].len
-    if i == shapes.high or (batches and points >= strokeBatchPoints):
-      var outline = strokeShapes(
-        shapes.toOpenArray(first, i),
-        strokeWidth,
-        lineCap,
-        lineJoin,
-        miterLimit,
-        dashes,
-        pixelScale
-      )
-      outline.transform(transform)
-      image.fillShapes(outline, color, NonZero, blendMode)
-      first = i + 1
-      points = 0
+  proc fill(outline: var seq[Polygon]) {.raises: [PixieError].} =
+    outline.transform(transform)
+    image.fillShapes(outline, color, NonZero, blendMode)
+  var flush: proc(outline: var seq[Polygon]) {.raises: [PixieError].}
+  if batches:
+    flush = fill
+  var outline = strokeShapes(shapes, strokeWidth, lineCap, lineJoin, miterLimit, dashes,
+    pixelScale, flush)
+  fill(outline)
 
 proc strokePath*(
   image: Image,
