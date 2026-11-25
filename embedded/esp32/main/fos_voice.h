@@ -30,10 +30,11 @@
 /* Once at boot, after the config and the buzzer: nothing runs until a hold. */
 void fos_voice_init(void);
 /* This frame can take a session: voice chat on, microphone pins set, a
- * control plane to send to, and no session running. */
+ * Wi-Fi network saved, a control plane to send to, and no session running. */
 bool fos_voice_available(void);
 /* The voice key held: start listening. False when fos_voice_available() is
- * false (the caller sounds the refusal). Returns at once. */
+ * false (the caller sounds the refusal); refused for want of Wi-Fi or a
+ * control plane, the panel says what to do about it. Returns at once. */
 bool fos_voice_begin(void);
 /* The key let go: stop listening, send what is left, wait for the answer.
  * Returns at once; no-op without a session. */
