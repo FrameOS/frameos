@@ -1188,11 +1188,20 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
  * Compared whole, a sleeping ESP32 put "Embedded settings" in the pending
  * changes after every wake, the deploy's own boot included (frame 70,
  * 2026-10-13: only `lastBoot.at` differed). `storage` is what the state
- * partition holds at the frame's last check-in, reported the same way.
+ * partition holds at the frame's last check-in, reported the same way, and
+ * `sceneImport` says an adopted board's own scenes are still to be read
+ * (backend utils/embedded_scene_import.py).
  */
 function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, storage: _storage, ...rest } = source
+  const {
+    lastBoot: _lastBoot,
+    layout: _layout,
+    firmware: _firmware,
+    storage: _storage,
+    sceneImport: _sceneImport,
+    ...rest
+  } = source
   return rest
 }
 
@@ -3585,8 +3594,14 @@ export const frameLogic = kea<frameLogicType>([
       const formKeysMoved = !frame || !oldFrame || !frameFormKeysEqual(oldFrame, frame)
       if (formKeysMoved) {
         const previousMode = values.frameForm?.mode || oldFrame?.mode || 'rpios'
+        // Against the form the previous row made, not the row itself:
+        // sanitizeFrame fills in what a row may lack. A row first heard of
+        // through a broadcast has no secrets (backend frame_secrets.py), so
+        // its form's `frame_admin_auth.pass: ''` read as an edit, the full
+        // row from the GET never replaced the form, and an adopted frame
+        // opened with six secrets "unsaved" and "pending" (2026-11-25).
         const frameFormMatchesPrevious = oldFrame
-          ? computeChangeDetails(oldFrame, values.frameForm, previousMode, false).length === 0
+          ? computeChangeDetails(sanitizeFrame(oldFrame), values.frameForm, previousMode, false).length === 0
           : false
         if (frame && (!oldFrame || frameFormMatchesPrevious)) {
           actions.resetFrameForm(sanitizeFrame(frame) as FrameType)

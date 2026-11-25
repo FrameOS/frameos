@@ -2,14 +2,18 @@
 with `code` (docs/api-triality.md). The frame's side is faked: GET
 /api/adopt says what it is, POST /api/adopt takes the code."""
 
+import asyncio
 import json
+import re
 from unittest.mock import AsyncMock, patch
+from urllib.parse import unquote
 
 import pytest
 from fastapi import HTTPException
 
 from app.models.frame import Frame
 from app.tasks.embedded_firmware import embedded_device_for_panel, embedded_panel_for_device
+from app.utils import embedded_scene_import
 
 
 def _body(**overrides):
@@ -43,13 +47,17 @@ def _linux_device_payload():
 
 
 class FakeFrame:
-    """One frame on the network: the adoption routes, and for a Pi the admin
-    API the password flow continues on. `ports` are where it answers."""
+    """One frame on the network: the adoption routes, for a Pi the admin API
+    the password flow continues on, and for an ESP32 its scene store
+    (`board_scenes`, read with the key it was given once it is back up,
+    `scene_reads_refused` reads later). `ports` are where it answers."""
 
-    def __init__(self, adopt_info, *, ports=(8787,), claim=None):
+    def __init__(self, adopt_info, *, ports=(8787,), claim=None, board_scenes=(), scene_reads_refused=0):
         self.adopt_info = adopt_info
         self.ports = set(ports)
         self.claim = claim or (lambda body: (200, {'username': 'admin', 'password': 'minted-pass'}))
+        self.board_scenes = list(board_scenes)
+        self.scene_reads_refused = scene_reads_refused
         self.calls = []  # (method, port, path, body)
         self.logins = []
         self.posted = []
@@ -60,6 +68,24 @@ class FakeFrame:
         self.calls.append((method, port, path, parsed))
         if port not in self.ports:
             raise HTTPException(status_code=502, detail='All connection attempts failed')
+        scene_read = re.fullmatch(r'/api/frames/(\d+)/scenes(?:/(.+))?', path)
+        if scene_read and method == 'GET':
+            # The row's key and id are what the board was told.
+            assert frame_obj.mode == 'embedded' and frame_obj.server_api_key
+            assert int(scene_read.group(1)) == frame_obj.id
+            if self.scene_reads_refused:
+                self.scene_reads_refused -= 1
+                raise HTTPException(status_code=502, detail='All connection attempts failed')
+            if scene_read.group(2) is None:
+                listing = {
+                    'scenes': [{'id': scene['id'], 'name': scene['name'], 'slot': index}
+                               for index, scene in enumerate(self.board_scenes)],
+                    'storage': {'sceneCount': len(self.board_scenes)},
+                }
+                return 200, json.dumps(listing).encode(), {}
+            scene_id = unquote(scene_read.group(2))
+            scene = next(scene for scene in self.board_scenes if scene['id'] == scene_id)
+            return 200, json.dumps(scene).encode(), {}
         if path == '/api/adopt':
             # The code is the only credential: nothing else goes out.
             assert not (headers or {}).get('Authorization')
@@ -83,6 +109,17 @@ class FakeFrame:
 
 def _patched(fake):
     return patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=fake.fetch))
+
+
+@pytest.fixture(autouse=True)
+def _board_back_at_once(monkeypatch):
+    """The adoption's wait for a restarting board, without the wait."""
+    monkeypatch.setattr('app.api.frame_sync.ADOPT_SCENE_IMPORT_RETRY_SECONDS', 0)
+    monkeypatch.setattr('app.api.frame_sync.ADOPT_SCENE_IMPORT_WAIT_SECONDS', 0.3)
+
+
+async def _background_imports_done():
+    await asyncio.gather(*list(embedded_scene_import._background_imports))
 
 
 LINUX_INFO = {'adopting': True, 'kind': 'linux', 'platform': 'linux', 'name': 'Kitchen frame', 'version': '2026.11.11'}
@@ -141,6 +178,8 @@ async def test_adopt_by_code_creates_an_embedded_row_and_tells_the_board_this_ba
         ('GET', 8787, '/api/adopt'),
         ('GET', 80, '/api/adopt'),
         ('POST', 80, '/api/adopt'),
+        # Back up on the new key: what it holds (nothing, here).
+        ('GET', 80, f'/api/frames/{frame.id}/scenes'),
     ]
     assert frame.mode == 'embedded'
     assert frame.name == 'Hallway'
@@ -179,12 +218,100 @@ async def test_adopt_by_code_embedded_without_preset_or_size_takes_the_panel_and
     db.expire_all()
     frame = db.get(Frame, response.json()['frame']['id'])
     # A typed port is the only one tried.
-    assert [p for _, p, _, _ in fake.calls] == [80, 80]
+    assert [p for _, p, _, _ in fake.calls] == [80, 80, 80]
     assert frame.device == 'waveshare.EPD_7in5_V2'
     assert frame.width is None and frame.height is None
     assert 'hardwarePreset' not in frame.embedded
     # The image's placeholder name gives way to the address.
     assert frame.name == '10.0.0.43'
+
+
+BOARD_SCENES = [
+    {'id': 'clock', 'name': 'Clock', 'default': True, 'nodes': [], 'edges': [],
+     'settings': {'execution': 'interpreted'}},
+    {'id': 'pixel toys', 'name': 'Pixel toys', 'nodes': [], 'edges': [], 'settings': {'execution': 'interpreted'}},
+    {'id': 'layout-reterminal-sticky', 'name': 'Sticky', 'nodes': [], 'edges': [],
+     'settings': {'execution': 'interpreted', 'isLayout': True}},
+]
+
+
+@pytest.mark.asyncio
+async def test_adopt_by_code_reads_the_boards_own_scenes_into_the_row_and_the_baseline(
+    async_client, no_auth_client, db, redis
+):
+    # The board restarts after the claim: the first reads find nobody.
+    fake = FakeFrame(ESP32_INFO, ports=(80,), claim=lambda body: (200, {'ok': True}),
+                     board_scenes=BOARD_SCENES, scene_reads_refused=2)
+    with _patched(fake):
+        response = await async_client.post('/api/frames/adopt', json=_body())
+    assert response.status_code == 200, response.text
+    assert [scene['id'] for scene in response.json()['frame']['scenes']] == ['clock', 'pixel toys', 'layout-reterminal-sticky']
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+
+    assert [scene['id'] for scene in frame.scenes] == ['clock', 'pixel toys', 'layout-reterminal-sticky']
+    assert frame.scenes[0]['default'] is True
+    assert ('GET', 80, f'/api/frames/{frame.id}/scenes/pixel%20toys', None) in fake.calls
+    # What it holds is what was deployed to it: nothing pending, nothing marked.
+    assert frame.last_successful_deploy['scenes'] == frame.scenes
+    assert 'sceneImport' not in frame.embedded
+    assert 'sceneImport' not in frame.last_successful_deploy['embedded']
+    # Its pull is answered with them, so a deploy gives it back what it had.
+    pulled = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes', headers={'Authorization': f'Bearer {frame.server_api_key}'}
+    )
+    assert pulled.status_code == 200
+    assert [scene['id'] for scene in pulled.json()] == ['clock', 'pixel toys', 'layout-reterminal-sticky']
+
+
+@pytest.mark.asyncio
+async def test_adopted_board_is_sent_no_scenes_until_its_own_are_read(async_client, no_auth_client, db, redis):
+    # It does not come back while the adoption waits.
+    fake = FakeFrame(ESP32_INFO, ports=(80,), claim=lambda body: (200, {'ok': True}),
+                     board_scenes=BOARD_SCENES, scene_reads_refused=10**6)
+    with _patched(fake), patch('app.utils.frame_http._fetch_frame_http_bytes', new=AsyncMock(side_effect=fake.fetch)):
+        response = await async_client.post('/api/frames/adopt', json=_body())
+        assert response.status_code == 200, response.text
+        db.expire_all()
+        frame = db.get(Frame, response.json()['frame']['id'])
+        assert frame.scenes == []
+        assert frame.embedded['sceneImport'] == 'pending'
+        device = {'Authorization': f'Bearer {frame.server_api_key}'}
+
+        # Its pull is refused (it keeps what it holds), and tries the import.
+        pulled = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=device)
+        assert pulled.status_code == 503
+        await _background_imports_done()
+
+        # A settings save from a form loaded before neither drops the mark nor
+        # stops it; a scene saved here meanwhile stays.
+        saved = await async_client.post(f'/api/frames/{frame.id}', json={'embedded': {'platform': 'esp32-s3'}})
+        assert saved.status_code == 200, saved.text
+        db.expire_all()
+        frame = db.get(Frame, frame.id)
+        assert frame.embedded['sceneImport'] == 'pending'
+        frame.scenes = [{'id': 'mine', 'name': 'Mine', 'nodes': [], 'edges': []},
+                        {'id': 'clock', 'name': 'My clock', 'nodes': [], 'edges': []}]
+        db.commit()
+
+        # A minute on, the board is up and checks in: its scenes are read.
+        fake.scene_reads_refused = 0
+        await redis.delete(embedded_scene_import.IMPORT_CLAIM_KEY.format(frame.id))
+        hello = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/commands', json={}, headers=device)
+        assert hello.status_code == 200, hello.text
+        await _background_imports_done()
+
+    db.expire_all()
+    frame = db.get(Frame, frame.id)
+    assert 'sceneImport' not in frame.embedded
+    assert [scene['id'] for scene in frame.scenes] == ['mine', 'clock', 'pixel toys', 'layout-reterminal-sticky']
+    assert frame.scenes[1]['name'] == 'My clock'
+    # The baseline is what the board holds: "mine" and this clock are the changes to deploy.
+    assert [scene['id'] for scene in frame.last_successful_deploy['scenes']] == [
+        'clock', 'pixel toys', 'layout-reterminal-sticky'
+    ]
+    pulled = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/scenes', headers=device)
+    assert pulled.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -266,3 +393,32 @@ def test_embedded_device_for_panel_reverses_the_panel_mapping():
         assert embedded_device_for_panel(embedded_panel_for_device(device)) == device
     assert embedded_device_for_panel('none') is None
     assert embedded_device_for_panel('EPD_does_not_exist') is None
+
+
+@pytest.mark.asyncio
+async def test_a_board_scene_read_that_can_never_succeed_holds_nothing_back():
+    """A scene the board lists and cannot serve is skipped, and a firmware
+    with no scene list ends the import: neither may keep the marker, which
+    holds every scene pull (every deploy) back, for good."""
+    frame = Frame(id=9, name="board")
+    answers = {
+        "/api/frames/9/scenes": (200, json.dumps({"scenes": [{"id": "a"}, {"id": "gone"}]}).encode()),
+        "/api/frames/9/scenes/a": (200, json.dumps({"id": "a", "nodes": []}).encode()),
+        "/api/frames/9/scenes/gone": (404, b"{}"),
+    }
+
+    async def fetch(_frame, _redis, *, path, attempts=None):
+        status, body = answers[path]
+        return status, body, {}
+
+    scenes = await embedded_scene_import.read_board_scenes(frame, None, fetch)
+    assert [scene["id"] for scene in scenes] == ["a"]
+
+    # A board that is away is tried again, never skipped.
+    answers["/api/frames/9/scenes/gone"] = (503, b"")
+    with pytest.raises(embedded_scene_import.SceneImportError):
+        await embedded_scene_import.read_board_scenes(frame, None, fetch)
+
+    answers["/api/frames/9/scenes"] = (404, b"")
+    with pytest.raises(embedded_scene_import.SceneListMissing):
+        await embedded_scene_import.read_board_scenes(frame, None, fetch)

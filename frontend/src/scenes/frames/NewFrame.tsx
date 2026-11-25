@@ -1888,7 +1888,7 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
     <div className="space-y-4">
       <p className="frameos-muted text-xs text-slate-500">
         A Pi keeps what it is showing: its config and scenes are imported here. An ESP32 keeps its board settings and
-        takes its scenes from this backend. Either reports here from then on.
+        its scenes, imported here once it has restarted. Either reports here from then on.
       </p>
       <div className="flex gap-2" role="radiogroup" aria-label="How to adopt">
         <button

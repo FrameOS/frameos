@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 import json
 import re
+import time
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -50,6 +51,15 @@ from app.tasks.embedded_firmware import (
     ensure_embedded_frame_defaults,
     normalize_embedded_hardware_preset,
     normalize_embedded_platform,
+)
+from app.utils.embedded_scene_import import (
+    IMPORT_RETRY_SECONDS,
+    SCENE_IMPORT_KEY,
+    SCENE_IMPORT_PENDING,
+    SceneImportError,
+    claim_scene_import,
+    import_embedded_frame_scenes,
+    release_scene_import,
 )
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
@@ -1953,7 +1963,10 @@ async def _adopt_embedded_frame(
     )
     try:
         frame.frame_port = frame_port
-        embedded: dict[str, Any] = {"platform": platform}
+        # Its scenes are its own until they are read: no set may reach it
+        # before (app/utils/embedded_scene_import.py), so the mark is on the
+        # row before the board learns this backend.
+        embedded: dict[str, Any] = {"platform": platform, SCENE_IMPORT_KEY: SCENE_IMPORT_PENDING}
         if preset:
             embedded["hardwarePreset"] = preset
         frame.embedded = embedded
@@ -2015,14 +2028,56 @@ async def _adopt_embedded_frame(
         await delete_frame(db, redis, frame.id, frame.project_id)
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Adoption failed: {exc}") from exc
 
+    # The adoption is complete from here on, whatever the import does: the
+    # board holds this backend's key and comes back with the scenes it had.
+    imported = await _import_adopted_board_scenes(db, redis, frame, fetch_frame_http_bytes)
     try:
         await new_log(
             db, redis, frame.id, "stdout",
-            "Adopted: the frame restarts and reports to this backend",
+            "Adopted: the frame restarted and reports to this backend"
+            if imported
+            else "Adopted: the frame restarts and reports to this backend; its scenes are read when it checks in",
         )
     except Exception:  # noqa: BLE001 - the adoption is complete
         logger.warning("adopt: could not log the adoption of %s", frame.id, exc_info=True)
     return frame
+
+
+# How long an adoption waits for the board to come back on its new key and
+# read its scenes, trying every few seconds (it restarts 750 ms after the
+# claim, then joins its network). Past it the adoption still succeeds and the
+# board's first check-in reads them (embedded_scene_import.start_scene_import).
+ADOPT_SCENE_IMPORT_WAIT_SECONDS = 45.0
+ADOPT_SCENE_IMPORT_RETRY_SECONDS = 2.0
+
+
+async def _import_adopted_board_scenes(
+    db: Session, redis: Redis, frame: Frame, fetch_frame_http_bytes: FrameFetch
+) -> bool:
+    """Read an adopted board's own scenes into its row as soon as it answers
+    again; False when it did not in time (the row keeps its mark, so the
+    board is sent no scenes until they are read)."""
+    frame_id = int(frame.id)
+    # Held while waiting: the board's first check-in starts no second import.
+    await claim_scene_import(redis, frame_id, int(ADOPT_SCENE_IMPORT_WAIT_SECONDS) + IMPORT_RETRY_SECONDS)
+    deadline = time.monotonic() + ADOPT_SCENE_IMPORT_WAIT_SECONDS
+    reason = ""
+    try:
+        while True:
+            await asyncio.sleep(ADOPT_SCENE_IMPORT_RETRY_SECONDS)
+            try:
+                await import_embedded_frame_scenes(db, redis, frame, fetch_frame_http_bytes, attempts=1)
+                return True
+            except (SceneImportError, HTTPException) as exc:
+                reason = str(getattr(exc, "detail", None) or exc)
+            except Exception as exc:  # noqa: BLE001 - a restarting board fails in many ways
+                reason = str(exc) or type(exc).__name__
+            if time.monotonic() >= deadline:
+                break
+    finally:
+        await release_scene_import(redis, frame_id)
+    logger.info("adopt: the scenes of frame %s are not read yet: %s", frame_id, reason)
+    return False
 
 
 async def adopt_standalone_frame(

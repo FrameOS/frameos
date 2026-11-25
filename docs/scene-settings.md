@@ -326,8 +326,14 @@ which has no page, keeps its marker and its start budget.)
   - an ESP32 is sent `{code, backend, apiKey, frameId}` for a row the backend
     made from what `GET /api/adopt` said (platform, panel, preset, size),
     writes them to NVS and restarts, and from then on is a backend frame like
-    a USB-provisioned one. It keeps its board settings; its scenes are the
-    backend's from the first pull, so scenes it held on its own are replaced.
+    a USB-provisioned one. It keeps its board settings and its scenes: the
+    backend reads them over the board's HTTP API with the key it was just
+    given (`GET /api/frames/<id>/scenes`, then each scene) as soon as it
+    answers again, into the row and the deploy baseline
+    (`backend/app/utils/embedded_scene_import.py`). Until they are read the
+    row says so (`embedded.sceneImport`) and the board is sent no scenes: its
+    scene pull answers 503 and the board keeps what it holds, and its next
+    check-in reads them.
 
   `GET /api/adopt` says nothing but `{"adopting": false}` while no code shows;
   `POST /api/adopt` answers the ceremony's tokens (`code_required` 400,
