@@ -50,7 +50,10 @@ render line.
 ## Categories
 
 A metric's score is **1000 x reference / value** (lower is better) or
-**1000 x value / reference** (higher is better). The reference is the median
+**1000 x value / reference** (higher is better). A lower-is-better value is
+taken as at least a twentieth of its reference (`scoring.LOWER_FLOOR`): below
+that it is noise, and a net time of 0 ms (a UI that costs nothing over the
+base scene) would otherwise score infinitely, or be dropped. The reference is the median
 over the boards benched on **2026.11.12** of that metric, normalized as below,
 frozen in `scoring.REFERENCE` (the five ESP32 boards, 2026-11-19/20;
 `bench.py scores --reference 2026.11.12` prints it again). A category is the **geometric mean** of the

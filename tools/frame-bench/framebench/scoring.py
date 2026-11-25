@@ -92,10 +92,23 @@ def _norm(value, how, board):
     return value
 
 
+# A time under a twentieth of its reference is within the benchmark's noise:
+# it scores as that twentieth (20,000), not as a ratio that runs away (the
+# E1003's UI benchmark, 10 ms over its base scene on 2026.11.14, scored 25.7x
+# the reference) and not as nothing (0 ms on main, dropped from the category,
+# its Graphics 7135 -> 2006 for the same renders; the hardware bench,
+# 2026-11-25). SCORES.md "Categories".
+LOWER_FLOOR = 1 / 20
+
+
 def _metric_score(value, ref, better):
-    if value is None or not ref or value <= 0:
+    if value is None or not ref:
         return None
-    return 1000 * (ref / value if better == 'lower' else value / ref)
+    if better == 'lower':
+        return 1000 * ref / max(value, ref * LOWER_FLOOR)
+    if value <= 0:
+        return None
+    return 1000 * value / ref
 
 
 def _geomean(xs):

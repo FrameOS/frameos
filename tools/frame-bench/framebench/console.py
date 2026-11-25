@@ -103,7 +103,9 @@ class Console:
                     if pat.search(text):
                         self.incidents.append(Incident(now, kind, text[:400]))
                         break
-                if BOOT_PATTERN.search(text):
+                # One ESP32 boot prints two of these lines (`rst:0x...` and the
+                # bootloader's banner) a few ms apart: count it once.
+                if BOOT_PATTERN.search(text) and not (self.boots and now - self.boots[-1] < 5):
                     self.boots.append(now)
                 self.lines.put((now, text))
                 self.history.append((now, text))

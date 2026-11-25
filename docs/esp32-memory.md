@@ -290,6 +290,43 @@ shapes and its edge list beside the partitions (about 380 KB of the largest
 fill above): making the partitions straight from the shapes is the next
 400 KB.
 
+## A hand-drawn stroke is outlined a batch at a time (2026-11-25)
+
+The Sketchbook could not open on the Waveshare AMOLED 1.75 (8 MB) once the
+hardware bench had drawn in it: about 5 MB gone within 2.8 s, `render
+aborted: out of memory`, a restart, and the same at every switch back. Its
+saved drawing is 21 KB of state: 94 strokes, two of them long (a 988-point
+pen line and a 713-point eraser line 21.4 px wide). Rendered on the host at
+466x466, the eraser line alone held 6 MB.
+
+pixie outlined a stroke as a rectangle per segment of the flattened path
+and, for a round join, a whole circle at every point: a hand-drawn line is
+thousands of points once its curves are flattened, and each circle at that
+width is dozens of points. The fill then held every edge of the outline at
+once, since a subpath was never split.
+
+- **A round join is one small polygon** (`addRoundJoin` in `paths.nim`): the
+  arc on the outer side of the turn and the same arc across the circle,
+  both half a pixel wider, so it holds both rectangles' ends. The
+  rectangles and these cover what the circles did (a point near the line is
+  near a segment or nearest a point, and then in that point's outer arc),
+  and it lies within the old circle. Joins that only met the rectangles
+  edge to edge left the rasterizer's rounding along each edge, 1/255 to
+  5/255 short inside the stroke: `test_stroke_round_joins.nim` checks every
+  pixel well inside a long stroke is solid.
+- **An opaque stroke is filled 256 outline polygons at a time**
+  (`strokeShapes`' `flush`, `strokeBatchPolygons`), one subpath or many,
+  the last segment's again in the next batch so the two meet inside one
+  fill. A translucent stroke stays one fill.
+
+| the saved drawing, 466x466 (host) | before | now |
+|---|---|---|
+| most held during the render | 9.7 MB | 3.8 MB (a blank drawing: 2.7) |
+| the render | 524 ms | 163 ms |
+| on the AMOLED | out of memory, restart | opens; 4.15 MB free after |
+
+3,000 short roads (a map's strokes) take 50 ms as before (55).
+
 ## A fetch's body is its own string (2026-11-24)
 
 The Browser sample on a reTerminal Sticky (8 MB, 3.8 MB of PSRAM free with

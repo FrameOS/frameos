@@ -4784,6 +4784,15 @@ static void client_task(void *arg)
                 fos_scenes_apply_pending_selection();
             }
         }
+        /* A boot's first pass made its round trips here, its picture waiting
+         * for what they brought; the link task has them from its first
+         * render on. Decided again only at the next pass, the link stayed off
+         * for the scene's whole interval after every boot: a minute without
+         * a poll after a restart on a clock, fifteen on a scene that sleeps
+         * that long (the hardware bench, 2026-11-25). */
+        if (!s_link_on && housekeeping) {
+            s_link_on = fos_backend_link_on(s_link_task != NULL, deep_sleep_now, s_render_attempts);
+        }
         /* An animation samples with the frame it logs in full, every ten
          * seconds: a sample is three heap walks and a line the provider's
          * Metrics panel stores, and once a second was 3,600 an hour. A pass

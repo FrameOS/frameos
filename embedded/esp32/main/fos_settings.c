@@ -164,7 +164,14 @@ static void settings_restart_task(void *arg)
     int64_t deadline = esp_timer_get_time() + 180 * 1000000LL;
     while (fos_voice_busy() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(250));
     vTaskDelay(pdMS_TO_TICKS(2000)); /* the release's render starts within this */
-    while (fos_client_render_in_flight() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(250));
+    /* No render starts from here on, and the one in flight ends: an
+     * animation renders all but a few ms of every frame, and a gap looked
+     * for every 250 ms held the restart 22 s on a SenseCAP Indicator at 24
+     * fps (the hardware bench, 2026-11-25). The notice is still drawn: the
+     * render task serves it while held. */
+    int64_t left_ms = (deadline - esp_timer_get_time()) / 1000;
+    fos_client_hold_render(left_ms > 10000 ? (uint32_t)left_ms : 10000);
+    while (fos_client_render_in_flight() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(20));
     fos_restart_notice("Restarting...");
     esp_restart();
 }
