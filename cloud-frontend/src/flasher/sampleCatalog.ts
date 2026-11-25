@@ -1,0 +1,199 @@
+import { keyFlagNamespace, sceneAccessFlags } from '../../../frontend/src/utils/sceneAccess'
+import { sceneNeeds, type SceneNeed } from '../../../frontend/src/utils/sceneNeeds'
+import { storeCategoryShelves } from '../../../frontend/src/utils/storeCategories'
+
+// The samples flash.frameos.net offers a standalone ESP32 (cloud/docs/flasher.md
+// "A standalone frame"): every sample of repo/scenes the store carries that can
+// run on such a frame. cloud-frontend/build.mjs runs this over the repo at build
+// time and writes a light index (this file's FlasherSample, no scene JSON) and
+// one file of scenes per sample, fetched only for the samples picked.
+//
+// What a standalone frame cannot run is read from the scenes themselves, never
+// from a list of names: a layout (it shows nothing of its own), a scene that
+// needs a Raspberry Pi (`linux`: a program on the frame; `video`: ffmpeg), and a
+// scene whose apps read an account's key (`key:<service>`, sceneAccess.ts): a
+// frame with no plane is given no keys.
+
+/** One sample as build.mjs reads it from repo/scenes. */
+export interface FlasherSampleSource {
+  /** The sample's folder name, which is its template name. */
+  name: string
+  description: string
+  scenes: Record<string, unknown>[]
+}
+
+/** One sample the flasher offers. */
+export interface FlasherSample {
+  name: string
+  description: string
+  /** Its scenes' `settings.category` (the first one that names one), else "Other". */
+  category: string
+  /** What its scenes need of the frame (sceneNeeds.ts), `round` left out. */
+  needs: SceneNeed[]
+  /** Its scenes as the board is sent them: compact JSON, in bytes. */
+  bytes: number
+  /** How many scenes it adds. */
+  scenes: number
+  /** Where its scenes are served, relative to the index. */
+  file: string
+  /** The Scene store: always on the frame, so it can install the rest itself. */
+  store: boolean
+}
+
+export type FlasherSampleLeftOut = 'layout' | 'pi' | 'video' | 'key' | 'empty'
+
+export interface FlasherSampleIndex {
+  samples: FlasherSample[]
+  /** What was left out and why, for the build's log and the tests. */
+  leftOut: { name: string; why: FlasherSampleLeftOut }[]
+}
+
+/** The Scene store's scene id (repo/scenes/samples/Scene store). */
+export const SCENE_STORE_ID = 'scene-store'
+
+export const OTHER_CATEGORY = 'Other'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function settingsOf(scene: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(scene.settings) ? scene.settings : {}
+}
+
+function isLayout(scene: Record<string, unknown>): boolean {
+  return settingsOf(scene).isLayout === true
+}
+
+// A sample that plays a video as one thing among many, which the data cannot
+// tell from a video player: Files opens every kind of file, and its viewer
+// says it cannot play a video on an ESP32 (docs/video.md).
+const VIDEO_AMONG_OTHERS = new Set(['Files'])
+
+/** Why a sample is not offered to a standalone frame, or null when it is. */
+export function flasherSampleLeftOut(source: FlasherSampleSource): FlasherSampleLeftOut | null {
+  const shown = source.scenes.filter((scene) => !isLayout(scene))
+  if (source.scenes.length === 0) {
+    return 'empty'
+  }
+  if (shown.length === 0) {
+    return 'layout'
+  }
+  const needs = sceneNeeds(source.scenes)
+  if (needs.includes('linux')) {
+    return 'pi'
+  }
+  if (needs.includes('video') && !VIDEO_AMONG_OTHERS.has(source.name)) {
+    return 'video'
+  }
+  const flags = sceneAccessFlags(source.scenes)
+  if (flags.includes('shell')) {
+    return 'pi'
+  }
+  if (flags.some((flag) => keyFlagNamespace(flag) !== null)) {
+    return 'key'
+  }
+  return null
+}
+
+/** The file a sample's scenes are served at: its name, made safe for a URL. */
+export function flasherSampleFile(name: string): string {
+  const slug = name
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7e]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return `${slug || 'sample'}.json`
+}
+
+/** The JSON a sample's scenes go to the board as: compact. */
+export function flasherScenesJson(scenes: readonly Record<string, unknown>[]): string {
+  return JSON.stringify(scenes)
+}
+
+function categoryOf(scenes: readonly Record<string, unknown>[]): string {
+  for (const scene of scenes) {
+    const category = settingsOf(scene).category
+    if (typeof category === 'string' && category.trim()) {
+      return category.trim()
+    }
+  }
+  return OTHER_CATEGORY
+}
+
+/**
+ * Where a category goes in the list: "System" first (the frame's own tools, as
+ * the scene switcher puts them), then the store's shelves in their order, then
+ * any other name, "Other" last.
+ */
+export function flasherCategoryRank(category: string): number {
+  if (category === 'System') {
+    return -1
+  }
+  const shelf = storeCategoryShelves.findIndex((entry) => entry.title === category)
+  if (shelf >= 0) {
+    return shelf
+  }
+  return category === OTHER_CATEGORY ? storeCategoryShelves.length + 1 : storeCategoryShelves.length
+}
+
+export function compareFlasherCategories(a: string, b: string): number {
+  return flasherCategoryRank(a) - flasherCategoryRank(b) || a.localeCompare(b)
+}
+
+/**
+ * The flasher's index of `sources`: the Scene store first, then by category and
+ * name. Throws when two offered samples share a scene id (picked together they
+ * would be one scene) or when there is no Scene store (a frame could install
+ * nothing).
+ */
+export function flasherSampleIndex(sources: readonly FlasherSampleSource[]): FlasherSampleIndex {
+  const samples: FlasherSample[] = []
+  const leftOut: FlasherSampleIndex['leftOut'] = []
+  const ids = new Map<string, string>()
+  const files = new Set<string>()
+  for (const source of sources) {
+    const why = flasherSampleLeftOut(source)
+    if (why) {
+      leftOut.push({ name: source.name, why })
+      continue
+    }
+    for (const scene of source.scenes) {
+      const id = typeof scene.id === 'string' ? scene.id : ''
+      if (!id) {
+        throw new Error(`flasher sample "${source.name}" has a scene with no id`)
+      }
+      const other = ids.get(id)
+      if (other !== undefined) {
+        throw new Error(`flasher samples "${other}" and "${source.name}" share the scene id "${id}"`)
+      }
+      ids.set(id, source.name)
+    }
+    const file = flasherSampleFile(source.name)
+    if (files.has(file)) {
+      throw new Error(`two flasher samples are served as ${file}`)
+    }
+    files.add(file)
+    samples.push({
+      name: source.name,
+      description: source.description,
+      category: categoryOf(source.scenes.filter((scene) => !isLayout(scene))),
+      needs: sceneNeeds(source.scenes).filter((need) => need !== 'round'),
+      bytes: new TextEncoder().encode(flasherScenesJson(source.scenes)).byteLength,
+      scenes: source.scenes.length,
+      file,
+      store: source.scenes.some((scene) => scene.id === SCENE_STORE_ID),
+    })
+  }
+  if (!samples.some((sample) => sample.store)) {
+    throw new Error('the flasher offers no Scene store sample')
+  }
+  samples.sort(
+    (a, b) =>
+      Number(b.store) - Number(a.store) ||
+      compareFlasherCategories(a.category, b.category) ||
+      a.name.localeCompare(b.name)
+  )
+  return { samples, leftOut }
+}

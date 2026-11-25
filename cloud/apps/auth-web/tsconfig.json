@@ -51,6 +51,8 @@
     // legacy workspace components (bare JSX namespace, pre-strict typing).
     // Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/embedded-flash-shared.test.ts",
+    // The same file again, for how a set goes over the console after a flash.
+    "src/test/shared-spa/usb-scenes-upload-plan.test.ts",
     // Same story: mounts EmbeddedReleaseFlasher, whose import graph reaches
     // the legacy workspace components through framesModel.
     // Vitest still runs it; only tsc leaves it out.

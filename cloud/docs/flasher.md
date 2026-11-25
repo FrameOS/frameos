@@ -28,7 +28,7 @@ manifests are its planes' routes, and it has none.
 
 - **cloud-frontend's second entry**, `cloud-frontend/src/flasher` (built by
   `build.mjs` next to the frames SPA into `dist/flasher.html`, with the
-  starter samples in `dist/flasher-scenes.json`), served by auth-web's
+  samples to start with in `dist/flasher-scenes/`), served by auth-web's
   `app/flash/route.ts`. `src/lib/surfaces.ts` serves it at the root of
   `FRAMEOS_FLASHER_APP_URL` (production: `flash.frameos.net`) the way the
   playground is served (`docs/playground.md`: the proxy marks the request,
@@ -155,8 +155,46 @@ told). A C3 or a Pico is a thin client and needs a plane to draw for it. The
 console gets `set hardware` (or `set panel`), a carrier board's panel, the
 preset's rotation, `hostname`, `time_zone`, then the Wi-Fi; no `backend`, no
 `cloud_url`. A board with no login set refuses its HTTP API's writes, so none
-is set. The starter samples are `build.mjs`'s `flasherStarterTemplates`; the
-first picked scene that is not the Scene store is marked `default`.
+is set.
+
+### The scenes to start with
+
+Every repo sample (`repo/scenes/samples` and `gallery`) that a standalone
+ESP32 can run, ticked one by one: `src/flasher/sampleCatalog.ts` reads that
+from the scenes, never from a list of names. A layout is left out (it shows
+nothing of its own), and so is a scene that needs a Pi (`linux` or `video` in
+`sceneNeeds.ts`, `shell` in `sceneAccess.ts`; Files is the one exception, its
+video viewer one thing among many) or reads an account's key (`key:<service>`:
+a frame with no plane is given none). `build.mjs` bundles the module, runs it
+over the repo and writes `flasher-scenes/index.json` (about 25 KB for 101
+samples: names, categories, needs, sizes) and one file of scenes per sample
+(4 MB in all), which the page fetches only for the samples picked, starting
+when Flash is clicked. Two samples with one scene id fail the build.
+
+The list is grouped by category ("System" first, then the store's shelves),
+with a search. The Scene store is always on the frame and cannot be unticked.
+A scene that needs a fast screen cannot be ticked for e-paper. Presets tick a
+set (`presetPicks` in `standalone.ts`): "A few to start" (a short list by
+taste: a clock and the weather, plus the frame's tools on a touch board),
+"Interactive LCD scenes" (what needs `touch`, `keys` or `fast`), "Best for
+e-paper" (none of those), "Everything" and "Only the Scene store". A preset
+follows the board picked after it; a tick by hand ends that. A preset fills
+the board while it has room and says how many did not fit; a set picked by
+hand that the board cannot take is refused before the flash: more than 128
+scenes, or more than 70% of the layout's `/state` (1 MB on 8 MB of flash, 8
+MB on 16, 24 MB on 32; a board the flasher has no preset for counts as 8 MB).
+The page says how long the scenes take over the cable (about 11 KB a second).
+
+A set over 512 KB goes as the scenes that fit one `upload-scenes` (the board
+holds a whole set in memory up to `SCENES_HELD_MAX_BYTES`), then the rest a
+scene at a time with `scene-put` (`uploadScenesOverUsbAfterFlash`, which the
+backend's flasher runs too).
+
+On a board that takes taps (its firmware event map swipes: `fos_board.c`
+`k_event_maps`, pinned by `flasher-standalone.test.ts`) no scene is marked
+`default`, so with no scene of its own choosing it opens on the scene
+switcher, its home. On a board of keys the first picked scene that is not the
+Scene store is marked `default`: a clock, not the shop.
 
 ## Deploying
 
