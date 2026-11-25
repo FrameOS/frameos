@@ -134,6 +134,66 @@ static void test_the_keys_bound_three_times(void)
     CHECK(fos_voice_binding_triple_labels("", labels, 4) == 0, "no map, no keys");
 }
 
+#define EDGE(edge, emit) "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"" edge "\"},\"emit\":\"" emit "\",\"as\":{}}"
+
+static void test_the_way_to_the_frame_page(void)
+{
+    char way[64];
+    /* The Sticky's preset: its keys first, the edge swipes after. The
+     * settings' swipe wins over the AI key's thrice, which is the list. */
+    const char *sticky =
+        "[{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\",\"as\":{}},"
+        "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\",\"as\":{}}," EDGE(
+            "bottom", "sceneSwitcher") "," EDGE("top", "sceneSettings") "]";
+    CHECK(fos_voice_binding_page_way(sticky, way, sizeof(way)) == FOS_VOICE_PAGE_GEAR, "the panel, then its gear");
+    CHECK(strcmp(way, "swipe down from the top") == 0, "got %s", way);
+
+    /* No settings rule: the list's, the first in the map. The AI key reads
+     * as the Action key, its third press as thrice. */
+    const char *no_settings =
+        "[{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\",\"as\":{}}," EDGE(
+            "bottom", "sceneSwitcher") "]";
+    CHECK(fos_voice_binding_page_way(no_settings, way, sizeof(way)) == FOS_VOICE_PAGE_GEAR, "the list, then its gear");
+    CHECK(strcmp(way, "press the Action key thrice") == 0, "got %s", way);
+    CHECK(fos_voice_binding_page_way("[" EDGE("bottom", "sceneSwitcher") "]", way, sizeof(way)) == FOS_VOICE_PAGE_GEAR &&
+              strcmp(way, "swipe up from the bottom") == 0,
+          "got %s", way);
+
+    /* Straight onto the frame page: no gear to tap. */
+    CHECK(fos_voice_binding_page_way("[{\"event\":\"button\",\"match\":{\"label\":\"KEY1\",\"action\":\"doublePress\"},"
+                                     "\"emit\":\"sceneSettings\",\"as\":{\"page\":\"frame\"}}," EDGE("left", "back") "]",
+                                     way, sizeof(way)) == FOS_VOICE_PAGE_OPEN,
+          "page frame opens it");
+    CHECK(strcmp(way, "press the KEY1 key twice") == 0, "got %s", way);
+    CHECK(fos_voice_binding_page_way("[{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"},"
+                                     "\"emit\":\"sceneSettings\",\"as\":{}}," EDGE("right", "forward") "]",
+                                     way, sizeof(way)) == FOS_VOICE_PAGE_GEAR &&
+              strcmp(way, "hold the UP key") == 0,
+          "got %s", way);
+
+    /* A board of keys alone (the reTerminal E1002's): the gear wants a
+     * finger, so a key's rule is no way there. */
+    CHECK(fos_voice_binding_page_way("[{\"event\":\"button\",\"match\":{\"label\":\"REFRESH\",\"action\":\"doublePress\"},"
+                                     "\"emit\":\"sceneSwitcher\",\"as\":{}}," VOICE_REFRESH "]",
+                                     way, sizeof(way)) == FOS_VOICE_PAGE_NONE,
+          "keys alone");
+    CHECK(way[0] == '\0', "no words, got %s", way);
+
+    /* Nothing to put into words, no map, a broken one. */
+    CHECK(fos_voice_binding_page_way("[{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"middle\"},\"emit\":\"sceneSettings\"}]",
+                                     way, sizeof(way)) == FOS_VOICE_PAGE_NONE,
+          "an edge it does not know");
+    CHECK(fos_voice_binding_page_way("[" ARROWS "]", way, sizeof(way)) == FOS_VOICE_PAGE_NONE, "no such rule");
+    CHECK(fos_voice_binding_page_way("", way, sizeof(way)) == FOS_VOICE_PAGE_NONE, "no map");
+    CHECK(fos_voice_binding_page_way("{", way, sizeof(way)) == FOS_VOICE_PAGE_NONE, "unparsable");
+    CHECK(fos_voice_binding_page_way(NULL, way, sizeof(way)) == FOS_VOICE_PAGE_NONE, "null");
+
+    /* Cut to the room given, never past it. */
+    char small[8];
+    CHECK(fos_voice_binding_page_way(sticky, small, sizeof(small)) == FOS_VOICE_PAGE_GEAR, "cut, still a way");
+    CHECK(strlen(small) == sizeof(small) - 1, "cut to %zu, got %zu", sizeof(small) - 1, strlen(small));
+}
+
 int main(void)
 {
     test_the_reterminal_map();
@@ -141,6 +201,7 @@ int main(void)
     test_the_first_matching_rule_wins();
     test_other_rules_and_keys();
     test_the_keys_bound_three_times();
+    test_the_way_to_the_frame_page();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

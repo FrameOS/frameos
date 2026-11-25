@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <strings.h> /* strcasecmp: POSIX, not in <string.h> under strict C11 (glibc) */
 
@@ -78,4 +79,85 @@ size_t fos_voice_binding_triple_labels(const char *event_map_json, char labels[]
                                        size_t max)
 {
     return bound_labels(event_map_json, FOS_BUTTON_ACTION_TRIPLE_PRESS, false, NULL, labels, max);
+}
+
+static const char *text_of(const cJSON *object, const char *key)
+{
+    const cJSON *item = cJSON_GetObjectItem(object, key);
+    return cJSON_IsString(item) ? item->valuestring : "";
+}
+
+/* What a person does to fire `rule`, in a few words; false for a trigger
+ * this does not put into words. */
+static bool rule_words(const cJSON *rule, char *out, size_t out_len)
+{
+    const cJSON *match = cJSON_GetObjectItem(rule, "match");
+    if (!cJSON_IsObject(match)) return false;
+    const char *event = text_of(rule, "event");
+    if (strcmp(event, FOS_EVENT_EDGE_SWIPE) == 0) {
+        static const char *const edges[][2] = {
+            {"top", "swipe down from the top"},
+            {"bottom", "swipe up from the bottom"},
+            {"left", "swipe in from the left edge"},
+            {"right", "swipe in from the right edge"},
+        };
+        const char *edge = text_of(match, "edge");
+        for (size_t i = 0; i < sizeof(edges) / sizeof(edges[0]); i++) {
+            if (strcmp(edge, edges[i][0]) == 0) {
+                snprintf(out, out_len, "%s", edges[i][1]);
+                return true;
+            }
+        }
+        return false;
+    }
+    if (strcmp(event, FOS_EVENT_BUTTON) != 0) return false;
+    const char *label = text_of(match, "label");
+    if (!label[0]) return false;
+    if (strcasecmp(label, "AI") == 0) label = "Action";
+    const char *action = text_of(match, "action");
+    const char *verb = "press";
+    const char *count = "";
+    if (strcmp(action, FOS_BUTTON_ACTION_LONG_PRESS) == 0) {
+        verb = "hold";
+    } else if (strcmp(action, FOS_BUTTON_ACTION_DOUBLE_PRESS) == 0) {
+        count = " twice";
+    } else if (strcmp(action, FOS_BUTTON_ACTION_TRIPLE_PRESS) == 0) {
+        count = " thrice";
+    } else if (action[0] && strcmp(action, FOS_BUTTON_ACTION_PRESS) != 0) {
+        return false;
+    }
+    snprintf(out, out_len, "%s the %s key%s", verb, label, count);
+    return true;
+}
+
+fos_voice_page_way_t fos_voice_binding_page_way(const char *event_map_json, char *out, size_t out_len)
+{
+    if (out_len) out[0] = '\0';
+    if (!event_map_json || !event_map_json[0] || out_len == 0) return FOS_VOICE_PAGE_NONE;
+    cJSON *rules = cJSON_Parse(event_map_json);
+    if (!cJSON_IsArray(rules)) {
+        cJSON_Delete(rules);
+        return FOS_VOICE_PAGE_NONE;
+    }
+    bool touch = false;
+    const cJSON *rule;
+    cJSON_ArrayForEach(rule, rules) {
+        if (cJSON_IsObject(rule) && strcmp(text_of(rule, "event"), FOS_EVENT_BUTTON) != 0) touch = true;
+    }
+    fos_voice_page_way_t way = FOS_VOICE_PAGE_NONE;
+    /* The panel first, then the list: each one's first rule put into words. */
+    const char *const emits[] = {FOS_EVENT_SCENE_SETTINGS, FOS_EVENT_SCENE_SWITCHER};
+    for (size_t e = 0; e < 2 && way == FOS_VOICE_PAGE_NONE; e++) {
+        cJSON_ArrayForEach(rule, rules) {
+            if (!cJSON_IsObject(rule) || strcmp(text_of(rule, "emit"), emits[e]) != 0) continue;
+            if (!touch && strcmp(text_of(rule, "event"), FOS_EVENT_BUTTON) == 0) continue;
+            if (!rule_words(rule, out, out_len)) continue;
+            const cJSON *as = cJSON_GetObjectItem(rule, "as");
+            way = e == 0 && strcmp(text_of(as, "page"), "frame") == 0 ? FOS_VOICE_PAGE_OPEN : FOS_VOICE_PAGE_GEAR;
+            break;
+        }
+    }
+    if (way == FOS_VOICE_PAGE_NONE) out[0] = '\0';
+    cJSON_Delete(rules);
+    return way;
 }
