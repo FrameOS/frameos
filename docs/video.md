@@ -184,6 +184,10 @@ and the canvas plays the video everywhere else, as it always did:
   under what the frame draws over the scenes go off; after it, the rest may
   show. No frame of a plane is ever on the glass over what the new picture
   put there.
+  Such a pass is the video's own clock, which nobody waits for: it puts no
+  loading mark up (`videoOnPlane`), which would take every plane off (a Pi
+  Zero's pass takes about the mark's 200 ms: a 360p video played 15.9 frames
+  a second instead of 24 until 2026-11-25).
 - **Back to the canvas.** A video under the UI again (the Video player's
   controls) relaunches in the canvas with the plane's frame copied into its
   image first, so the picture does not step back; the plane goes once that
