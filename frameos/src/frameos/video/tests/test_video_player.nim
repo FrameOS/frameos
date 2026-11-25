@@ -31,6 +31,12 @@ if haveFfmpeg:
     "-map \"[v]\" -pix_fmt yuv420p -c:v mpeg4 -g 20 -sc_threshold 1000000000 " & quoteShell(keyed))
   doAssert made.exitCode == 0, made.output
 
+# The same two seconds in H.264, where ffmpeg can make it (libx264): the
+# codec the ISP path takes.
+let h264Clip = dir / "clip-h264.mp4"
+let haveH264 = haveFfmpeg and execCmdEx("ffmpeg -hide_banner -loglevel error -y -f lavfi -i " &
+  "color=c=blue:size=320x180:rate=10:duration=2 -pix_fmt yuv420p -c:v libx264 " & quoteShell(h264Clip)).exitCode == 0
+
 proc fileSource(path: string): VideoSource =
   VideoSource(input: path)
 
@@ -292,6 +298,30 @@ suite "video player":
       check fallback.count == 1 and not fallback.busy
       check "made no frame" in fallback.reason
       check hardwareFailed("mpeg4") # ffmpeg's own played it: the hardware's fault
+      player.close()
+
+  test "the ISP path, its devices not there, gives way to ffmpeg's decoders and is not blamed":
+    if not haveH264:
+      skip()
+    else:
+      setDecodeCapsForTest(DecodeCaps(v4l2Decoders: @["h264_v4l2m2m"], v4l2Device: dir / "no-video10",
+        ispDevice: dir / "no-video12"))
+      defer: setDecodeCapsForTest(DecodeCaps())
+      let player = newVideoPlayer(fileSource(h264Clip), "clip-h264.mp4", loop = false, maxFps = 30, startAt = 0)
+      discard player.playUntil(200, 100, vfContain, nil, 30,
+        proc(p: VideoPlayer): bool = p.state == "ended")
+      check player.state == "ended"
+      check player.image.blue
+      check player.status.decoder == "software"
+      # The ISP path (no decoder device to open), then ffmpeg's V4L2 decoder
+      # (none either), then ffmpeg's own.
+      check player.fallbacks() == 2
+      let last = player.lastFallback()
+      check last.decoder == "h264_v4l2m2m" and last.to == "software"
+      # ffmpeg's hardware decoder did not play it either: the path is not to
+      # blame for this runtime, the codec's hardware is.
+      check not ispFailed()
+      check hardwareFailed("h264")
       player.close()
 
   test "a slow decoder starts at the keyframe before the time asked for, and says that time":
