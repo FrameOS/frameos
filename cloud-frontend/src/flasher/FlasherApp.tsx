@@ -111,14 +111,14 @@ function JobCard(): JSX.Element | null {
       <div className={mutedClass}>
         {mode === 'bridge' ? (
           <>
-            The FrameOS page at <strong className="text-[color:var(--tool-strong)]">{jobFrom}</strong> asked this
-            flasher to do its USB part. Check what will be written: nothing happens until you click below and pick the
-            board’s port.
+            Your FrameOS backend at <strong className="text-[color:var(--tool-strong)]">{jobFrom}</strong> sent this
+            frame here to be set up over USB. Check the details below. Nothing is written until you click the button and
+            choose the board’s port.
           </>
         ) : (
           <>
-            From the setup file <strong className="text-[color:var(--tool-strong)]">{fromHost}</strong>. Nothing happens
-            until you click below and pick the board’s port.
+            From the setup file <strong className="text-[color:var(--tool-strong)]">{fromHost}</strong>. Nothing is
+            written until you click the button and choose the board’s port.
           </>
         )}
       </div>
@@ -127,25 +127,27 @@ function JobCard(): JSX.Element | null {
         <dd className="font-semibold">
           {setup.frame.name} (#{String(setup.frame.id)})
         </dd>
-        <dt className="frame-tool-muted">Calls home to</dt>
-        <dd className="break-all font-semibold">{backend ?? 'nothing (no backend set)'}</dd>
+        <dt className="frame-tool-muted">Backend</dt>
+        <dd className="break-all font-semibold">{backend ?? 'None'}</dd>
         {backend && mode === 'bridge' && jobFrom && !backend.startsWith(jobFrom) ? (
           <>
             <dt />
             <dd className="frame-tool-muted text-xs leading-5">
-              That is not the address of the page that asked. Fine when the frame reaches its backend by another name;
-              stop here if you did not expect it.
+              This is not the address of the page that sent the frame here. That is fine if the frame reaches your
+              backend by another address. If you did not expect it, stop here.
             </dd>
           </>
         ) : null}
         <dt className="frame-tool-muted">Board</dt>
         <dd className="font-semibold">{board ?? setup.provisioning.platform ?? 'as configured'}</dd>
         <dt className="frame-tool-muted">Wi-Fi</dt>
-        <dd className="font-semibold">{setup.provisioning.wifi?.ssid ?? 'none (the board asks on its first boot)'}</dd>
+        <dd className="font-semibold">
+          {setup.provisioning.wifi?.ssid ?? 'None (the frame asks for it when it starts)'}
+        </dd>
         <dt className="frame-tool-muted">Scenes</dt>
         <dd className="font-semibold">{setup.scenes.length}</dd>
         <dt className="frame-tool-muted">Settings</dt>
-        <dd className="font-semibold">{settings.length} console settings</dd>
+        <dd className="font-semibold">{settings.length}</dd>
       </dl>
       {setup.provisioning.warnings.length > 0 ? (
         <ul className="frame-tool-muted list-disc space-y-0.5 pl-5 text-xs leading-5">
@@ -171,7 +173,7 @@ function JobCard(): JSX.Element | null {
             </button>
           ) : job.kind === 'update' ? (
             <button type="button" className={primaryButtonClass} disabled={busy || !usbSupported} onClick={runUpdate}>
-              Update the firmware, keep its settings
+              Update firmware, keep settings
             </button>
           ) : (
             <button type="button" className={primaryButtonClass} disabled={busy || !usbSupported} onClick={runSetup}>
@@ -185,7 +187,7 @@ function JobCard(): JSX.Element | null {
               disabled={busy || !usbSupported}
               onClick={runProvision}
             >
-              Only send the settings (it runs FrameOS already)
+              Only send settings (FrameOS is already installed)
             </button>
           ) : null}
           {mode === 'file' ? (
@@ -205,8 +207,8 @@ function JobCard(): JSX.Element | null {
       )}
       {pico ? (
         <div className="frame-tool-muted text-xs leading-5">
-          A Pico takes its firmware as a .uf2 file dropped onto its BOOTSEL drive, from the backend. Once it runs
-          FrameOS, plug it in here to send its settings.
+          A Pico cannot be flashed from this page. Copy the .uf2 file from your backend onto its BOOTSEL drive first,
+          then plug it in here to send its settings.
         </div>
       ) : null}
       <RunStatus />
@@ -264,9 +266,7 @@ function ScenePicker(): JSX.Element {
           </div>
           <div className="frame-tool-muted text-xs leading-5">
             {presetShown ? presetShown.description : 'Picked by hand.'}
-            {noRoom.length > 0
-              ? ` ${noRoom.length} more of this set did not fit the room the board has for scenes.`
-              : ''}
+            {noRoom.length > 0 ? ` ${noRoom.length} more from this set do not fit on the board.` : ''}
           </div>
           <div
             className={clsx('text-sm', scenesIssue ? 'font-semibold text-red-500' : 'text-[color:var(--tool-strong)]')}
@@ -274,9 +274,9 @@ function ScenePicker(): JSX.Element {
             {scenesIssue ??
               `${chosenScenes.scenes} scene${chosenScenes.scenes === 1 ? '' : 's'}, ${sceneBytesLabel(
                 chosenScenes.bytes
-              )}: the board has room for about ${sceneBytesLabel(sceneRoom.bytes)}${
-                sceneRoom.assumed ? ' (counted for an 8 MB board)' : ''
-              }. They take ${uploadTimeLabel(uploadSeconds)} over the cable.`}
+              )}. The board has room for about ${sceneBytesLabel(sceneRoom.bytes)}${
+                sceneRoom.assumed ? ' (if it has 8 MB of flash)' : ''
+              }. Sending them takes ${uploadTimeLabel(uploadSeconds)}.`}
           </div>
           <input
             className={inputClass}
@@ -287,13 +287,15 @@ function ScenePicker(): JSX.Element {
             onChange={(event) => setQuery(event.target.value)}
           />
           <div className="frameos-inset max-h-[28rem] space-y-4 overflow-y-auto rounded-xl border p-3">
-            {sampleGroups.length === 0 ? <div className="frame-tool-muted text-sm">No scene matches that.</div> : null}
+            {sampleGroups.length === 0 ? (
+              <div className="frame-tool-muted text-sm">No scenes match your search.</div>
+            ) : null}
             {sampleGroups.map((group) => (
               <section key={group.category} className="space-y-1.5">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
                   {group.category}
                 </h3>
-                {group.rows.map(({ sample, picked, cover }) => (
+                {group.rows.map(({ sample, picked, cover, picture }) => (
                   <label
                     key={sample.name}
                     className={clsx(
@@ -314,17 +316,23 @@ function ScenePicker(): JSX.Element {
                         href={cover.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        title={`${sample.name} on the Scene store`}
+                        title={`${sample.title} on the Scene store`}
                         className="mt-0.5 block h-12 w-16 shrink-0 overflow-hidden rounded-md border border-[color:var(--tool-border)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                       >
-                        <img src={cover.image} alt="" loading="lazy" className="h-full w-full object-cover" />
+                        {picture ? (
+                          <img src={picture} alt="" loading="lazy" className="h-full w-full object-cover" />
+                        ) : null}
                       </a>
+                    ) : picture ? (
+                      <span className="mt-0.5 block h-12 w-16 shrink-0 overflow-hidden rounded-md border border-[color:var(--tool-border)]">
+                        <img src={picture} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      </span>
                     ) : (
                       <span className="mt-0.5 block h-12 w-16 shrink-0" aria-hidden />
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="font-semibold text-[color:var(--tool-strong)]">{sample.name}</span>
+                        <span className="font-semibold text-[color:var(--tool-strong)]">{sample.title}</span>
                         {SHOWN_NEEDS.filter((need) => sample.needs.includes(need)).map((need) => (
                           <span key={need} className="frame-tool-muted text-[11px]">
                             {sceneNeedLabel(need)}
@@ -332,7 +340,7 @@ function ScenePicker(): JSX.Element {
                         ))}
                       </span>
                       <span className="frame-tool-muted line-clamp-2 block text-xs leading-5">
-                        {sample.store ? 'Always on the frame: it installs the rest. ' : ''}
+                        {sample.store ? 'Always included. Use it on the frame to install more scenes. ' : ''}
                         {sample.description}
                       </span>
                     </span>
@@ -369,17 +377,18 @@ function StandaloneCard(): JSX.Element {
   const chosen = standaloneBoard(board)
   const custom = board === CUSTOM_BOARD
   return (
-    <Card title="A standalone frame">
+    <Card title="Set up a standalone frame">
       <div className={mutedClass}>
-        An ESP32-S3 frame of its own: no backend and no account. It shows the scenes you pick here, installs more from
-        the Scene store scene on the frame, and keeps working offline. Its settings change over USB, from this page.
+        For an ESP32-S3 frame that runs by itself, with no backend or account. It shows the scenes you pick below and
+        works offline. Add more scenes later from the Scene store on the frame. To change its settings, plug it in and
+        come back to this page.
       </div>
       <Field
         label="Board"
         hint={
           chosen?.touch
-            ? 'A touch board: you can also join a network later on its own screen (swipe down from the top, then the gear).'
-            : 'ESP32-C3 boards and Inky Frames need a backend to draw for them, so they are not here.'
+            ? 'This board has a touch screen, so you can also set up Wi-Fi on the frame later: swipe down from the top, then tap the gear.'
+            : 'ESP32-C3 boards and Inky Frames are not listed: they need a FrameOS backend to draw their scenes.'
         }
       >
         <select className={inputClass} value={board} onChange={(event) => setBoard(event.target.value)}>
@@ -395,7 +404,7 @@ function StandaloneCard(): JSX.Element {
       {custom || chosen?.panelSelectable ? (
         <Field
           label="Panel"
-          hint={custom ? 'The e-paper or display wired to the board.' : 'The panel plugged into the board.'}
+          hint={custom ? 'The e-paper or screen wired to the board.' : 'The panel plugged into the board.'}
         >
           <select className={inputClass} value={choices.panel} onChange={(event) => setPanel(event.target.value)}>
             <option value="">Choose the panel…</option>
@@ -410,12 +419,12 @@ function StandaloneCard(): JSX.Element {
       {custom ? (
         <Field
           label="Pins (optional)"
-          hint="Empty keeps the Seeed XIAO ESP32-S3 wiring. Otherwise: rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1"
+          hint="Leave empty for the Seeed XIAO ESP32-S3 wiring. Otherwise list each pin's GPIO, like rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1"
         >
           <input className={inputClass} value={pins} onChange={(event) => setPins(event.target.value)} />
         </Field>
       ) : null}
-      <Field label="Name" hint={`On your network as ${standaloneHostname(name)}.`}>
+      <Field label="Name" hint={`The frame shows up on your network as ${standaloneHostname(name)}.`}>
         <input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} />
       </Field>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -437,7 +446,7 @@ function StandaloneCard(): JSX.Element {
           />
         </Field>
       </div>
-      <Field label="Time zone" hint="From this browser. An IANA name such as Europe/Brussels.">
+      <Field label="Time zone" hint="Filled in from this browser. Use a name like Europe/Brussels.">
         <input
           className={inputClass}
           value={timeZone ?? ''}
@@ -457,9 +466,9 @@ function StandaloneCard(): JSX.Element {
         {standaloneIssue && board ? <span className="frame-tool-muted text-xs">{standaloneIssue}</span> : null}
       </div>
       <div className="frame-tool-muted text-xs leading-5">
-        Writes the latest signed FrameOS release for the board’s chip and flash size (checked against the release
-        signature first), then sends these settings, your Wi-Fi and the scenes over the cable. A new board formats its
-        storage on its first boot: up to a few minutes on a 32 MB board. Keep it plugged in.
+        This installs the latest FrameOS release on the board, after checking its signature, then sends these settings,
+        your Wi-Fi and the scenes over the cable. On its first start the board prepares its storage, which can take a
+        few minutes. Keep it plugged in until it is done.
       </div>
       <RunStatus />
     </Card>
@@ -476,7 +485,7 @@ function SetupFileCard(): JSX.Element {
     }
   }
   return (
-    <Card title="A setup file from your backend">
+    <Card title="Set up a frame from your FrameOS backend">
       <div
         className="frameos-inset rounded-xl border border-dashed p-5 text-center"
         onDragOver={(event: DragEvent) => event.preventDefault()}
@@ -486,11 +495,11 @@ function SetupFileCard(): JSX.Element {
         }}
       >
         <div className={mutedClass}>
-          Drop a <code>.frameos-setup.json</code> here (a frame’s USB card on your FrameOS backend: Download setup
-          file), or
+          Drop the frame’s <code>.frameos-setup.json</code> file here. To get it, open the frame’s USB card on your
+          FrameOS backend and click Download setup file.
         </div>
         <label className={clsx(secondaryButtonClass, 'mt-2 cursor-pointer')}>
-          choose the file
+          Choose the file
           <input
             type="file"
             accept=".json,application/json"
@@ -501,8 +510,8 @@ function SetupFileCard(): JSX.Element {
         </label>
       </div>
       <div className="frame-tool-muted text-xs leading-5">
-        The file stays in this browser: it is read here and its settings go over the USB cable, nowhere else. It holds
-        the frame’s API key and Wi-Fi password, so delete it when you are done.
+        The file is only read in this browser, and its settings go straight to the board over the cable. It contains the
+        frame’s API key and Wi-Fi password, so delete it when you are done.
       </div>
       {problem ? <div className="text-sm font-semibold text-red-500">{problem}</div> : null}
     </Card>
@@ -517,8 +526,8 @@ function BoardToolsCard(): JSX.Element {
   return (
     <Card title="Board tools">
       <div className={mutedClass}>
-        For a board that already runs FrameOS: read its log, give it another Wi-Fi network, update its firmware while it
-        keeps its settings and scenes.
+        For a board that already runs FrameOS: see its log, change its Wi-Fi, or update its firmware without losing its
+        settings and scenes.
       </div>
       <div className="flex flex-wrap gap-2">
         <button
@@ -600,8 +609,8 @@ export function FlasherApp(): JSX.Element {
             <h1 className="text-2xl font-semibold text-[color:var(--tool-strong)]">FrameOS flasher</h1>
           </div>
           <p className={mutedClass}>
-            Put FrameOS on an ESP32 frame from this browser, over a USB cable. No account: a frame of its own, or one
-            your own FrameOS backend set up. Guide:{' '}
+            Install FrameOS on an ESP32 frame from this browser, over a USB cable. No account needed: set up a frame
+            that runs by itself, or one for a FrameOS backend you host. Guide:{' '}
             <a className="underline" href="https://frameos.net/guide/flasher" target="_blank" rel="noreferrer">
               frameos.net/guide/flasher
             </a>
@@ -633,9 +642,13 @@ export function FlasherApp(): JSX.Element {
         {!job && mode !== 'bridge' ? <SetupFileCard /> : null}
         <BoardToolsCard />
         <footer className="frame-tool-muted pb-8 text-xs leading-5">
-          Every image this page writes is a FrameOS release, checked against the release signing key in this browser
-          first. Your settings and Wi-Fi go from this page to the board over the cable. Besides the page and its sample
-          scenes it fetches only that firmware: from FrameOS, or from your backend when your backend opened it.{' '}
+          This page only installs official FrameOS releases, and checks each one’s signature in your browser first. Your
+          settings and Wi-Fi password go straight to the board over the cable and are never uploaded. It counts visits
+          and flashes without cookies and without anything that identifies you.{' '}
+          <a className="underline" href="https://cloud.frameos.net/legal/privacy">
+            Privacy
+          </a>
+          {' · '}
           <a className="underline" href="https://github.com/FrameOS/frameos">
             Source
           </a>

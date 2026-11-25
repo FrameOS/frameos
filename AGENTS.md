@@ -1392,8 +1392,10 @@
   cloud-frontend's second entry (`src/flasher`, `build.mjs`), served by
   auth-web's `app/flash` and host-routed like the playground
   (`surfaces.ts`, `FRAMEOS_FLASHER_APP_URL`); its host strips the cookie and
-  serves no API but `GET /api/frames/firmware` and the store's public listing
-  and covers, for the scene list's thumbnails (`flasherServesApi`).
+  serves no API but `GET /api/frames/firmware`, the store's public listing
+  and covers, and `POST /api/flasher/events`, its anonymous counts
+  (`flasherServesApi`; `cloud/docs/flasher.md` "What is counted": a new
+  property goes on the route's list and on the privacy page too).
 - **One engine**: `scenes/workspace/embeddedFlashRun.ts` (`flashAndSetUpBoard`,
   `updateBoardKeepingSettings`, `provisionOverUsb`) is what the backend's
   USB buttons and the flasher run. A fix to how a board is flashed goes

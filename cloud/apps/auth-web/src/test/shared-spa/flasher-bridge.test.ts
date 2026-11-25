@@ -216,7 +216,7 @@ describe("listenForBridgeJob", () => {
       () => undefined,
       (problem) => problems.push(problem)
     );
-    expect(problems[0]).toMatch(/not opened by a FrameOS page/);
+    expect(problems[0]).toMatch(/not opened by a FrameOS backend/);
   });
 });
 

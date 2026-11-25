@@ -48,7 +48,9 @@ manifests are its planes' routes, and it has none.
   bearer off every request on the flasher host, and the host answers 404 for
   every API path but `GET /api/frames/firmware` and the store's public
   listing and covers (`/api/store/repository.json`,
-  `/api/store/scenes/<id>/image`, the scene list's thumbnails)
+  `/api/store/scenes/<id>/image`: the scene list's store pages, and a cover
+  for a sample with no picture of its own), and its one write,
+  `POST /api/flasher/events` ("What is counted" below)
   (`flasherServesApi`). A new thing the page needs from the API goes on that
   list, and must be fine to serve to anyone.
 - **No sign-in, no cross-origin opener policy.** It is no app origin
@@ -168,17 +170,22 @@ nothing of its own), and so is a scene that needs a Pi (`linux` or `video` in
 `sceneNeeds.ts`, `shell` in `sceneAccess.ts`; Files is the one exception, its
 video viewer one thing among many) or reads an account's key (`key:<service>`:
 a frame with no plane is given none). `build.mjs` bundles the module, runs it
-over the repo and writes `flasher-scenes/index.json` (about 25 KB for 101
+over the repo and writes `flasher-scenes/index.json` (about 30 KB for 101
 samples: names, categories, needs, sizes) and one file of scenes per sample
 (4 MB in all), which the page fetches only for the samples picked, starting
-when Flash is clicked. Two samples with one scene id fail the build.
+when Flash is clicked, and beside each its picture (template.json `image`) as
+a 128 x 96 JPEG made with sharp (230 KB for all of them; the originals are
+17 MB). Two samples with one scene id fail the build.
 
 The list is grouped by category ("System" first, then the store's shelves),
 with a search. The Scene store is always on the frame and cannot be unticked.
 Any scene may go on any panel: a fast scene runs on e-paper too (the DVD logo
-on a fast e-paper, the kitchen sink), so nothing is held back by it. A sample
-the store carries has its cover as a thumbnail, which opens its store page in
-a new tab (the store's public listing, read by name). Presets tick a
+on a fast e-paper, the kitchen sink), so nothing is held back by it. Every
+sample shows that picture and is listed by its template name, what the scene
+is called (a folder can be named otherwise: `Books` is the ePub reader; the
+folder stays what a pick and a preset name). One the store carries opens its
+store page in a new tab (the store's public listing, matched by that name,
+`sampleList.ts`). Presets tick a
 set (`presetPicks` in `standalone.ts`): "A few to start" (a short list by
 taste: a clock and the weather, plus the frame's tools on a touch board),
 "Interactive LCD scenes" (what needs `touch`, `keys` or `fast`), "Best for
@@ -201,6 +208,35 @@ On a board that takes taps (its firmware event map swipes: `fos_board.c`
 `default`, so with no scene of its own choosing it opens on the scene
 switcher, its home. On a board of keys the first picked scene that is not the
 Scene store is marked `default`: a clock, not the shop.
+
+## What is counted
+
+The page counts how it is used, for questions like how many boards are
+flashed a day, which ones, and how often a flash fails. It stores nothing on
+the device and needs no consent: no cookies, no local storage, no PostHog
+script. `src/flasher/flasherEvents.ts` sends each event to
+`POST /api/flasher/events` on the page's own host (`keepalive`, never
+awaited), and auth-web's route (`app/api/flasher/events/route.ts`) passes it
+to PostHog with `capturePostHogEvent`, with no person profile
+(`$process_person_profile: false`), no location (`$geoip_disable`) and
+`surface: "flasher"`. It is rate limited per address.
+
+| Event | When | Properties |
+| --- | --- | --- |
+| `flasher opened` | the page loads | `entry` (`page`, `bridge`), `usb` (`yes`, `blocked`, `no`), `board` and `board_from_link` for a `?board=` link |
+| `flasher flash started` | a flash, update or settings run is clicked, after the form's checks | `kind` (`setup`, `update`, `provision`), `mode` (`standalone`, `bridge`, `file`), `board`, `panel`, `platform`, `preset` (`hand` when picked by hand), `scenes`, `scene_bytes` |
+| `flasher flash finished` | that run ends | the same, plus `outcome` (`done`, `written`, `failed`, `cancelled`), `seconds`, and for a setup that is done the detected `platform` and `flash_size` |
+| `flasher tool used` | Connect, Set Wi-Fi or Restart in Board tools | `tool` (`connect`, `wifi`, `restart`), `outcome` |
+
+The distinct id is a random visit id made when the page loads and kept only
+in its memory: one visit's events belong together, and nothing links one
+visit to the next, so "people" in PostHog are visits. A port prompt the person
+closes is a `cancelled` run. The route keeps only what
+`src/lib/flasher-events.ts` lists (an event name, a few words per property,
+catalog keys, counts) and answers 400 to anything else: never a frame's name,
+a Wi-Fi network, a backend's address or a scene. A new property goes on that
+list and on the privacy page's flasher paragraph (`app/legal/privacy`), which
+says what is collected.
 
 ## Deploying
 

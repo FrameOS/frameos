@@ -183,13 +183,19 @@ export function isPlaygroundHost(requestUrl: URL, requestHost?: string | null) {
 // (frontend/src/utils/flasherBridge.ts). So its host is no door to the API
 // either: it answers what the flasher asks for — the release listing, the
 // firmware and its signature (app/api/frames/firmware), and the store's
-// public listing and its covers, which its scene list shows as thumbnails —
-// and proxy.ts takes the cookie and any bearer off those too.
+// public listing and its covers, which its scene list links to and falls back
+// on — and takes one write, its anonymous counts (app/api/flasher/events,
+// which reads no session). proxy.ts takes the cookie and any bearer off all
+// of them.
 const flasherApiReads = ["/api/frames/firmware", "/api/store/repository.json"] as const;
 const flasherStoreCover = /^\/api\/store\/scenes\/[0-9a-f-]{36}\/image$/;
+const flasherEventsPath = "/api/flasher/events";
 
 export function flasherServesApi(pathname: string, method = "GET") {
   const verb = method.toUpperCase();
+  if (verb === "POST") {
+    return pathname === flasherEventsPath;
+  }
   return (
     (verb === "GET" || verb === "HEAD") &&
     ((flasherApiReads as readonly string[]).includes(pathname) || flasherStoreCover.test(pathname))

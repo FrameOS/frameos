@@ -104,7 +104,7 @@ export function pinSpecProblem(spec: string): string | null {
   if (!trimmed) {
     return null
   }
-  return PIN_SPEC.test(trimmed) ? null : 'Pins are written as rst=5,dc=4,cs=3,… (a name, an equals sign, a GPIO).'
+  return PIN_SPEC.test(trimmed) ? null : 'Write each pin as name=GPIO, separated by commas, like rst=5,dc=4,cs=3.'
 }
 
 export interface StandaloneChoices {
@@ -122,10 +122,10 @@ export interface StandaloneChoices {
 export function standaloneProblem(choices: StandaloneChoices): string | null {
   const board = standaloneBoard(choices.board)
   if (!board && choices.board !== CUSTOM_BOARD) {
-    return 'Pick the board.'
+    return 'Choose a board.'
   }
   if (choices.board === CUSTOM_BOARD && !choices.panel) {
-    return 'Pick the panel wired to the board.'
+    return 'Choose the panel.'
   }
   if (choices.board === CUSTOM_BOARD) {
     const problem = pinSpecProblem(choices.pins)
@@ -134,7 +134,7 @@ export function standaloneProblem(choices: StandaloneChoices): string | null {
     }
   }
   if (choices.wifi && /[\r\n\0]/.test(choices.wifi.ssid + choices.wifi.password)) {
-    return 'The Wi-Fi name or password has a character the board cannot take.'
+    return 'The Wi-Fi name or password has a character the board cannot use.'
   }
   return null
 }
@@ -238,45 +238,6 @@ export function standaloneSceneRoom(kind: StandaloneBoardKind): StandaloneSceneR
   }
 }
 
-/** A sample's store listing, for its thumbnail: its cover and its page. */
-export interface StoreCover {
-  /** The cover, as the flasher's own host serves it (surfaces.ts flasherServesApi). */
-  image: string
-  /** The scene's store page, opened in a new tab. */
-  url: string
-}
-
-/** The store's public listing (/api/store/repository.json), read for the
- * covers of the samples it carries, by name in lower case. A sample the store
- * does not carry has none; a listing that is not one gives none. */
-export function storeCoversFromListing(listing: unknown, listingUrl: string): Record<string, StoreCover> {
-  const covers: Record<string, StoreCover> = {}
-  const templates =
-    listing && typeof listing === 'object' ? (listing as Record<string, unknown>).templates : undefined
-  if (!Array.isArray(templates)) {
-    return covers
-  }
-  for (const entry of templates) {
-    if (!entry || typeof entry !== 'object') {
-      continue
-    }
-    const { name, image, url } = entry as Record<string, unknown>
-    if (typeof name !== 'string' || typeof image !== 'string' || typeof url !== 'string') {
-      continue
-    }
-    try {
-      const page = new URL(url)
-      if (page.protocol !== 'https:' && page.protocol !== 'http:') {
-        continue
-      }
-      covers[name.toLowerCase()] = { image: new URL(image, listingUrl).href, url: page.href }
-    } catch {
-      // Not a URL: no thumbnail for it.
-    }
-  }
-  return covers
-}
-
 /** The console reads at 115200 baud on a USB-UART bridge: about 11 KB a second. */
 const USB_UPLOAD_BYTES_PER_SECOND = 11 * 1024
 /** What each scene sent alone costs on top (`scene-put`: the slot file and the index written). */
@@ -300,20 +261,20 @@ export const scenePresets: ScenePreset[] = [
   {
     key: 'starter',
     label: 'A few to start',
-    description: 'The Scene store, a clock, the weather and the frame’s tools.',
+    description: 'The Scene store, a clock, the weather and a few tools.',
   },
   {
     key: 'interactive',
     label: 'Interactive LCD scenes',
-    description: 'Everything you tap, type into or play: games, tools and animations.',
+    description: 'Scenes you tap, type into or play: games, tools and animations.',
   },
   {
     key: 'paper',
     label: 'Best for e-paper',
-    description: 'Scenes to look at that change slowly: clocks, calendars, weather, photos and art.',
+    description: 'Scenes that change slowly: clocks, calendars, weather, photos and art.',
   },
   { key: 'everything', label: 'Everything', description: 'Every scene that runs on this board.' },
-  { key: 'store', label: 'Only the Scene store', description: 'Install the rest from the frame itself.' },
+  { key: 'store', label: 'Only the Scene store', description: 'Install scenes later from the frame itself.' },
 ]
 
 /** The frame's own tools (the scene switcher puts them first). */
@@ -428,13 +389,13 @@ export function pickedScenesProblem(
     return null
   }
   if (picked.scenes > STANDALONE_MAX_SCENES) {
-    return `A frame keeps up to ${STANDALONE_MAX_SCENES} scenes: untick some.`
+    return `A frame holds at most ${STANDALONE_MAX_SCENES} scenes. Untick some.`
   }
   const room = standaloneSceneRoom(kind)
   if (picked.bytes > room.bytes) {
-    return `The board keeps about ${sceneBytesLabel(room.bytes)} of scenes${
-      room.assumed ? ' (counted for an 8 MB board)' : ''
-    }, and these are ${sceneBytesLabel(picked.bytes)}: untick some.`
+    return `These scenes take ${sceneBytesLabel(picked.bytes)}, but the board has room for about ${sceneBytesLabel(
+      room.bytes
+    )}${room.assumed ? ' (if it has 8 MB of flash)' : ''}. Untick some.`
   }
   return null
 }

@@ -267,6 +267,9 @@ importers:
       postcss-preset-env:
         specifier: ^9.5.13
         version: 9.6.0(postcss@8.5.26)
+      sharp:
+        specifier: ^0.35.5
+        version: 0.35.5(@types/node@25.9.5)
       tailwindcss:
         specifier: ^3.4.1
         version: 3.4.19(tsx@4.23.1)

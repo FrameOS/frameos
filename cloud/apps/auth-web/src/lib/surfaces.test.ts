@@ -88,6 +88,11 @@ describe("surface routing", () => {
     });
     expect(flasherServesApi("/api/frames/firmware", "GET")).toBe(true);
     expect(flasherServesApi("/api/frames/firmware", "HEAD")).toBe(true);
+    // Its one write: the anonymous counts. Only as a POST, and no other path.
+    expect(flasherServesApi("/api/flasher/events", "POST")).toBe(true);
+    expect(resolveSurfaceRoute(new URL("https://flash.frameos.net/api/flasher/events"), null, "POST")).toBeUndefined();
+    expect(flasherServesApi("/api/flasher/events", "GET")).toBe(false);
+    expect(flasherServesApi("/api/flasher/events/x", "POST")).toBe(false);
     // The cloud host is not the flasher's: its API stays as it is.
     expect(resolveSurfaceRoute(new URL("https://cloud.frameos.net/api/frames"))).toBeUndefined();
   });

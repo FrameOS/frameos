@@ -39,7 +39,15 @@ import { FrameSetupError, parseFrameSetupDocument, type FlasherJob } from '../..
 import { webSerialNeedsFlasher, webSerialSupported } from '../../../frontend/src/utils/webSerial'
 import { browserTimeZone } from '../lib/browser-time-zone'
 import { bridgeFirmwareSource, listenForBridgeJob, type BridgeConnection } from './bridgeClient'
-import { compareFlasherCategories, type FlasherSample } from './sampleCatalog'
+import { sendFlasherEvent, type FlasherEventProperties } from './flasherEvents'
+import { type FlasherSample } from './sampleCatalog'
+import {
+  FLASHER_SAMPLES_URL,
+  flasherSampleGroups,
+  storeCoversFromListing,
+  type FlasherSampleGroup,
+  type StoreCover,
+} from './sampleList'
 import {
   CUSTOM_BOARD,
   boardFromQuery,
@@ -54,9 +62,7 @@ import {
   standaloneProvisioning,
   standaloneSceneRoom,
   starterSceneSet,
-  storeCoversFromListing,
   type PickedScenes,
-  type StoreCover,
   type ScenePresetKey,
   type StandaloneBoardKind,
   type StandaloneChoices,
@@ -79,9 +85,6 @@ export function publicFirmwareSource(): FirmwareSource {
   return httpFirmwareSource((url, init) => fetch(url, init), { requireSignature: true })
 }
 
-// The samples a standalone frame can start with (build.mjs, sampleCatalog.ts):
-// the index, and each sample's scenes beside it, fetched once it is picked.
-const SAMPLES_URL = '/frames-app/flasher-scenes/'
 /** The store's public listing, which the flasher's host serves (surfaces.ts). */
 const STORE_LISTING_PATH = '/api/store/repository.json'
 
@@ -101,51 +104,8 @@ interface FlasherCache {
   connection?: BridgeConnection | null
   /** Each picked sample's scenes, fetched once. */
   sampleScenes?: Map<string, Promise<Record<string, unknown>[]>>
-}
-
-/** One sample as the list shows it. */
-export interface FlasherSampleRow {
-  sample: FlasherSample
-  picked: boolean
-  /** Its store cover and page, when the store carries it. */
-  cover: StoreCover | null
-}
-
-export interface FlasherSampleGroup {
-  category: string
-  rows: FlasherSampleRow[]
-}
-
-function matchesQuery(sample: FlasherSample, query: string): boolean {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const text = `${sample.name} ${sample.description} ${sample.category}`.toLowerCase()
-  return words.every((word) => text.includes(word))
-}
-
-/** The list: by category, the Scene store's group first, a search applied. */
-export function flasherSampleGroups(
-  samples: FlasherSample[] | null,
-  picked: readonly string[],
-  covers: Record<string, StoreCover>,
-  query: string
-): FlasherSampleGroup[] {
-  const groups = new Map<string, FlasherSampleRow[]>()
-  for (const sample of samples ?? []) {
-    if (query.trim() && !matchesQuery(sample, query)) {
-      continue
-    }
-    const rows = groups.get(sample.category) ?? []
-    rows.push({
-      sample,
-      picked: sample.store || picked.includes(sample.name),
-      cover: covers[sample.name.toLowerCase()] ?? null,
-    })
-    groups.set(sample.category, rows)
-  }
-  const hasStore = (group: FlasherSampleGroup): number => Number(group.rows.some((row) => row.sample.store))
-  return [...groups.entries()]
-    .map(([category, rows]) => ({ category, rows }))
-    .sort((a, b) => hasStore(b) - hasStore(a) || compareFlasherCategories(a.category, b.category))
+  /** The run being counted (flasherEvents.ts): when it started and what it was. */
+  run?: { startedAt: number; properties: FlasherEventProperties }
 }
 
 // This package runs no kea-typegen (frontend/ does), so the logic type is
@@ -413,13 +373,13 @@ export const flasherLogic = kea<flasherLogicType>([
       state.sampleScenes ??= new Map()
       let scenes = state.sampleScenes.get(sample.file)
       if (!scenes) {
-        scenes = fetch(`${SAMPLES_URL}${encodeURIComponent(sample.file)}`).then(async (response) => {
+        scenes = fetch(`${FLASHER_SAMPLES_URL}${encodeURIComponent(sample.file)}`).then(async (response) => {
           if (!response.ok) {
-            throw new Error(`Could not fetch the scenes of ${sample.name} (HTTP ${response.status}).`)
+            throw new Error(`Could not fetch the scenes of ${sample.title} (HTTP ${response.status}).`)
           }
           const json: unknown = await response.json()
           if (!Array.isArray(json)) {
-            throw new Error(`The scenes of ${sample.name} are not a list.`)
+            throw new Error(`The scenes of ${sample.title} are not a list.`)
           }
           return json as Record<string, unknown>[]
         })
@@ -429,11 +389,59 @@ export const flasherLogic = kea<flasherLogicType>([
       return scenes
     }
 
-    const finish = (kind: FlasherRunResult['kind'], outcome: 'done' | 'written' | 'failed' | 'cancelled'): void => {
+    // What a run is counted with: the board and how many scenes, never a
+    // name, a network or an address.
+    const runFacts = (kind: FlasherRunResult['kind']): FlasherEventProperties => {
+      const job = values.job
+      if (job) {
+        const settings = job.setup.provisioning.settings
+        return {
+          kind,
+          mode: values.mode,
+          board: settings.find((setting) => setting.key === 'hardware')?.value,
+          panel: settings.find((setting) => setting.key === 'panel')?.value,
+          platform: job.setup.provisioning.platform,
+          scenes: job.setup.scenes.length,
+        }
+      }
+      if (kind !== 'setup') {
+        return { kind, mode: values.mode }
+      }
+      const panelPicked = values.board === CUSTOM_BOARD || standaloneBoard(values.board)?.panelSelectable
+      return {
+        kind,
+        mode: values.mode,
+        board: values.board || undefined,
+        panel: panelPicked ? values.choices.panel || undefined : undefined,
+        preset: values.preset ?? 'hand',
+        scenes: values.chosenScenes.scenes,
+        scene_bytes: values.chosenScenes.bytes,
+      }
+    }
+
+    const started = (kind: FlasherRunResult['kind']): void => {
+      const properties = runFacts(kind)
+      state.run = { startedAt: Date.now(), properties }
+      sendFlasherEvent('flasher flash started', properties)
+    }
+
+    const finish = (
+      kind: FlasherRunResult['kind'],
+      outcome: 'done' | 'written' | 'failed' | 'cancelled',
+      found: FlasherEventProperties = {}
+    ): void => {
       if (outcome !== 'cancelled') {
         actions.setLastRun({ kind, ok: outcome === 'done' })
       }
       state.connection?.send({ type: 'finished', outcome, message: values.message })
+      const run = state.run
+      state.run = undefined
+      sendFlasherEvent('flasher flash finished', {
+        ...(run?.properties ?? { kind, mode: values.mode }),
+        outcome,
+        seconds: run ? (Date.now() - run.startedAt) / 1000 : undefined,
+        ...found,
+      })
     }
 
     return {
@@ -461,7 +469,7 @@ export const flasherLogic = kea<flasherLogicType>([
       },
       loadSamples: async () => {
         try {
-          const response = await fetch(`${SAMPLES_URL}index.json`)
+          const response = await fetch(`${FLASHER_SAMPLES_URL}index.json`)
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`)
           }
@@ -531,6 +539,7 @@ export const flasherLogic = kea<flasherLogicType>([
           fetched.catch(() => undefined)
           scenes = async () => starterSceneSet(await fetched, kind)
         }
+        started('setup')
         const connection = state.connection
         const outcome = await flashAndSetUpBoard(reporter(), {
           firmware: firmware(),
@@ -554,13 +563,18 @@ export const flasherLogic = kea<flasherLogicType>([
             actions.setToolMessage(notice)
           }
         }
-        finish('setup', outcome.status)
+        finish(
+          'setup',
+          outcome.status,
+          outcome.status === 'done' ? { platform: outcome.platform, flash_size: outcome.detectedFlashSize } : {}
+        )
         if (outcome.status === 'done' || outcome.status === 'written') {
           await keepListening(outcome.port)
         }
       },
       runUpdate: async () => {
         const job = values.job
+        started('update')
         const outcome = await updateBoardKeepingSettings(reporter(), {
           firmware: firmware(),
           knownChip: job?.setup.provisioning.platform.startsWith('esp32-')
@@ -581,9 +595,10 @@ export const flasherLogic = kea<flasherLogicType>([
         if (!job) {
           return
         }
+        started('provision')
         const report = reporter()
         report.setPhase('connecting')
-        report.setMessage('Selecting USB port')
+        report.setMessage('Choose the board’s port in the browser’s prompt.')
         let port: SerialPort | null = null
         try {
           port = await takeFlashPort(FLASHER_FRAME_ID)
@@ -599,16 +614,16 @@ export const flasherLogic = kea<flasherLogicType>([
           const sent = plan.settings.length - skipped.length
           const wifi = job.withWifi ? plan.wifi : null
           if (wifi) {
-            report.setMessage(`Sent ${sent} settings to the board; joining ${wifi.ssid} and restarting it.`)
+            report.setMessage(`Sent ${sent} settings. The board is restarting and joining ${wifi.ssid}.`)
             await usbProvisionWifi(FLASHER_FRAME_ID, wifi.ssid, wifi.password, { port, keepOpen: true })
           } else {
-            report.setMessage(`Sent ${sent} settings to the board; restarting it to apply them.`)
+            report.setMessage(`Sent ${sent} settings. The board is restarting to use them.`)
             await usbRestart(FLASHER_FRAME_ID, { port, keepOpen: true })
           }
           const notice = skippedSettingsNotice(skipped)
           report.setPhase('done')
           report.setMessage(
-            `Sent ${sent} settings to the board. It rebooted and is ${wifi ? `joining ${wifi.ssid}` : 'applying them'}.${
+            `Sent ${sent} settings. The board restarted${wifi ? ` and is joining ${wifi.ssid}` : ' with them'}.${
               notice ? ` ${notice}` : ''
             }`
           )
@@ -622,12 +637,13 @@ export const flasherLogic = kea<flasherLogicType>([
             return
           }
           report.setPhase('error')
-          report.setMessage(`Applying the frame's settings failed: ${detail}`)
+          report.setMessage(`Could not send the settings: ${detail}`)
           finish('provision', 'failed')
         }
       },
       connectBoard: async () => {
         actions.setToolMessage(null)
+        sendFlasherEvent('flasher tool used', { tool: 'connect' })
         await startEmbeddedUsbLogStream(FLASHER_FRAME_ID)
       },
       disconnectBoard: async () => {
@@ -645,8 +661,10 @@ export const flasherLogic = kea<flasherLogicType>([
           // The password field empties on this action; the value went with it.
           await usbProvisionWifi(FLASHER_FRAME_ID, ssid, values.toolPassword || '', { promptIfNeeded: true })
           actions.setToolMessage(`Wi-Fi saved. The board restarted and is joining “${ssid}”.`)
+          sendFlasherEvent('flasher tool used', { tool: 'wifi', outcome: 'done' })
         } catch (error) {
           actions.setToolMessage(`Could not set the Wi-Fi: ${errorDetail(error)}`)
+          sendFlasherEvent('flasher tool used', { tool: 'wifi', outcome: 'failed' })
         } finally {
           actions.setToolBusy(false)
         }
@@ -657,21 +675,29 @@ export const flasherLogic = kea<flasherLogicType>([
         try {
           await usbRestart(FLASHER_FRAME_ID, { promptIfNeeded: true })
           actions.setToolMessage('The board is restarting.')
+          sendFlasherEvent('flasher tool used', { tool: 'restart', outcome: 'done' })
         } catch (error) {
           actions.setToolMessage(`Could not restart the board: ${errorDetail(error)}`)
+          sendFlasherEvent('flasher tool used', { tool: 'restart', outcome: 'failed' })
         } finally {
           actions.setToolBusy(false)
         }
       },
     }
   }),
-  afterMount(({ actions, cache }) => {
+  afterMount(({ actions, values, cache }) => {
     const state = cache as FlasherCache
     actions.setTimeZone(browserTimeZone() ?? null)
     const board = boardFromQuery(window.location.search)
     if (board) {
       actions.setBoard(board)
     }
+    sendFlasherEvent('flasher opened', {
+      entry: new URLSearchParams(window.location.search).get('bridge') === '1' ? 'bridge' : 'page',
+      usb: values.usbSupported ? 'yes' : values.usbBlockedHere ? 'blocked' : 'no',
+      board: board ?? undefined,
+      board_from_link: Boolean(board),
+    })
     actions.loadSamples()
     actions.loadStoreCovers()
     if (new URLSearchParams(window.location.search).get('bridge') === '1') {

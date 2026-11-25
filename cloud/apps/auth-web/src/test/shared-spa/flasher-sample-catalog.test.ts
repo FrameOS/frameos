@@ -2,7 +2,7 @@
 // (cloud-frontend/src/flasher/sampleCatalog.ts, built into
 // flasher-scenes/index.json by cloud-frontend/build.mjs): every repo sample
 // such a frame can run, read from the scenes themselves.
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -11,13 +11,18 @@ import {
   flasherSampleFile,
   flasherSampleIndex,
   flasherSampleLeftOut,
+  flasherSampleThumb,
   type FlasherSampleSource,
 } from "../../../../../../cloud-frontend/src/flasher/sampleCatalog";
 
 const repoRoot = fileURLToPath(new URL("../../../../../../", import.meta.url));
 
-function source(name: string, scenes: Record<string, unknown>[]): FlasherSampleSource {
-  return { name, description: `${name}.`, scenes };
+function source(
+  name: string,
+  scenes: Record<string, unknown>[],
+  { title = name, hasImage = true }: { title?: string; hasImage?: boolean } = {},
+): FlasherSampleSource {
+  return { name, title, description: `${name}.`, hasImage, scenes };
 }
 
 function app(code: string, permissions?: string[], settings?: string[]): Record<string, unknown> {
@@ -41,7 +46,14 @@ function repoSamples(): FlasherSampleSource[] {
     for (const entry of readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory())) {
       const meta = JSON.parse(readFileSync(join(dir, entry.name, "template.json"), "utf8"));
       const scenes = JSON.parse(readFileSync(join(dir, entry.name, String(meta.scenes ?? "./scenes.json")), "utf8"));
-      sources.push({ name: entry.name, description: String(meta.description ?? ""), scenes });
+      // As cloud-frontend/build.mjs reads them.
+      sources.push({
+        name: entry.name,
+        title: typeof meta.name === "string" ? meta.name : entry.name,
+        description: String(meta.description ?? ""),
+        hasImage: typeof meta.image === "string" && existsSync(join(dir, entry.name, meta.image)),
+        scenes,
+      });
     }
   }
   return sources;
@@ -109,6 +121,23 @@ describe("the flasher's index", () => {
     expect(flasherSampleFile("Weather, painted")).toBe("weather-painted.json");
     expect(flasherSampleFile("2048")).toBe("2048.json");
     expect(flasherSampleFile("Café ☕")).toBe("cafe.json");
+    expect(flasherSampleThumb("Weather, painted")).toBe("weather-painted.jpg");
+  });
+
+  it("lists a sample by what it is called, and by it in its category, with its picture", () => {
+    const index = flasherSampleIndex([
+      source("Scene store", [{ id: "scene-store" }]),
+      // A folder named before its scene was: the list says what the scene is.
+      source("Books", [{ id: "books" }], { title: "ePub reader" }),
+      source("Abacus", [{ id: "abacus" }], { hasImage: false }),
+    ]);
+    expect(index.samples.map((sample) => [sample.name, sample.title, sample.thumb])).toEqual([
+      ["Scene store", "Scene store", "scene-store.jpg"],
+      ["Abacus", "Abacus", null],
+      ["Books", "ePub reader", "books.jpg"],
+    ]);
+    // Picked and served by its folder name, as before.
+    expect(index.samples[2]?.file).toBe("books.json");
   });
 
   it("offers the repo's samples that run on an ESP32 of its own", () => {
@@ -121,7 +150,10 @@ describe("the flasher's index", () => {
     for (const sample of index.samples) {
       expect(sample.needs).not.toContain("linux");
       expect(sample.bytes).toBeLessThan(512 * 1024);
+      // Every sample in the list has a picture, whether the store carries it or not.
+      expect(sample.thumb, sample.name).not.toBeNull();
     }
+    expect(index.samples.find((sample) => sample.name === "Books")?.title).toBe("ePub reader");
     const leftOut = new Map(index.leftOut.map((entry) => [entry.name, entry.why]));
     expect(leftOut.get("Windows 98 layout")).toBe("layout");
     expect(leftOut.get("Video player")).toBe("video");

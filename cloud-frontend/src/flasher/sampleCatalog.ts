@@ -16,15 +16,22 @@ import { storeCategoryShelves } from '../../../frontend/src/utils/storeCategorie
 
 /** One sample as build.mjs reads it from repo/scenes. */
 export interface FlasherSampleSource {
-  /** The sample's folder name, which is its template name. */
+  /** The sample's folder name: what the flasher knows it by (its picks, its file). */
   name: string
+  /** Its template.json name: what the scene is called, here and on the Scene store. */
+  title: string
   description: string
+  /** Whether its template.json names a picture of it that is there. */
+  hasImage: boolean
   scenes: Record<string, unknown>[]
 }
 
 /** One sample the flasher offers. */
 export interface FlasherSample {
+  /** Its folder name: what a pick names. */
   name: string
+  /** What it is called, as the list shows it and the Scene store lists it. */
+  title: string
   description: string
   /** Its scenes' `settings.category` (the first one that names one), else "Other". */
   category: string
@@ -36,6 +43,8 @@ export interface FlasherSample {
   scenes: number
   /** Where its scenes are served, relative to the index. */
   file: string
+  /** Where a small picture of it is served, relative to the index, when it has one. */
+  thumb: string | null
   /** The Scene store: always on the frame, so it can install the rest itself. */
   store: boolean
 }
@@ -107,6 +116,15 @@ export function flasherSampleFile(name: string): string {
   return `${slug || 'sample'}.json`
 }
 
+/** The small picture of a sample build.mjs serves beside its scenes. */
+export function flasherSampleThumb(name: string): string {
+  return flasherSampleFile(name).replace(/\.json$/, '.jpg')
+}
+
+/** The size of that picture: twice the list's 64 x 48 slot. */
+export const FLASHER_THUMB_WIDTH = 128
+export const FLASHER_THUMB_HEIGHT = 96
+
 /** The JSON a sample's scenes go to the board as: compact. */
 export function flasherScenesJson(scenes: readonly Record<string, unknown>[]): string {
   return JSON.stringify(scenes)
@@ -177,12 +195,14 @@ export function flasherSampleIndex(sources: readonly FlasherSampleSource[]): Fla
     files.add(file)
     samples.push({
       name: source.name,
+      title: source.title.trim() || source.name,
       description: source.description,
       category: categoryOf(source.scenes.filter((scene) => !isLayout(scene))),
       needs: sceneNeeds(source.scenes).filter((need) => need !== 'round'),
       bytes: new TextEncoder().encode(flasherScenesJson(source.scenes)).byteLength,
       scenes: source.scenes.length,
       file,
+      thumb: source.hasImage ? flasherSampleThumb(source.name) : null,
       store: source.scenes.some((scene) => scene.id === SCENE_STORE_ID),
     })
   }
@@ -193,7 +213,7 @@ export function flasherSampleIndex(sources: readonly FlasherSampleSource[]): Fla
     (a, b) =>
       Number(b.store) - Number(a.store) ||
       compareFlasherCategories(a.category, b.category) ||
-      a.name.localeCompare(b.name)
+      a.title.localeCompare(b.title)
   )
   return { samples, leftOut }
 }

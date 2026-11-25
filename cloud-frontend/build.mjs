@@ -15,6 +15,7 @@ import { build, context } from 'esbuild'
 import { createRequire } from 'node:module'
 import postcss from 'postcss'
 import postcssPresetEnv from 'postcss-preset-env'
+import sharp from 'sharp'
 import tailwindcss from 'tailwindcss'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -40,7 +41,9 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
 // the next deploy): src/flasher/sampleCatalog.ts decides which can run on such
 // a frame, from the scenes themselves. The page loads the light index
 // (flasher-scenes/index.json) and fetches a sample's scenes only when it is
-// picked (flasher-scenes/<file>).
+// picked (flasher-scenes/<file>). Each sample's own picture (template.json
+// `image`) goes beside them as a small JPEG for the list (flasher-scenes/<thumb>):
+// the originals are 17 MB, some of them 2 MB, for a 64 x 48 slot.
 {
   const bundled = await build({
     absWorkingDir: __dirname,
@@ -63,9 +66,19 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
       const dir = path.join(scenesRoot, shelf, entry.name)
       const meta = JSON.parse(await fs.readFile(path.join(dir, 'template.json'), 'utf8'))
       const scenes = JSON.parse(await fs.readFile(path.join(dir, String(meta.scenes ?? './scenes.json')), 'utf8'))
+      const image = typeof meta.image === 'string' && meta.image ? path.join(dir, meta.image) : null
+      const hasImage =
+        image !== null &&
+        (await fs
+          .stat(image)
+          .then((stat) => stat.isFile())
+          .catch(() => false))
       sources.push({
         name: entry.name,
+        title: typeof meta.name === 'string' ? meta.name : entry.name,
         description: String(meta.description ?? ''),
+        hasImage,
+        image: hasImage ? image : null,
         scenes: Array.isArray(scenes) ? scenes : [],
       })
     }
@@ -74,15 +87,30 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
   const sampleDir = path.join(outputDir, 'flasher-scenes')
   await fs.mkdir(sampleDir, { recursive: true })
   const byName = new Map(sources.map((source) => [source.name, source]))
-  for (const sample of index.samples) {
-    await fs.writeFile(path.join(sampleDir, sample.file), catalog.flasherScenesJson(byName.get(sample.name).scenes))
-  }
+  let thumbBytes = 0
+  await Promise.all(
+    index.samples.map(async (sample) => {
+      const source = byName.get(sample.name)
+      await fs.writeFile(path.join(sampleDir, sample.file), catalog.flasherScenesJson(source.scenes))
+      if (sample.thumb) {
+        const thumb = await sharp(source.image)
+          .rotate()
+          .resize(catalog.FLASHER_THUMB_WIDTH, catalog.FLASHER_THUMB_HEIGHT, { fit: 'cover' })
+          .jpeg({ quality: 75, mozjpeg: true })
+          .toBuffer()
+        await fs.writeFile(path.join(sampleDir, sample.thumb), thumb)
+        thumbBytes += thumb.byteLength
+      }
+    })
+  )
   const indexJson = JSON.stringify({ samples: index.samples })
   await fs.writeFile(path.join(sampleDir, 'index.json'), indexJson)
   const total = index.samples.reduce((sum, sample) => sum + sample.bytes, 0)
   console.log(
     `🧩 flasher: ${index.samples.length} samples (${Math.round(total / 1024)} KB of scenes, index ${Math.round(
       indexJson.length / 1024
+    )} KB, ${index.samples.filter((sample) => sample.thumb).length} pictures in ${Math.round(
+      thumbBytes / 1024
     )} KB), ${index.leftOut.length} left out`
   )
 }

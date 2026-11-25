@@ -13,7 +13,7 @@ export const metadata = { title: "Privacy Policy" };
 // actually requires ("concise, transparent, intelligible... clear and plain
 // language", art. 12(1)) — the dense version is not the compliant one.
 
-const lastUpdated = "11 November 2026";
+const lastUpdated = "25 November 2026";
 
 export default function PrivacyPage() {
   const entity = getLegalEntity();
@@ -146,6 +146,20 @@ export default function PrivacyPage() {
         next, so what we are left holding is an anonymous count. Collecting it
         rests on our <strong>legitimate interest</strong> (art. 6(1)(f)) in
         knowing which pages are worth writing.
+      </p>
+      <p className="copy">
+        The browser flasher at <strong>flash.frameos.net</strong> has no account
+        either and puts nothing on your device. It counts how it is used: that
+        the page was opened, and each flash, firmware update or settings run,
+        with the board model, how many scenes were picked, how long it took and
+        whether it worked. Each visit gets a random identifier that exists only
+        in that page&rsquo;s memory, so nothing links one visit to the next. The
+        counts go through our servers to the same PostHog in the EU, without
+        your IP address and without a location, and never include a
+        frame&rsquo;s name, your Wi-Fi network, a backend&rsquo;s address or a
+        password. Collecting them rests on our{" "}
+        <strong>legitimate interest</strong> (art. 6(1)(f)) in knowing which
+        boards people use and whether flashing works.
       </p>
 
       <h2>Cookies and similar storage</h2>

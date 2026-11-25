@@ -41,7 +41,7 @@ export function listenForBridgeJob(
   const opener = window.opener as Window | null
   if (!opener) {
     onProblem(
-      'This window was not opened by a FrameOS page, so it has nothing to set up. Open it from the frame’s USB card, or drop a setup file below.'
+      'There is nothing to set up: this window was not opened by a FrameOS backend. Open it from the frame’s USB card on your backend.'
     )
     return () => undefined
   }

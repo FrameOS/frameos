@@ -22,9 +22,9 @@ import {
   standaloneProvisioning,
   standaloneSceneRoom,
   starterSceneSet,
-  storeCoversFromListing,
   type StandaloneChoices,
 } from "../../../../../../cloud-frontend/src/flasher/standalone";
+import { storeCoversFromListing } from "../../../../../../cloud-frontend/src/flasher/sampleList";
 
 function choices(overrides: Partial<StandaloneChoices> = {}): StandaloneChoices {
   return {
@@ -102,9 +102,9 @@ describe("standaloneProvisioning", () => {
   });
 
   it("says what is missing", () => {
-    expect(standaloneProblem(choices({ board: "" }))).toMatch(/Pick the board/);
+    expect(standaloneProblem(choices({ board: "" }))).toMatch(/Choose a board/);
     expect(standaloneProblem(choices({ board: CUSTOM_BOARD }))).toMatch(/panel/);
-    expect(standaloneProblem(choices({ board: CUSTOM_BOARD, panel: "EPD_7in5_V2", pins: "rst five" }))).toMatch(/Pins/);
+    expect(standaloneProblem(choices({ board: CUSTOM_BOARD, panel: "EPD_7in5_V2", pins: "rst five" }))).toMatch(/pin as name=GPIO/);
     expect(standaloneProblem(choices({ wifi: { ssid: "Home\nx", password: "" } }))).toMatch(/Wi-Fi/);
     expect(standaloneProblem(choices())).toBeNull();
     expect(pinSpecProblem("")).toBeNull();
@@ -189,12 +189,14 @@ describe("the scenes to start with", () => {
   function sample(name: string, overrides: Partial<FlasherSample> = {}): FlasherSample {
     return {
       name,
+      title: name,
       description: "",
       category: "Clocks & time",
       needs: [],
       bytes: 10 * 1024,
       scenes: 1,
       file: `${name.toLowerCase().replace(/\W+/g, "-")}.json`,
+      thumb: null,
       store: false,
       ...overrides,
     };
@@ -279,13 +281,13 @@ describe("the scenes to start with", () => {
 
   it("refuses a set the board cannot take", () => {
     const tooBig = pickedScenes(samples, ["Big photo", "Clock"]);
-    expect(pickedScenesProblem(tooBig, small, samples)).toMatch(/keeps about 717 KB of scenes.*untick some/);
+    expect(pickedScenesProblem(tooBig, small, samples)).toMatch(/room for about 717 KB.*Untick some/);
     // No panel holds a scene back: the DVD logo runs on a fast e-paper.
     expect(pickedScenesProblem(pickedScenes(samples, ["Star shooter"]), paper, samples)).toBeNull();
     const many = Array.from({ length: 130 }, (_, index) => sample(`Scene ${index}`, { bytes: 1024 }));
     expect(
       pickedScenesProblem(pickedScenes(many, many.map((entry) => entry.name)), paper, many),
-    ).toMatch(/up to 128 scenes/);
+    ).toMatch(/at most 128 scenes/);
     // The store is always among the picked, ticked or not.
     expect(pickedScenes(samples, []).samples.map((entry) => entry.name)).toEqual(["Scene store"]);
   });
