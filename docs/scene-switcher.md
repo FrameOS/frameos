@@ -112,11 +112,14 @@ listing carries the category (`listingItem`'s entries are the same):
 
 It shows them grouped (`grouped`, the same rule as the desktops' JavaScript
 `grouped`, docs/scene-layouts.md "Long lists of scenes"): a category's scenes
-together under a heading with its name, the categories sorted by name with
-case aside (the raw name breaking a tie), each trimmed, and the scenes without
-one, or in a category named "Other" in any case, last under "Other". Within a
-group the scenes keep the list's order. Where no scene has a category there
-are no headings, and the list is as the host gave it. The keys walk the
+together under a heading with its name, "System" first (the frame's own apps:
+the Scene store, Files, the terminal, the code editor, Fonts, the readers, the
+Calculator; the owner's call, 2026-11-25), then the categories sorted by name
+with case aside (the raw name breaking a tie), each trimmed, and the scenes
+without one, or in a category named "Other" in any case, last under "Other".
+Within a group the scenes keep the list's order (the flash.frameos.net
+flasher puts the store first). Where no scene has a category there are no
+headings, and the list is as the host gave it. The keys walk the
 tiles in the order shown. JavaScript lowers every letter
 for the comparison and the Nim lowers A to Z and the Latin-1 capitals
 (`folded`): two categories that differ only in another script's capitals can
@@ -168,10 +171,10 @@ larger.
 - **Categories** are sections, as a file manager's: each starts a row of its
   own under a small name with a thin rule across the row (the owner's call,
   2026-11-22; before, the next category went on in the row the last one
-  ended in). Only a category's first row has the strip its heading sits in. Where headings
-  would be most of the list (fewer than a dozen scenes, or fewer than two a
-  category: `headed`) there are none, and the scenes keep the order by
-  category in one flow.
+  ended in). Only a category's first row has the strip its heading sits in.
+  They show wherever a scene has a category, from a list of one (`headed`;
+  until 2026-11-25 only from a dozen scenes and two a category), and never
+  where none has: no lone "Other" over a list with no categories.
 - **No pictures.** A host's snapshots of its scenes
   (`sceneSwitcherThumbnail`, the Linux runner's) are no longer drawn: the
   icon view is the owner's call (2026-11-21). The hook stays for now.

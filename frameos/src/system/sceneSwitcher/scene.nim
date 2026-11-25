@@ -102,7 +102,7 @@ type
     slow*: bool ## a press cost a refresh last time (panelLook): taps alone
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
     keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close or gear to draw
-    headed*: bool ## the categories have headings (heads): a dozen scenes and more, two a category
+    headed*: bool ## the categories have headings (heads): wherever a scene has one
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
@@ -403,11 +403,21 @@ proc folded(s: string, i: int): int =
   else:
     c
 
+proc isSystemGroup(name: string): bool =
+  ## Whether `name` is the frame's own apps' category, "System" in any case:
+  ## the first group (the store, Files, the terminal, the code editor).
+  result = name.len == 6
+  for i in 0 ..< min(name.len, 6):
+    if (ord(name[i]) or 0x20) != ord("system"[i]):
+      result = false
+
 proc before(a, b: string): bool =
-  ## Whether the category `a` goes before `b`, as `grouped` sorts them: by
-  ## the names with case aside, and by the names themselves when that ties.
+  ## Whether the category `a` goes before `b`, as `grouped` sorts them:
+  ## System first, then by the names with case aside, and by the names
+  ## themselves when that ties.
   var i = 0
-  var decided = false
+  var decided = a.isSystemGroup != b.isSystemGroup
+  result = a.isSystemGroup
   while not decided and i < min(a.len, b.len):
     let x = folded(a, i)
     let y = folded(b, i)
@@ -421,10 +431,11 @@ proc before(a, b: string): bool =
 proc grouped*(entries: seq[SwitcherEntry]): seq[SwitcherEntry] =
   ## `entries` in the order the switcher shows them, which is the desktops'
   ## `grouped` (docs/scene-layouts.md "Long lists of scenes"): each category's scenes
-  ## under it, the categories by name with case aside, then the scenes with
-  ## none (or "Other"); in the list's order within each, and the list as it
-  ## is where no scene has one. Each one's `category` becomes its group's
-  ## name, "" for Other: the first one has a category when any does.
+  ## under it, System first (the frame's own apps), then the categories by
+  ## name with case aside, then the scenes with none (or "Other"); in the
+  ## list's order within each, and the list as it is where no scene has one.
+  ## Each one's `category` becomes its group's name, "" for Other: the first
+  ## one has a category when any does.
   var names: seq[string]
   result = entries
   for i in 0 ..< result.len:
@@ -459,7 +470,9 @@ proc holds(text, part: string): bool =
 
 proc list(self: SceneSwitcherScene) =
   ## The host's scenes, in the order they are drawn, those the search holds
-  ## (by name, category or id), and whether their categories get headings.
+  ## (by name, category or id), and whether their categories get headings:
+  ## wherever a scene has one, even a lone scene, and never where none has
+  ## (a list with no categories is one flow with no heading over it).
   self.entries = grouped(listEntries())
   let query = self.state{"query"}.getStr()
   if query.len > 0:
@@ -468,17 +481,12 @@ proc list(self: SceneSwitcherScene) =
       if entry.name.holds(query) or entry.category.holds(query) or entry.id.holds(query):
         kept.add entry
     self.entries = move(kept)
-  var groups = 0
-  for i in 0 ..< self.entries.len:
-    if i == 0 or self.entries[i].category != self.entries[i - 1].category:
-      inc groups
-  self.headed = self.entries.len >= 12 and self.entries[0].category.len > 0 and 2 * groups <= self.entries.len
+  self.headed = self.entries.len > 0 and self.entries[0].category.len > 0
 
 proc heads*(self: SceneSwitcherScene, index: int): bool =
-  ## Whether the cell at `index` starts a category, a heading above it: never
-  ## where no scene has one, nor where headings would be most of the list
-  ## (`headed`: fewer than a dozen scenes, or fewer than two a category),
-  ## which keeps the order by category without them.
+  ## Whether the cell at `index` starts a category, a heading above it:
+  ## wherever a scene has a category (`headed`), Other's heading over the
+  ## scenes with none after them, and never where no scene has one.
   self.headed and
     (index == 0 or self.entries[index].category != self.entries[index - 1].category)
 

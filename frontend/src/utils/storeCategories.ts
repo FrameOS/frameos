@@ -30,6 +30,7 @@ export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'utilities', title: 'Notes & tools', kind: 'scene' },
   { slug: 'ai', title: 'AI & generative', kind: 'scene' },
   { slug: 'demos', title: 'Demos & examples', kind: 'scene' },
+  { slug: 'system', title: 'System', kind: 'scene' },
   { slug: 'desktops', title: 'Multi app layouts', kind: 'layout' },
   { slug: 'layouts', title: 'Single app layouts', kind: 'layout' },
   { slug: 'devices', title: 'Device layouts', kind: 'layout' },
@@ -51,6 +52,7 @@ export const storeShelfDescriptions: Record<string, string> = {
   utilities: 'To-dos, notes, drawing, and practical helpers like webcams and web page screenshots.',
   ai: 'Scenes that generate fresh images or words with AI on every refresh.',
   demos: 'Small demos, made-up data and test patterns to learn from or remix.',
+  system: "The frame's own apps: the scene store, its files, a terminal, a code editor, fonts, readers and a calculator.",
   desktops: "Desktops that run the frame's scenes side by side, in windows or tiles.",
   layouts: 'Title bars, status lines and picture frames drawn around the one scene that is showing.',
   devices:
