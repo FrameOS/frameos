@@ -41,6 +41,7 @@ import frameos/ui/events
 import frameos/ui/keyboard
 import frameos/frame_settings_hooks
 export frame_settings_hooks
+import frameos/frame_service_keys
 import frameos/scene_store_hooks
 import frameos/ui/theme
 import frameos/ui/tree
@@ -91,6 +92,7 @@ const
   AUnlink = 12 ## asks whether to leave the plane that manages the frame
   AUnlinkNow = 13 ## leaves it (the host's `unlink`), on a second tap
   ACancelUnlink = 14 ## back from asking, nothing done
+  AKeys = 15 ## the service keys typed on the frame (frame_service_keys.nim), on a page of their own
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -114,6 +116,15 @@ const
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
   WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
   WifiAfter = ["", "", "", "?", "\xe2\x80\xa6"]
+  # The service keys the page offers: every field a control plane sends
+  # (apps.nim CloudServiceSettingsFields, which test_scene.nim holds this to).
+  # A field named `url` is the one that is no secret.
+  ServiceKeys* = [("openAI", "apiKey", "OpenAI API key"), ("unsplash", "accessKey", "Unsplash access key"),
+    ("homeAssistant", "url", "Home Assistant URL"), ("homeAssistant", "accessToken", "Home Assistant access token"),
+    ("immich", "url", "Immich server URL"), ("immich", "apiKey", "Immich API key"),
+    ("github", "api_key", "GitHub API key"), ("frameOS", "apiKey", "FrameOS Gallery API key")]
+  KeysNote = "A key typed here stays on this frame and is used instead of the one its control plane " &
+    "sends. An address typed here is sent only keys typed here. Empty a field to remove its key."
 
 var
   # What the last handler did: its number and the text it carried. Read by
@@ -132,9 +143,14 @@ proc str(node: JsonNode, key: string): string {.noinline.} =
 
 # ------------------------------------------------------------------ values
 
+proc onSubPage(self: SceneSettingsScene): bool =
+  ## A page of the frame page's that is a form of its own: the layout's
+  ## settings, the service keys.
+  self.state.str("page") in ["layout", "keys"]
+
 proc form(self: SceneSettingsScene): JsonNode =
-  ## What the page's fields live in: the layout's on its page, else the scene's.
-  result = if self.state.str("page") == "layout": self.state{"layoutForm"} else: self.state
+  ## What the page's fields live in: a sub-page's own, else the scene's.
+  result = if self.onSubPage(): self.state{"pageForm"} else: self.state
 
 proc fieldList(self: SceneSettingsScene): JsonNode =
   result = self.form(){"fields"}
@@ -172,6 +188,9 @@ proc onFrame(self: SceneSettingsScene): bool =
 
 proc onLayoutPage(self: SceneSettingsScene): bool =
   self.state.str("page") == "layout"
+
+proc onKeysPage(self: SceneSettingsScene): bool =
+  self.state.str("page") == "keys"
 
 proc showName(self: SceneSettingsScene, name: string) =
   ## What a layout around it calls this page.
@@ -566,6 +585,13 @@ proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
     forgetUiTarget(self.uiId, SettingsNode)
     frameSettingsApply(changes)
 
+proc openSubPage(self: SceneSettingsScene, page, name: string, form: JsonNode) =
+  self.state.put("pageForm", form)
+  forgetUiTarget(self.uiId, SettingsNode)
+  frameAction("close")
+  self.state.put("page", newJString(page))
+  self.showName(name)
+
 proc openLayoutPage(self: SceneSettingsScene) =
   ## The settings of the layout showing, on a page of their own.
   let worn = self.frameLayout()
@@ -573,11 +599,54 @@ proc openLayoutPage(self: SceneSettingsScene) =
     return
   let form = newJObject()
   settingsOf(worn, form)
-  self.state.put("layoutForm", form)
-  forgetUiTarget(self.uiId, SettingsNode)
-  frameAction("close")
-  self.state.put("page", newJString("layout"))
-  self.showName("Layout settings")
+  self.openSubPage("layout", "Layout settings", form)
+
+proc openKeysPage(self: SceneSettingsScene) =
+  ## The service keys (docs/scene-settings.md "Service keys"): one field
+  ## each, holding what was typed on the frame, a secret behind its eye. What
+  ## a plane sent is said in the field's placeholder, a secret's never shown.
+  let
+    form = newJObject()
+    fields = newJArray()
+    values = newJObject()
+    typed = serviceKeysTyped()
+    sent = self.frameConfig.settings
+  for i in 0 ..< ServiceKeys.len:
+    # A field by its label, which no two keys share. The table's strings as
+    # they are, not copies (flash).
+    template group: untyped = ServiceKeys[i][0]
+    template name: untyped = ServiceKeys[i][1]
+    template label: untyped = ServiceKeys[i][2]
+    let
+      f = field(label, label, "string")
+      given = sent{group, name}.getStr()
+      secret = name != "url"
+      own = typed{group, name}
+    if secret:
+      f.put("secret", newJBool(true))
+    f.put("placeholder", newJString(if given.len == 0: "Not set"
+      elif secret: "Saved (type to change)" else: given))
+    if not own.isNil:
+      values.put(label, own)
+    fields.elems.add f
+  form.put("fields", fields)
+  form.put("values", values)
+  self.openSubPage("keys", "Service keys", form)
+
+proc saveKeysPage(self: SceneSettingsScene) =
+  ## The keys edited here, kept by the host (frame_service_keys.nim): an
+  ## emptied one goes. The log says which, never a value.
+  let edited = self.formObject("edited")
+  var names = ""
+  for i in 0 ..< ServiceKeys.len:
+    template label: untyped = ServiceKeys[i][2]
+    if not edited{label}.isNil:
+      typeServiceKey(ServiceKeys[i][0], ServiceKeys[i][1], self.valueMap().str(label).strip())
+      if names.len > 0: names.add ", "
+      names.add label
+  if names.len > 0 and keepServiceKeys():
+    self.logger.log(%*{"event": "settings:frame:keys", "keys": names})
+  self.showPage(true)
 
 proc saveLayoutPage(self: SceneSettingsScene) =
   ## Kept on the frame under the layout's id, and on the bar at once.
@@ -610,6 +679,8 @@ proc press(self: SceneSettingsScene, action: int) =
     self.state.put("unlinking", newJBool(action == AUnlink))
   elif action == ALayout:
     self.openLayoutPage()
+  elif action == AKeys:
+    self.openKeysPage()
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
   elif self.state{"confirm"}.getInt(-1) == action:
@@ -644,7 +715,7 @@ proc acting(self: SceneSettingsScene) =
   if handler < HAction:
     self.state.put("confirm", newJInt(-1))
   if handler == HCancel:
-    if self.onLayoutPage(): self.showPage(true)
+    if self.onSubPage(): self.showPage(true)
     elif frame and self.state{"unlinking"}.getBool():
       self.state.put("unlinking", newJBool(false))
     elif frame and not info{"link"}.isNil:
@@ -654,7 +725,8 @@ proc acting(self: SceneSettingsScene) =
     elif frame and not self.openedOnFrame(): self.showPage(false)
     else: leave()
   elif handler == HSave:
-    if self.onLayoutPage(): self.saveLayoutPage()
+    if self.onKeysPage(): self.saveKeysPage()
+    elif self.onLayoutPage(): self.saveLayoutPage()
     elif frame: self.saveFrame(fields)
     else: self.save()
   elif handler == HCode:
@@ -671,8 +743,8 @@ proc acting(self: SceneSettingsScene) =
       # The frame page has a window of its own: it comes forward.
       sendEvent(evSceneSettings, %*{"page": "frame"}, eoScene)
     else:
-      # Lit on the frame's and the layout's pages: back to the scene's form.
-      self.showPage(not frame and not self.onLayoutPage())
+      # Lit on the frame's page and its sub-pages: back to the scene's form.
+      self.showPage(not frame and not self.onSubPage())
   elif handler >= HAction:
     self.press(handler - HAction)
   elif handler >= HShow and handler < HSelect:
@@ -932,6 +1004,12 @@ proc note(list: SvgNode, look: Look, text: string) =
   c.px("text", look.size * 3 div 4)
   list.children.add el("div", move c, SvgNode(text: text)).role("muted")
 
+proc pageList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
+  ## The fields of the page showing, and on the service keys what they do.
+  result = self.fieldList(look, padX, padY)
+  if self.onKeysPage():
+    result.note(look, KeysNote)
+
 proc offers(actions: seq[JsonNode], action: string): bool =
   ## Whether the host lists `action` among what the page may do.
   for a in actions:
@@ -1122,6 +1200,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   if cloud: buttons.children.add look.pressButton("Link to cloud", ALinkCloud)
   if backend: buttons.children.add look.pressButton("Link to backend", AAdopt)
   if actions.offers("unlink"): buttons.children.add look.pressButton("Unlink", AUnlink)
+  # Where the host keeps keys typed on the frame (frame_service_keys.nim).
+  if not serviceKeysSave.isNil: buttons.children.add look.pressButton("Service keys", AKeys)
   result.children.add buttons
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -1228,7 +1308,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
         cancel = "Back", saveLit = not edits.isNil and edits.len > 0)
     else:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height),
-        gear = not info.isNil and not self.panelWindow(), self.fieldList(look, 2, look.gap div 2))
+        gear = not info.isNil and not self.panelWindow(), self.pageList(look, 2, look.gap div 2))
     return
   c = "shrink-0 flex items-center"
   c.px("h", look.line * 3 div 2)
@@ -1240,8 +1320,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     frame = not info.isNil and self.onFrame()
     # Connecting a control plane: its own title and nothing to save.
     connecting = frame and not info{"link"}.isNil
-    layoutPage = self.onLayoutPage()
-  header.children.add look.button(if frame or layoutPage: "Back" else: "Cancel", HCancel, false)
+    subPage = self.onSubPage()
+  header.children.add look.button(if frame or subPage: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if connecting: "Connect" elif frame and self.state{"unlinking"}.getBool(): "Unlink"
       elif frame: "Frame settings" else: title))
@@ -1251,11 +1331,11 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   if code:
     header.children.add look.iconButton(false, CodePath, HCode, wide = true)
   if not info.isNil and not self.panelWindow():
-    # Lit on the frame's and the layout's pages, which are the frame's. Named
+    # Lit on the frame's page and its sub-pages, which are the frame's. Named
     # where there are about 31 of the text's size: the two buttons, the
     # title and the name (36 with the code button beside them).
-    header.children.add look.gear(frame or layoutPage,
-      named = not frame and not layoutPage and width >= look.size * (if code: 36 else: 31))
+    header.children.add look.gear(frame or subPage,
+      named = not frame and not subPage and width >= look.size * (if code: 36 else: 31))
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
@@ -1263,11 +1343,13 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   result.children.add header.role("bar")
   let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit,
       width, height)
-    else: self.fieldList(look, look.pad, look.pad)
+    else: self.pageList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 
 proc title(self: SceneSettingsScene): string =
   ## The scene's name, from the host's scene list (its id without one).
+  if self.onKeysPage():
+    return "Service keys"
   if self.onLayoutPage():
     return "Layout settings"
   result = self.opener()
@@ -1290,7 +1372,8 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     if not target.isNil and target.input.keyboard and target.input.focus > 0:
       keyboardTop = keyboardBox(roomW, roomH, true)[0]
   let info = frameInfo()
-  if info.isNil and self.onFrame():
+  if info.isNil and (self.onFrame() or self.onKeysPage()):
+    # Turned off while it showed: the frame's pages go with it.
     self.showPage(false)
   if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,
       keyboardTop, info, self.sizeUnit(image)), image, self.paper, self.slow, onHandler, IdleSeconds,
@@ -1298,9 +1381,9 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     leave()
 
 proc back(self: SceneSettingsScene) =
-  ## One step back: from the frame page to the scene's form, from the form
-  ## to the scene.
-  if self.onLayoutPage():
+  ## One step back: from a sub-page to the frame page, from the frame page to
+  ## the scene's form, from the form to the scene.
+  if self.onSubPage():
     self.showPage(true)
     self.touch()
     sendEvent(evRender, newJObject(), eoScene)

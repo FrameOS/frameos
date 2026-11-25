@@ -23,6 +23,7 @@ from frameos/events_gen import contractEventIndex, ContractEventPolicies, ecInpu
 import frameos/single_scene_host
 import frameos/scene_rhythm
 import frameos/layout_choice
+import frameos/frame_service_keys
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
@@ -997,6 +998,24 @@ proc frameSettingsDo(action: string) {.nimcall, gcsafe, raises: [].} =
 sceneSettings.frameSettingsRead = frameSettingsJson
 sceneSettings.frameSettingsApply = frameSettingsSet
 sceneSettings.frameSettingsAction = frameSettingsDo
+
+# The service keys typed on the frame page (frame_service_keys.nim), in NVS
+# (main/fos_frame_settings.c): read when an app first asks for a key.
+proc fos_service_keys_load(): cstring {.importc, cdecl.}
+proc fos_service_keys_save(json: cstring): bool {.importc, cdecl.}
+
+proc serviceKeysFromNvs(): string {.nimcall, gcsafe, raises: [].} =
+  let raw = fos_service_keys_load()
+  if not raw.isNil:
+    result = $raw
+    zeroMem(raw, result.len) # keys: not left in freed heap
+    cFree(raw)
+
+proc serviceKeysToNvs(text: string): bool {.nimcall, gcsafe, raises: [].} =
+  fos_service_keys_save(text.cstring)
+
+serviceKeysLoad = serviceKeysFromNvs
+serviceKeysSave = serviceKeysToNvs
 
 # The scene store's host (docs/scene-store.md, frameos/scene_store_hooks.nim):
 # the facts and the work, from main/fos_store.c, which does the work on a task

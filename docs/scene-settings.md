@@ -146,8 +146,10 @@ What the page holds, top to bottom:
 - **The buttons**, right under the card, above the fields (which can run
   longer than the panel): **Render again**, **Check for updates** / **Install
   update** (below), **Update scenes** (below), **Restart FrameOS** (where the
-  host lists it), **Reboot**, and **Link to cloud** and **Link to backend**
-  where a plane can be connected (below, "Connecting the frame"). Restart,
+  host lists it), **Reboot**, **Link to cloud** and **Link to backend**
+  where a plane can be connected (below, "Connecting the frame"), and
+  **Service keys** where the host keeps keys typed on the frame (below,
+  "Service keys"). Restart,
   Reboot, Install and Update scenes ask for a second tap ("Tap again",
   red); anything else in between asks again. Render, Restart and Reboot send
   the contract's device commands from the origin `panel`
@@ -344,10 +346,11 @@ which has no page, keeps its marker and its start budget.)
   granted the groups its store scenes declare (`service_setting_groups`), as
   installing them from the store grants them, and a scene of the owner's own
   gets what it declares without a grant. A key the frame held of its own
-  stays where this backend has none to send: an ESP32 holds none (its keys
-  are a plane's, pulled every boot), and a Pi's frame.json keeps a group
-  this backend never shipped, through the admin route and an SSH deploy
-  alike.
+  stays where this backend has none to send: an ESP32's are the keys typed
+  on its frame page (the rest are a plane's, pulled every boot), and a Pi's
+  frame.json keeps a group this backend never shipped, through the admin
+  route and an SSH deploy alike. Keys typed on the frame page stay on either
+  and win over the backend's (below, "Service keys").
 
   `GET /api/adopt` says nothing but `{"adopting": false}` while no code shows;
   `POST /api/adopt` answers the ceremony's tokens (`code_required` 400,
@@ -395,8 +398,47 @@ The frame is then a frame no plane holds, and the page offers **Link to cloud**
 and **Link to backend** again. An app's `frameos.frame('action', 'unlink')` is
 refused: no scene takes a frame out of its owner's hands.
 
+### Service keys
+
+**Service keys** on the frame page opens a page of its own (Back goes to the
+frame page, Save keeps what was edited and goes back there): the frame's
+service keys, the API keys and addresses the apps read with
+`frameos.getSetting`, one field each for every key a control plane may send
+(`CloudServiceSettingsFields` in `apps.nim`; `test_scene.nim` holds the page
+to it): OpenAI, Unsplash, Home Assistant's URL and access token, Immich's
+server URL and API key, GitHub, the FrameOS Gallery. A stopgap for today's
+frame-wide keys, kept small (2026-11-25): the rework of service keys
+replaces it.
+
+- **Typed here, a key is the frame's own.** It stays on the frame, never told
+  to a plane (as the Wi-Fi network), and through pushes, deploys, reboots, an
+  unlink and an adoption: a Pi keeps it in `state/service_keys.json` (0600;
+  no deploy writes under `state/`), an ESP32 in NVS (`svc_typed`, in the
+  namespace `factory-reset` erases). At most 4 KB.
+- **It wins over the plane's, field by field.** An app's `getSetting` answers
+  the key typed here, else what the plane sent (`frame_service_keys.nim`
+  `withServiceKeys`, read by `jsGetSetting`, the one reader of service keys on
+  a frame). A frame no plane holds has only these. An address typed here
+  (Home Assistant's, Immich's `url`) takes its group whole: a plane's token
+  never goes to an address typed at the frame, so its token is typed here
+  too. A token typed here for the plane's address goes there.
+- **What the page shows.** A field holds what was typed here, a secret behind
+  the eye of a password field. What a plane sent is said in the empty field:
+  an address as it is, a secret only as "Saved (type to change)", never its
+  value; "Not set" for neither. An emptied field removes its key, and the
+  plane's is used again.
+- Typed keys are read off the host when an app first asks for one, on the
+  render thread (`serviceKeysLoad` / `serviceKeysSave`, set by
+  `frame_settings_linux.nim` and `embedded_runtime.nim`; an ESP32's NVS is
+  `fos_service_keys_load` / `_save` in `fos_frame_settings.c`). A host that
+  sets neither (the browser, a plane's render of a board) offers no page.
+  They are not among the three hooks, so `frameos.frame` (the Terminal,
+  docs/terminal.md) neither reads nor types them. Save logs
+  `settings:frame:keys` with the fields' names, never a value.
+
 ### What a control plane learns
 
+- **Service keys typed here: nothing** (above, "Service keys").
 - **Wi-Fi: nothing.** A network set here is the device's alone, as the
   console's and the setup portal's are. Neither plane is told the network's
   name and no password leaves the frame. A backend learns the address alone,

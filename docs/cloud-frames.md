@@ -985,7 +985,9 @@ uses them is added to such a frame, and the scene drawer says so with a
 That is the whole point: revoking a key in the provider account, or removing
 the last scene that used it, must actually take the key off the device.
 Settings groups *outside* the six are untouched by this route and stay under
-local control.
+local control. So are the keys typed on the frame itself (its frame page's
+**Service keys**, `docs/scene-settings.md`): kept apart on the device, never
+told to the provider, and used over this copy, field by field.
 
 Both the response and a `304` carry `Cache-Control: no-store`: this body is
 the account's credentials and no proxy, CDN or on-device HTTP cache may keep
