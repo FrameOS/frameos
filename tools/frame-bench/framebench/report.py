@@ -188,6 +188,20 @@ def write(run: dict, out_dir: str, baseline: dict | None = None) -> str:
                 md.append(f"| {c.get('scene') or '(its list)'} | {kind} | {_ms(c.get('wall_ms'))} | {_ms(c.get('done_ms'))} | "
                           f"{_ms(c.get('tap_ms'))} | {len(c.get('js_errors') or [])} | {c.get('image') or '-'} |")
             md.append('')
+        played = (suites.get('video') or {}).get('video')
+        if played:
+            # framebench/video.py: the runtime's own `video:playback` lines,
+            # the clip's start left out.
+            md.append('| Video | path | fps / rate | late | dropped | worst late ms | judged s |')
+            md.append('|---|---|---|---|---|---|---|')
+            for name, v in played.items():
+                if 'frames' not in v:
+                    md.append(f"| {name} | (nothing shown) | - | - | - | - | - |")
+                    continue
+                path = f"{v.get('decoder')} {'plane' if v.get('plane') else 'canvas'}"
+                md.append(f"| {name} | {path} | {v.get('fps')} / {v.get('rate')} | {v.get('late')} | {v.get('dropped')} | "
+                          f"{v.get('worst_late_ms')} | {v.get('seconds')} |")
+            md.append('')
         for key in ('builtin', 'input', 'storm', 'offline', 'thin', 'device'):
             src = suites.get(key) or (suites.get('thin') if key == 'device' else None)
             if not src:

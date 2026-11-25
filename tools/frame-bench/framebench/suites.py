@@ -1237,6 +1237,7 @@ def suite_code(ctx, frame, opens=None):
 
 
 from .benchmarks import suite_benchmark  # noqa: E402  (it imports helpers from here)
+from .video import suite_video  # noqa: E402  (it imports helpers from here)
 
 SUITES = {
     'status': suite_status,
@@ -1252,13 +1253,14 @@ SUITES = {
     'thin': suite_thin,
     'desktop': suite_desktop,
     'settings': suite_settings,
+    'video': suite_video,
 }
 # What `--suites default` runs per frame kind.
 DEFAULT = {
     # `benchmark` right after the restart: its memory reading (heapinfo's
     # minimum since boot) then covers the boot and the benchmark alone.
-    'local': ['status', 'reboot', 'benchmark', 'scenes', 'builtin', 'input', 'desktop', 'code', 'settings', 'storm', 'soak',
-              'offline'],
+    'local': ['status', 'reboot', 'benchmark', 'scenes', 'builtin', 'input', 'desktop', 'code', 'settings', 'video',
+              'storm', 'soak', 'offline'],
     'thin': ['status', 'thin'],
     'pico': ['thin'],
 }
