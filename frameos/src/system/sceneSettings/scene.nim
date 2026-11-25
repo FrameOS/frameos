@@ -1120,7 +1120,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     if not payload{"state", "from"}.isNil:
       self.startAfresh()
     # What the dispatcher read off the scene it was opened from.
-    for key in ["from", "fields", "values", "opened", "layout", "noLayout"]:
+    for key in ["from", "fields", "values", "opened", "layout", "noLayout", "home"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)

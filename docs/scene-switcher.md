@@ -80,6 +80,35 @@ and held it does nothing). E-paper without glass ships no binding; the
 owner adds one under "Button actions" (a REFRESH double press, say), and
 every frame can be sent to it by name.
 
+## The frame's home
+
+An ESP32 that takes taps starts on the switcher when nothing was ever picked
+on it and no scene in its set is marked `default`: a board fresh from
+flash.frameos.net on a touch preset (the flasher marks no default there), or
+any set whose maker left the start to the frame. Without this it showed the
+first scene of the list (the Clock of a flasher's set), which nobody chose.
+
+- The firmware decides that nothing was picked (`fos_boot_scene_home` in
+  `embedded/esp32/main/fos_boot_scene.c`, host-tested): no queued selection,
+  no remembered `last_scene` it still has, no scene marked `default`. It still
+  makes the list's first scene resident, then queues the switcher, and the
+  runtime opens it with `state.home` (`embedded_runtime.openHome`) unless
+  nothing on the frame takes a tap (`takesNoTaps`: e-paper whose event map
+  binds keys alone), which shows that first scene as before.
+- At home the switcher has nothing to go back to: no Close, no idle timeout
+  (it draws again hourly), and a `back` key, Escape, or `sceneSwitcher`
+  again leave it where it is (`backFrom` in `event_loop.nim` answers the
+  switcher itself). Its gear opens the frame page over it, and the frame
+  page's way back is home again (the settings keep `home`). The Wi-Fi a
+  board fresh from the flasher has to join is on that page.
+- A scene picked from it ends home: that scene is remembered (`last_scene`),
+  so the next boot starts there, and the switcher opened from it later is the
+  usual one (`state.home` goes when it is opened from a scene).
+- It wears the frame's chosen layout, if any (`layoutFor("")`): on a desktop
+  it is the launcher's window.
+- A Pi starts on its first scene as before (`getFirstSceneId`): a Pi always
+  gets its scenes from a backend deploy.
+
 ## The scene
 
 The switcher is built into the runtime, not installed: it is in no scene

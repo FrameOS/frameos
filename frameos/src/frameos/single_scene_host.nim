@@ -278,6 +278,13 @@ proc runOn(host: SingleSceneHost, scene: FrameScene, event: string, payload: Jso
 proc runNow(host: SingleSceneHost, event: string, payload: JsonNode) =
   host.runOn(host.scene, event, payload)
 
+proc carrySwitchState*(host: SingleSceneHost, sceneId: string, state: JsonNode) =
+  ## The state the next switch to `sceneId` hands that scene, as a
+  ## `setCurrentScene` with `state` does: for a switch the firmware makes
+  ## itself (the frame's home, embedded_runtime.openHome).
+  host.pendingSwitchId = sceneId
+  host.pendingSwitchPayload = %*{"sceneId": sceneId, "state": state}
+
 proc applyPendingSwitch(host: SingleSceneHost, sceneId: SceneId) =
   ## The state the switch to `sceneId` carried, applied to the resident scene
   ## (public fields only, by its own `setCurrentScene` handling), in the

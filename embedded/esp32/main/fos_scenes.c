@@ -131,6 +131,9 @@ static bool s_payload_stored_since_boot = false;
 static bool s_built_in_shown = false;
 /* That scene is the settings (fos_scenes_settings_shown). */
 static volatile bool s_settings_shown = false;
+/* The queued switcher is the frame's home (activate_from_index,
+ * fos_boot_scene_home): opened with nothing to go back to. */
+static volatile bool s_home_pending = false;
 /* How long a frame that deep-sleeps stays up with the switcher on its panel:
  * the switcher's own idle timeout on e-paper (system/sceneSwitcher), so the
  * keys that walk it are heard, and it goes back before the frame sleeps. */
@@ -808,6 +811,7 @@ typedef struct {
     char id[SCENE_ID_LEN];
     int slot;
     bool is_layout;
+    bool is_default;
 } scene_slot_t;
 
 /* The render task's map of the set, as many rows as the index has scenes
@@ -1078,6 +1082,7 @@ static int load_scene_index(void)
             snprintf(s_slots[s_slot_count].id, SCENE_ID_LEN, "%s", id->valuestring);
             s_slots[s_slot_count].slot = (int)slot->valuedouble;
             s_slots[s_slot_count].is_layout = cJSON_IsTrue(cJSON_GetObjectItem(entry, "isLayout"));
+            s_slots[s_slot_count].is_default = cJSON_IsTrue(cJSON_GetObjectItem(entry, "default"));
             s_slot_count++;
         }
     }
@@ -1183,7 +1188,8 @@ static bool activate_from_index(const char *origin)
 
     fos_boot_scene_t scenes[SCENES_SET_MAX];
     for (int i = 0; i < s_slot_count; i++) {
-        scenes[i] = (fos_boot_scene_t){.id = s_slots[i].id, .is_layout = s_slots[i].is_layout};
+        scenes[i] = (fos_boot_scene_t){
+            .id = s_slots[i].id, .is_layout = s_slots[i].is_layout, .is_default = s_slots[i].is_default};
     }
 
     char scene_id[SCENE_ID_LEN] = "";
@@ -1201,6 +1207,11 @@ static bool activate_from_index(const char *origin)
         }
     }
     int pick = fos_boot_scene_pick(scenes, s_slot_count, scene_id, s_default_scene_id);
+    /* Nothing picked on the frame and no default: the scene above is only the
+     * list's first. It is still made resident (the frame shows it where the
+     * runtime finds no taps to take), and the switcher opens over it as the
+     * frame's home (fos_boot_scene.h). */
+    bool home = fos_boot_scene_home(scenes, s_slot_count, scene_id);
     if (pick >= 0 && strcmp(s_slots[pick].id, scene_id) == 0 && consume_oom_scene_mark(scene_id)) {
         /* The scene that drove the last restart out of memory. Rendering it
          * again here — before the cloud session is even up — would loop the
@@ -1222,7 +1233,12 @@ static bool activate_from_index(const char *origin)
         return true;
     }
     snprintf(scene_id, sizeof(scene_id), "%s", s_slots[pick].id);
-    return load_scene_slot(s_slots[pick].slot, scene_id, origin);
+    bool loaded = load_scene_slot(s_slots[pick].slot, scene_id, origin);
+    if (loaded && home) {
+        s_home_pending = true;
+        fos_scenes_select(FOS_SCENE_SWITCHER_ID);
+    }
+    return loaded;
 }
 
 /* Switch scenes on the lazy path: read that scene's file and make it
@@ -1640,6 +1656,8 @@ bool fos_scenes_apply_pending_selection(void)
         s_boot_pending_selection = false;
         s_scene_switched = true;
     }
+    bool home = s_home_pending && strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0;
+    s_home_pending = false;
     if (is_built_in_scene(scene_id)) {
         /* The scene switcher (system/sceneSwitcher): the runtime draws it,
          * so there is no slot to load, and the resident scene stays parsed
@@ -1647,11 +1665,17 @@ bool fos_scenes_apply_pending_selection(void)
          * back on the scene it covers. A frame that deep-sleeps stays up a
          * while for the keys that walk it. Nothing loads, but its first
          * picture is a render like any other (drawn whole, 13 tiles take
-         * ~2 s on the SenseCAP), so the loading mark counts from here too. */
+         * ~2 s on the SenseCAP), so the loading mark counts from here too.
+         * The frame's home asks the runtime, which knows whether anything
+         * here takes a tap: its event map first, which a pass hands over
+         * after this. */
         fos_client_switch_begin(asked_at);
-        if (!frameos_nim_set_scene(scene_id)) {
-            log_scene_event("scenes:select", "error", "queued", scene_id,
-                            "apply-failed", 0, 0, 0, ESP_FAIL);
+        if (home) frameos_nim_set_event_map(fos_config()->event_map);
+        if (home ? !frameos_nim_open_home() : !frameos_nim_set_scene(scene_id)) {
+            if (!home) {
+                log_scene_event("scenes:select", "error", "queued", scene_id,
+                                "apply-failed", 0, 0, 0, ESP_FAIL);
+            }
             fos_client_loading_end();
             return false;
         }

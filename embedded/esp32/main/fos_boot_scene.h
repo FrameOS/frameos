@@ -15,6 +15,7 @@
 typedef struct {
     const char *id;
     bool is_layout;
+    bool is_default; /* marked `default` by whoever made the set */
 } fos_boot_scene_t;
 
 /* The index in `scenes` to start on: `wanted` (a queued or remembered
@@ -26,5 +27,15 @@ int fos_boot_scene_pick(const fos_boot_scene_t *scenes, int count, const char *w
 /* The first scene that is neither `avoid` nor a layout, -1 when there is none:
  * where a frame starts when `avoid` ran it out of memory. */
 int fos_boot_scene_other(const fos_boot_scene_t *scenes, int count, const char *avoid);
+
+/* Whether the frame starts on its home, the scene switcher
+ * (docs/scene-switcher.md "The frame's home"), over the scene
+ * fos_boot_scene_pick names: nothing was picked on it (`wanted` names no
+ * scene it can start) and no scene is marked default, so that scene would
+ * only be the first in the list (a fresh board: the Clock of a flasher's set
+ * was all it ever showed). Never with nothing to start. The runtime still
+ * decides whether the frame takes taps (frameos_nim_open_home): e-paper with
+ * keys alone starts on that scene, as before. */
+bool fos_boot_scene_home(const fos_boot_scene_t *scenes, int count, const char *wanted);
 
 #endif

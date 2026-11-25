@@ -218,7 +218,10 @@
   its header's gear, `sceneSettings {page: "frame"}`, opens the frame page,
   shown only while the frame offers one, `{swap: true}` the list over a
   scene's settings, and on a desktop the other one always opens beside), never
-  a host. It is drawn
+  a host. An ESP32 that takes taps and on which nothing was ever picked (no
+  remembered scene, none marked `default`) starts on it as the frame's home
+  (`state.home`: no Close, no timeout, back stays; `fos_boot_scene_home`,
+  `openHome`; doc section "The frame's home"). It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
   host's scene order through `sceneSwitcherListing`, grouped by category as
   the desktops group theirs, in one list that scrolls (no pages); the Linux

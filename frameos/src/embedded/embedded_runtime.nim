@@ -19,7 +19,7 @@ from frameos/render_scale import MaxRenderScale
 import lib/tz
 import std/[monotimes, times]
 import frameos/channels
-from frameos/events_gen import contractEventIndex, ContractEventPolicies, ecInput
+from frameos/events_gen import contractEventIndex, ContractEventPolicies, ecInput, SceneSwitcherId
 import frameos/single_scene_host
 import frameos/scene_rhythm
 import frameos/layout_choice
@@ -1062,6 +1062,17 @@ proc selectScene*(sceneIdText: string): bool =
   host.makeCurrent(sceneId)
   log("selectScene: " & sceneIdText)
   true
+
+proc openHome*(): bool =
+  ## The scene switcher as the frame's home (docs/scene-switcher.md "The
+  ## frame's home"): what fos_scenes.c opens at boot when nothing was picked
+  ## on the frame and no scene is marked default (fos_boot_scene.h). False on
+  ## a frame that takes no taps (e-paper with keys alone, `takesNoTaps`): it
+  ## starts on its first scene, as before.
+  if takesNoTaps(host.frameConfig, panelLook(host.frameConfig).paper):
+    return false
+  host.carrySwitchState(SceneSwitcherId, %*{"home": true})
+  selectScene(SceneSwitcherId)
 
 proc sceneRunning*(sceneIdText: string): bool =
   ## Whether the scene runs in a window of a desktop already: fos_scenes.c

@@ -98,6 +98,8 @@ bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json, con
     if (state_json) *state_json = frameos_nim_scene_state_json();
     return true;
 }
+bool frameos_nim_open_home(void) { return false; }
+
 bool frameos_nim_set_scene(const char *scene_id)
 {
     (void)scene_id;

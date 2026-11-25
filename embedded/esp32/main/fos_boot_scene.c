@@ -30,3 +30,15 @@ int fos_boot_scene_pick(const fos_boot_scene_t *scenes, int count, const char *w
     if (pick < 0) pick = fos_boot_scene_other(scenes, count, NULL);
     return pick;
 }
+
+bool fos_boot_scene_home(const fos_boot_scene_t *scenes, int count, const char *wanted)
+{
+    if (startable(scenes, count, wanted) >= 0) return false;
+    bool any = false;
+    for (int i = 0; i < count; i++) {
+        if (scenes[i].is_layout) continue;
+        if (scenes[i].is_default) return false;
+        any = true;
+    }
+    return any;
+}

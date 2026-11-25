@@ -964,5 +964,38 @@ block the_header_searches_the_scenes:
   scene.send("open", %*{"sceneId": SceneSwitcherId})
   doAssert scene.entries.len == 20 and not scene.state.hasKey("query")
 
+block the_frames_home_stays:
+  # What an ESP32 that takes taps starts on with nothing picked and no scene
+  # marked default (docs/scene-switcher.md "The frame's home"): nothing to
+  # go back to, so no Close, no timeout, and back stays. A pick ends it.
+  listed = entries(5)
+  sent.setLen(0)
+  let scene = SceneSwitcherScene(switcher.exportedScene.init(SceneSwitcherId.SceneId,
+    config(800, 480, "framebuffer"), logger, %*{}))
+  scene.send("setCurrentScene", %*{"sceneId": SceneSwitcherId, "state": {"home": true}})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert scene.state{"home"}.getBool() and scene.state{"from"}.getStr() == ""
+  scene.state["touchedAt"] = %(epochTime() - IdleSecondsSlow - 1)
+  discard scene.draw(newImage(800, 480))
+  doAssert sent.len == 0, "home does not go back by itself: " & $sent
+  doAssert scene.refreshInterval > IdleSecondsSlow, $scene.refreshInterval
+  let grid = switcherGrid(800, 480, thumbnails = false)
+  for cx in countdown(800 - grid.pad - 2, 600, 4):
+    scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
+  doAssert sent.len == 0, "no Close at home: " & $sent
+  scene.send("button", %*{"label": "LEFT", "role": "back", "action": "press"})
+  scene.send("keyDown", %*{"key": "Escape", "code": "Escape"})
+  for (event, _) in sent:
+    doAssert event != evSceneSwitcher, "back stays home: " & $sent
+  sent.setLen(0)
+  scene.send("button", %*{"label": "REFRESH", "role": "refresh", "action": "press"})
+  doAssert sent.len == 1 and sent[0][0] == evSetCurrentScene, $sent
+  doAssert not scene.state.hasKey("home"), "a pick ends home"
+  # Opened from a scene, it is the usual switcher, whatever it was before.
+  scene.state["home"] = %true
+  scene.send("setCurrentScene", %*{"sceneId": SceneSwitcherId, "state": {"from": "scene-2"}})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert not scene.state.hasKey("home")
+
 localEventSink = nil
 echo "scene switcher: ok"
