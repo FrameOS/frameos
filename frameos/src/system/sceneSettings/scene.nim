@@ -71,6 +71,7 @@ const
   HCode = 3
   HText = 1000
   HToggle = 2000
+  HShow = 3000 ## + field: a secret field's eye, what is typed shown or hidden
   HSelect = 13000 ## + field: a select box's pick
   HAction = 20000 ## + one of the buttons below
   AScan = 0
@@ -98,6 +99,8 @@ const
   CodeEditorName = "Code editor"
   # A circle with an arrow, 48 units square as the gear is (switcher.gearPath).
   RefreshPath = "M24 8a16 16 0 1 0 16 16h-5a11 11 0 1 1-11-11v6l10-8.5L24 2Z"
+  # An eye, 48 units square: its white winds against its outline, the pupil in it.
+  EyePath = "M2 24Q24 0 46 24Q24 48 2 24ZM7 24Q24 40 41 24Q24 8 7 24ZM24 17a7 7 0 1 1 0 14a7 7 0 1 1 0-14Z"
   # wifiLine's words, by the host's `state`.
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
   WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
@@ -632,6 +635,12 @@ proc acting(self: SceneSettingsScene) =
       self.showPage(not frame and not self.onLayoutPage())
   elif handler >= HAction:
     self.press(handler - HAction)
+  elif handler >= HShow and handler < HSelect:
+    # A secret field's eye: what is typed in it shown, or hidden again.
+    let index = handler - HShow
+    if index < fields.elems.len:
+      let name = fields.elems[index]{"name"}.getStr()
+      self.state.put("shown", newJString(if self.state{"shown"}.getStr() == name: "" else: name))
   elif handler >= HSelect:
     let index = handler - HSelect
     if index < fields.elems.len and actedText != HeadingValue:
@@ -769,9 +778,10 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)
   result = result.role("field")
 
-proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = false): SvgNode =
+proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = false, shown = false): SvgNode =
   ## One field: its label and what changes it. `typing`: its select box's
-  ## `other` option is picked, and its own value is typed under it.
+  ## `other` option is picked, and its own value is typed under it. `shown`:
+  ## a secret field's text in the clear (its eye, beside it, is lit).
   let
     kind = field{"type"}.getStr()
     options = field{"options"}
@@ -829,9 +839,18 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   let input = el(if lines: "textarea" else: "input", move c)
   input.attrs.add(("value", value.text))
   input.attrs.add(("placeholder", field{if typing: "otherPlaceholder" else: "placeholder"}.getStr()))
-  if field{"secret"}.getBool(): input.attrs.add(("type", "password"))
+  let secret = field{"secret"}.getBool()
+  if secret and not shown: input.attrs.add(("type", "password"))
   elif kind in ["integer", "float"]: input.attrs.add(("type", "number"))
-  result.children.add input.on("on-change", HText + index).role("field")
+  let box = input.on("on-change", HText + index).role("field")
+  if secret and not lines:
+    # A password typed blind on a frame's keyboard is easy to get wrong: an
+    # eye on its line shows it, and hides it again.
+    let line = el("div", "flex items-center gap-2", el("div", "flex-1 min-w-0", box))
+    line.children.add look.iconButton(shown, EyePath, HShow + index)
+    result.children.add line
+  else:
+    result.children.add box
 
 proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
   ## The fields, one under the other, or a line that says there are none.
@@ -846,7 +865,8 @@ proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
     if field.kind == JObject and field{"type"}.getStr() notin Unedited:
-      result.children.add look.row(field, values{field{"name"}.getStr()}, i)
+      let name = field{"name"}.getStr()
+      result.children.add look.row(field, values{name}, i, shown = self.state{"shown"}.getStr() == name)
   if result.children.len == 0:
     c = "text-center"
     if not look.paper: c.add " text-zinc-400"
@@ -917,7 +937,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
-    result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid")
+    result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid",
+      self.state{"shown"}.getStr() == name)
     # A turned LCD copies every frame to its place (embedded_main.nim
     # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
     let note =

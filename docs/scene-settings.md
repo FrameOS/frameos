@@ -146,7 +146,9 @@ What the page holds, top to bottom:
   when it is not among them, and "Other network…" for a hidden one (an input
   to type its name). "Scan for networks" sits right under it; a scan runs when
   the page opens off Wi-Fi (an ESP32) or on a scan older than 30 s (Linux).
-- **Password**: never shown. On an ESP32 an empty one keeps the saved
+- **Password**: the saved one never shown; what is typed shows with the eye
+  on its line (any secret field has it), and hides again with a second tap or
+  when the page is opened again. On an ESP32 an empty one keeps the saved
   password for the same network and means an open network for another; a
   Linux runtime holds no password (NetworkManager or the supplicant does), so
   there an empty one is an open network.
@@ -352,7 +354,7 @@ switcher: a header with Cancel, the scene's name (the host's scene list,
 | `boolean` | a switch beside the label; a tap anywhere on the row flips it |
 | `text`, `json` | a `<textarea>` |
 | `integer`, `float` | an `<input type="number">`: the keyboard opens on its number pad |
-| `secret: true` | an `<input type="password">` |
+| `secret: true` | an `<input type="password">`, an eye on its line showing what is typed (`HShow`) |
 | `string`, `color` (its hex), `date`, `font`, `path`, any other | an `<input>` |
 | `node`, `scene`, `image` | left out: what they hold is not text |
 

@@ -143,6 +143,37 @@ block the_form:
   doAssert scene.state{"from"}.isNil
   doAssert uiTarget(SceneSettingsId, 1, create = false).isNil
 
+block a_secret_field_has_an_eye:
+  # A password typed blind on a frame's keyboard: the eye on its line shows
+  # what is typed, and hides it again. The Wi-Fi password on the frame page
+  # is one.
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {
+    "from": "scenes/weather",
+    "fields": [
+      {"name": "city", "label": "City", "type": "string", "placeholder": "", "secret": false},
+      {"name": "apiKey", "label": "API key", "type": "string", "placeholder": "", "secret": true}],
+    "values": {"city": "Oslo", "apiKey": "k"}}})
+  scene.send("open", %*{"sceneId": SceneSettingsId})
+  discard scene.draw()
+  doAssert (try: (discard regionWith(3000 + 0); true) except ValueError: false) == false, "no eye on a plain field"
+  scene.tap(regionWith(1000 + 1))
+  discard scene.draw()
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.secret, "typed blind first"
+  scene.tap(regionWith(3000 + 1))
+  doAssert scene.state{"shown"}.getStr() == "apiKey", $scene.state
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-secret-shown.png")
+  scene.tap(regionWith(1000 + 1))
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).input.secret, "shown"
+  scene.tap(regionWith(3000 + 1))
+  doAssert scene.state{"shown"}.getStr() == "", $scene.state
+  scene.tap(regionWith(1000 + 1))
+  discard scene.draw()
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.secret, "hidden again"
+  scene.send("close", %*{})
+
 block a_number_that_is_no_number_is_not_saved:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
   scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
