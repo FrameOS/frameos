@@ -964,17 +964,21 @@ owner next saves the frame's scene list, which makes the grant explicit.
 **A grant reaches only a frame that is allowed keys at all.** The grant is
 per scene; whether the frame may pull the account's keys is its link's
 `settings:services`, the frame's "Deliver keys to this frame" switch. A
-claim-token enrollment holds it from the start; a link made through the
-device flow (a frame's own **Link to cloud**, the setup portal, the admin
-page) holds what that flow asked for, `frame:link` and `frame:managed`, and
-so gets no key, whatever its scenes were granted (an install of "Word of the
-day" on a reTerminal Sticky linked from its screen said "please provide an
-OpenAI API key" with the key in the account, 2026-11-25). The grant is
-recorded all the same, and `…/scenes/add` answers `keys_withheld`: the
-granted groups such a frame cannot get (`[]` when it can). The workspace
-asks the owner to deliver keys when a scene that uses them is added to such
-a frame, and the scene drawer says so with a **Deliver keys** button; both
-turn the switch on, never by themselves.
+claim-token enrollment holds it from the start, and so does a device-flow
+link that asks to be managed (`frame:managed`: a frame's own **Link to
+cloud**, the setup portal), with the logs and metrics scopes too:
+`/api/device/start` adds what a claim-token frame is granted
+(`settings:services`, `telemetry:logs`, `telemetry:metrics`), and the
+approval screen lists them. Before that (2026-11-25) such a link held only
+`frame:link` and `frame:managed`, so an install of "Word of the day" on a
+reTerminal Sticky linked from its screen said "please provide an OpenAI API
+key" with the key in the account, and the frame shipped no logs. A frame
+linked before then keeps what it was approved with (no scope is added to an
+approved link): the grant is recorded all the same, and `…/scenes/add`
+answers `keys_withheld`, the granted groups such a frame cannot get (`[]`
+when it can). The workspace asks the owner to deliver keys when a scene that
+uses them is added to such a frame, and the scene drawer says so with a
+**Deliver keys** button; both turn the switch on, never by themselves.
 
 **The six groups are cloud-owned on a managed frame.** A group absent from
 `settings` is **deleted** on the device — not left at its previous value.

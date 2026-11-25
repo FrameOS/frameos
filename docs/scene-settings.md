@@ -305,7 +305,9 @@ which has no page, keeps its marker and its start budget.)
   page the code is typed in without its scheme, `qr` is
   `verification_uri_complete`, the same page with the code in it
   (`/device?user_code=…`, which the cloud's device page fills in). Approved,
-  the frame enrolls with the flow's token and is cloud-managed. A Pi also
+  the frame enrolls with the flow's token and is cloud-managed, with what a
+  claim-token frame is granted: the account's service keys, its logs and
+  metrics (`/api/device/start` adds them to a `frame:managed` link). A Pi also
   draws its code and a QR over any other scene, as it did before.
 - **A backend** (`adopt`): six digits, the local network access ceremony with
   the scope `adopt` (`local_access.nim`, `fos_lan_access.c`: five tries, five

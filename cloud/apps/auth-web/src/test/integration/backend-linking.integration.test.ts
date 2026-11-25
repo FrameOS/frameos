@@ -488,6 +488,33 @@ describe("backend linking flow", () => {
     ]);
   });
 
+  it("gives a frame that asks to be managed what a claim-token frame is granted", async () => {
+    // A frame page's Link to cloud asks for frame:link + frame:managed; its
+    // store scenes need the account's keys, and its logs and metrics ship,
+    // as a claim-token frame's do.
+    await startDeviceRequest({
+      client_kind: "frame",
+      public_display_name: "Managed Frame",
+      scopes: ["frame:link", "frame:managed"],
+    });
+    await startDeviceRequest({
+      client_kind: "frame",
+      public_display_name: "Linked Frame",
+      scopes: ["frame:link", "auth:login"],
+    });
+
+    const stored = await db.select().from(deviceAuthorizationRequests);
+    const byName = new Map(stored.map((row) => [row.publicDisplayName, row]));
+    expect(byName.get("Managed Frame")?.requestedScopes).toEqual([
+      "frame:link",
+      "frame:managed",
+      "settings:services",
+      "telemetry:logs",
+      "telemetry:metrics",
+    ]);
+    expect(byName.get("Linked Frame")?.requestedScopes).toEqual(["frame:link", "auth:login"]);
+  });
+
   it("lets a frame link read grants and report inventory, not rotate a backend token", async () => {
     const { deviceCode, userCode } = await startDeviceRequest({
       client_kind: "frame",
