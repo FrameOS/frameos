@@ -14,7 +14,7 @@ import frameos/device_setup
 import frameos/event_log
 import frameos/event_loop
 import frameos/interpreter
-from frameos/js_runtime/app_runtime import pumpJsAsync, nextJsAsyncMs, markVideoPlaneScenesDue
+from frameos/js_runtime/app_runtime import pumpJsAsync, nextJsAsyncMs, markVideoPlaneScenesDue, videoOnPlane
 import frameos/display_detect
 import frameos/panel_canvas
 import frameos/driver_render_hint
@@ -572,8 +572,10 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # This pass's frame ends the loading mark, whoever began it. The pass
       # counts as a wait of its own, except when nobody is waiting for it: a
       # scene the frame's clock redraws every few seconds or faster would
-      # blink the mark on every tick a little over the delay.
-      if currentScene.isNil or currentScene.id != sceneId or rhythmAwaited(currentScene):
+      # blink the mark on every tick a little over the delay, and a video on
+      # a display plane would lose its plane to it every second.
+      if currentScene.isNil or currentScene.id != sceneId or
+          (rhythmAwaited(currentScene) and not videoOnPlane(currentScene)):
         self.beginSceneLoading()
       let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:

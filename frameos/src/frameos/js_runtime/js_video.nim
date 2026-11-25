@@ -296,6 +296,13 @@ else:
       rhythmMarkDue(scene)
     planeScenes.setLen(0)
 
+  proc videoOnPlane*(scene: FrameScene): bool =
+    ## A video of `scene` was on a display plane in the last pass. Its next
+    ## pass is the video's own clock (the canvas's copy once a second), which
+    ## nobody waits for: no loading mark, which would take the plane off
+    ## (runner.nim; a Pi Zero's pass takes about the mark's 200 ms).
+    not scene.isNil and scene in planeScenes
+
   proc videoSpots(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, target: UiTarget,
       requestedWidth, requestedHeight: int, regionScale: float32): seq[(Image, VideoPlaneSpot)] =
     ## The videos whose `<img>` can be a display plane (video/planes.nim,
