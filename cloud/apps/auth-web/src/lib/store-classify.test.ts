@@ -67,6 +67,11 @@ describe("classifyStoreScene", () => {
     expect(body.messages[1].content).toContain("data/openWeather");
     expect(body.messages[1].content).toContain("Hourly and daily forecasts.");
     expect(body.response_format.type).toBe("json_schema");
+    // System is the frame's own apps, filed there only when a scene says so.
+    const offered = body.response_format.json_schema.schema.properties.category.enum;
+    expect(offered).toContain("weather");
+    expect(offered).not.toContain("system");
+    expect(body.messages[0].content).not.toContain("- system:");
   });
 
   it("retries once, then gives up quietly on garbage or errors", async () => {

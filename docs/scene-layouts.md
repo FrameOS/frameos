@@ -397,8 +397,9 @@ finger as under a wheel, and so does `BeOS`'s Deskbar with many windows open.
 The lists go by category: a scene's `settings.category`, its category by name
 ("Photos", "Clocks & time"; docs/scene-icons.md "Category"), reaches a layout as
 `category` on its entry of `app.frame.scenes`, and each list has a heading over
-each category, under that name, the categories by name whatever the case, and
-the scenes with none last as Other. Nothing maps a category: a name of the
+each category, under that name, "System" first (the frame's own apps), the
+other categories by name whatever the case, and the scenes with none last as
+Other. Nothing maps a category: a name of the
 owner's own is a heading like the store's. Where no scene has a category (an
 older runtime lists none), the list is as it always was. That is `grouped`, one more function the same text in each of those
 eight layouts. The scene switcher groups its own list by the same rule in Nim

@@ -27,16 +27,16 @@ static int failures = 0;
     } while (0)
 
 static const fos_boot_scene_t LAYOUT_FIRST[] = {
-    {"win98", true},
-    {"touch", false},
-    {"clock", false},
-    {"bar", true},
+    {"win98", true, false},
+    {"touch", false, false},
+    {"clock", false, false},
+    {"bar", true, false},
 };
 #define LAYOUT_FIRST_COUNT 4
 
 static const fos_boot_scene_t ONLY_LAYOUTS[] = {
-    {"win98", true},
-    {"bar", true},
+    {"win98", true, false},
+    {"bar", true, false},
 };
 
 static void test_a_layout_first_in_the_list_is_not_where_a_frame_starts(void)
@@ -88,8 +88,43 @@ static void test_after_an_out_of_memory_restart_the_next_scene_is_not_a_layout(v
 
 static void test_a_lone_scene_has_no_alternative(void)
 {
-    static const fos_boot_scene_t lone[] = {{"bar", true}, {"touch", false}};
+    static const fos_boot_scene_t lone[] = {{"bar", true, false}, {"touch", false, false}};
     CHECK_INT(fos_boot_scene_other(lone, 2, "touch"), -1);
+}
+
+static const fos_boot_scene_t FLASHED[] = {
+    {"scene-store", false, false},
+    {"clock", false, false},
+    {"sticky", true, false},
+};
+
+static const fos_boot_scene_t FLASHED_WITH_DEFAULT[] = {
+    {"scene-store", false, false},
+    {"clock", false, true},
+};
+
+static void test_a_frame_nobody_picked_a_scene_on_starts_at_home(void)
+{
+    /* A fresh board from flash.frameos.net on a touch preset: no default. */
+    CHECK_INT(fos_boot_scene_home(FLASHED, 3, ""), 1);
+    CHECK_INT(fos_boot_scene_home(FLASHED, 3, NULL), 1);
+    /* Remembered, or queued before a sleep, but gone from the set. */
+    CHECK_INT(fos_boot_scene_home(FLASHED, 3, "deleted"), 1);
+    /* A layout remembered is no pick (an editor's setCurrentScene). */
+    CHECK_INT(fos_boot_scene_home(FLASHED, 3, "sticky"), 1);
+}
+
+static void test_a_scene_picked_or_marked_default_is_where_it_starts(void)
+{
+    CHECK_INT(fos_boot_scene_home(FLASHED, 3, "clock"), 0);
+    CHECK_INT(fos_boot_scene_home(FLASHED_WITH_DEFAULT, 2, ""), 0);
+    CHECK_INT(fos_boot_scene_pick(FLASHED_WITH_DEFAULT, 2, "", "clock"), 1);
+}
+
+static void test_nothing_to_start_is_no_home(void)
+{
+    CHECK_INT(fos_boot_scene_home(ONLY_LAYOUTS, 2, ""), 0);
+    CHECK_INT(fos_boot_scene_home(ONLY_LAYOUTS, 0, ""), 0);
 }
 
 int main(void)
@@ -103,6 +138,9 @@ int main(void)
     test_a_frame_of_layouts_has_nothing_to_start();
     test_after_an_out_of_memory_restart_the_next_scene_is_not_a_layout();
     test_a_lone_scene_has_no_alternative();
+    test_a_frame_nobody_picked_a_scene_on_starts_at_home();
+    test_a_scene_picked_or_marked_default_is_where_it_starts();
+    test_nothing_to_start_is_no_home();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

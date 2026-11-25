@@ -39,15 +39,27 @@ import { FrameSetupError, parseFrameSetupDocument, type FlasherJob } from '../..
 import { webSerialNeedsFlasher, webSerialSupported } from '../../../frontend/src/utils/webSerial'
 import { browserTimeZone } from '../lib/browser-time-zone'
 import { bridgeFirmwareSource, listenForBridgeJob, type BridgeConnection } from './bridgeClient'
+import { compareFlasherCategories, type FlasherSample } from './sampleCatalog'
 import {
   CUSTOM_BOARD,
   boardFromQuery,
+  defaultScenePreset,
+  pickedScenes,
+  pickedScenesProblem,
+  presetPicks,
+  sampleUnfitReason,
+  sceneUploadSeconds,
   standaloneBoard,
+  standaloneBoardKind,
   standaloneProblem,
   standaloneProvisioning,
+  standaloneSceneRoom,
   starterSceneSet,
+  type PickedScenes,
+  type ScenePresetKey,
+  type StandaloneBoardKind,
   type StandaloneChoices,
-  type StarterTemplate,
+  type StandaloneSceneRoom,
 } from './standalone'
 
 // flash.frameos.net (cloud/docs/flasher.md). Three ways in, one page:
@@ -66,7 +78,9 @@ export function publicFirmwareSource(): FirmwareSource {
   return httpFirmwareSource((url, init) => fetch(url, init), { requireSignature: true })
 }
 
-const STARTER_SCENES_URL = '/frames-app/flasher-scenes.json'
+// The samples a standalone frame can start with (build.mjs, sampleCatalog.ts):
+// the index, and each sample's scenes beside it, fetched once it is picked.
+const SAMPLES_URL = '/frames-app/flasher-scenes/'
 
 export type FlasherMode = 'standalone' | 'bridge' | 'file'
 
@@ -82,6 +96,49 @@ function errorDetail(error: unknown): string {
 interface FlasherCache {
   stopListening?: () => void
   connection?: BridgeConnection | null
+  /** Each picked sample's scenes, fetched once. */
+  sampleScenes?: Map<string, Promise<Record<string, unknown>[]>>
+}
+
+/** One sample as the list shows it. */
+export interface FlasherSampleRow {
+  sample: FlasherSample
+  picked: boolean
+  /** Why it cannot go on this board, or null. */
+  unfit: string | null
+}
+
+export interface FlasherSampleGroup {
+  category: string
+  rows: FlasherSampleRow[]
+}
+
+function matchesQuery(sample: FlasherSample, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+  const text = `${sample.name} ${sample.description} ${sample.category}`.toLowerCase()
+  return words.every((word) => text.includes(word))
+}
+
+/** The list: by category, the Scene store's group first, a search applied. */
+export function flasherSampleGroups(
+  samples: FlasherSample[] | null,
+  picked: readonly string[],
+  kind: StandaloneBoardKind,
+  query: string
+): FlasherSampleGroup[] {
+  const groups = new Map<string, FlasherSampleRow[]>()
+  for (const sample of samples ?? []) {
+    if (query.trim() && !matchesQuery(sample, query)) {
+      continue
+    }
+    const rows = groups.get(sample.category) ?? []
+    rows.push({ sample, picked: sample.store || picked.includes(sample.name), unfit: sampleUnfitReason(sample, kind) })
+    groups.set(sample.category, rows)
+  }
+  const hasStore = (group: FlasherSampleGroup): number => Number(group.rows.some((row) => row.sample.store))
+  return [...groups.entries()]
+    .map(([category, rows]) => ({ category, rows }))
+    .sort((a, b) => hasStore(b) - hasStore(a) || compareFlasherCategories(a.category, b.category))
 }
 
 // This package runs no kea-typegen (frontend/ does), so the logic type is
@@ -101,9 +158,12 @@ export interface flasherLogicValues {
   ssid: string
   password: string
   timeZone: string | null
-  templates: StarterTemplate[] | null
-  templatesError: string | null
+  samples: FlasherSample[] | null
+  samplesError: string | null
   picked: string[]
+  preset: ScenePresetKey | null
+  noRoom: string[]
+  query: string
   phase: FlashPhase
   message: string | null
   progress: number | null
@@ -117,6 +177,12 @@ export interface flasherLogicValues {
   usbBlockedHere: boolean
   choices: StandaloneChoices
   standaloneIssue: string | null
+  boardKind: StandaloneBoardKind
+  sceneRoom: StandaloneSceneRoom
+  chosenScenes: PickedScenes
+  scenesIssue: string | null
+  uploadSeconds: number
+  sampleGroups: FlasherSampleGroup[]
   usbLogs: LogType[]
   boardConnected: boolean
 }
@@ -135,15 +201,22 @@ export interface flasherLogicActions {
   setSsid: (ssid: string) => { ssid: string }
   setPassword: (password: string) => { password: string }
   setTimeZone: (timeZone: string | null) => { timeZone: string | null }
-  loadTemplates: () => { value: true }
-  setTemplates: (
-    templates: StarterTemplate[] | null,
+  loadSamples: () => { value: true }
+  setSamples: (
+    samples: FlasherSample[] | null,
     error: string | null
   ) => {
-    templates: StarterTemplate[] | null
+    samples: FlasherSample[] | null
     error: string | null
   }
   togglePicked: (name: string) => { name: string }
+  applyPreset: (preset: ScenePresetKey) => { preset: ScenePresetKey }
+  setPicks: (
+    picked: string[],
+    preset: ScenePresetKey | null,
+    noRoom: string[]
+  ) => { picked: string[]; preset: ScenePresetKey | null; noRoom: string[] }
+  setQuery: (query: string) => { query: string }
   setPhase: (phase: FlashPhase) => { phase: FlashPhase }
   setMessage: (message: string | null) => { message: string | null }
   setProgress: (progress: number | null) => { progress: number | null }
@@ -182,9 +255,12 @@ export const flasherLogic = kea<flasherLogicType>([
     setSsid: (ssid: string) => ({ ssid }),
     setPassword: (password: string) => ({ password }),
     setTimeZone: (timeZone: string | null) => ({ timeZone }),
-    loadTemplates: true,
-    setTemplates: (templates: StarterTemplate[] | null, error: string | null) => ({ templates, error }),
+    loadSamples: true,
+    setSamples: (samples: FlasherSample[] | null, error: string | null) => ({ samples, error }),
     togglePicked: (name: string) => ({ name }),
+    applyPreset: (preset: ScenePresetKey) => ({ preset }),
+    setPicks: (picked: string[], preset: ScenePresetKey | null, noRoom: string[]) => ({ picked, preset, noRoom }),
+    setQuery: (query: string) => ({ query }),
     setPhase: (phase: FlashPhase) => ({ phase }),
     setMessage: (message: string | null) => ({ message }),
     setProgress: (progress: number | null) => ({ progress }),
@@ -214,17 +290,23 @@ export const flasherLogic = kea<flasherLogicType>([
     ssid: ['', { setSsid: (_, { ssid }) => ssid }],
     password: ['', { setPassword: (_, { password }) => password }],
     timeZone: [null as string | null, { setTimeZone: (_, { timeZone }) => timeZone }],
-    templates: [null as StarterTemplate[] | null, { setTemplates: (_, { templates }) => templates }],
-    templatesError: [null as string | null, { setTemplates: (_, { error }) => error }],
+    samples: [null as FlasherSample[] | null, { setSamples: (_, { samples }) => samples }],
+    samplesError: [null as string | null, { setSamples: (_, { error }) => error }],
     picked: [
       [] as string[],
       {
-        setTemplates: (_, { templates }) =>
-          (templates ?? []).filter((template) => template.preselected).map((template) => template.name),
+        setPicks: (_, { picked }) => picked,
         togglePicked: (state, { name }) =>
           state.includes(name) ? state.filter((picked) => picked !== name) : [...state, name],
       },
     ],
+    // The preset the picks came from; null once a sample is ticked by hand.
+    preset: [
+      defaultScenePreset() as ScenePresetKey | null,
+      { setPicks: (_, { preset }) => preset, togglePicked: () => null },
+    ],
+    noRoom: [[] as string[], { setPicks: (_, { noRoom }) => noRoom, togglePicked: () => [] }],
+    query: ['', { setQuery: (_, { query }) => query }],
     phase: ['idle' as FlashPhase, { setPhase: (_, { phase }) => phase, setJob: () => 'idle' }],
     message: [null as string | null, { setMessage: (_, { message }) => message, setJob: () => null }],
     progress: [null as number | null, { setProgress: (_, { progress }) => progress }],
@@ -254,6 +336,26 @@ export const flasherLogic = kea<flasherLogicType>([
       }),
     ],
     standaloneIssue: [(s) => [s.choices], (choices: StandaloneChoices): string | null => standaloneProblem(choices)],
+    boardKind: [(s) => [s.board], (board: string): StandaloneBoardKind => standaloneBoardKind(board)],
+    sceneRoom: [(s) => [s.boardKind], (kind: StandaloneBoardKind): StandaloneSceneRoom => standaloneSceneRoom(kind)],
+    chosenScenes: [
+      (s) => [s.samples, s.picked],
+      (samples: FlasherSample[] | null, picked: string[]): PickedScenes => pickedScenes(samples ?? [], picked),
+    ],
+    scenesIssue: [
+      (s) => [s.chosenScenes, s.boardKind, s.samples],
+      (chosen: PickedScenes, kind: StandaloneBoardKind, samples: FlasherSample[] | null): string | null =>
+        pickedScenesProblem(chosen, kind, samples),
+    ],
+    uploadSeconds: [
+      (s) => [s.chosenScenes],
+      (chosen: PickedScenes): number => sceneUploadSeconds(chosen.bytes, chosen.scenes),
+    ],
+    sampleGroups: [
+      (s) => [s.samples, s.picked, s.boardKind, s.query],
+      (samples: FlasherSample[] | null, picked: string[], kind: StandaloneBoardKind, query: string) =>
+        flasherSampleGroups(samples, picked, kind, query),
+    ],
     usbLogs: [
       (s) => [s.usbLogsByFrameId],
       (logs: Record<string, LogType[]>): LogType[] => logs[FLASHER_FRAME_ID] ?? [],
@@ -293,6 +395,27 @@ export const flasherLogic = kea<flasherLogicType>([
       await startEmbeddedUsbLogStream(FLASHER_FRAME_ID, port)
     }
 
+    // A picked sample's scenes, fetched once (build.mjs writes one file each).
+    const sampleScenes = (sample: FlasherSample): Promise<Record<string, unknown>[]> => {
+      state.sampleScenes ??= new Map()
+      let scenes = state.sampleScenes.get(sample.file)
+      if (!scenes) {
+        scenes = fetch(`${SAMPLES_URL}${encodeURIComponent(sample.file)}`).then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Could not fetch the scenes of ${sample.name} (HTTP ${response.status}).`)
+          }
+          const json: unknown = await response.json()
+          if (!Array.isArray(json)) {
+            throw new Error(`The scenes of ${sample.name} are not a list.`)
+          }
+          return json as Record<string, unknown>[]
+        })
+        scenes.catch(() => state.sampleScenes?.delete(sample.file))
+        state.sampleScenes.set(sample.file, scenes)
+      }
+      return scenes
+    }
+
     const finish = (kind: FlasherRunResult['kind'], outcome: 'done' | 'written' | 'failed' | 'cancelled'): void => {
       if (outcome !== 'cancelled') {
         actions.setLastRun({ kind, ok: outcome === 'done' })
@@ -323,16 +446,31 @@ export const flasherLogic = kea<flasherLogicType>([
           )
         }
       },
-      loadTemplates: async () => {
+      loadSamples: async () => {
         try {
-          const response = await fetch(STARTER_SCENES_URL)
+          const response = await fetch(`${SAMPLES_URL}index.json`)
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`)
           }
-          actions.setTemplates((await response.json()) as StarterTemplate[], null)
+          const index = (await response.json()) as { samples?: FlasherSample[] }
+          actions.setSamples(Array.isArray(index.samples) ? index.samples : [], null)
         } catch (error) {
-          actions.setTemplates(null, `Could not load the starter scenes (${errorDetail(error)}).`)
+          actions.setSamples(null, `Could not load the scenes to start with (${errorDetail(error)}).`)
         }
+      },
+      setSamples: () => {
+        actions.applyPreset(values.preset ?? defaultScenePreset())
+      },
+      setBoard: () => {
+        // Picks a preset made follow the board (what fits its panel and its
+        // room); picks made by hand stay.
+        if (values.preset !== null && values.samples) {
+          actions.applyPreset(values.preset)
+        }
+      },
+      applyPreset: ({ preset }) => {
+        const { picked, noRoom } = presetPicks(preset, values.samples ?? [], values.boardKind)
+        actions.setPicks(picked, preset, noRoom)
       },
       runSetup: async () => {
         // In the click: the port prompt is the engine's first await.
@@ -354,10 +492,18 @@ export const flasherLogic = kea<flasherLogicType>([
             actions.setPhase('error')
             return
           }
+          if (values.scenesIssue) {
+            actions.setMessage(values.scenesIssue)
+            actions.setPhase('error')
+            return
+          }
           plan = standaloneProvisioning(values.choices)
-          const picked = new Set(values.picked)
-          const templates = values.templates ?? []
-          scenes = async () => starterSceneSet(templates, picked)
+          const kind = values.boardKind
+          // Fetched now, without waiting: the port prompt must stay the
+          // click's first await. The engine asks for them after the flash.
+          const fetched = Promise.all(values.chosenScenes.samples.map((sample) => sampleScenes(sample)))
+          fetched.catch(() => undefined)
+          scenes = async () => starterSceneSet(await fetched, kind)
         }
         const connection = state.connection
         const outcome = await flashAndSetUpBoard(reporter(), {
@@ -500,7 +646,7 @@ export const flasherLogic = kea<flasherLogicType>([
     if (board) {
       actions.setBoard(board)
     }
-    actions.loadTemplates()
+    actions.loadSamples()
     if (new URLSearchParams(window.location.search).get('bridge') === '1') {
       actions.setMode('bridge')
       actions.setWaitingForBridge(true)

@@ -149,7 +149,7 @@ def test_a_scene_payload_is_written_off_the_render_task():
     assert take.index("load_into_nim(") < take.index("store_behind("), "the write is queued before the parse"
     assert "etag_set(etag)" in take, "the next poll would fetch the payload being written again"
     assert "store_task_ready()" in scenes["store_behind"]
-    assert "esp_register_shutdown_handler(store_shutdown)" in scenes["store_task_ready"]
+    assert "fos_on_restart(store_shutdown)" in scenes["store_task_ready"]
     sync = scenes["fos_scenes_sync"]
     assert "fos_scenes_backend_fetch(" in sync and "fos_scenes_take_backend_payload(" in sync
     client = _strip_comments(CLIENT_C.read_text())

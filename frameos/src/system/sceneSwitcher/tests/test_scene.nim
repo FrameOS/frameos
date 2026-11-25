@@ -464,7 +464,7 @@ proc categorized(): seq[SwitcherEntry] =
 
 proc crowded(): seq[SwitcherEntry] =
   ## `categorized` and fifteen more, five each in Clocks, Garden and Photos:
-  ## a list long enough, two scenes a category and more, for headings.
+  ## a list longer than the screen.
   result = categorized()
   for i in 0 ..< 15:
     result.add SwitcherEntry(id: "scene-" & $(10 + i), name: "Extra " & $i,
@@ -492,17 +492,29 @@ block categories_head_their_scenes_and_other_comes_last:
     $names
   # No category anywhere: the list as it is.
   doAssert grouped(entries(5)) == entries(5)
+  # System first, in any case (the frame's own apps), then the rest by name,
+  # Other last: as every desktop's `grouped`.
+  var system = entries(6)
+  for (i, category) in [(0, "Weather"), (1, "System"), (2, ""), (3, "Apps"), (4, "system "), (5, "Systems")]:
+    system[i].category = category
+  var systemOrder: seq[string]
+  for entry in grouped(system):
+    systemOrder.add entry.id & ":" & entry.category
+  doAssert systemOrder == @["scene-2:System", "scene-5:system", "scene-4:Apps", "scene-6:Systems",
+    "scene-1:Weather", "scene-3:"], $systemOrder
   listed = categorized()
   sent.setLen(0)
   let scene = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-6")
   let image = scene.draw(newImage(800, 480))
   preview("switcher-800x480-lcd-few-categories", image)
-  # Seven categories for nine scenes: headings would be most of the list, so
-  # there are none, and the scenes keep the order by category in one flow.
-  doAssert scene.tree(800, 480, false).headings.len == 0
+  # Seven categories for nine scenes: a heading over each all the same
+  # (2026-11-25; before, only from a dozen scenes and two a category).
+  doAssert scene.tree(800, 480, false).headings ==
+    @["Clocks", "Garden", "Photos", "photos", "\xC3\xA9a", "\xC3\x89clairs", "Other"]
   let grid = switcherGrid(800, 480, thumbnails = false)
   var spots = scene.spots(grid)
-  doAssert spots[2].col == 2 and spots[2].top == spots[0].top, $spots
+  # Garden starts a row of its own under its heading.
+  doAssert spots[2].col == 0 and spots[2].top > spots[0].top, $spots
   doAssert scene.highlighted() == 2, "scene-6 is third, in Garden"
   scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   doAssert scene.highlightedId == "scene-7"
@@ -526,7 +538,14 @@ block categories_head_their_scenes_and_other_comes_last:
   doAssert spots[7].col == 0 and spots[7].top == spots[6].top + grid.tileH + grid.gap + grid.headingH, $spots
   doAssert spots[8].col == 1 and spots[8].top == spots[7].top, $spots
   doAssert many.highlightedId == "scene-6"
-  # No scene with a category: no headings.
+  # One scene, with a category: its heading.
+  var lone = entries(1)
+  lone[0].category = "System"
+  listed = lone
+  let one = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-1")
+  discard one.draw(newImage(800, 480))
+  doAssert one.tree(800, 480, false).headings == @["System"]
+  # No scene with a category: no headings, not even Other.
   listed = entries(9)
   let plain = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-1")
   discard plain.draw(newImage(800, 480))
@@ -972,6 +991,62 @@ block the_header_searches_the_scenes:
   scene.send("keyDown", %*{"key": "Escape", "code": "Escape"})
   scene.send("open", %*{"sceneId": SceneSwitcherId})
   doAssert scene.entries.len == 20 and not scene.state.hasKey("query")
+
+block the_frames_home_stays:
+  # What an ESP32 that takes taps starts on with nothing picked and no scene
+  # marked default (docs/scene-switcher.md "The frame's home"): nothing to
+  # go back to, so no Close, no timeout, and back stays. A pick ends it.
+  listed = entries(5)
+  sent.setLen(0)
+  let scene = SceneSwitcherScene(switcher.exportedScene.init(SceneSwitcherId.SceneId,
+    config(800, 480, "framebuffer"), logger, %*{}))
+  scene.send("setCurrentScene", %*{"sceneId": SceneSwitcherId, "state": {"home": true}})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert scene.state{"home"}.getBool() and scene.state{"from"}.getStr() == ""
+  scene.state["touchedAt"] = %(epochTime() - IdleSecondsSlow - 1)
+  discard scene.draw(newImage(800, 480))
+  doAssert sent.len == 0, "home does not go back by itself: " & $sent
+  doAssert scene.refreshInterval > IdleSecondsSlow, $scene.refreshInterval
+  let grid = switcherGrid(800, 480, thumbnails = false)
+  for cx in countdown(800 - grid.pad - 2, 600, 4):
+    scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
+  for (event, _) in sent:
+    doAssert event != evSceneSwitcher, "no Close at home: " & $sent
+  sent.setLen(0)
+  scene.send("button", %*{"label": "LEFT", "role": "back", "action": "press"})
+  scene.send("keyDown", %*{"key": "Escape", "code": "Escape"})
+  for (event, _) in sent:
+    doAssert event != evSceneSwitcher, "back stays home: " & $sent
+  sent.setLen(0)
+  scene.send("button", %*{"label": "REFRESH", "role": "refresh", "action": "press"})
+  doAssert sent.len == 1 and sent[0][0] == evSetCurrentScene, $sent
+  doAssert not scene.state.hasKey("home"), "a pick ends home"
+  # Opened from a scene, it is the usual switcher, whatever it was before.
+  scene.state["home"] = %true
+  scene.send("setCurrentScene", %*{"sceneId": SceneSwitcherId, "state": {"from": "scene-2"}})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert not scene.state.hasKey("home")
+
+block the_frames_home_on_a_portrait_e_paper:
+  # A reTerminal Sticky fresh from the flasher, as it starts: its set's
+  # categories as headings, System first, and no Close.
+  listed = @[
+    SwitcherEntry(id: "clock", name: "Clock", category: "Clocks & time"),
+    SwitcherEntry(id: "scene-store", name: "Scene store", category: "System"),
+    SwitcherEntry(id: "flip-clock", name: "Flip clock", category: "Clocks & time"),
+    SwitcherEntry(id: "asset-browser", name: "Files", category: "System"),
+    SwitcherEntry(id: "pixel-toys", name: "Pixel toys", category: "Fun & animations"),
+    SwitcherEntry(id: "terminal-app", name: "Terminal", category: "System"),
+    SwitcherEntry(id: "weather", name: "Weather", category: "Weather"),
+    SwitcherEntry(id: "calculator", name: "Calculator", category: "System")]
+  sent.setLen(0)
+  let scene = SceneSwitcherScene(switcher.exportedScene.init(SceneSwitcherId.SceneId,
+    config(800, 480, "waveshare.EPD_7in5_V2", rotate = 90), logger, %*{}))
+  scene.send("setCurrentScene", %*{"sceneId": SceneSwitcherId, "state": {"home": true}})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert scene.entries[0].category == "System", scene.entries[0].name
+  preview("switcher-home-480x800-eink-bw", oneBit(scene.draw(newImage(480, 800))))
+  doAssert sent.len == 0, $sent
 
 localEventSink = nil
 echo "scene switcher: ok"

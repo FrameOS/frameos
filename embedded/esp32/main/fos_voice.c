@@ -23,6 +23,7 @@
 #include "fos_mem.h"
 #include "fos_codec.h"
 #include "fos_mic.h"
+#include "fos_voice_binding.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -169,12 +170,32 @@ static void ascii_fold(const char *src, char *dst, size_t dst_len)
     dst[out] = '\0';
 }
 
+#define VOICE_NEEDS_PLANE "Voice chat needs a backend or FrameOS Cloud. Link this frame to one to talk to it."
+
+/* `lead` (no Wi-Fi) and what a person at the frame does about it: the way
+ * to the frame's page where its event map has one (it has the Wi-Fi list),
+ * the setup hotspot while that is up, else the flasher over USB. */
+static void wifi_notice(char *out, size_t len, const char *lead)
+{
+    char way[64];
+    fos_voice_page_way_t page = FOS_VOICE_PAGE_NONE;
+    if (fos_config_frame_page_offered()) page = fos_voice_binding_page_way(fos_config()->event_map, way, sizeof(way));
+    if (page == FOS_VOICE_PAGE_GEAR) {
+        snprintf(out, len, "%s To set it up, %s, then tap the gear.", lead, way);
+    } else if (page == FOS_VOICE_PAGE_OPEN) {
+        snprintf(out, len, "%s To set it up, %s.", lead, way);
+    } else if (fos_wifi_state() == FOS_WIFI_PORTAL) {
+        snprintf(out, len, "%s To set it up, join the Wi-Fi network %s.", lead, fos_wifi_ap_ssid());
+    } else {
+        snprintf(out, len, "%s Set it up over USB at flash.frameos.net.", lead);
+    }
+}
+
 /* What the panel says for an error the frame can explain itself. */
 static const char *error_notice(const char *error)
 {
     if (strcmp(error, "nothing_heard") == 0) return "I didn't catch that. Hold both buttons and speak after the chime.";
-    if (strcmp(error, "offline") == 0) return "Voice chat: no Wi-Fi.";
-    if (strcmp(error, "no_control_plane") == 0) return "Voice chat: this frame has no backend or cloud to talk to.";
+    if (strcmp(error, "no_control_plane") == 0) return VOICE_NEEDS_PLANE;
     if (strcmp(error, "unauthorized") == 0) return "Voice chat: the frame's key was refused by its control plane.";
     if (strcmp(error, "upload_failed") == 0) return "Voice chat: could not reach the control plane.";
     if (strcmp(error, "upload_refused") == 0) return "Voice chat: the control plane refused the recording.";
@@ -200,7 +221,9 @@ static void voice_log_error(const char *error, const char *detail)
      * a sentence for the user; the frame's are worded here. */
     char notice[VOICE_LOG_TEXT_MAX + 32];
     const char *known = error_notice(error);
-    if (known) {
+    if (strcmp(error, "offline") == 0) {
+        wifi_notice(notice, sizeof(notice), "Voice chat: no Wi-Fi.");
+    } else if (known) {
         strlcpy(notice, known, sizeof(notice));
     } else if (detail && detail[0]) {
         char folded[VOICE_LOG_TEXT_MAX + 1];
@@ -657,13 +680,42 @@ bool fos_voice_available(void)
     const fos_config_t *config = fos_config();
     if (!config->voice_chat || !mic_configured()) return false;
     if (fos_mic_active()) return false; /* the console's `mic` check holds it */
-    if (!plane_configured()) return false;
+    if (!config->wifi_ssid[0] || !plane_configured()) return false;
     return s_state == VOICE_IDLE;
+}
+
+/* A hold refused for want of Wi-Fi or a control plane, not because voice
+ * chat is off, has no microphone or is busy: the panel says what a person at
+ * the frame does about it, drawn at once over the last picture as an answer
+ * is. The caller sounds the refusal. Button task. */
+static void say_why_not(void)
+{
+    const fos_config_t *config = fos_config();
+    if (!s_lock || !config->voice_chat || !mic_configured() || fos_mic_active() || s_state != VOICE_IDLE) return;
+    char notice[VOICE_LOG_TEXT_MAX + 32];
+    const char *error = "no_control_plane";
+    if (!config->wifi_ssid[0]) {
+        error = "no_wifi";
+        wifi_notice(notice, sizeof(notice), "Voice chat needs Wi-Fi.");
+    } else if (!plane_configured()) {
+        strlcpy(notice, VOICE_NEEDS_PLANE, sizeof(notice));
+    } else {
+        return;
+    }
+    cJSON *fields = cJSON_CreateObject();
+    if (fields) cJSON_AddStringToObject(fields, "error", error);
+    voice_log("voice:refused", fields);
+    printf("voice: refused, %s\n", error);
+    fos_client_show_notice(notice);
+    fos_client_release_render();
 }
 
 bool fos_voice_begin(void)
 {
-    if (!fos_voice_available()) return false;
+    if (!fos_voice_available()) {
+        say_why_not();
+        return false;
+    }
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool started = false;
     if (s_state == VOICE_IDLE) {

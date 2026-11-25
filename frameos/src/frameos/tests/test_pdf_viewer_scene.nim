@@ -239,7 +239,7 @@ suite "the PDF viewer scene":
     let scene = parseFile(Samples / "PDF viewer" / "scenes.json")[0]
     check scene["id"].getStr() == "pdf-viewer"
     check scene["settings"]["icon"].getStr().len > 0
-    check scene["settings"]["category"].getStr() == "Notes & tools"
+    check scene["settings"]["category"].getStr() == "System"
     check parseFile(Samples / "PDF viewer" / "template.json")["name"].getStr() == "PDF viewer"
 
   test "the library lists the card's PDFs by title and length, and says what is not one":

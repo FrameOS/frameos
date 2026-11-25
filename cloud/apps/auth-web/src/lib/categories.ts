@@ -25,6 +25,9 @@ export type StoreCategory = {
   // Titles this category had before, which a scene's settings.category may
   // still say (a scene installed or forked from an older version).
   formerTitles?: string[];
+  // Only a scene that names it (settings.category) or its owner files it
+  // here: the classifier is never offered it (store-classify.ts).
+  statedOnly?: boolean;
 };
 
 export const storeCategories: StoreCategory[] = [
@@ -114,6 +117,17 @@ export const storeCategories: StoreCategory[] = [
       "Small demos, made-up data and test patterns to learn from or remix.",
     hint: "primarily a demo, sample, test pattern or building block showing a FrameOS technique, often with made-up data, rather than a finished scene",
     kind: "scene",
+  },
+  {
+    // The frame's own apps, first in its scene list (the scene switcher and
+    // every desktop's `grouped`, docs/scene-switcher.md "Categories").
+    slug: "system",
+    title: "System",
+    description:
+      "The frame's own apps: the scene store, its files, a terminal, a code editor, fonts, readers and a calculator.",
+    hint: "one of the frame's own apps that works on the frame itself: the scene store, a file manager, a terminal, a code editor, a font list, document readers, a calculator",
+    kind: "scene",
+    statedOnly: true,
   },
   {
     slug: "desktops",

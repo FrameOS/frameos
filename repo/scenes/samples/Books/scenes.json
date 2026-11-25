@@ -3,7 +3,7 @@
     "id": "books",
     "name": "ePub reader",
     "settings": {
-      "category": "Notes & tools",
+      "category": "System",
       "opens": "epub",
       "execution": "interpreted",
       "refreshInterval": 86400,

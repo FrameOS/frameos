@@ -97,13 +97,31 @@ frame has no key hold and no microphone path (yet).
   microphone would hear it);
   the chat did something (a tool ran) = three rising notes; the chat only
   answered = two notes; nothing heard = one low note; error = two low notes;
-  busy (a hold while a session is in flight, or no microphone / no control
-  plane, or voice chat off) = the refused press's dull pair at the hold, and
-  the key stays claimed to its release, so nothing else comes of the press.
+  busy (a hold while a session is in flight, or no microphone / no Wi-Fi
+  saved / no control plane, or voice chat off) = the refused press's dull
+  pair at the hold, and the key stays claimed to its release, so nothing else
+  comes of the press.
+- **A frame with nowhere to talk to says so** (`say_why_not` in
+  `fos_voice.c`): a hold refused for want of a network or a plane (not voice
+  chat off, no microphone, or a session in flight, which stay the beep alone)
+  puts a notice up at once over the last picture, with a `voice:refused
+  {error}` log line. No Wi-Fi saved: `Voice chat needs Wi-Fi.` and the way to
+  the frame page, which lists the networks (docs/scene-settings.md): the
+  frame's own event map's first rule to the scene settings, else to the scene
+  switcher, in words (`fos_voice_binding_page_way`, host-tested: `To set it
+  up, swipe down from the top, then tap the gear.` on every touch preset;
+  a key's rule only where a finger can tap the gear, the Sticky's AI key read
+  as the Action key), the setup hotspot's name while it is up, else
+  `Set it up over USB at flash.frameos.net.` A session that finds no Wi-Fi
+  after the wait says `Voice chat: no Wi-Fi.` with the same way. Wi-Fi saved
+  but no backend and no cloud: `Voice chat needs a backend or FrameOS Cloud.
+  Link this frame to one to talk to it.` The words are the firmware's, as
+  every notice of the voice key's is (the 5x7 notice box).
 - **The notice** (`fos_client_show_notice`, drawn by the render task in
   `fos_panel_draw.c`'s notice box): the transcript in quotes and the reply,
   or the error in a sentence (`I didn't catch that…`, `Voice chat: no
-  Wi-Fi.`, the plane's own `detail` for an OpenAI refusal), word-wrapped
+  Wi-Fi.` and how to set it up, the plane's own `detail` for an OpenAI
+  refusal), word-wrapped
   across the bottom of the panel in the 5x7 font (3 px per font pixel on a
   panel 600 px or wider, 2 below; curly quotes and dashes folded to ASCII).
   **The panel holds still from the hold until the answer**, but for the

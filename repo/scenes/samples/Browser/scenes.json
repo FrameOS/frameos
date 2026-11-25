@@ -3,7 +3,7 @@
     "id": "browser",
     "name": "Browser",
     "settings": {
-      "category": "Notes & tools",
+      "category": "System",
       "execution": "interpreted",
       "refreshInterval": 86400,
       "backgroundColor": "#ffffff",

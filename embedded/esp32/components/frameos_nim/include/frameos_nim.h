@@ -161,6 +161,10 @@ bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json,
                                      const char **state_json);
 /* Select an interpreted scene by id; the next render initializes it. */
 bool frameos_nim_set_scene(const char *scene_id);
+/* The scene switcher as the frame's home (docs/scene-switcher.md "The
+ * frame's home"), with nothing to go back to: false on a frame that takes no
+ * taps (e-paper with keys alone), which shows its resident scene instead. */
+bool frameos_nim_open_home(void);
 /* Whether the scene runs in a window of a desktop layout already
  * (docs/scene-layouts.md "Windows"): selecting it brings it to the front,
  * with nothing to read off flash. */

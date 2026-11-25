@@ -516,7 +516,11 @@ proc layoutAround(current: FrameScene): JsonNode =
 proc backFrom(loop: EventLoop, current: FrameScene): string =
   ## Where a built-in scene goes back to: the scene it was opened from, else
   ## (one opened by name, or one that left the list) the list's first; "" for
-  ## none.
+  ## none. The frame's home (the switcher an ESP32 starts on with nothing
+  ## picked, `state.home`; docs/scene-switcher.md "The frame's home") and the
+  ## settings opened over it go back to it.
+  if current.state{"home"}.getBool():
+    return SceneSwitcherId
   result = current.state{"from"}.getStr()
   if result.len == 0:
     let order = loop.sceneOrderOf()
@@ -554,6 +558,8 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   if swap:
     let state = newJObject()
     state.put("from", newJString(current.state{"from"}.getStr()))
+    if current.state{"home"}.getBool():
+      state.put("home", newJBool(true))
     let worn = current.state{"layout"}
     if not worn.isNil:
       state.put("layout", copy(worn))
@@ -579,9 +585,10 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     payload.put("state", state)
   else:
     next = loop.backFrom(current)
-    sceneWentBackTo = next
-    # Gone back, done: not left open in a window (`builtInsAway`).
-    current.state.put("goneBack", newJBool(true))
+    if next != current.id.string:
+      sceneWentBackTo = next
+      # Gone back, done: not left open in a window (`builtInsAway`).
+      current.state.put("goneBack", newJBool(true))
   if safe and not current.isNil and current.id.string == sceneId:
     # Already up (the pull before this one opened it): no switch to make.
     loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender,
@@ -594,8 +601,16 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     result = loop.host.selectScene(payload)
   elif next.len == 0:
     result = loop.refused(envelope, "noSceneOrder")
+  elif not current.isNil and next == current.id.string:
+    # The frame's home asked to go back: there is nowhere else, it stays.
+    result = true
   else:
     payload.put("sceneId", newJString(next))
+    if next == SceneSwitcherId and not current.isNil and current.state{"home"}.getBool():
+      # Back from the settings opened over the frame's home: home again.
+      let state = newJObject()
+      state.put("home", newJBool(true))
+      payload.put("state", state)
     result = loop.host.selectScene(payload)
 
 proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =

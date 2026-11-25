@@ -2,6 +2,7 @@ import { EMBEDDED_ESP32_S3 } from '../../../frontend/src/devices'
 import { ESP32_HARDWARE_PRESET_CONFIGS } from '../../../frontend/src/scenes/frame/panels/FrameSettings/esp32Hardware'
 import type { ProvisioningCommands } from '../../../frontend/src/scenes/workspace/embeddedFlashRun'
 import type { EmbeddedUsbConfigKey } from '../../../frontend/src/models/embeddedUsbLogsModel'
+import { SCENE_STORE_ID, type FlasherSample } from './sampleCatalog'
 
 // A standalone ESP32 (cloud/docs/flasher.md "A standalone frame"): a board
 // with no backend and no account, set up by flash.frameos.net from what the
@@ -15,9 +16,12 @@ export const CUSTOM_BOARD = 'custom'
 
 // The touch boards: their on-screen frame page joins a network (a swipe down
 // from the top, then the gear), so Wi-Fi may wait (docs/scene-settings.md
-// "A boot that does not wait for the network"). Keep with the touch presets
-// in TOUCH_EDGE_SWIPES (fos_board.c) and the SPA's frameEventMap.ts.
-const TOUCH_PRESETS = new Set([
+// "A boot that does not wait for the network"). A standalone frame runs its
+// firmware's event map (fos_board.c k_event_maps), and these are the boards
+// whose map has more than button rules (`edge_swipes`): the frames that take
+// taps (`takesNoTaps` in system/sceneSwitcher/scene.nim says the rest take
+// none). flasher-standalone.test.ts reads fos_board.c for it.
+export const TOUCH_PRESETS = new Set([
   'seeed_reterminal_sticky',
   'seeed_reterminal_e1003',
   'seeed_sensecap_indicator_d1',
@@ -35,6 +39,15 @@ export interface StandaloneBoard {
   /** The rotation the board is held at (the Sticky stands portrait). */
   rotate: number | null
   touch: boolean
+  /** A fast screen (an LCD or an AMOLED): it shows what redraws many times a second. */
+  fast: boolean
+  /** The flash the board comes with, which decides its layout and so its `/state`. */
+  flashSize: string
+}
+
+/** A panel that redraws fast: an LCD or an AMOLED. Every other ESP32 panel is e-paper. */
+function deviceIsFast(device: string): boolean {
+  return device.startsWith('lcd.') || device.startsWith('amoled.')
 }
 
 /** The console's panel key for a device id ('waveshare.EPD_7in5_V2' → 'EPD_7in5_V2'). */
@@ -52,6 +65,8 @@ export const standaloneBoards: StandaloneBoard[] = Object.entries(ESP32_HARDWARE
     defaultPanel: consolePanelKey(config!.device),
     rotate: typeof config!.rotate === 'number' ? config!.rotate : null,
     touch: TOUCH_PRESETS.has(key),
+    fast: deviceIsFast(config!.device),
+    flashSize: config!.flashSize,
   }))
   .sort((a, b) => a.label.localeCompare(b.label))
 
@@ -164,28 +179,254 @@ export function standaloneProvisioning(choices: StandaloneChoices): Provisioning
 }
 
 // ----- Starter scenes -------------------------------------------------------
+//
+// The samples are sampleCatalog.ts's index (every repo sample a standalone
+// frame can run), ticked one by one or a preset at a time. The Scene store is
+// always among them: with it the frame installs the rest without a cable.
 
-/** One sample the flasher offers (cloud-frontend/build.mjs writes the list
- * from repo/scenes/samples into flasher-scenes.json). */
-export interface StarterTemplate {
-  name: string
+/** What the scene list needs to know of the board picked. */
+export interface StandaloneBoardKind {
+  /** It takes taps: a touch screen (TOUCH_PRESETS). */
+  touch: boolean
+  /** A fast screen; null before a board is picked. */
+  fast: boolean | null
+  /** Its flash, which decides its `/state`; null when not known (another S3 board). */
+  flashSize: string | null
+}
+
+export function standaloneBoardKind(board: string): StandaloneBoardKind {
+  const preset = standaloneBoard(board)
+  if (preset) {
+    return { touch: preset.touch, fast: preset.fast, flashSize: preset.flashSize }
+  }
+  // Another S3 board: its panels are all e-paper; its flash is read only once
+  // the flash starts.
+  return { touch: false, fast: board === CUSTOM_BOARD ? false : null, flashSize: null }
+}
+
+/** The `state` partition of each flash layout (embedded/esp32/partitions*.csv). */
+const STATE_PARTITION_BYTES: Record<string, number> = {
+  '4MB': 512 * 1024,
+  '8MB': 1024 * 1024,
+  '16MB': 8 * 1024 * 1024,
+  '32MB': 24 * 1024 * 1024,
+}
+
+/** A set holds up to this many scenes (FOS_SCENE_STORE_SCENES, embedded/esp32/README.md "How big a set may be"). */
+export const STANDALONE_MAX_SCENES = 128
+
+/** The share of `/state` a set may take: SPIFFS keeps its own pages, and the
+ * scenes keep their state beside them (a reTerminal E1002 held 680 KB of
+ * scenes on its 1 MB `/state`, with room for 120 KB more). */
+const STATE_SHARE_FOR_SCENES = 0.7
+
+export interface StandaloneSceneRoom {
+  bytes: number
+  /** The flash it was worked out for. */
+  flashSize: string
+  /** Not known for this board: worked out for the smallest S3 layout. */
+  assumed: boolean
+}
+
+/** How many bytes of scenes the board keeps. */
+export function standaloneSceneRoom(kind: StandaloneBoardKind): StandaloneSceneRoom {
+  const flashSize = kind.flashSize && STATE_PARTITION_BYTES[kind.flashSize] ? kind.flashSize : '8MB'
+  return {
+    bytes: Math.floor(STATE_PARTITION_BYTES[flashSize]! * STATE_SHARE_FOR_SCENES),
+    flashSize,
+    assumed: flashSize !== kind.flashSize,
+  }
+}
+
+/** Why a sample cannot go on this board, or null: a fast scene on e-paper. */
+export function sampleUnfitReason(sample: FlasherSample, kind: StandaloneBoardKind): string | null {
+  return kind.fast === false && sample.needs.includes('fast') ? 'Needs a fast screen' : null
+}
+
+/** The console reads at 115200 baud on a USB-UART bridge: about 11 KB a second. */
+const USB_UPLOAD_BYTES_PER_SECOND = 11 * 1024
+/** What each scene sent alone costs on top (`scene-put`: the slot file and the index written). */
+const USB_SCENE_PUT_SECONDS = 2
+
+/** About how long the picked scenes take over the cable, in seconds. */
+export function sceneUploadSeconds(bytes: number, scenes: number): number {
+  const alone = bytes > 512 * 1024 ? scenes : 0
+  return Math.ceil(bytes / USB_UPLOAD_BYTES_PER_SECOND + alone * USB_SCENE_PUT_SECONDS)
+}
+
+export type ScenePresetKey = 'starter' | 'interactive' | 'paper' | 'everything' | 'store'
+
+export interface ScenePreset {
+  key: ScenePresetKey
+  label: string
   description: string
-  /** Ticked unless the person unticks it. */
-  preselected: boolean
-  scenes: Record<string, unknown>[]
+}
+
+export const scenePresets: ScenePreset[] = [
+  {
+    key: 'starter',
+    label: 'A few to start',
+    description: 'The Scene store, a clock, the weather and the frame’s tools.',
+  },
+  {
+    key: 'interactive',
+    label: 'Interactive LCD scenes',
+    description: 'Everything you tap, type into or play: games, tools and animations.',
+  },
+  {
+    key: 'paper',
+    label: 'Best for e-paper',
+    description: 'Scenes to look at that change slowly: clocks, calendars, weather, photos and art.',
+  },
+  { key: 'everything', label: 'Everything', description: 'Every scene that runs on this board.' },
+  { key: 'store', label: 'Only the Scene store', description: 'Install the rest from the frame itself.' },
+]
+
+/** The frame's own tools (the scene switcher puts them first). */
+const SYSTEM_CATEGORY = 'System'
+const DEMOS_CATEGORY = 'Demos & examples'
+
+// "A few to start" is a choice of taste, so a short list by name, in the
+// order they go on: a keys-only board boots into the first one that is not
+// the store (a clock). The frame's tools (the "System" category) come too on a
+// board that takes taps, whose own screen runs them.
+const STARTER_SAMPLES = ['Clock', 'Weather']
+const STARTER_TOUCH_SAMPLES = ['Files', 'Calculator', 'Terminal app', 'To-do']
+const STARTER_KEYS_SAMPLES = ['Word clock', 'Year progress']
+
+function interactive(sample: FlasherSample): boolean {
+  return sample.needs.some((need) => need === 'touch' || need === 'keys' || need === 'fast')
+}
+
+/** The samples a preset ticks on this board, in the order they are tried. */
+function presetCandidates(key: ScenePresetKey, samples: FlasherSample[], kind: StandaloneBoardKind): FlasherSample[] {
+  const fits = samples.filter((sample) => !sample.store && !sampleUnfitReason(sample, kind))
+  const byName = (names: string[]) =>
+    names.map((name) => fits.find((sample) => sample.name === name)).filter((sample) => sample !== undefined)
+  switch (key) {
+    case 'store':
+      return []
+    case 'starter':
+      return kind.touch
+        ? [
+            ...byName(STARTER_SAMPLES),
+            ...fits.filter((sample) => sample.category === SYSTEM_CATEGORY),
+            ...byName(STARTER_TOUCH_SAMPLES),
+          ]
+        : byName([...STARTER_SAMPLES, ...STARTER_KEYS_SAMPLES])
+    case 'interactive':
+      return fits.filter((sample) => sample.category !== DEMOS_CATEGORY && interactive(sample))
+    case 'paper':
+      return fits.filter(
+        (sample) => sample.category !== DEMOS_CATEGORY && !interactive(sample) && !sample.needs.includes('fast')
+      )
+    case 'everything':
+      return fits
+  }
+}
+
+export interface PresetPicks {
+  /** The samples ticked: the Scene store first, then the preset's that fit. */
+  picked: string[]
+  /** The preset's samples that did not fit the board's room. */
+  noRoom: string[]
+}
+
+/** What a preset ticks: the Scene store, then its samples while the board has room for them. */
+export function presetPicks(key: ScenePresetKey, samples: FlasherSample[], kind: StandaloneBoardKind): PresetPicks {
+  const room = standaloneSceneRoom(kind)
+  const store = samples.filter((sample) => sample.store)
+  let bytes = store.reduce((sum, sample) => sum + sample.bytes, 0)
+  let count = store.reduce((sum, sample) => sum + sample.scenes, 0)
+  const picked = store.map((sample) => sample.name)
+  const noRoom: string[] = []
+  for (const sample of presetCandidates(key, samples, kind)) {
+    if (picked.includes(sample.name)) {
+      continue
+    }
+    if (bytes + sample.bytes > room.bytes || count + sample.scenes > STANDALONE_MAX_SCENES) {
+      noRoom.push(sample.name)
+      continue
+    }
+    bytes += sample.bytes
+    count += sample.scenes
+    picked.push(sample.name)
+  }
+  return { picked, noRoom }
+}
+
+/** The preset a board starts on. */
+export function defaultScenePreset(): ScenePresetKey {
+  return 'starter'
+}
+
+export interface PickedScenes {
+  samples: FlasherSample[]
+  bytes: number
+  scenes: number
+}
+
+/** The picked samples in the list's order, the Scene store always among them. */
+export function pickedScenes(samples: FlasherSample[], picked: readonly string[]): PickedScenes {
+  const chosen = samples.filter((sample) => sample.store || picked.includes(sample.name))
+  return {
+    samples: chosen,
+    bytes: chosen.reduce((sum, sample) => sum + sample.bytes, 0),
+    scenes: chosen.reduce((sum, sample) => sum + sample.scenes, 0),
+  }
+}
+
+/** A size as the list says it: KB, or MB from one. */
+export function sceneBytesLabel(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`
+}
+
+/** Why the picked scenes cannot go on the board, or null. */
+export function pickedScenesProblem(
+  picked: PickedScenes,
+  kind: StandaloneBoardKind,
+  samples: FlasherSample[] | null
+): string | null {
+  if (samples === null) {
+    return null
+  }
+  const unfit = picked.samples.filter((sample) => sampleUnfitReason(sample, kind))
+  if (unfit.length > 0) {
+    return `${unfit.map((sample) => sample.name).join(', ')} need${unfit.length === 1 ? 's' : ''} a fast screen.`
+  }
+  if (picked.scenes > STANDALONE_MAX_SCENES) {
+    return `A frame keeps up to ${STANDALONE_MAX_SCENES} scenes: untick some.`
+  }
+  const room = standaloneSceneRoom(kind)
+  if (picked.bytes > room.bytes) {
+    return `The board keeps about ${sceneBytesLabel(room.bytes)} of scenes${
+      room.assumed ? ' (counted for an 8 MB board)' : ''
+    }, and these are ${sceneBytesLabel(picked.bytes)}: untick some.`
+  }
+  return null
+}
+
+function sceneIsLayout(scene: Record<string, unknown>): boolean {
+  const settings = scene.settings
+  return !!settings && typeof settings === 'object' && (settings as Record<string, unknown>).isLayout === true
 }
 
 /**
  * The scene set a standalone frame starts with: the picked samples' scenes,
- * the first one that is not the Scene store marked `default` (the frame shows
- * a clock, not the shop), the store itself always among them so the frame
- * can install the rest without a cable.
+ * the Scene store's first. A board that takes taps gets no `default`: with no
+ * scene of its own choosing it opens on the scene switcher, its home. A board
+ * of keys alone boots into the first scene that is not the store (a clock, not
+ * the shop), or the store when it is all there is.
  */
-export function starterSceneSet(templates: StarterTemplate[], picked: ReadonlySet<string>): Record<string, unknown>[] {
-  const scenes = templates
-    .filter((template) => picked.has(template.name))
-    .flatMap((template) => template.scenes.map((scene) => ({ ...scene })))
-  const first = scenes.find((scene) => scene.id !== 'scene-store') ?? scenes[0]
+export function starterSceneSet(
+  sampleScenes: readonly (readonly Record<string, unknown>[])[],
+  kind: Pick<StandaloneBoardKind, 'touch'>
+): Record<string, unknown>[] {
+  const scenes = sampleScenes.flatMap((scenes) => scenes.map((scene) => ({ ...scene })))
+  scenes.sort((a, b) => Number(b.id === SCENE_STORE_ID) - Number(a.id === SCENE_STORE_ID))
+  const first = kind.touch
+    ? null
+    : (scenes.find((scene) => scene.id !== SCENE_STORE_ID && !sceneIsLayout(scene)) ?? scenes[0])
   for (const scene of scenes) {
     if (scene === first) {
       scene.default = true

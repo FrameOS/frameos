@@ -4550,6 +4550,283 @@
     ]
    },
    {
+    "name": "the frame's home: a switcher opened with nothing behind it stays until a scene is picked",
+    "why": "An ESP32 that takes taps starts on the scene switcher when nothing was picked on it and no scene is marked default (fos_boot_scene_home, docs/scene-switcher.md \"The frame's home\"): opened with `state.home`. It has nothing to go back to, so the commands that would go back (`sceneSwitcher` again, a `back` key) leave it where it is. Its gear opens the frame page over it, and the frame page goes back to it, home again. Picking a scene ends it: opened from that scene later, the switcher is the usual one.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/switcherA",
+      "name": "switcherA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/switcherB",
+      "name": "switcherB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/switcherC",
+      "name": "switcherC",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "bottom"
+      },
+      "emit": "sceneSwitcher"
+     }
+    ],
+    "scene": "fixtures/dispatcher/switcherA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "system/sceneSwitcher",
+         "state": {
+          "home": true
+         }
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run switcherA close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "",
+       "home": true,
+       "highlight": "fixtures/dispatcher/switcherA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "home": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "LEFT",
+         "role": "back",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSwitcher button",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "home": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings",
+        "payload": {
+         "page": "frame"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run sceneSwitcher close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "home": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run sceneSettings close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "home": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "role": "refresh",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSwitcher button",
+       "select fixtures/dispatcher/switcherA",
+       "run sceneSwitcher close",
+       "run switcherA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/switcherA"
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run switcherA close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherA",
+       "home": null
+      }
+     }
+    ]
+   },
+   {
     "name": "the frame's back and forward are the scene's own: a swipe in from the side never switches the scene",
     "why": "`back` and `forward` are delivered to the scene showing, which decides what they mean (the photo or the page before or after). Every touch preset binds them to the swipes in from the left and the right edge, so those no longer walk the scene list: a scene that does not listen for them stays as it is, and changing the scene is the switcher's (up from the bottom). Only the event map, the HTTP API, a schedule, the preview and the runtime may say them: a driver's key is bound through the map. The render follows only when the scene's state changed.",
     "scenes": [

@@ -79,6 +79,7 @@
 #endif
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
+#include "fos_restart.h"
 
 /* The one external copy of fos_mem.h's inline fos_big_malloc. */
 extern inline void *fos_big_malloc(size_t size);
@@ -311,7 +312,7 @@ static void scene_state_write_behind(void)
     };
     fos_scene_state_set_write_behind(&behind);
     xTaskCreatePinnedToCore(scene_state_writer_task, "state_wr", 4096, NULL, tskIDLE_PRIORITY + 1, NULL, 0);
-    esp_register_shutdown_handler(scene_state_flush_on_restart);
+    fos_on_restart(scene_state_flush_on_restart);
 }
 
 /* The CPU at 240 MHz. On the S3 both clocks divide the same 480 MHz PLL,
@@ -545,6 +546,9 @@ void app_main(void)
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
+    /* A restart waits for the panel's waveform and puts it to sleep, its
+     * high voltage off. */
+    fos_on_restart(fos_display_before_restart);
     fos_display_set_temperature_hook(panel_temperature);
 
     /* An RGB LCD board renders at 240 MHz unless its cpu_mode says battery:
@@ -888,7 +892,7 @@ void app_main(void)
     /* Log lines leave the logging task here on: a printf on the render task
      * was a third of an isolated tap on an LCD board (fos_log_ring.h). */
     fos_log_ring_start();
-    esp_register_shutdown_handler(log_ring_flush_on_restart);
+    fos_on_restart(log_ring_flush_on_restart);
 
     /* Cloud-managed frames (docs/cloud-frames.md): idles until cloud_url and
      * a claim token are provisioned (USB `set`, flasher) and Wi-Fi is up,

@@ -102,7 +102,7 @@ type
     slow*: bool ## a press cost a refresh last time (panelLook): taps alone
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
     keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close or gear to draw
-    headed*: bool ## the categories have headings (heads): a dozen scenes and more, two a category
+    headed*: bool ## the categories have headings (heads): wherever a scene has one
     revealing: bool ## just opened: the next render scrolls to the highlight in the room it has (draw)
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
@@ -210,6 +210,10 @@ template fastPanel*(frameConfig: FrameConfig, canvas: Image = nil): bool =
 proc idleSeconds*(slow: bool): float =
   ## How long the switcher waits for a touch or a key before it goes back.
   if slow: IdleSecondsSlow else: IdleSecondsFast
+
+const HomeIdleSeconds = 3600.0
+  ## How often the frame's home (it never goes back by itself) draws again
+  ## with nobody at it: a new scene list, the hour.
 
 proc canvasSize(frameConfig: FrameConfig): (int, int) =
   if frameConfig.rotate == 90 or frameConfig.rotate == 270: (frameConfig.height, frameConfig.width)
@@ -404,11 +408,21 @@ proc folded(s: string, i: int): int =
   else:
     c
 
+proc isSystemGroup(name: string): bool =
+  ## Whether `name` is the frame's own apps' category, "System" in any case:
+  ## the first group (the store, Files, the terminal, the code editor).
+  result = name.len == 6
+  for i in 0 ..< min(name.len, 6):
+    if (ord(name[i]) or 0x20) != ord("system"[i]):
+      result = false
+
 proc before(a, b: string): bool =
-  ## Whether the category `a` goes before `b`, as `grouped` sorts them: by
-  ## the names with case aside, and by the names themselves when that ties.
+  ## Whether the category `a` goes before `b`, as `grouped` sorts them:
+  ## System first, then by the names with case aside, and by the names
+  ## themselves when that ties.
   var i = 0
-  var decided = false
+  var decided = a.isSystemGroup != b.isSystemGroup
+  result = a.isSystemGroup
   while not decided and i < min(a.len, b.len):
     let x = folded(a, i)
     let y = folded(b, i)
@@ -422,10 +436,11 @@ proc before(a, b: string): bool =
 proc grouped*(entries: seq[SwitcherEntry]): seq[SwitcherEntry] =
   ## `entries` in the order the switcher shows them, which is the desktops'
   ## `grouped` (docs/scene-layouts.md "Long lists of scenes"): each category's scenes
-  ## under it, the categories by name with case aside, then the scenes with
-  ## none (or "Other"); in the list's order within each, and the list as it
-  ## is where no scene has one. Each one's `category` becomes its group's
-  ## name, "" for Other: the first one has a category when any does.
+  ## under it, System first (the frame's own apps), then the categories by
+  ## name with case aside, then the scenes with none (or "Other"); in the
+  ## list's order within each, and the list as it is where no scene has one.
+  ## Each one's `category` becomes its group's name, "" for Other: the first
+  ## one has a category when any does.
   var names: seq[string]
   result = entries
   for i in 0 ..< result.len:
@@ -460,7 +475,9 @@ proc holds(text, part: string): bool =
 
 proc list(self: SceneSwitcherScene) =
   ## The host's scenes, in the order they are drawn, those the search holds
-  ## (by name, category or id), and whether their categories get headings.
+  ## (by name, category or id), and whether their categories get headings:
+  ## wherever a scene has one, even a lone scene, and never where none has
+  ## (a list with no categories is one flow with no heading over it).
   self.entries = grouped(listEntries())
   let query = self.state{"query"}.getStr()
   if query.len > 0:
@@ -469,17 +486,12 @@ proc list(self: SceneSwitcherScene) =
       if entry.name.holds(query) or entry.category.holds(query) or entry.id.holds(query):
         kept.add entry
     self.entries = move(kept)
-  var groups = 0
-  for i in 0 ..< self.entries.len:
-    if i == 0 or self.entries[i].category != self.entries[i - 1].category:
-      inc groups
-  self.headed = self.entries.len >= 12 and self.entries[0].category.len > 0 and 2 * groups <= self.entries.len
+  self.headed = self.entries.len > 0 and self.entries[0].category.len > 0
 
 proc heads*(self: SceneSwitcherScene, index: int): bool =
-  ## Whether the cell at `index` starts a category, a heading above it: never
-  ## where no scene has one, nor where headings would be most of the list
-  ## (`headed`: fewer than a dozen scenes, or fewer than two a category),
-  ## which keeps the order by category without them.
+  ## Whether the cell at `index` starts a category, a heading above it:
+  ## wherever a scene has a category (`headed`), Other's heading over the
+  ## scenes with none after them, and never where no scene has one.
   self.headed and
     (index == 0 or self.entries[index].category != self.entries[index - 1].category)
 
@@ -518,6 +530,14 @@ proc opener(self: SceneSwitcherScene): string =
 proc forget(self: SceneSwitcherScene) =
   ## Opened from nowhere it knows: Close goes to the list's first scene.
   self.state.put("from", newJString(""))
+
+proc isHome(self: SceneSwitcherScene): bool =
+  ## The frame's home (docs/scene-switcher.md "The frame's home"): what an
+  ## ESP32 that takes taps starts on when nothing was picked on it and no
+  ## scene is marked default. Nothing to go back to: no Close, no timeout,
+  ## and the commands that would go back leave it where it is
+  ## (event_loop.nim backFrom). Until a scene is picked from it.
+  self.state{"home"}.getBool()
 
 proc highlighted*(self: SceneSwitcherScene): int =
   ## The highlighted tile, the first when the highlight names no scene on the
@@ -605,6 +625,8 @@ proc choose(self: SceneSwitcherScene, index: int) =
   let payload = newJObject()
   if index >= 0 and index < self.entries.len:
     payload.put("sceneId", newJString(self.entries[index].id))
+    if self.state.hasKey("home"):
+      self.state.delete("home")
     # On a desktop it is a launcher: the scene picked opens beside it and the
     # list stays open in its window until it is closed (2026-11-22).
     wentBack = not builtInScenesStay
@@ -613,8 +635,11 @@ proc choose(self: SceneSwitcherScene, index: int) =
     payload.put("page", newJString("frame"))
     sendEvent(evSceneSettings, payload, eoScene)
 
-proc leave() =
-  ## Back to the scene it was opened from: the dispatcher knows which.
+proc leave(self: SceneSwitcherScene) =
+  ## Back to the scene it was opened from: the dispatcher knows which. The
+  ## frame's home has none, and stays.
+  if self.isHome():
+    return
   wentBack = true
   sendEvent(evSceneSwitcher, newJObject(), eoScene)
 
@@ -652,6 +677,9 @@ proc opened(self: SceneSwitcherScene) =
     # A search is for this time: opened again, every scene shows.
     self.state.delete("query")
     self.list()
+  if self.opener().len > 0 and self.state.hasKey("home"):
+    # Opened from a scene: the way back is there, home or not before.
+    self.state.delete("home")
   let index = self.indexOf(self.opener())
   if index < 0:
     self.forget()
@@ -682,13 +710,13 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     of "next", "down": self.highlight(self.highlighted() + steps)
     of "prev", "up": self.highlight(self.highlighted() - steps)
     of "primary", "refresh": self.choose(self.highlighted())
-    of "back", "menu": leave()
+    of "back", "menu": self.leave()
     else: acted = false
     if acted:
       self.touch()
   elif action == "longPress":
     case payload{"role"}.getStr()
-    of "primary", "refresh", "menu", "back": leave()
+    of "primary", "refresh", "menu", "back": self.leave()
     else: discard
 
 when not defined(frameosEmbedded):
@@ -731,7 +759,7 @@ when not defined(frameosEmbedded):
     of "PageDown": self.screenful(1)
     of "PageUp": self.screenful(-1)
     of "Enter", "NumpadEnter", "Space": self.choose(self.highlighted())
-    of "Escape", "Backspace": leave()
+    of "Escape", "Backspace": self.leave()
     else: return
     self.touch()
 
@@ -903,7 +931,8 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: 
   if self.gear:
     header.children.add self.gearButton(clamp(grid.headerH * 3 div 4, 14, 48), paper,
       self.highlighted() == self.entries.len, button, wide = true)
-  if self.keysOnly:
+  if self.keysOnly or self.isHome():
+    # Nothing to close to at the frame's home.
     root.children.add header.role("bar")
     return
   c = "shrink-0 rounded-full"
@@ -943,7 +972,8 @@ proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, pa
   c.add " flex items-center justify-center rounded-full"
   c.px("text", small)
   c.add button
-  root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
+  if not self.isHome():
+    root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
   if self.gear:
     let gear = self.gearButton(rowH, paper, self.highlighted() == self.entries.len, button)
     gear.attrs[0][1].add " absolute"
@@ -1100,7 +1130,7 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   # A slow panel shows no press: a refresh to say a finger is down is seconds
   # of flashing for nothing. `pointer` hands it taps alone, which leave the
   # target's input (what is hovered, what is pressed) empty. Back by itself
-  # once nobody has touched it for a while.
+  # once nobody has touched it for a while, but for the frame's home.
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
   let unit = self.sizeUnit(image)
   if self.revealing:
@@ -1116,8 +1146,9 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
     if lit >= 0 and lit < self.entries.len:
       self.reveal(lit, centred = true)
   let tree = self.tree(roomW, roomH, self.paper, unit)
-  if self.drawUi(SceneSwitcherId, tree, image, self.paper, self.slow, onTap, idleSeconds(self.slow), roomW, roomH):
-    leave()
+  let idle = if self.isHome(): HomeIdleSeconds else: idleSeconds(self.slow)
+  if self.drawUi(SceneSwitcherId, tree, image, self.paper, self.slow, onTap, idle, roomW, roomH):
+    self.leave()
 
 # ------------------------------------------------------------ the scene
 
@@ -1142,7 +1173,7 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
     # A tile, Close or the gear: what it did is the next picture (a switch).
     # A tap on nothing is nothing.
     if tapped < count: self.choose(tapped)
-    elif tapped == count: leave()
+    elif tapped == count: self.leave()
     else: self.choose(count)
     tapped = -1
     self.touch()
@@ -1163,8 +1194,9 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   let payload = context.payload
   case context.event
   of "setCurrentScene":
-    # What the dispatcher says it was opened from (event_loop.nim).
-    for key in ["from", "layout"]:
+    # What the dispatcher says it was opened from (event_loop.nim), and
+    # whether it is the frame's home (`isHome`).
+    for key in ["from", "layout", "home"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)

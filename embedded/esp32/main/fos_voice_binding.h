@@ -37,3 +37,21 @@ size_t fos_voice_binding_labels(const char *event_map_json, char labels[][FOS_VO
  * as a first. */
 size_t fos_voice_binding_triple_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
                                        size_t max);
+
+/* How a person at the frame opens its own page (docs/scene-settings.md "The
+ * frame page") by hand, for the voice key's words when there is no Wi-Fi to
+ * talk over (fos_voice.c): the first rule that emits `sceneSettings` (the
+ * panel, whose gear opens the page; straight onto it with
+ * `as: {"page": "frame"}`), else the first that emits `sceneSwitcher` (the
+ * list, whose header gear opens it), in a few words: "swipe down from the
+ * top", "press the Action key thrice". The gear wants a finger, so a key's
+ * rule counts only on a map with a rule that is not a key's (a touch board:
+ * the switcher's takesNoTaps). The Sticky's AI key is the Action key in
+ * every word a person reads. FOS_VOICE_PAGE_NONE and "" when there is no way. */
+typedef enum {
+    FOS_VOICE_PAGE_NONE = 0,
+    FOS_VOICE_PAGE_GEAR, /* the words, then the gear */
+    FOS_VOICE_PAGE_OPEN, /* the words open the page itself */
+} fos_voice_page_way_t;
+
+fos_voice_page_way_t fos_voice_binding_page_way(const char *event_map_json, char *out, size_t out_len);

@@ -44,7 +44,8 @@ warns. The rule is written twice, `frameos/src/frameos/scene_icon.nim`
 category titles (the Category select in the scene's settings, the store's
 `categories.ts` / the SPA's `storeCategories.ts`): Photos, Art & galleries,
 Clocks & time, Calendars & agendas, Weather, Home & dashboards, Games, Fun &
-animations, Notes & tools, AI & generative, Demos & examples, and Multi app
+animations, Notes & tools, AI & generative, Demos & examples, System (the
+frame's own apps, listed first on a frame), and Multi app
 layouts / Single app layouts / Device layouts for a layout. The scene keeps the name as text and nothing
 maps it to anything: a name of the owner's own is kept, shown as it is in the
 select, and is a category like any other.

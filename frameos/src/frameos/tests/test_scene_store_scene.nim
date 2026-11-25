@@ -53,7 +53,7 @@ initLock(requestsLock)
 const Shelves = [("photos", "Photos"), ("art", "Art & galleries"), ("clocks", "Clocks & time"),
   ("calendar", "Calendars & agendas"), ("weather", "Weather"), ("dashboards", "Home & dashboards"),
   ("games", "Games"), ("fun", "Fun & animations"), ("utilities", "Notes & tools"), ("ai", "AI & generative"),
-  ("demos", "Demos & examples"), ("desktops", "Multi app layouts"), ("layouts", "Single app layouts"),
+  ("demos", "Demos & examples"), ("system", "System"), ("desktops", "Multi app layouts"), ("layouts", "Single app layouts"),
   ("devices", "Device layouts")]
 
 proc repoStore(): seq[JsonNode] =

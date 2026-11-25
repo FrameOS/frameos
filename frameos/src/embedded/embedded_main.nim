@@ -1235,6 +1235,13 @@ proc fos_nim_scene_state_json_impl(): cstring {.exportc, cdecl.} =
     sceneStateBuffer = "{}"
   sceneStateBuffer.cstring
 
+proc fos_nim_open_home_impl(): bool {.exportc, cdecl.} =
+  try:
+    result = openHome()
+  except Exception as e:
+    log("open home failed: " & e.msg)
+    result = false
+
 proc fos_nim_set_scene_impl(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
     if sceneId == nil:
