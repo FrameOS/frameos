@@ -539,6 +539,15 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       mountPath: '/srv/assets',
     },
   },
+  // Its LCD is wired by the firmware's board table, like the Indicator's.
+  guition_esp32_4848s040: {
+    label: 'Guition ESP32-4848S040 (4" LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st7701s_480x480',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_SENSECAP_INDICATOR_PIN_LAYOUT,
+  },
   waveshare_esp32_s3_touch_amoled_1_75: {
     label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75 (1.75" round AMOLED)',
     platform: EMBEDDED_ESP32_S3,

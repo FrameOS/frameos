@@ -1,5 +1,6 @@
-/* ST7701S 480x480 RGB LCD (the Seeed SenseCAP Indicator's) and the Sunton
- * ESP32-8048S070's EK9716 800x480. See lcd_st7701s_rgb.h. */
+/* ST7701S 480x480 RGB LCD (the Seeed SenseCAP Indicator's and the Guition
+ * ESP32-4848S040's) and the Sunton ESP32-8048S070's EK9716 800x480. See
+ * lcd_st7701s_rgb.h. */
 #include "lcd_st7701s_rgb.h"
 #include "lcd_press.h"
 
@@ -27,8 +28,14 @@ typedef struct {
     /* Pins held high so the rest of the board runs: the RP2040's reset and
      * the WXM's barometer power on the Indicator (-1 = none). */
     int exp_hold_high[2];
-    /* The controller's 3-wire SPI (clock and data are GPIOs). */
+    /* The controller's 3-wire SPI (clock and data are GPIOs). Chip-select is
+     * the expander's exp_lcd_cs, or a GPIO here (-1 = the expander's). */
     int spi_sck, spi_sda;
+    int gpio_lcd_cs;
+    /* What differs between glasses on one ST7701S bring-up: display
+     * inversion on (0x21) or off (0x20), and the 0xCD byte. */
+    bool invert;
+    uint8_t cd;
     int backlight; /* GPIO, high = on */
     /* The RGB interface. */
     int hsync, vsync, de, pclk;
@@ -67,7 +74,8 @@ static const lcd_board_t k_boards[] = {
         .i2c_sda = 39, .i2c_scl = 40,
         .exp_lcd_cs = 4, .exp_lcd_rst = 5, .exp_tp_rst = 7,
         .exp_hold_high = {8, 10},
-        .spi_sck = 41, .spi_sda = 48,
+        .spi_sck = 41, .spi_sda = 48, .gpio_lcd_cs = -1,
+        .invert = true, .cd = 0x08,
         .backlight = 45,
         .hsync = 16, .vsync = 17, .de = 18, .pclk = 21,
         .data = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0},
@@ -108,7 +116,7 @@ static const lcd_board_t k_boards[] = {
         .i2c_sda = -1, .i2c_scl = -1,
         .exp_lcd_cs = -1, .exp_lcd_rst = -1, .exp_tp_rst = -1,
         .exp_hold_high = {-1, -1},
-        .spi_sck = -1, .spi_sda = -1,
+        .spi_sck = -1, .spi_sda = -1, .gpio_lcd_cs = -1,
         .backlight = 2,
         .hsync = 39, .vsync = 40, .de = 41, .pclk = 42,
         .data = {15, 7, 6, 5, 4, 9, 46, 3, 8, 16, 1, 14, 21, 47, 48, 45},
@@ -117,6 +125,29 @@ static const lcd_board_t k_boards[] = {
         .vsync_pulse = 13, .vsync_back = 10, .vsync_front = 12,
         .pclk_active_neg = 1,
         /* 2 x 32 KB: 20 of 480 lines, ~2.9 ms of slack at 12 MHz. */
+        .bounce_lines = 20,
+    },
+    /* Guition ESP32-4848S040: no IO expander, so the controller's CS is a
+     * GPIO and nothing resets it. GPIO20 is the S3's USB D+ pad, freed from
+     * the USB-Serial/JTAG PHY by touch init (fos_touch.c). Wiring, porches
+     * and init values are ESPHome's GUITION-4848S040 model
+     * (components/mipi_rgb/models/guition.py). */
+    {
+        .preset = "guition_esp32_4848s040",
+        .panel = "LCD_ST7701S_480x480",
+        .width = 480, .height = 480,
+        .i2c_sda = -1, .i2c_scl = -1,
+        .exp_lcd_cs = -1, .exp_lcd_rst = -1, .exp_tp_rst = -1,
+        .exp_hold_high = {-1, -1},
+        .spi_sck = 48, .spi_sda = 47, .gpio_lcd_cs = 39,
+        .invert = false, .cd = 0x00,
+        .backlight = 38,
+        .hsync = 16, .vsync = 17, .de = 18, .pclk = 21,
+        .data = {4, 5, 6, 7, 15, 8, 20, 3, 46, 9, 10, 11, 12, 13, 14, 0},
+        .pclk_hz = 12 * 1000 * 1000,
+        .hsync_pulse = 10, .hsync_back = 10, .hsync_front = 20,
+        .vsync_pulse = 10, .vsync_back = 10, .vsync_front = 10,
+        .pclk_active_neg = 0,
         .bounce_lines = 20,
     },
 };
@@ -152,6 +183,11 @@ void fos_lcd_st7701s_select_board(const char *hardware_preset, const char *panel
     s_width = s_board->width;
     s_height = s_board->height;
     s_fb_bytes = (size_t)s_width * (size_t)s_height * 2u;
+}
+
+const char *fos_lcd_st7701s_board(void)
+{
+    return s_board->preset;
 }
 
 void fos_lcd_st7701s_size(int *width, int *height)
@@ -312,7 +348,7 @@ static bool board_has_controller(const lcd_board_t *b)
 static esp_err_t expander_init(void)
 {
     const lcd_board_t *b = s_board;
-    if (!board_has_controller(b) && b->i2c_sda < 0) return ESP_OK;
+    if (b->i2c_sda < 0) return ESP_OK; /* no expander (CS on a GPIO, or no controller) */
     i2c_master_bus_config_t bus_config = {
         .i2c_port = -1,
         .sda_io_num = (gpio_num_t)b->i2c_sda,
@@ -382,7 +418,11 @@ static esp_err_t expander_init(void)
 
 static void spi_sck(int level) { gpio_set_level((gpio_num_t)s_board->spi_sck, level); }
 static void spi_sdo(int level) { gpio_set_level((gpio_num_t)s_board->spi_sda, level); }
-static void spi_cs(int level) { expander_set(s_board->exp_lcd_cs, level != 0); }
+static void spi_cs(int level)
+{
+    if (s_board->gpio_lcd_cs >= 0) gpio_set_level((gpio_num_t)s_board->gpio_lcd_cs, level);
+    else expander_set(s_board->exp_lcd_cs, level != 0);
+}
 
 static void spi_send_9bits(unsigned value)
 {
@@ -486,7 +526,8 @@ static void controller_init(void)
     const lcd_board_t *b = s_board;
     if (!board_has_controller(b)) return; /* the EK9716 scans; nothing to tell */
     gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << b->spi_sck) | (1ULL << b->spi_sda),
+        .pin_bit_mask = (1ULL << b->spi_sck) | (1ULL << b->spi_sda) |
+                        (b->gpio_lcd_cs >= 0 ? (1ULL << b->gpio_lcd_cs) : 0),
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
@@ -496,11 +537,16 @@ static void controller_init(void)
     spi_cs(1);
     spi_sck(1);
     spi_sdo(1);
+    uint8_t command = 0;
     for (size_t i = 0; i < sizeof(k_st7701s_init) / sizeof(k_st7701s_init[0]); i++) {
         uint16_t entry = k_st7701s_init[i];
         if (entry & 0x200u) vTaskDelay(pdMS_TO_TICKS(entry & 0xFF));
-        else if (entry & 0x100u) spi_write_command((uint8_t)entry);
-        else spi_write_data((uint8_t)entry);
+        else if (entry & 0x100u) {
+            command = (uint8_t)entry;
+            if (command == 0x21 && !b->invert) command = 0x20; /* inversion off */
+            spi_write_command(command);
+        }
+        else spi_write_data(command == 0xCD ? b->cd : (uint8_t)entry);
     }
     spi_cs(1);
     spi_sck(1);

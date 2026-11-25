@@ -182,6 +182,9 @@ static const struct {
     /* The Sunton ESP32-8048S070: the BOOT key (GPIO0) and a touch screen,
      * no microphone. The key works like the Indicator's; the edges swipe. */
     {"sunton_esp32_8048s070", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
+    /* The Guition ESP32-4848S040: a touch screen and no key (its BOOT pad,
+     * GPIO0, is the glass's R4 data line), so the edges are the whole map. */
+    {"guition_esp32_4848s040", TOUCH_EDGE_SWIPES, NULL, false},
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
 };
 
@@ -453,6 +456,10 @@ static const struct {
      * interrupt line (GPIO18) is behind an unpopulated resistor (R17), so
      * the driver polls it. */
     {"sunton_esp32_8048s070", "sda=19,scl=20,int=-1,rst=38,en=-1"},
+    /* The Guition ESP32-4848S040's GT911 on SDA19/SCL45 (GPIO19 is a USB
+     * pad, which fos_touch.c frees from the PHY first), polled: no reset or
+     * interrupt line is wired. */
+    {"guition_esp32_4848s040", "sda=19,scl=45,int=-1,rst=-1,en=-1"},
     /* The Waveshare ESP32-S3-Touch-AMOLED-1.75's Hynitron CST9217 (0x5a) on
      * the board's one bus (SDA15/SCL14, which fos_i2c.c lends it), INT
      * GPIO11, reset GPIO40 (Waveshare's BSP). */
@@ -472,6 +479,8 @@ static const struct {
     /* The AMOLED 1.75's CST9217 too (Waveshare's BSP mirrors both; a tap at
      * the top read as the bottom on the bench, 2026-11-23). */
     {"waveshare_esp32_s3_touch_amoled_1_75", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
+    /* The Guition 4848S040's GT911 reports the top right as the bottom left. */
+    {"guition_esp32_4848s040", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
 };
 
 int fos_board_touch_mirror(const char *hardware_preset)

@@ -708,6 +708,34 @@ def test_embedded_hardware_preset_for_sunton_esp32_8048s070():
     assert "touch_pins" not in settings
 
 
+def test_embedded_hardware_preset_for_guition_esp32_4848s040():
+    frame = Frame(id=16, embedded={"hardwarePreset": "guition_esp32_4848s040"})
+    ensure_embedded_frame_defaults(frame)
+    assert frame.device == "lcd.st7701s_480x480"
+    assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    assert embedded_gpio_buttons_for_frame(frame) == []
+    assert frame.event_map == [
+        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
+    ]
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    # The hardware key picks this board's wiring over the Indicator's, which
+    # has the same panel.
+    assert settings["hardware"] == "guition_esp32_4848s040"
+    assert settings["panel"] == "LCD_ST7701S_480x480"
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["guition_esp32_4848s040"]
+    assert preset["touchPins"] == "sda=19,scl=45,int=-1,rst=-1,en=-1"
+    assert "touch_pins" not in settings
+
+
 def test_embedded_hardware_preset_for_waveshare_esp32_s3_touch_amoled_1_75():
     frame = Frame(id=17, embedded={"hardwarePreset": "waveshare_esp32_s3_touch_amoled_1_75"})
     ensure_embedded_frame_defaults(frame)

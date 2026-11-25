@@ -18,6 +18,7 @@
  * (backend/app/tasks/tests/test_esp32_lcd_board.py does exactly that in CI.)
  */
 #include <stdio.h>
+#include <string.h>
 
 #include "lcd_st7701s_rgb.h"
 
@@ -33,6 +34,16 @@ static void expect_size(const char *preset, const char *panel, int width, int he
     if (w != width || h != height) {
         g_failures++;
         printf("FAIL: %s: %dx%d, wanted %dx%d\n", what, w, h, width, height);
+    }
+}
+
+static void expect_board(const char *preset, const char *panel, const char *board, const char *what)
+{
+    fos_lcd_st7701s_select_board(preset, panel);
+    g_checks++;
+    if (strcmp(fos_lcd_st7701s_board(), board) != 0) {
+        g_failures++;
+        printf("FAIL: %s: %s, wanted %s\n", what, fos_lcd_st7701s_board(), board);
     }
 }
 
@@ -53,6 +64,12 @@ int main(void)
     /* Neither: the Indicator's, as before. */
     expect_size(NULL, NULL, 480, 480, "nothing");
     expect_size("", "EPD_7in5_V2", 480, 480, "an e-paper panel");
+    /* Two boards share the ST7701S glass: the Guition's preset picks its
+     * own wiring, and the panel alone stays the Indicator's. */
+    expect_size("guition_esp32_4848s040", "LCD_ST7701S_480x480", 480, 480, "guition");
+    expect_board("guition_esp32_4848s040", "LCD_ST7701S_480x480", "guition_esp32_4848s040", "guition board");
+    expect_board("guition_esp32_4848s040", NULL, "guition_esp32_4848s040", "guition, no panel");
+    expect_board("", "LCD_ST7701S_480x480", "seeed_sensecap_indicator_d1", "st7701s panel alone");
     /* A choice is not sticky: the next call starts over. */
     expect_size("sunton_esp32_8048s070", NULL, 800, 480, "sunton again");
     expect_size(NULL, NULL, 480, 480, "back to nothing");

@@ -359,6 +359,24 @@ EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP = [
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the GT911 on
 # the chip's I2C pins, polled (INT unwired), reset GPIO38, no load switch.
 EMBEDDED_SUNTON_ESP32_8048S070_TOUCH = {"touchPins": "sda=19,scl=20,int=-1,rst=38,en=-1"}
+# Guition ESP32-4848S040 (ESP32-S3, 16 MB flash, 8 MB PSRAM), the 4" 86-box
+# wall panel: the 480x480 ST7701S glass that the SenseCAP Indicator also uses,
+# but initialised over GPIO SPI instead of an IO expander. Its wiring is the
+# LCD driver's board table, so the EPD pin slots carry nothing. GPIO0 (BOOT)
+# is an RGB data line, so the board has no key: the edges swipe only.
+EMBEDDED_GUITION_ESP32_4848S040_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": -1,
+    "mosi": -1,
+    "pwr": -1,
+}
+# Parity with fos_board.c's k_touch_pins, nothing provisions it: the GT911 on
+# SDA19/SCL45, polled, no reset line.
+EMBEDDED_GUITION_ESP32_4848S040_TOUCH = {"touchPins": "sda=19,scl=45,int=-1,rst=-1,en=-1"}
 # Waveshare ESP32-S3-Touch-AMOLED-1.75 (and its -B, the same board in a case;
 # ESP32-S3R8, 16 MB flash, 8 MB PSRAM): the round 1.75" 466x466 AMOLED, a
 # CO5300 on QSPI that keeps its own picture. Its wiring (CS12, SCLK38, D0-D3
@@ -917,6 +935,15 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
             "pins": EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS,
             "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
         },
+    },
+    "guition_esp32_4848s040": {
+        "device": "lcd.st7701s_480x480",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_GUITION_ESP32_4848S040_PINS,
+        "gpioButtons": [],
+        "eventMap": EMBEDDED_TOUCH_EDGE_SWIPES,
+        **EMBEDDED_GUITION_ESP32_4848S040_TOUCH,
     },
     # Waveshare ESP32-S3-Touch-AMOLED-1.75 (-B: the same board in a case): the
     # round 466x466 QSPI AMOLED; see EMBEDDED_WAVESHARE_AMOLED_1_75_PINS.
