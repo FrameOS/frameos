@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import requests
+import shutil
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,6 +28,8 @@ def fixture_response(path):
         return "image/png", Path("./assets/image.png").read_bytes()
     if path == "/fixtures/bird.png":
         return "image/png", Path("./assets/bird.png").read_bytes()
+    if path == "/fixtures/mask.png":
+        return "image/png", Path("./assets/mask.png").read_bytes()
     if path == "/fixtures/ci_text_file":
         return "text/plain; charset=utf-8", b"FrameOS CI text fixture\n"
     return None
@@ -185,6 +188,21 @@ def snapshot_reset_scene(scene_id):
     base_scene_id = scene_id.removesuffix("_interpreted")
     return "black" if base_scene_id == "blue" else "blue"
 
+ASSETS_FOLDER = Path("./tmp/assets")
+
+def prepare_assets_folder(source):
+    """The frame's assets folder for the run: frame.json's (the fonts) plus the
+    e2e images. A scene app reads the frame's files only (the Local Image app,
+    docs/retired-apps.md), so a scene showing ./assets/image.png names
+    ./tmp/assets/image.png."""
+    shutil.rmtree(ASSETS_FOLDER, ignore_errors=True)
+    if source and Path(source).is_dir():
+        shutil.copytree(source, ASSETS_FOLDER)
+    ASSETS_FOLDER.mkdir(parents=True, exist_ok=True)
+    for image in Path("./assets").glob("*.png"):
+        shutil.copy(image, ASSETS_FOLDER / image.name)
+    return ASSETS_FOLDER
+
 def write_runtime_frame_config(upload_url, frame_size=None):
     frame_json = Path("./frame.json")
     contents = json.loads(frame_json.read_text())
@@ -202,6 +220,10 @@ def write_runtime_frame_config(upload_url, frame_size=None):
     ])
     device_config["uploadHeaders"] = headers
     contents["deviceConfig"] = device_config
+    # "tmp/assets": without a leading "./", which the runtime's asset paths
+    # are normalized without (the Local Image app reads the scene's
+    # "./tmp/assets/image.png" as in it).
+    contents["assetsPath"] = str(prepare_assets_folder(contents.get("assetsPath") or ""))
 
     runtime_config_path = Path("./tmp/frame.snapshot.json")
     runtime_config_path.parent.mkdir(exist_ok=True)

@@ -94,7 +94,11 @@ export function appCompatibilityForFrame(
     return supported
   }
 
-  if (keyword === 'data/localImage' && !hasEmbeddedSdCardAssets(frame)) {
+  // The Local Image app (once the built-in data/localImage) reads the assets folder: the card on an ESP32.
+  const localImage =
+    keyword === 'data/localImage' ||
+    (app as { origin?: string } | null | undefined)?.origin === 'repo/apps/image/localImage'
+  if (localImage && !hasEmbeddedSdCardAssets(frame)) {
     return unsupported('Requires SD card assets mounted at /srv/assets.')
   }
 

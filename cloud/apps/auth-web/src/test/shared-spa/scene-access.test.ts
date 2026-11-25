@@ -132,6 +132,24 @@ describe("built-in apps", () => {
         }
       }
     }
+    // A retired built-in app (docs/retired-apps.json) keeps its entry while a
+    // scene not yet converted can still name it: what its replacement declares.
+    const retired = JSON.parse(readFileSync(repoUrl("docs/retired-apps.json"), "utf8")) as {
+      apps: Record<string, { replacement: string }>;
+    };
+    for (const [keyword, entry] of Object.entries(retired.apps)) {
+      if (!(keyword in BUILTIN_APP_ACCESS)) {
+        continue;
+      }
+      const config = JSON.parse(readFileSync(repoUrl(`${entry.replacement}/config.json`), "utf8")) as {
+        permissions?: string[];
+        settings?: string[];
+      };
+      declared[keyword] = {
+        ...(config.permissions?.length ? { permissions: config.permissions } : {}),
+        ...(config.settings?.length ? { settings: config.settings } : {}),
+      };
+    }
     expect(BUILTIN_APP_ACCESS).toEqual(declared);
   });
 });

@@ -184,7 +184,8 @@ plan is not the claim; now one log field says which you have.
   allocating path.
 - **1:1 placements stream too.** `render/image` offers its canvas under
   `center` and the eight anchored placements (`top-left` ... `bottom-right`),
-  and `data/localImage` takes it: pixie's `OneToOneFits` decode only the
+  and the Local Image app takes it (`frameos.loadAssetImage`, once
+  `data/localImage`): pixie's `OneToOneFits` decode only the
   window of the photo that shows, at scale 1, into the canvas. Before, a
   4032x3024 JPEG centered on an E1004 (2.4 MB left beside its 1600x1200
   canvas) fell back to a full-size decode, then to reading the 2.8 MB file in
@@ -437,8 +438,11 @@ the bounds it took that pass is now kept in memory past the cache's 1 MB
 limit while 512 KB of render headroom remains (`keepsBoundedImage`: a miss
 would allocate the same pixels again). And a cached producer the cache could
 not keep runs again with `context.remakingCachedValue` set while the value
-it made is still current: localImage then decodes the same photo, leaving
-its counter (and that field's disk write) for the cache's next period.
+it made is still current: Local Image then decodes the same photo, leaving
+its counter (and that field's disk write) for the cache's next period. Since
+it is a JS app (repo/apps/image/localImage), the bounds walk ends at a JS
+producer as the intoTarget walk does, `loadAssetImage` takes them, and the
+app reads `context.remakingCachedValue` and `context.repainting`.
 
 ### The scaled decoders
 

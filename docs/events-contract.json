@@ -87,6 +87,18 @@
         "optional": true,
         "sandboxes": ["code", "app"],
         "description": "Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md \"Round panels\"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15."
+      },
+      {
+        "name": "remakingCachedValue",
+        "type": "boolean",
+        "sandboxes": ["app"],
+        "description": "The node's cache could not keep what this node made last time and asks for the same again (an animation over a photo on a board short of memory): make the same value, do not step on to the next one. A slideshow's schedule is its cache, never the frame rate (2026.11.15+)."
+      },
+      {
+        "name": "repainting",
+        "type": "boolean",
+        "sandboxes": ["app"],
+        "description": "The scene is drawn again before it is due (a window moved over a desktop, a panel nothing kept a copy of): show what it showed, do not step on (2026.11.15+)."
       }
     ]
   },

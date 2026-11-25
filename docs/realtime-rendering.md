@@ -635,7 +635,8 @@ was 3,600 an hour.
 
 ### Photos in motion: Ken Burns
 
-The store's Ken Burns slideshow is data/localImage, cached per cycle, under
+The store's Ken Burns slideshow is the Local Image app (data/localImage until
+2026.11.15), cached per cycle, under
 render/zoomPan at 24 fps. On the Indicator it went from 0.4 fps with every
 photo refused (2026-10-25) to 7.4-7.9 fps between photo changes
 (2026-10-26):

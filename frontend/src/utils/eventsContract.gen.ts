@@ -1133,7 +1133,7 @@ export const defaultKeyboardLayout = 'us'
 
 /** `context` keys per JavaScript sandbox. */
 export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight", "round"]
-export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight", "targetWidth", "targetHeight", "targetFit", "round"]
+export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight", "targetWidth", "targetHeight", "targetFit", "round", "remakingCachedValue", "repainting"]
 
 /** Ambient declarations for the Monaco editors: event names and payloads. */
 export const eventTypeDeclarations = `/** What each built-in scene event carries in \`context.payload\` (docs/events.md). */
@@ -1251,4 +1251,8 @@ export const appContextMembers = `  /** The name of the event this run is handli
   targetFit?: string;
   /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
   round?: boolean;
+  /** The node's cache could not keep what this node made last time and asks for the same again (an animation over a photo on a board short of memory): make the same value, do not step on to the next one. A slideshow's schedule is its cache, never the frame rate (2026.11.15+). */
+  remakingCachedValue: boolean;
+  /** The scene is drawn again before it is due (a window moved over a desktop, a panel nothing kept a copy of): show what it showed, do not step on (2026.11.15+). */
+  repainting: boolean;
 `

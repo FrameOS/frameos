@@ -330,6 +330,20 @@ suite "requested bounds":
     check scene.imageBoundsPlans.len == 1
     check scene.imageBoundsPlans[2.NodeId].producerNodeId == 3.NodeId
 
+  test "a JS producer under a rotation gets the bounds, as a Nim one does":
+    # The photo a JS app decodes (frameos.loadAssetImage) under a render/zoomPan
+    # or a rotation: bounded, so the node cache can keep it.
+    let scene = sceneWith(
+      @[consumer(2, %*{}), rotate(4, "90"), producer(3, cached = false)],
+      [(2, "image", 4), (4, "image", 3)])
+    scene.planImageFusion(jsProducerAt3)
+    scene.planImageBounds(jsProducerAt3)
+    check scene.imageBoundsPlans.len == 1
+    let plan = scene.imageBoundsPlans[2.NodeId]
+    check plan.producerNodeId == 3.NodeId
+    check plan.fromCanvas
+    check plan.swapped
+
   test "a natural producer has nothing to bound":
     let scene = sceneWith(
       @[consumer(2, %*{"blendMode": "mask"}),

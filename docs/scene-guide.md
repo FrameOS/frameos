@@ -1546,6 +1546,10 @@ interface FrameOSContext {
   targetFit?: string;
   /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
   round?: boolean;
+  /** The node's cache could not keep what this node made last time and asks for the same again (an animation over a photo on a board short of memory): make the same value, do not step on to the next one. A slideshow's schedule is its cache, never the frame rate (2026.11.15+). */
+  remakingCachedValue: boolean;
+  /** The scene is drawn again before it is due (a window moved over a desktop, a panel nothing kept a copy of): show what it showed, do not step on (2026.11.15+). */
+  repainting: boolean;
   [key: string]: any;
 }
 
@@ -1850,8 +1854,11 @@ declare const frameos: {
       mask?: { offset: number; length: number; inflate?: boolean; pixels: { width: number; height: number; bits?: number; predictor?: number; invert?: boolean } };
       /** Which of app.frame.storages the path is in (FrameOS 2026.11.11+). */
       storage?: "assets" | "internal";
+      /** Also read the photo's EXIF block, as fetchImage's exif does: the reference then carries exif (camera, lens,
+       * exposure, date, GPS, ...) and exifSummary, a one-line credit, when the file has them (FrameOS 2026.11.15+). */
+      exif?: boolean;
     }
-  ): FrameOSImageRef | null;
+  ): (FrameOSImageRef & { exif?: Record<string, any>; exifSummary?: string }) | null;
   openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;
   createStream(base64: string): FrameOSStreamRef | null;
   streamRead(stream: FrameOSStreamRef | number, length: number): string | null;

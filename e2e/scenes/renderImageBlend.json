@@ -140,9 +140,9 @@
           "y": -206.96412395859497
         },
         "data": {
-          "keyword": "data/localImage",
+          "keyword": "data/downloadImage",
           "config": {
-            "path": "./assets/bird.png"
+            "url": "https://frameos.net/img/bird_in_ci_tests.png"
           },
           "cache": {
             "duration": "900",

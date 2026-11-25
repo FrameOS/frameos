@@ -1,102 +1,188 @@
 {
-    "id": "790a204a-43a5-4573-9933-dbdf3cb9c0b9",
-    "name": "Local Image",
-    "fields": [],
-    "nodes": [
-      {
-        "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "type": "event",
-        "position": {
-          "x": 121,
-          "y": 113
-        },
-        "data": {
-          "keyword": "render"
-        },
-        "width": 212,
-        "height": 161
+  "id": "790a204a-43a5-4573-9933-dbdf3cb9c0b9",
+  "name": "Local Image",
+  "fields": [],
+  "nodes": [
+    {
+      "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "type": "event",
+      "position": {
+        "x": 121,
+        "y": 113
       },
-      {
-        "id": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
-        "position": {
-          "x": 470.323300667029,
-          "y": 109.84328164590144
-        },
-        "data": {
-          "keyword": "render/image",
-          "config": {}
-        },
-        "type": "app",
-        "width": 311,
-        "height": 106,
-        "selected": false,
-        "dragging": false
+      "data": {
+        "keyword": "render"
       },
-      {
-        "id": "e49a80de-657b-459e-b715-ca83086ac6ac",
-        "position": {
-          "x": 450.323300667029,
-          "y": -210.15671835409856
-        },
-        "data": {
-          "keyword": "data/localImage",
-          "config": {
-            "path": "./assets/image.png"
-          },
-          "cache": {
-            "duration": "900",
-            "durationEnabled": true,
-            "enabled": true,
-            "inputEnabled": true
-          }
-        },
-        "type": "app",
-        "width": 520,
-        "height": 244,
-        "selected": false
+      "width": 212,
+      "height": 161
+    },
+    {
+      "id": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
+      "position": {
+        "x": 470.323300667029,
+        "y": 109.84328164590144
       },
-      {
-        "id": "cfdeaa29-2842-457e-9048-e53c01354f22",
-        "position": {
-          "x": 911.1739498327506,
-          "y": 89.01232736464814
+      "data": {
+        "keyword": "render/image",
+        "config": {}
+      },
+      "type": "app",
+      "width": 311,
+      "height": 106,
+      "selected": false,
+      "dragging": false
+    },
+    {
+      "id": "e49a80de-657b-459e-b715-ca83086ac6ac",
+      "position": {
+        "x": 450.323300667029,
+        "y": -210.15671835409856
+      },
+      "data": {
+        "keyword": "localImage",
+        "config": {
+          "path": "./tmp/assets/image.png"
         },
-        "data": {
-          "keyword": "render/text",
-          "config": {
-            "text": "Activate proton beam"
-          }
+        "cache": {
+          "duration": "900",
+          "durationEnabled": true,
+          "enabled": true,
+          "inputEnabled": true
+        }
+      },
+      "type": "app",
+      "width": 520,
+      "height": 244,
+      "selected": false
+    },
+    {
+      "id": "cfdeaa29-2842-457e-9048-e53c01354f22",
+      "position": {
+        "x": 911.1739498327506,
+        "y": 89.01232736464814
+      },
+      "data": {
+        "keyword": "render/text",
+        "config": {
+          "text": "Activate proton beam"
+        }
+      },
+      "type": "app",
+      "width": 380,
+      "height": 412,
+      "selected": false
+    }
+  ],
+  "edges": [
+    {
+      "id": "506e4cca-b8d5-4ee1-a788-537b238a5181",
+      "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
+      "sourceHandle": "next",
+      "target": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    },
+    {
+      "id": "19686c5d-08f7-46da-950e-217196198d65",
+      "target": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
+      "targetHandle": "fieldInput/image",
+      "source": "e49a80de-657b-459e-b715-ca83086ac6ac",
+      "sourceHandle": "fieldOutput",
+      "type": "codeNodeEdge"
+    },
+    {
+      "id": "c46114ed-2e1d-4f37-98bf-3065c2059bc7",
+      "source": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
+      "sourceHandle": "next",
+      "target": "cfdeaa29-2842-457e-9048-e53c01354f22",
+      "targetHandle": "prev",
+      "type": "appNodeEdge"
+    }
+  ],
+  "apps": {
+    "localImage": {
+      "name": "Local Image",
+      "description": "Show an image from the frame's files: one picture, or a folder of them one at a time.",
+      "category": "data",
+      "version": "1.0.0",
+      "permissions": [
+        "files"
+      ],
+      "fields": [
+        {
+          "name": "path",
+          "type": "path",
+          "pick": "any",
+          "extensions": [
+            "jpg",
+            "jpeg",
+            "png",
+            "gif",
+            "bmp",
+            "webp",
+            "qoi",
+            "ppm",
+            "svg"
+          ],
+          "value": "",
+          "required": true,
+          "label": "Image filename or folder",
+          "placeholder": "Defaults to the assets folder (e.g. /srv/assets)",
+          "hint": "In the frame's files: its assets folder (an SD card on an ESP32) or /srv/internal."
         },
-        "type": "app",
-        "width": 380,
-        "height": 412,
-        "selected": false
+        {
+          "name": "order",
+          "type": "select",
+          "options": [
+            "random",
+            "alphabetical"
+          ],
+          "value": "random",
+          "required": true,
+          "label": "Order of images"
+        },
+        {
+          "name": "counterStateKey",
+          "type": "string",
+          "value": "",
+          "required": false,
+          "label": "Optional state key for persistence",
+          "hint": "Enter a state key to persist the current image index between restarts."
+        },
+        {
+          "name": "metadataStateKey",
+          "type": "string",
+          "value": "",
+          "required": false,
+          "label": "Optional metadata state key",
+          "hint": "Enter a state key to persist metadata about the last image. Stores: {path, filename, index, total, width, height, exif: {make, model, lensModel, exposureTime, fNumber, iso, focalLength, dateTimeOriginal, gpsLatitude, ...}, exifSummary}. EXIF is parsed from JPEG files; exifSummary is a one-line photographer credit."
+        },
+        {
+          "name": "search",
+          "type": "string",
+          "value": "",
+          "required": false,
+          "label": "Filter filenames by keyword"
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "cache": {
+        "enabled": true,
+        "inputEnabled": true,
+        "durationEnabled": true,
+        "duration": "900"
+      },
+      "origin": "repo/apps/image/localImage",
+      "sources": {
+        "app.test.ts": "import { compareImagePaths, get, isImage, resolveFolder, shuffled } from './app'\n\n// A folder of files by their path in the storage, and their sizes.\nfunction folder(files: Record<string, number>, internal: Record<string, number> = {}) {\n  const pick = (options?: { storage?: string }) => (options?.storage === 'internal' ? internal : files)\n  mock.listAssets((dir?: string, options?: { storage?: 'assets' | 'internal' }) => {\n    const prefix = dir ? dir + '/' : ''\n    return Object.keys(pick(options))\n      .filter((path) => path.startsWith(prefix))\n      .sort()\n  })\n  mock.assetExists((path: string, options?: { storage?: 'assets' | 'internal' }) => path in pick(options))\n  mock.assetSize((path: string, options?: { storage?: 'assets' | 'internal' }) => pick(options)[path] ?? 0)\n  return mock.loadAssetImage((path: string, options?: any) => ({\n    ...mock.image({ width: 4, height: 3 }).image,\n    ...(options?.exif ? { exif: { make: 'Canon' }, exifSummary: 'Canon' } : {}),\n    path,\n  }))\n}\n\nconst render = (extra: Record<string, any> = {}) => makeContext({ event: 'render', ...extra })\n\ndescribe('localImage', () => {\n  it('goes through a folder by name, ignoring case, and keeps the counter in state', () => {\n    const load = folder({ 'zeta.jpg': 10, 'Alpha.jpg': 10, 'middle.png': 10 })\n    const app = makeApp({\n      config: { path: '/srv/assets', order: 'alphabetical', counterStateKey: 'counter', metadataStateKey: 'meta' },\n      state: { counter: 0 },\n    })\n    const names = [0, 1, 2, 3].map(() => {\n      get(app, render())\n      return app.state.meta.filename\n    })\n    expect(names).toEqual(['Alpha.jpg', 'middle.png', 'zeta.jpg', 'Alpha.jpg'])\n    expect(app.state.counter).toBe(1)\n    expect(load.calls[0][0]).toBe('Alpha.jpg')\n    expect(app.state.meta).toMatchObject({ path: '/srv/assets/Alpha.jpg', index: 0, total: 3, width: 4, height: 3 })\n    expect(app.state.meta.exif).toEqual({ make: 'Canon' })\n    expect(app.state.meta.exifSummary).toBe('Canon')\n  })\n\n  it('skips what is not an image, empty files, and QOI and PPM on a device', () => {\n    folder({ 'a.jpg': 10, 'b.txt': 10, 'empty.bmp': 0, 'c.qoi': 10, 'sub/d.PPM': 10 })\n    const host = makeApp({ config: { path: '', order: 'alphabetical', metadataStateKey: 'meta' } })\n    get(host, render())\n    expect(host.state.meta.total).toBe(3)\n    const device = makeApp({\n      config: { path: '', order: 'alphabetical', metadataStateKey: 'meta' },\n      frame: { embedded: true },\n    })\n    get(device, render())\n    expect(device.state.meta.total).toBe(1)\n  })\n\n  it('reads a subfolder and /srv/internal, and refuses a path outside the frame’s files', () => {\n    const load = folder({ 'trips/x.jpg': 10, 'y.jpg': 10 }, { 'pics/z.jpg': 10 })\n    const sub = makeApp({ config: { path: '/srv/assets/trips/', metadataStateKey: 'meta' } })\n    get(sub, render())\n    expect(sub.state.meta).toMatchObject({ filename: 'x.jpg', path: '/srv/assets/trips/x.jpg', total: 1 })\n    expect(load.calls[0][0]).toBe('trips/x.jpg')\n    const internal = makeApp({ config: { path: '/srv/internal/pics', metadataStateKey: 'meta' } })\n    get(internal, render())\n    expect(load.calls[1]).toEqual(['pics/z.jpg', { storage: 'internal', exif: true }])\n    const error = mock.frameos('error')\n    const outside = makeApp({ config: { path: '/home/pi/Pictures' } })\n    const shown = get(outside, render()) as { svg: string }\n    expect(error.calls[0][0]).toBe(\"/home/pi/Pictures is outside the frame's files: put the photos in /srv/assets\")\n    expect(shown.svg).toContain('/home/pi/Pictures is outside')\n  })\n\n  it('shows one file alone when the path names it', () => {\n    folder({ 'only.jpg': 10, 'other.jpg': 10 })\n    const app = makeApp({ config: { path: '/srv/assets/only.jpg', metadataStateKey: 'meta' } })\n    get(app, render())\n    expect(app.state.meta).toMatchObject({ filename: '', path: '/srv/assets/only.jpg', total: 1 })\n  })\n\n  it('filters by name, ignoring case, and starts over when the search changes', () => {\n    folder({ 'SunSet.jpg': 10, 'Ocean.jpg': 10 })\n    const app = makeApp({ config: { path: '', search: 'sunset', metadataStateKey: 'meta' } })\n    get(app, render())\n    expect(app.state.meta.filename).toBe('SunSet.jpg')\n    app.config.search = 'OCEAN'\n    get(app, render())\n    expect(app.state.meta.filename).toBe('Ocean.jpg')\n  })\n\n  it('says why there is nothing to show, in a picture the node cache keeps', () => {\n    folder({ 'a.jpg': 10 })\n    const error = mock.frameos('error')\n    const noMatch = get(makeApp({ config: { path: '', search: 'none' } }), render()) as { svg: string }\n    expect(error.calls[0][0]).toBe('No images matching the search query \"none\" found in the folder: ')\n    expect(noMatch.svg).toContain('No images matching the search query')\n    const empty = get(\n      makeApp({ config: { path: '/srv/assets/missing' } }),\n      render({ imageWidth: 800, imageHeight: 480 })\n    )\n    expect(error.calls[1][0]).toBe('No images found in the folder: /srv/assets/missing')\n    expect((empty as { width: number }).width).toBe(800)\n    // On a device with no target: a fraction of the canvas, under 512 KB.\n    const device = makeApp({ config: { path: '/srv/assets/missing' }, frame: { embedded: true } })\n    const small = get(device, render({ imageWidth: 1848, imageHeight: 1179 })) as { width: number; height: number }\n    expect(small.width * small.height * 4).toBeLessThanOrEqual(512 * 1024)\n    expect([small.width, small.height]).toEqual([369, 235])\n  })\n\n  it('repeats the photo when the cache remakes it or the scene repaints, without stepping on', () => {\n    const load = folder({ 'a.jpg': 10, 'b.jpg': 10 })\n    const app = makeApp({\n      config: { path: '', order: 'alphabetical', counterStateKey: 'counter', metadataStateKey: 'meta' },\n      state: { counter: 0 },\n    })\n    get(app, render())\n    get(app, render({ remakingCachedValue: true }))\n    get(app, render({ repainting: true }))\n    expect(load.calls.map((call) => call[0])).toEqual(['a.jpg', 'a.jpg', 'a.jpg'])\n    // No EXIF read and no new metadata for a repeat.\n    expect(load.calls[1][1]).toEqual({})\n    expect(app.state.counter).toBe(1)\n    get(app, render())\n    expect(app.state.meta.filename).toBe('b.jpg')\n  })\n\n  it('shuffles once and keeps that order until the folder changes', () => {\n    const files: Record<string, number> = {}\n    for (let i = 0; i < 12; i++) files[`p${i}.jpg`] = 10\n    folder(files)\n    const app = makeApp({ config: { path: '', order: 'random', metadataStateKey: 'meta' } })\n    const seen = new Set<string>()\n    for (let i = 0; i < 12; i++) {\n      get(app, render())\n      seen.add(app.state.meta.filename)\n    }\n    // Every photo once before any repeats.\n    expect(seen.size).toBe(12)\n  })\n\n  it('has the helpers the built-in app had', () => {\n    expect(isImage('x.JPEG', true)).toBe(true)\n    expect(isImage('x.ppm', true)).toBe(false)\n    expect(isImage('x.ppm', false)).toBe(true)\n    expect(['b', 'B', 'a'].sort(compareImagePaths)).toEqual(['a', 'B', 'b'])\n    expect(resolveFolder('', '/srv/assets')).toEqual({ storage: 'assets', dir: '' })\n    expect(resolveFolder('/srv/assets/../etc', '/srv/assets')).toBeNull()\n    expect(resolveFolder('/srv/assetsx', '/srv/assets')).toBeNull()\n    // A working-directory folder, with or without its \"./\".\n    expect(resolveFolder('./tmp/assets/a.png', 'tmp/assets')).toEqual({ storage: 'assets', dir: 'a.png' })\n    expect(resolveFolder('tmp/assets/a.png', './tmp/assets/')).toEqual({ storage: 'assets', dir: 'a.png' })\n    expect(shuffled(['a', 'b', 'c', 'd'], 7)).toEqual(shuffled(['a', 'b', 'c', 'd'], 7))\n  })\n})\n",
+        "app.ts": "// Local Image: one picture of the frame's files, or a folder of them one per\n// render (the port of the built-in data/localImage, docs/retired-apps.md).\n// The folder is the frame's assets folder (an ESP32's SD card) or\n// /srv/internal; anything else is outside what a JS app may read. Where it is\n// in the folder is remembered (frameos.remember): on an ESP32 the interpreter\n// does not outlive a render.\n\nconst IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']\n// The ESP32 firmware is built without pixie's QOI and PPM codecs.\nconst HOST_ONLY_EXTENSIONS = ['.qoi', '.ppm']\nconst INTERNAL_ROOT = '/srv/internal'\nconst MEMORY_KEY = 'slideshow'\n\nfunction asciiLower(text: string): string {\n  return text.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32))\n}\n\nexport function isImage(file: string, embedded: boolean): boolean {\n  const lower = asciiLower(file)\n  const extensions = embedded ? IMAGE_EXTENSIONS : IMAGE_EXTENSIONS.concat(HOST_ONLY_EXTENSIONS)\n  return extensions.some((extension) => lower.endsWith(extension))\n}\n\n// By name ignoring ASCII case, then exactly: the built-in app's order.\nexport function compareImagePaths(a: string, b: string): number {\n  const la = asciiLower(a)\n  const lb = asciiLower(b)\n  if (la !== lb) return la < lb ? -1 : 1\n  return a === b ? 0 : a < b ? -1 : 1\n}\n\nfunction trimSlashes(text: string): string {\n  return text.length > 1 ? text.replace(/\\/+$/, '') : text\n}\n\n// A path as compared: no trailing slash, no leading \"./\" (a working-directory\n// assets folder is written both ways).\nfunction comparable(text: string): string {\n  return trimSlashes(text.replace(/^(\\.\\/)+/, ''))\n}\n\n// Where `path` is among the frame's storages: the storage and the path in it\n// ('' for its root), or null when it is outside them.\nexport function resolveFolder(path: unknown, assetsPath: string): { storage: string; dir: string } | null {\n  const wanted = comparable(String(path ?? '').trim())\n  if (!wanted) return { storage: 'assets', dir: '' }\n  for (const [storage, root] of [\n    ['assets', comparable(assetsPath || '/srv/assets')],\n    ['internal', INTERNAL_ROOT],\n  ]) {\n    if (wanted === root) return { storage, dir: '' }\n    if (wanted.startsWith(root + '/')) {\n      const dir = wanted.slice(root.length + 1)\n      if (dir.split('/').includes('..')) return null\n      return { storage, dir }\n    }\n  }\n  return null\n}\n\n// FNV-1a over the names: the folder's contents, small enough to remember.\nexport function listHash(files: string[]): string {\n  let hash = 0x811c9dc5\n  for (const file of files) {\n    for (let i = 0; i < file.length; i++) {\n      hash ^= file.charCodeAt(i)\n      hash = Math.imul(hash, 0x01000193) >>> 0\n    }\n    hash = Math.imul(hash ^ 10, 0x01000193) >>> 0\n  }\n  return hash.toString(16)\n}\n\n// A shuffle of the sorted names that one seed always repeats (mulberry32), so\n// a random order outlives the interpreter as two numbers, not the whole list.\nexport function shuffled(files: string[], seed: number): string[] {\n  const list = files.slice()\n  let state = seed >>> 0\n  const next = (): number => {\n    state = (state + 0x6d2b79f5) >>> 0\n    let t = state\n    t = Math.imul(t ^ (t >>> 15), t | 1)\n    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)\n    return ((t ^ (t >>> 14)) >>> 0) / 4294967296\n  }\n  for (let i = list.length - 1; i > 0; i--) {\n    const j = Math.floor(next() * (i + 1))\n    const swap = list[i]\n    list[i] = list[j]\n    list[j] = swap\n  }\n  return list\n}\n\nfunction newSeed(): number {\n  return Math.floor(Math.random() * 4294967296) >>> 0\n}\n\ninterface Memory {\n  path: string\n  search: string\n  order: string\n  seed: number\n  hash: string\n  counter: number\n  last: string | null\n}\n\nfunction within(storage: string): { storage?: 'internal' } {\n  return storage === 'internal' ? { storage: 'internal' } : {}\n}\n\n// The images of the folder, by their path in it, sorted. A path to one image\n// is that image alone (filename ''), whatever its name looks like.\nfunction folderImages(storage: string, dir: string, search: string, embedded: boolean): string[] {\n  if (dir && frameos.assetExists(dir, within(storage))) {\n    return isImage(dir, embedded) ? [''] : []\n  }\n  const query = search.toLowerCase()\n  const prefix = dir ? dir + '/' : ''\n  const images: string[] = []\n  for (const file of frameos.listAssets(dir, within(storage))) {\n    if (!file.startsWith(prefix)) continue\n    const name = file.slice(prefix.length)\n    if (!isImage(name, embedded)) continue\n    if (query && !name.toLowerCase().includes(query)) continue\n    // An empty file is not an image, whatever it is called (the Waveshare\n    // demo card's zero-byte sys_decode.bmp).\n    if (!(frameos.assetSize(file, within(storage)) > 0)) continue\n    images.push(name)\n  }\n  return images.sort(compareImagePaths)\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\n// The error as a picture: white, the message wrapped in it in black, as the\n// runtime's error frame is (32 px there; here up to that, at least 14, so a\n// small frame a device makes still reads when it is drawn larger).\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.min(32, Math.max(14, Math.round(Math.min(width, height) / 12)))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  for (const paragraph of message.split('\\n')) {\n    let line = ''\n    for (const word of paragraph.split(/\\s+/).filter(Boolean)) {\n      if (line && line.length + 1 + word.length > max) {\n        lines.push(line)\n        line = word\n      } else line = line ? `${line} ${word}` : word\n    }\n    if (line) lines.push(line)\n  }\n  const text = lines\n    .map(\n      (l, i) =>\n        `<text x=\"${size}\" y=\"${size * 2 + i * Math.round(size * 1.35)}\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#000000\">${esc(l)}</text>`\n    )\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\n// The error frame's size: the target's, or the canvas's. On a device a whole\n// fraction of the canvas under 512 KB, as the built-in app's was: a frame-sized\n// picture beside the canvas is what an 8 MB board does not have, and the node\n// cache keeps this one (a consumer's bounds are no reason to make it bigger).\nexport function errorFrameSize(context: FrameOSContext | undefined, frame: FrameOSApp['frame']): [number, number] {\n  const targeted = !frame.embedded && !!(context?.targetWidth && context?.targetHeight)\n  const width = (targeted ? context?.targetWidth : context?.imageWidth) || frame.width || 800\n  const height = (targeted ? context?.targetHeight : context?.imageHeight) || frame.height || 480\n  if (!frame.embedded) return [width, height]\n  let k = 1\n  while (Math.floor(width / k) * Math.floor(height / k) * 4 > 512 * 1024) k++\n  return [Math.max(1, Math.floor(width / k)), Math.max(1, Math.floor(height / k))]\n}\n\nfunction stateCounter(value: unknown): number {\n  const n = Math.floor(Number(value))\n  return Number.isFinite(n) && n > 0 ? n : 0\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const path = String(app.config.path ?? '').trim()\n  const search = String(app.config.search ?? '')\n  // Anything but random is by name, as the built-in app read it.\n  const order = app.config.order === 'random' ? 'random' : 'alphabetical'\n  const counterKey = String(app.config.counterStateKey ?? '').trim()\n  const metadataKey = String(app.config.metadataStateKey ?? '').trim()\n  const assetsPath = app.frame.assetsPath || '/srv/assets'\n  const folder = path ? trimSlashes(path) : trimSlashes(assetsPath)\n  // An error is logged and shown, not thrown: the picture is the node's value,\n  // which its cache keeps for its period, so under an animation an empty\n  // folder is looked at, and logged, once a period and not every frame.\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    const [width, height] = errorFrameSize(context, app.frame)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const where = resolveFolder(path, assetsPath)\n  if (!where) return fail(`${path} is outside the frame's files: put the photos in ${assetsPath}`)\n\n  const sorted = folderImages(where.storage, where.dir, search, !!app.frame.embedded)\n  const recalled = frameos.recall(MEMORY_KEY) as Memory | undefined | null\n  const fresh = !recalled || recalled.path !== path || recalled.search !== search || recalled.order !== order\n  const memory: Memory = fresh\n    ? { path, search, order, seed: newSeed(), hash: listHash(sorted), counter: 0, last: null }\n    : { ...recalled }\n  if (fresh) {\n    if (search) frameos.log('Search query: ' + search)\n    frameos.log(`Found ${sorted.length} images in the folder: ${folder}`)\n  }\n  // A random order is shuffled again only when the folder's contents change.\n  const hash = listHash(sorted)\n  if (order === 'random' && hash !== memory.hash) memory.seed = newSeed()\n  memory.hash = hash\n  const images = order === 'random' ? shuffled(sorted, memory.seed) : sorted\n\n  if (images.length === 0) {\n    frameos.remember(MEMORY_KEY, memory as unknown as FrameOSJson)\n    if (search) return fail(`No images matching the search query \"${search}\" found in the folder: ${path}`)\n    return fail(`No images found in the folder: ${path}`)\n  }\n\n  if (fresh && order !== 'random' && counterKey) {\n    memory.counter = stateCounter(app.state[counterKey]) % images.length\n  }\n  // After the photo shown last, wherever the folder's changes put it.\n  if (memory.last !== null) {\n    const lastIndex = images.indexOf(memory.last)\n    if (lastIndex >= 0) memory.counter = (lastIndex + 1) % images.length\n  }\n  memory.counter %= images.length\n\n  // The node cache could not keep the photo it asked for and wants it again\n  // (an animation over it on a board short of memory), or its scene is drawn\n  // again before it is due: the same photo, the counter untouched. A\n  // slideshow steps on its schedule, never the frame rate.\n  const lastIndex =\n    (context?.remakingCachedValue || context?.repainting) && memory.last !== null ? images.indexOf(memory.last) : -1\n  const remaking = lastIndex >= 0\n  const index = remaking ? lastIndex : memory.counter\n  const filename = images[index]\n  const shownPath = filename ? `${folder}/${filename}` : folder\n  const inStorage = filename ? (where.dir ? `${where.dir}/${filename}` : filename) : where.dir\n  if (!remaking) {\n    frameos.log('Loading image: ' + shownPath)\n    memory.counter = (memory.counter + 1) % images.length\n    if (counterKey) frameos.setState(counterKey, memory.counter)\n  }\n  memory.last = filename\n  frameos.remember(MEMORY_KEY, memory as unknown as FrameOSJson)\n\n  // No size: decoded straight into the canvas it is drawn on where the\n  // runtime offers one, else at the consumer's bounds.\n  const wantMetadata = !!metadataKey && !remaking\n  const image = frameos.loadAssetImage(inStorage, { ...within(where.storage), ...(wantMetadata ? { exif: true } : {}) })\n  if (!image) return fail(`An error occurred while loading the image: ${shownPath}`)\n  if (wantMetadata) {\n    const metadata: Record<string, FrameOSJson> = {\n      path: shownPath,\n      filename,\n      index,\n      total: images.length,\n      width: image.width,\n      height: image.height,\n    }\n    if (image.exif) metadata.exif = image.exif as FrameOSJson\n    if (image.exifSummary) metadata.exifSummary = image.exifSummary\n    frameos.setState(metadataKey, metadata)\n  }\n  return image\n}\n",
+        "config.json": "{\n  \"name\": \"Local Image\",\n  \"description\": \"Show an image from the frame's files: one picture, or a folder of them one at a time.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"permissions\": [\"files\"],\n  \"fields\": [\n    {\n      \"name\": \"path\",\n      \"type\": \"path\",\n      \"pick\": \"any\",\n      \"extensions\": [\"jpg\", \"jpeg\", \"png\", \"gif\", \"bmp\", \"webp\", \"qoi\", \"ppm\", \"svg\"],\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Image filename or folder\",\n      \"placeholder\": \"Defaults to the assets folder (e.g. /srv/assets)\",\n      \"hint\": \"In the frame's files: its assets folder (an SD card on an ESP32) or /srv/internal.\"\n    },\n    {\n      \"name\": \"order\",\n      \"type\": \"select\",\n      \"options\": [\"random\", \"alphabetical\"],\n      \"value\": \"random\",\n      \"required\": true,\n      \"label\": \"Order of images\"\n    },\n    {\n      \"name\": \"counterStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Optional state key for persistence\",\n      \"hint\": \"Enter a state key to persist the current image index between restarts.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Optional metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the last image. Stores: {path, filename, index, total, width, height, exif: {make, model, lensModel, exposureTime, fNumber, iso, focalLength, dateTimeOriginal, gpsLatitude, ...}, exifSummary}. EXIF is parsed from JPEG files; exifSummary is a one-line photographer credit.\"\n    },\n    {\n      \"name\": \"search\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Filter filenames by keyword\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
       }
-    ],
-    "edges": [
-      {
-        "id": "506e4cca-b8d5-4ee1-a788-537b238a5181",
-        "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
-        "sourceHandle": "next",
-        "target": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
-        "targetHandle": "prev",
-        "type": "appNodeEdge"
-      },
-      {
-        "id": "19686c5d-08f7-46da-950e-217196198d65",
-        "target": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
-        "targetHandle": "fieldInput/image",
-        "source": "e49a80de-657b-459e-b715-ca83086ac6ac",
-        "sourceHandle": "fieldOutput",
-        "type": "codeNodeEdge"
-      },
-      {
-        "id": "c46114ed-2e1d-4f37-98bf-3065c2059bc7",
-        "source": "df3e09c1-bb34-4d0f-8157-4e7251e41f3a",
-        "sourceHandle": "next",
-        "target": "cfdeaa29-2842-457e-9048-e53c01354f22",
-        "targetHandle": "prev",
-        "type": "appNodeEdge"
-      }
-    ]
+    }
   }
+}

@@ -1615,7 +1615,7 @@ type AssetOptions = object
   ## every exit of one proc, and every exit destroyed them all: 625 cleanup
   ## calls, 14.8 KB of the ESP32 image for this one bridge.
   storage, entry, background: string
-  shallow, strict, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate: bool
+  shallow, strict, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate, exif: bool
   offset, length, width, height, maskOffset, maskLength: int
   pixels, mask: RawPixels
 
@@ -1648,6 +1648,7 @@ proc assetOptions(ctx: ptr JSContext, data: JSValue): AssetOptions {.noinline.} 
   result.height = options{"height"}.getInt(0)
   result.inflate = options{"inflate"}.getBool(false)
   result.bytes = options{"bytes"}.getBool(false)
+  result.exif = options{"exif"}.getBool(false)
   let pixels = options{"pixels"}
   if not pixels.isNil and pixels.kind == JObject:
     result.hasPixels = true
@@ -1866,6 +1867,12 @@ proc assetFileImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image
   # A kept picture shares its render with others (a grid of them), so it
   # never sets the frame's dither palette.
   let colorProfile = loadAssetColorProfile(full)
+  # The picture the app returns as its image: the frame's dither palette is
+  # its photo's, so a photo without a profile clears what the last one set
+  # (a slideshow's next photo), as data/localImage did.
+  let returned = result.isNil and not options.keep
+  if returned and colorProfile.isNone:
+    clearRenderPaletteOverride()
   if result.isNil and not options.keep:
     # The picture the app returns, as data/localImage and fetchImage give
     # it: decoded straight into the consumer's target where the interpreter
@@ -1898,6 +1905,19 @@ proc assetFileImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image
       applyAssetColors(result, colorProfile.get())
       markImageGraded(result)
 
+proc addAssetExif(imageRef: JsonNode, full: string) {.noinline.} =
+  ## loadAssetImage's `exif`: the photo's EXIF block, as fetchImage reads a
+  ## download's (exiftool where the host has it, then the built-in parser
+  ## over the file's head), beside the image reference.
+  let metadata = newJObject()
+  let exifTool = getExifMetadataFromPath(full)
+  if exifTool.isSome:
+    metadata["exif"] = exifTool.get()
+  mergeParsedExif(metadata, readExifHead(full))
+  for key in ["exif", "exifSummary"]:
+    if metadata.hasKey(key):
+      imageRef[key] = metadata[key]
+
 proc assetsImage(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSValue): JSValue =
   let options = assetOptions(ctx, data)
   let full = resolveAssetPath(e, pathStr, storage = options.storage)
@@ -1908,9 +1928,12 @@ proc assetsImage(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSV
     else: assetFileImage(e, full, options)
   if image.isNil:
     return jsNull(ctx)
-  if options.keep:
-    return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
-  jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
+  let imageRef =
+    if options.keep: e.runtime.storeKeptImageJson(e.owner, image)
+    else: e.runtime.storeTransientImageJson(image)
+  if options.exif:
+    addAssetExif(imageRef, full)
+  jsonToJS(ctx, imageRef)
 
 proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JSValue {.nimcall.} =
   ## Asset management scoped to the frame's assets folder. Ops:
@@ -2632,6 +2655,12 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
       e.context.hasImage and not e.context.image.isNil and
       e.context.image.width == frameos_apps.renderWidth(config) and
       e.context.image.height == frameos_apps.renderHeight(config))
+  of "remakingCachedValue":
+    # The same value again: the cache could not keep the last one.
+    return nimBoolToJS(ctx, e.context.remakingCachedValue)
+  of "repainting":
+    # The scene drawn again before it is due: the same picture.
+    return nimBoolToJS(ctx, not e.owner.scene.isNil and e.owner.scene.repainting)
   of "targetWidth", "targetHeight", "targetFit":
     let target = e.owner.addressedTarget(e.context)
     if target.width > 0:
@@ -2673,7 +2702,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       if windowLimit() > 0:
         keys.add("windows")
   of "context":
-    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep", "round"]
+    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep", "round", "remakingCachedValue", "repainting"]
     if e.context.hasImage and not e.context.image.isNil:
       keys.add("image")
       keys.add("imageWidth")

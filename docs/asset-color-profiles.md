@@ -183,7 +183,7 @@ backend push it from firmware 2026.10.4 on (`docs/cloud-frames-contract.json`).
 
 ## Where the runtime applies it
 
-* `apps/data/localImage` — after decode. With a profile to apply, `contain`
+* `frameos.loadAssetImage` (the Local Image app's photos; once `apps/data/localImage`) — after decode. With a profile to apply, `contain`
   skips the decode-into-canvas path (the adjustments must not touch the
   canvas around the photo); `cover` and `stretch` adjust the canvas in place.
 * The JS runtime's `loadAssetImage(path)` — same treatment.

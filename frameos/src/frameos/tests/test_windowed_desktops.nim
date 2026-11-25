@@ -84,7 +84,8 @@ proc countingPanel(id, name: string, interval: float, layout = Layout): JsonNode
 
 # The "SD card image" sample, as it is built: a slideshow from a folder, every
 # due run of its scene the next photo.
-let photos = getTempDir() / "frameos-windows98-photos"
+# In the frame's assets folder (`config` below): the app reads the frame's files.
+let photos = getTempDir() / "frameos-windows98-test" / "photos"
 createDir(photos)
 for (name, hex) in [("a.png", "#ff00ff"), ("b.png", "#00ffff"), ("c.png", "#ffff00")]:
   let photo = newImage(16, 16)

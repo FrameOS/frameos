@@ -3,7 +3,6 @@ import frameos/app_capabilities
 export app_capabilities
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
-import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/newImage/app_loader as data_newImage_loader
 import apps/data/qr/app_loader as data_qr_loader
 import apps/data/resizeImage/app_loader as data_resizeImage_loader
@@ -36,7 +35,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
   const appEntries = [
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
-    AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/qr", initProc: data_qr_loader.init, setFieldProc: data_qr_loader.setField, getProc: data_qr_loader.get, runProc: nil),
     AppEntry(keyword: "data/resizeImage", initProc: data_resizeImage_loader.init, setFieldProc: data_resizeImage_loader.setField, getProc: data_resizeImage_loader.get, runProc: nil),
@@ -56,7 +54,6 @@ else:
     AppEntry(keyword: "data/chromiumScreenshot", initProc: data_chromiumScreenshot_loader.init, setFieldProc: data_chromiumScreenshot_loader.setField, getProc: data_chromiumScreenshot_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
-    AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/newImage", initProc: data_newImage_loader.init, setFieldProc: data_newImage_loader.setField, getProc: data_newImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/qr", initProc: data_qr_loader.init, setFieldProc: data_qr_loader.setField, getProc: data_qr_loader.get, runProc: nil),
     AppEntry(keyword: "data/resizeImage", initProc: data_resizeImage_loader.init, setFieldProc: data_resizeImage_loader.setField, getProc: data_resizeImage_loader.get, runProc: nil),
@@ -125,13 +122,6 @@ const capabilities_data_downloadImage = AppCapabilities(
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[])
-const capabilities_data_localImage = AppCapabilities(
-      providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch", "center", "top-left", "top-center", "top-right", "center-left", "center-right", "bottom-left", "bottom-center", "bottom-right"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
-      forwardsTarget: @[],
-      forwardsBounds: @[],
-      requestsBounds: @[],
-      fieldDefaults: @[])
 const capabilities_data_resizeImage = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
@@ -187,7 +177,6 @@ proc appCapabilities*(keyword: string): AppCapabilities =
   ## declare nothing are materialized-only, which every edge supports.
   case keyword:
   of "data/downloadImage": capabilities_data_downloadImage
-  of "data/localImage": capabilities_data_localImage
   of "data/resizeImage": capabilities_data_resizeImage
   of "data/rotateImage": capabilities_data_rotateImage
   of "render/color": capabilities_render_color
