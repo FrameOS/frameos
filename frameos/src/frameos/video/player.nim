@@ -1109,8 +1109,11 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
               break
             else:
               break
-      template letGo(index: int) =
+      template letGo(given: int) =
         # A frame back to the decoder (one of an older configuration is not).
+        # `given` once: a template would run an expression (hold.wait) twice,
+        # and give back the frame that waits as well.
+        let index = given
         if index >= 0:
           dec.release(frames[index])
       proc forgetImports(imported: var seq[PlaneBuffer], hold: var PlaneHold, lingering: var PlaneBuffer) =
