@@ -50,10 +50,11 @@ proc close*(isp: var IspSink) =
   isp.inFlight = 0
 
 proc openIsp*(device: string, input: DecodedFormat, pixels: VideoPixels, width, height: int,
-    pictureBuffers = 3): IspSink =
+    pictureBuffers = 3, yuv = false): IspSink =
   ## An ISP taking `input`'s frames and making `width` x `height` pictures of
-  ## `pixels`. Raises V4l2Unsupported where it would not (a stride it rounds,
-  ## a size or format it changes).
+  ## `pixels`, or with `yuv` of YUV420 (a display plane's: copyYuvPicture).
+  ## Raises V4l2Unsupported where it would not (a stride it rounds, a size or
+  ## format it changes).
   result.fd = -1
   result.device = device
   result.fd = openDevice(device, "isp")
@@ -68,7 +69,7 @@ proc openIsp*(device: string, input: DecodedFormat, pixels: VideoPixels, width, 
     if crop.width != v.width or crop.height != v.height or crop.x != v.x or crop.y != v.y:
       raise newException(V4l2Unsupported, "the ISP crops to " & $crop.width & "x" & $crop.height & " at " &
         $crop.x & "," & $crop.y & ", not the picture's " & $v.width & "x" & $v.height & " at " & $v.x & "," & $v.y)
-    let code = ispFourcc(pixels)
+    let code = if yuv: FourccYuv420 else: ispFourcc(pixels)
     result.output = setFormat(result.fd, BufTypeCapture, code, width, height, 0, "isp capture VIDIOC_S_FMT")
     if result.output.fourcc != code or result.output.width != width or result.output.height != height:
       raise newException(V4l2Unsupported, "the ISP makes " & $result.output.width & "x" & $result.output.height &
@@ -126,3 +127,27 @@ proc copyPicture*(picture: IspPicture, pixels: VideoPixels, x, y, width, height:
     row = width * bpp
   for r in 0 ..< height:
     copyMem(addr dst[r * row], addr picture.data[(y + r) * picture.bytesperline + x * bpp], row)
+
+proc copyYuvPicture*(picture: IspPicture, output: PlaneFormat, width, height: int,
+    dst: ptr UncheckedArray[byte]): bool =
+  ## A YUV420 picture (openIsp's `yuv`: Y rows of its `bytesperline` for the
+  ## format's height, then U and V in rows half as long) into `dst` packed:
+  ## `width` x `height` (even), rows of the width, Y then U then V. One read
+  ## of each row of memory the CPU sees uncached. False when the picture is
+  ## not that big.
+  let
+    bpl = output.bytesperline
+    rows = output.height
+    cbpl = bpl div 2
+    (cw, ch) = (width div 2, height div 2)
+    uAt = bpl * rows
+    vAt = uAt + cbpl * ((rows + 1) div 2)
+  if width > output.width or height > rows or cw > cbpl or vAt + cbpl * ch > output.sizeimage:
+    return false
+  for r in 0 ..< height:
+    copyMem(addr dst[r * width], addr picture.data[r * bpl], width)
+  let luma = width * height
+  for r in 0 ..< ch:
+    copyMem(addr dst[luma + r * cw], addr picture.data[uAt + r * cbpl], cw)
+    copyMem(addr dst[luma + cw * ch + r * cw], addr picture.data[vAt + r * cbpl], cw)
+  true

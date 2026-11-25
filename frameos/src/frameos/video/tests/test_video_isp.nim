@@ -82,18 +82,19 @@ suite "the ISP path":
     let hd = ProbeResult(ok: true, codec: "h264", width: 1920, height: 1080, fps: 30)
     check ispFits(caps, decode, vfContain, 720, 720, hd)
     check ispFits(caps, decode, vfCover, 720, 720, hd)
-    # No ISP, ffmpeg's own decoding (it failed here), another codec, a turned
-    # picture (the ISP does not turn), a source past the decoder's 1920, a
-    # frame the ISP does not make (under 32 a side).
+    # A turned picture: the copy out of the ISP turns it (video/turn.nim).
+    var phone = hd
+    phone.rotation = 90
+    swap(phone.width, phone.height)
+    check ispFits(caps, decode, vfContain, 720, 720, phone)
+    # No ISP, ffmpeg's own decoding (it failed here), another codec, a source
+    # past the decoder's 1920, a frame the ISP does not make (under 32 a side).
     check not ispFits(DecodeCaps(v4l2Decoders: @["h264_v4l2m2m"], v4l2Device: "/dev/video10"), decode,
       vfContain, 720, 720, hd)
     check not ispFits(caps, pickDecode("h264", caps, fast = true, software = true), vfContain, 720, 720, hd)
     check not ispFits(caps, pickDecode("mpeg4", DecodeCaps(v4l2Decoders: @["mpeg4_v4l2m2m"],
       v4l2Device: "/dev/video10", ispDevice: "/dev/video12"), fast = true, software = false), vfContain, 720, 720,
       ProbeResult(ok: true, codec: "mpeg4", width: 640, height: 360))
-    var phone = hd
-    phone.rotation = 90
-    check not ispFits(caps, decode, vfContain, 720, 720, phone)
     check not ispFits(caps, decode, vfContain, 720, 720,
       ProbeResult(ok: true, codec: "h264", width: 3840, height: 2160))
     check not ispFits(caps, decode, vfContain, 40, 40, hd) # a 40x23 picture
@@ -127,9 +128,24 @@ suite "the ISP path":
     # codec), a turned picture, past its 1920, under 32 a side, no decoder.
     check not pick(LaunchFlags(onPlane: true),
       decode = pickDecode("h264", caps, fast = true, software = true)).zeroCopy
+    # A turned picture: no plane shows one as it is, so not the decoder's
+    # frames but the ISP's, turned as they are copied onto it; ffmpeg's YUV
+    # (which it turns at its full size) when the ISP gave way.
     var phone = hd
     phone.rotation = 90
-    check not pick(LaunchFlags(onPlane: true), probe = phone).zeroCopy
+    swap(phone.width, phone.height)
+    let turned = pick(LaunchFlags(onPlane: true), probe = phone)
+    check not turned.zeroCopy and turned.ispPlane and not turned.isp
+    check decodeName(turned) == "h264_v4l2m2m+isp+plane"
+    for flags in [LaunchFlags(onPlane: true, ispOff: true), LaunchFlags(onPlane: true, ispBroken: true)]:
+      let next = pick(flags, probe = phone)
+      check not next.zeroCopy and not next.ispPlane and not next.isp
+      check decodeName(next) == "h264_v4l2m2m"
+    let canvasTurned = pick(LaunchFlags(), probe = phone)
+    check canvasTurned.isp and not canvasTurned.ispPlane
+    # Not turned: never the ISP's on a plane, whatever gave way.
+    check not pick(LaunchFlags(onPlane: true)).ispPlane
+    check not pick(LaunchFlags(onPlane: true, zeroCopyOff: true)).ispPlane
     check not pick(LaunchFlags(onPlane: true), probe = ProbeResult(ok: true, codec: "h264", width: 3840,
       height: 2160)).zeroCopy
     check not pick(LaunchFlags(onPlane: true), probe = ProbeResult(ok: true, codec: "h264", width: 24,
@@ -146,6 +162,20 @@ suite "the ISP path":
     check ispSize(720, 720, vfCover, 1920, 1080) == (1280, 720, 280, 0)
     check ispSize(800, 480, vfCover, 1080, 1920) == (800, 1422, 0, 471)
     check ispSize(320, 180, vfCover, 1280, 720) == (320, 180, 0, 0)
+
+  test "a turned picture's frames on a plane: the size it is shown, never bigger than the source, even":
+    # A 1080x1920 phone video in a 720 x 720 box: 405 x 720 (contain), the
+    # whole picture covering it (cover: the plane takes its middle), the box (fill).
+    check ispPlaneSize(720, 720, vfContain, 1080, 1920) == (404, 720)
+    check ispPlaneSize(720, 720, vfCover, 1080, 1920) == (720, 1280)
+    check ispPlaneSize(720, 720, vfFill, 1080, 1920) == (720, 720)
+    # A small one is not made bigger: the display scales it up.
+    check ispPlaneSize(720, 720, vfContain, 270, 480) == (270, 480)
+    check ispPlaneSize(1920, 1080, vfCover, 270, 480) == (270, 480)
+    check ispPlaneSize(720, 720, vfFill, 270, 480) == (270, 480)
+    # The frames in the stream: turned back.
+    check codedSize(ProbeResult(width: 1080, height: 1920, rotation: 90)) == (1920, 1080)
+    check codedSize(ProbeResult(width: 1920, height: 1080, rotation: 180)) == (1920, 1080)
 
   test "frames kept for the output's rate, frames dropped for an exact start":
     var kept = 0
@@ -175,10 +205,20 @@ suite "the ISP path":
     check codecDevices(sys / "nothing") == ("", "")
     removeDir(sys)
 
-  test "ffprobe's rotation is kept: the ISP path leaves a turned picture to ffmpeg":
+  test "ffprobe's rotation is kept clockwise, as ffmpeg's autorotate turns it":
+    # A phone held upright: the display matrix says -90 (counterclockwise),
+    # ffmpeg turns it a quarter clockwise (transpose=clock).
     let phone = parseProbe("""{"streams": [{"codec_name": "h264", "width": 1920, "height": 1080,
       "avg_frame_rate": "30/1", "side_data_list": [{"rotation": -90}]}], "format": {"duration": "12"}}""")
-    check phone.rotation == 270 and phone.width == 1080
+    check phone.rotation == 90 and phone.width == 1080 and phone.height == 1920
+    # cloud-w's "05 Phone portrait.mp4": 90 there, transpose=cclock, 270 here.
+    check parseProbe("""{"streams": [{"codec_name": "h264", "width": 1280, "height": 720,
+      "side_data_list": [{"rotation": 90}]}], "format": {}}""").rotation == 270
+    check parseProbe("""{"streams": [{"codec_name": "h264", "width": 1280, "height": 720,
+      "side_data_list": [{"rotation": 180}]}], "format": {}}""").rotation == 180
+    # The old tag is clockwise already.
+    check parseProbe("""{"streams": [{"codec_name": "h264", "width": 1280, "height": 720,
+      "tags": {"rotate": "90"}}], "format": {}}""").rotation == 90
     check parseProbe("""{"streams": [{"codec_name": "h264", "width": 1920, "height": 1080}],
       "format": {}}""").rotation == 0
     check fourcc("NV12") == 0x3231564e'u32 and fourccText(FourccRgb565) == "RGBP"

@@ -73,6 +73,23 @@ suite "video planes":
     check overlaps(0, 0, 10, 10, 9, 9, 5, 5)
     check not overlaps(0, 0, 10, 10, 10, 0, 5, 5) # touching is not covering
 
+  test "a source measured in the source's size, for frames of another size: scaled to them":
+    # A turned 720x1280 picture's cover in a 720x720 box: its middle 720x720.
+    # Its frames are 404x720 (the ISP's at the size shown): the middle of those.
+    var r = planeRect(0, 0, 720, 720, ord(vfCover), 720, 720, 720, 1280)
+    r.sourceW = 720
+    r.sourceH = 1280
+    let small = r.inFrame(360, 640)
+    check small.x == r.x and small.w == r.w and small.h == r.h
+    check abs(small.srcY - 140) < 0.01 and abs(small.srcH - 360) < 0.01 and abs(small.srcW - 360) < 0.01
+    check small.sourceW == 360 and small.sourceH == 640
+    # The same size, no size said either side: as it is.
+    check r.inFrame(720, 1280) == r
+    check r.inFrame(0, 0) == r
+    check PlaneRect(w: 10, h: 10, srcW: 64, srcH: 64).inFrame(32, 32).srcW == 64
+    # A cut keeps what it is measured in.
+    check r.clipped(0, 0, 360, 720).sourceW == 720
+
   test "an <img>'s box on the panel: its canvas's corner, render scale":
     # Laid out at (10, 12) 100x56 in a window at (120, 20) of 180x120.
     let r = holeOnPanel(10, 12, 100, 56, 1, 120, 20, 180, 120)

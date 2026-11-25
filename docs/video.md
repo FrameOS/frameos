@@ -224,7 +224,7 @@ plane again after; in a layout's yield on a plane where the yield is).
 ### Zero copy
 
 Where the VideoCore decodes the video (H.264 up to 1920 a side, not turned:
-`zeroCopyFits`), the plane shows the decoder's own frames, and no pixel of
+`zeroCopyFits`; a turned one is below), the plane shows the decoder's own frames, and no pixel of
 them passes through the CPU: ffmpeg only demuxes (`demuxArgs`, as for the
 ISP path), the reader feeds the decoder (`video/v4l2_decoder.nim`), and each
 of its capture buffers, a dma-buf, is imported into the display once
@@ -279,6 +279,48 @@ took 89 to 90% of the runtime's.
   decoders all but stop, and afterwards its firmware makes no decoder at all
   (`failed to create component ... Not enough GPU mem?`) until the Pi restarts.
   Every player then plays in software.
+
+### Turned videos
+
+A phone stores its video on its side, with a display matrix that says how to
+turn it. `parseProbe` keeps that as `rotation`, in degrees clockwise, the way
+ffmpeg's own autorotate turns it. ffprobe's side data is counterclockwise, so a
+phone held upright says -90 there and 90 here.
+
+Neither the ISP nor vc4's planes turn a picture a quarter (both only mirror).
+ffmpeg's autorotate turns each frame at its full size on the CPU, reading the
+VideoCore's frames uncached: on a Pi Zero W a 15 s 720p phone clip took 66 s
+to play.
+
+So for a turned H.264 video the player drives the VideoCore's decoder and ISP
+itself, as for the canvas (`ispPlaneFits`, decoder `h264_v4l2m2m+isp+plane`):
+
+- **The ISP scales.** It makes the picture as it is stored, at the size it is
+  shown (`ispPlaneSize`): the whole picture, for cover the picture covering
+  the box, never bigger than the source (the display scales up), made even.
+- **The CPU turns.** The reader's copy of each picture turns it
+  (`video/turn.nim`): the ISP's picture is read once, a row at a time, turned
+  in 16x16 tiles in memory the CPU caches, and written into the plane buffer
+  row by row.
+- **The plane is told the size.** The render pass measures the plane's source
+  rectangle in the source's size; `presentPlane` scales it to the frames
+  actually shown (`inFrame`).
+- **The canvas turns the same way.** `ispFits` takes a turned picture too: the
+  ISP's pictures in the canvas's pixels are turned into the ring, and a
+  cover's middle is taken from the turned picture.
+- **If the ISP gives way,** the player falls back to ffmpeg's YUV on the
+  plane, which ffmpeg turns.
+
+Measured on Cloud-W (2026-11-25) with "05 Phone portrait.mp4" (1280x720
+stored, turned 270, 30 a second, 15 s) in the Video player's 720x720 box,
+contained:
+
+- The plane shows 404x720 frames at 405x720+157+0.
+- The 15 s clip is on the screen for 16 to 18 s, its start included (66 s
+  before). A whole round of the six sample clips is each clip's own length.
+- The runtime takes 63% of the core.
+- Covered, the frames are 720x1280 and the plane takes their middle 720x720.
+- The picture matches ffmpeg's autorotate, in the canvas as on the plane.
 
 ## Hardware
 
@@ -341,9 +383,9 @@ access units (`video/annexb.nim`) and gives the decoder one a buffer
 decoder's own dma-buf, and the ISP's picture, at the frame's size in the
 canvas's pixels (RGB565, RGBA, the luma of YUV420 for grey), is copied into
 the ring: the CPU's one touch of a frame, and everything after the ring is
-as above. `ispFits` leaves to ffmpeg a turned picture (the ISP does not
-turn), a source past the decoder's 1920 a side and a frame under the ISP's
-32. `FRAMEOS_VIDEO_ISP=0` leaves the path alone. What the VideoCore needs,
+as above. A turned picture is turned as it is copied ("Turned videos").
+`ispFits` leaves to ffmpeg a source past the decoder's 1920 a side and a
+frame under the ISP's 32. `FRAMEOS_VIDEO_ISP=0` leaves the path alone. What the VideoCore needs,
 found on a Pi Zero W (2026-11-24):
 - Both devices are multi-planar only (`video/v4l2.nim`).
 - The decoder starts only once its capture queue streams: it is set up at

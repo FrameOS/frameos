@@ -25,6 +25,7 @@ import frameos/utils/canvas_log
 import frameos/utils/redacted_url
 import frameos/video/args
 import frameos/video/planes
+import frameos/video/turn
 when defined(linux):
   import frameos/video/[annexb, v4l2, v4l2_decoder, isp]
 
@@ -473,6 +474,83 @@ type LaunchEnd = enum
   leSuperseded, leEof, leFailed, leIdle
   leSlow ## a decoder without the shortcuts fell behind: again with them
 
+proc fillPlaneBuffer(b: PlaneBuffer, frame: ptr UncheckedArray[byte], width, height: int) =
+  ## A packed YUV420 frame (rows of its width: Y, then U and V at half) into a
+  ## plane buffer's rows (its pitch).
+  let (cw, ch) = ((width + 1) div 2, (height + 1) div 2)
+  let cp = (b.pitch + 1) div 2
+  for r in 0 ..< height:
+    copyMem(b.map[r * b.pitch].addr, frame[r * width].addr, width)
+  let u = width * height
+  for r in 0 ..< ch:
+    copyMem(b.map[b.uOffset + r * cp].addr, frame[u + r * cw].addr, cw)
+    copyMem(b.map[b.vOffset + r * cp].addr, frame[u + cw * ch + r * cw].addr, cw)
+
+type PlaneShow = enum
+  psShown      ## on the glass
+  psSuperseded ## the player wants something else
+  psIdle       ## nobody has drawn the video for a while
+  psRefused    ## the display would not show it: the canvas draws it from now on
+
+proc showWhenDue(s: ptr Shared, gen, plane: int, run: var PlaneRun, fill: int, seqNo: int64,
+    media, frameTime: float, clockStart: var float, clockSeq: var int64): PlaneShow =
+  ## Frame `seqNo`, in `run.bufs[fill]`, on display plane `plane` when it is
+  ## due by its launch's clock (frame `clockSeq` was shown at `clockStart`),
+  ## held while the player is paused or the plane may not show (no render pass
+  ## drew the video, something over the panel), which the clock waits out.
+  let live = s.duration <= 0
+  while true:
+    var paused, idle = false
+    withLock s.lock:
+      if s.stop or s.gen != gen:
+        return psSuperseded
+      paused = s.paused
+      idle = nowSeconds() - s.lastTake > IdleSeconds
+    if idle:
+      return psIdle
+    let now = nowSeconds()
+    if paused:
+      # Unpaused, the clock starts again at this frame.
+      clockStart = 0
+      withLock s.lock:
+        s.waitFor(50)
+      continue
+    if clockStart > 0 and not live:
+      let due = clockStart + float(seqNo - clockSeq) * frameTime
+      if due - now > 0.003:
+        withLock s.lock:
+          s.waitFor(max(1, int(min(due - now, 0.05) * 1000)))
+        continue
+      if now - due > ResyncSeconds:
+        # Behind and not catching up: the clock comes to the frames.
+        clockStart = 0
+    var onGlass = false
+    if presentPlane(plane, cast[pointer](s), run.bufs[fill].id, onGlass, run.width, run.height):
+      if clockStart <= 0:
+        clockStart = nowSeconds()
+        clockSeq = seqNo
+      run.shown = fill
+      withLock s.lock:
+        s.shownBuf = run.bufs[fill]
+        s.shownGen = gen
+        s.shownSeq = seqNo
+        s.shownMedia = media
+        s.planeShown = true
+        inc s.shownCount
+        broadcast(s.cond)
+      return psShown
+    if onGlass:
+      # The display would not show it (a size its scaler refuses): the
+      # player draws it in the canvas from now on.
+      withLock s.lock:
+        s.planeFailed = true
+        broadcast(s.cond)
+      return psRefused
+    # Not on the glass now: held, and the clock waits as for a pause.
+    clockStart = 0
+    withLock s.lock:
+      s.waitFor(50)
+
 proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
     srcWidth, srcHeight: int, startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode,
     made: var int64, exitCode: var int, why: var string, busy: var bool, run: ptr PlaneRun = nil,
@@ -611,15 +689,7 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
         var media = startAt + float(seqNo - firstSeq) * frameTime
         if onPlane and staging.len > 0:
           # The rows into the buffer's: Y, then U and V at half.
-          let b = run.bufs[fill]
-          let (cw, ch) = ((run.width + 1) div 2, (run.height + 1) div 2)
-          let cp = (b.pitch + 1) div 2
-          for r in 0 ..< run.height:
-            copyMem(b.map[r * b.pitch].addr, staging[r * run.width].addr, run.width)
-          let u = run.width * run.height
-          for r in 0 ..< ch:
-            copyMem(b.map[b.uOffset + r * cp].addr, staging[u + r * cw].addr, cw)
-            copyMem(b.map[b.vOffset + r * cp].addr, staging[u + cw * ch + r * cw].addr, cw)
+          fillPlaneBuffer(run.bufs[fill], cast[ptr UncheckedArray[byte]](addr staging[0]), run.width, run.height)
         withLock s.lock:
           if s.stop or s.gen != gen:
             result = leSuperseded
@@ -646,61 +716,15 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
             s.makeSeconds > frameTime * SlowPace
         if onPlane:
           # On the glass when it is due.
-          let live = s.duration <= 0
-          while true:
-            var paused, idle = false
-            withLock s.lock:
-              if s.stop or s.gen != gen:
-                result = leSuperseded
-                break frames
-              paused = s.paused
-              idle = nowSeconds() - s.lastTake > IdleSeconds
-            if idle:
-              result = leIdle
-              break frames
-            let now = nowSeconds()
-            if paused:
-              # Unpaused, the clock starts again at this frame.
-              clockStart = 0
-              withLock s.lock:
-                s.waitFor(50)
-              continue
-            if clockStart > 0 and not live:
-              let due = clockStart + float(seqNo - clockSeq) * frameTime
-              if due - now > 0.003:
-                withLock s.lock:
-                  s.waitFor(max(1, int(min(due - now, 0.05) * 1000)))
-                continue
-              if now - due > ResyncSeconds:
-                # Behind and not catching up: the clock comes to the frames.
-                clockStart = 0
-            var onGlass = false
-            if presentPlane(plane, cast[pointer](s), run.bufs[fill].id, onGlass):
-              if clockStart <= 0:
-                clockStart = nowSeconds()
-                clockSeq = seqNo
-              run.shown = fill
-              withLock s.lock:
-                s.shownBuf = run.bufs[fill]
-                s.shownGen = gen
-                s.shownSeq = seqNo
-                s.shownMedia = media
-                s.planeShown = true
-                inc s.shownCount
-                broadcast(s.cond)
-              break
-            if onGlass:
-              # The display would not show it (a size its scaler refuses):
-              # the player draws it in the canvas from now on.
-              withLock s.lock:
-                s.planeFailed = true
-                broadcast(s.cond)
-              result = leSuperseded
-              break frames
-            # Not on the glass now: held, and the clock waits as for a pause.
-            clockStart = 0
-            withLock s.lock:
-              s.waitFor(50)
+          case showWhenDue(s, gen, plane, run[], fill, seqNo, media, frameTime, clockStart, clockSeq)
+          of psShown:
+            discard
+          of psSuperseded, psRefused:
+            result = leSuperseded
+            break frames
+          of psIdle:
+            result = leIdle
+            break frames
         inc seqNo
         inc made
         if behind:
@@ -747,7 +771,8 @@ const
 
 proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
     probe: ProbeResult, caps: DecodeCaps, startAt, fps: float, loopFile: bool, firstSeq: int64,
-    decode: VideoDecode, made: var int64, exitCode: var int, why: var string, busy: var bool): LaunchEnd =
+    decode: VideoDecode, made: var int64, exitCode: var int, why: var string, busy: var bool,
+    planeRun: ptr PlaneRun = nil, plane = -1): LaunchEnd =
   ## One launch through the VideoCore's own decoder and ISP (video/isp.nim):
   ## ffmpeg only demuxes the H.264 (demuxArgs); its access units go to the
   ## decoder (video/annexb.nim, video/v4l2_decoder.nim), each decoded frame
@@ -755,6 +780,13 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
   ## the canvas's pixels, is copied into the ring: the CPU's one touch of a
   ## frame. Ends as runLaunch does; `busy` also says the ISP would not do this
   ## video (V4l2Unsupported: its stride, size or format), no fault of the path.
+  ##
+  ## A turned picture (a phone's: `probe.rotation`) is made by the ISP as it
+  ## is in the stream, at the size it is shown, and turned as it is copied
+  ## (video/turn.nim): neither the ISP nor a plane turns one. With `planeRun` (a
+  ## turned picture for a display plane: ispPlaneFits) the ISP makes YUV420
+  ## at the run's size, turned into one of its buffers and shown on plane
+  ## `plane` when it is due, as runLaunch's are.
   let s = arg.shared
   let shownDecoder = decodeName(decode)
   withLock s.lock:
@@ -768,9 +800,33 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
     busy = true
     return leFailed
   else:
+    let onPlane = not planeRun.isNil
+    let turn = probe.rotation
     let (frameWidth, frameHeight) = frameSize(width, height, fit, probe.width, probe.height)
     let fb = frameBytes(frameWidth, frameHeight, pixels)
     let scaled = ispSize(width, height, fit, probe.width, probe.height)
+    # The picture as it is shown (a plane's frames, or the ISP's for the
+    # canvas), and what the ISP makes: that turned back.
+    let (shownW, shownH) = if onPlane: (planeRun.width, planeRun.height) else: (scaled.width, scaled.height)
+    let (ispW, ispH) = turnedSize(shownW, shownH, turn)
+    let bpp = if onPlane: 1 else: bytesPerPixel(pixels)
+    # A turned picture's copies: the ISP's picture as it is (memory the CPU
+    # reads uncached: a row at a time, once), then turned where the ring's
+    # frame is not all of it (a cover's middle) and for a plane (its rows have
+    # the buffer's pitch). A plane's unturned picture is the YUV's rows packed.
+    var unturned, turned: seq[byte]
+    if onPlane:
+      unturned = newSeq[byte](yuv420Bytes(ispW, ispH))
+      if turn != 0:
+        turned = newSeq[byte](yuv420Bytes(shownW, shownH))
+    elif turn != 0:
+      unturned = newSeq[byte](ispW * ispH * bpp)
+      if scaled.x != 0 or scaled.y != 0 or scaled.width != frameWidth or scaled.height != frameHeight:
+        turned = newSeq[byte](shownW * shownH * bpp)
+    template bytesOf(data: seq[byte]): ptr UncheckedArray[byte] =
+      cast[ptr UncheckedArray[byte]](addr data[0])
+    var clockStart = 0.0      ## a plane's clock: frame `clockSeq` was shown at `clockStart`
+    var clockSeq: int64 = 0
     let srcFps = if probe.fps > 0: probe.fps else: fps
     let frameTime = 1.0 / fps
     # A stream copy starts at the keyframe before the time asked for: its
@@ -813,8 +869,8 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
         roomAt = -1.0             ## when the ring last had room and no picture came yet
       let launchedAt = nowSeconds()
       # The coded buffers hold an access unit each: 1.5 MB at 1080p (ffmpeg's).
-      dec = openDecoder(caps.v4l2Device, probe.width, probe.height,
-        codedSize = max(probe.width * probe.height * 3 div 4, 256 * 1024))
+      let (codedW, codedH) = codedSize(probe)
+      dec = openDecoder(caps.v4l2Device, codedW, codedH, codedSize = max(codedW * codedH * 3 div 4, 256 * 1024))
       template drainErr() =
         if errOpen:
           while true:
@@ -836,7 +892,8 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
             if s.stop or s.gen != gen:
               result = leSuperseded
               break run
-            room = s.count < s.slots
+            # A plane's frames wait for their time as they are shown (showWhenDue).
+            room = onPlane or s.count < s.slots
             if not room and nowSeconds() - s.lastTake > IdleSeconds:
               result = leIdle
               break run
@@ -902,7 +959,7 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
           # A new set of frames (the decoder's size, after its source change): a new ISP.
           if dec.started and (dec.reconfigured() or sink.fd < 0 or sink.generation != dec.format.generation):
             sink.close()
-            sink = openIsp(caps.ispDevice, dec.format, pixels, scaled.width, scaled.height)
+            sink = openIsp(caps.ispDevice, dec.format, pixels, ispW, ispH, yuv = onPlane)
           # Decoded frames: dropped up to an exact start, thinned to the
           # output's rate, the rest into the ISP.
           var frame: DecodedFrame
@@ -927,6 +984,47 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
             var picture: IspPicture
             if not sink.nextPicture(picture):
               break
+            if onPlane:
+              # Turned into a plane buffer not on the glass, shown when it is due.
+              let whole = copyYuvPicture(picture, sink.output, ispW, ispH, bytesOf(unturned))
+              sink.requeue(picture)
+              if not whole:
+                raise newException(V4l2Unsupported, "the ISP made a picture smaller than " & $ispW & "x" & $ispH)
+              var frame = bytesOf(unturned)
+              if turn != 0:
+                turnYuv420(frame, ispW, ispH, bytesOf(turned), turn)
+                frame = bytesOf(turned)
+              let fill = (if planeRun.shown < 0: 0 else: planeRun.shown + 1) mod planeRun.count
+              fillPlaneBuffer(planeRun.bufs[fill], frame, planeRun.width, planeRun.height)
+              var media = startAt + float(seqNo - firstSeq) * frameTime
+              withLock s.lock:
+                if s.stop or s.gen != gen:
+                  result = leSuperseded
+                  break run
+                if s.duration > 0 and loopFile:
+                  media = media mod s.duration
+                let arrived = nowSeconds()
+                if s.arrivedAt > 0 and roomAt > 0:
+                  let took = arrived - roomAt
+                  s.makeSeconds = if s.makeSeconds == 0: took else: s.makeSeconds * 0.8 + took * 0.2
+                s.arrivedAt = arrived
+                if s.failed:
+                  s.failed = false
+                  s.retrying = false
+                  s.messageLen = 0
+              case showWhenDue(s, gen, plane, planeRun[], fill, seqNo, media, frameTime, clockStart, clockSeq)
+              of psShown:
+                discard
+              of psSuperseded, psRefused:
+                result = leSuperseded
+                break run
+              of psIdle:
+                result = leIdle
+                break run
+              roomAt = nowSeconds()
+              inc seqNo
+              inc made
+              continue
             var dst: ptr UncheckedArray[byte]
             withLock s.lock:
               if s.stop or s.gen != gen:
@@ -935,7 +1033,19 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
                 break run
               let slot = (s.head + s.count) mod s.slots
               dst = cast[ptr UncheckedArray[byte]](addr s.buf[slot * fb])
-            copyPicture(picture, pixels, scaled.x, scaled.y, frameWidth, frameHeight, dst)
+            if turn == 0:
+              copyPicture(picture, pixels, scaled.x, scaled.y, frameWidth, frameHeight, dst)
+            else:
+              # Read once, turned into the ring's frame (or the whole picture
+              # turned, its middle into the frame).
+              copyPicture(picture, pixels, 0, 0, ispW, ispH, bytesOf(unturned))
+              if turned.len == 0:
+                turnCopy(bytesOf(unturned), ispW * bpp, ispW, ispH, dst, frameWidth * bpp, bpp, turn)
+              else:
+                turnCopy(bytesOf(unturned), ispW * bpp, ispW, ispH, bytesOf(turned), shownW * bpp, bpp, turn)
+                for r in 0 ..< frameHeight:
+                  copyMem(addr dst[r * frameWidth * bpp], addr turned[((scaled.y + r) * shownW + scaled.x) * bpp],
+                    frameWidth * bpp)
             sink.requeue(picture)
             withLock s.lock:
               if s.stop or s.gen != gen:
@@ -1497,7 +1607,15 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           dropPlaneRun(s, run)
         elif onPlane:
           dropLingering(s, lingering)
-          let (pw, ph) = planeFrameSize(probe.width, probe.height)
+          # ffmpeg's YUV at the source's size, the display scaling it; a
+          # turned picture's at the size it is shown, turned on the CPU.
+          let (pw, ph) =
+            if decode.ispPlane: ispPlaneSize(width, height, fit, probe.width, probe.height)
+            else: planeFrameSize(probe.width, probe.height)
+          if decode.ispPlane:
+            withLock s.lock:
+              s.planeSrcX = 0
+              s.planeSrcY = 0
           if run.count > 0 and (run.width != pw or run.height != ph):
             dropPlaneRun(s, run)
           if not makePlaneRun(run, pw, ph):
@@ -1522,9 +1640,9 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           if decode.zeroCopy:
             runZeroCopyLaunch(arg, gen, probe, caps, plane, launchAt, fps, loopFile, seqNo, decode, lingering,
               made, code, why, busy)
-          elif decode.isp:
+          elif decode.isp or decode.ispPlane:
             runIspLaunch(arg, gen, width, height, fit, pixels, probe, caps, launchAt, fps, loopFile, seqNo,
-              decode, made, code, why, busy)
+              decode, made, code, why, busy, (if decode.ispPlane: addr run else: nil), plane)
           else:
             runLaunch(arg, gen, width, height, fit, pixels, probe.width, probe.height, launchAt, fps,
               loopFile, seqNo, decode, made, code, why, busy, (if onPlane: addr run else: nil), plane)
@@ -1534,7 +1652,7 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           # would not: the launch's fault, so no player here tries it again.
           markZeroCopyFailed()
           suspectZeroCopy = false
-        if suspectIsp and not decode.isp and decode.decoder.len > 0 and made > 0:
+        if suspectIsp and not decode.isp and not decode.ispPlane and decode.decoder.len > 0 and made > 0:
           # ffmpeg's hardware decoder played what the ISP path would not: the
           # path's fault, so no player here tries it again.
           markIspFailed()
@@ -1569,16 +1687,18 @@ proc readerMain(arg: ReaderArg) {.thread.} =
             s.noteFallback(decodeName(decode), decodeName(next), why, busy)
           launchAt = reached
           continue
-        if decode.isp and not atEnd and
+        if (decode.isp or decode.ispPlane) and not atEnd and
             (ended == leFailed or (ended == leEof and code != 0 and code != -1)):
           # The ISP path would not: ffmpeg's hardware decoder from where it got
-          # to, and its rules from there. One that could not take it now, or
-          # would not do this video (a stride, a size it changes), is no fault
-          # of the path's: the next player tries it again.
+          # to, and its rules from there (on a plane, its YUV turned by ffmpeg).
+          # One that could not take it now, or would not do this video (a
+          # stride, a size it changes), is no fault of the path's: the next
+          # player tries it again.
           ispOff = true
           suspectIsp = not busy
           var next = decode
           next.isp = false
+          next.ispPlane = false
           withLock s.lock:
             s.messageLen = 0
             s.noteFallback(decodeName(decode), decodeName(next), why, busy)
@@ -1988,6 +2108,10 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
         let (fw, fh) = frameSize(w, h, fit, s.srcWidth, s.srcHeight)
         let (pw, ph) = planeFrameSize(s.srcWidth, s.srcHeight)
         placed = planeRect(spot.x, spot.y, w, h, ord(fit), fw, fh, pw, ph)
+        # Measured in the source's size: a reader whose frames are another
+        # (a turned picture's, the size it is shown) has it scaled (inFrame).
+        placed.sourceW = pw
+        placed.sourceH = ph
         if spot.clipW > 0 and spot.clipH > 0:
           placed = placed.clipped(spot.clipX, spot.clipY, spot.clipW, spot.clipH)
         # A decoder's frame holds the picture from (planeSrcX, planeSrcY).

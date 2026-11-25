@@ -9,6 +9,9 @@
 ## (docs/video.md "How it plays").
 
 import std/[json, math, strutils]
+import frameos/video/turn
+
+export turn.turnedSize
 
 type
   VideoFit* = enum
@@ -36,7 +39,8 @@ type
     width*, height*: int ## as it is shown: a phone's turned video turned
     fps*: float          ## 0 when unknown
     codec*: string
-    rotation*: int       ## degrees the picture is turned to be shown (0, 90, 180, 270)
+    rotation*: int       ## degrees clockwise the picture is turned to be shown (0, 90, 180, 270), as
+                         ## ffmpeg's autorotate turns it
 
   DecodeCaps* = object
     ## What this machine's ffmpeg can decode in hardware (docs/video.md
@@ -53,6 +57,7 @@ type
     fast*: bool      ## the decoder is behind: no loop filter, the scaler's fast bilinear
     isp*: bool       ## the VideoCore's decoder and ISP driven by the player, ffmpeg only demuxing
     zeroCopy*: bool  ## the VideoCore's decoder's frames straight onto a display plane, ffmpeg only demuxing
+    ispPlane*: bool  ## a turned picture: the ISP's, turned as it is copied, onto a display plane
 
 const
   DefaultMaxFps* = 30.0
@@ -252,6 +257,7 @@ proc pickDecode*(codec: string, caps: DecodeCaps, fast: bool, software: bool): V
 proc decodeName*(decode: VideoDecode): string =
   ## What a status says decodes it.
   if decode.zeroCopy: decode.decoder & "+plane"
+  elif decode.ispPlane: decode.decoder & "+isp+plane"
   elif decode.isp: decode.decoder & "+isp"
   elif decode.decoder.len > 0: decode.decoder
   elif decode.hwaccel.len > 0: decode.hwaccel
@@ -374,16 +380,74 @@ proc ispFits*(caps: DecodeCaps, decode: VideoDecode, fit: VideoFit, width, heigh
   ## player's own V4L2, video/isp.nim) rather than ffmpeg's decode and
   ## scale: an H.264 source the VideoCore decodes (ffmpeg's `h264_v4l2m2m`
   ## picked for it), both devices there, a source of a known size it takes,
-  ## not turned (the ISP cannot turn a picture), and a frame the ISP makes.
+  ## and a frame the ISP makes. A turned picture too: the ISP does not turn
+  ## one, the copy out of it does (video/turn.nim).
   if decode.decoder != "h264_v4l2m2m" or caps.v4l2Device.len == 0 or caps.ispDevice.len == 0:
     return false
-  if probe.codec != "h264" or probe.rotation != 0:
+  if probe.codec != "h264":
     return false
   if probe.width < IspMinEdge or probe.height < IspMinEdge or probe.width > V4l2MaxEdge or
       probe.height > V4l2MaxEdge:
     return false
   let (fw, fh) = frameSize(width, height, fit, probe.width, probe.height)
   fw >= IspMinEdge and fh >= IspMinEdge
+
+proc ispSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): tuple[width, height, x, y: int] =
+  ## What the ISP makes of a `srcWidth` x `srcHeight` picture for a `width` x
+  ## `height` box, and where in it the frame is: contain and fill are the
+  ## frame itself (frameSize); cover is the picture scaled to cover the box,
+  ## the box's part of it taken from the middle as it is copied (the ISP
+  ## crops from a picture's corner only, 2026-11-24).
+  let (fw, fh) = frameSize(width, height, fit, srcWidth, srcHeight)
+  if fit != vfCover or srcWidth <= 0 or srcHeight <= 0:
+    return (fw, fh, 0, 0)
+  let
+    w = clamp(width, 1, MaxFrameEdge)
+    h = clamp(height, 1, MaxFrameEdge)
+  var sw, sh: int
+  if srcWidth * h >= srcHeight * w:
+    # Wider than the box: its height, the sides cut off.
+    sh = h
+    sw = max(w, int(round(h.float * srcWidth.float / srcHeight.float)))
+  else:
+    sw = w
+    sh = max(h, int(round(w.float * srcHeight.float / srcWidth.float)))
+  (sw, sh, (sw - w) div 2, (sh - h) div 2)
+
+proc codedSize*(probe: ProbeResult): tuple[width, height: int] =
+  ## The size of the frames in the stream: a turned picture's turned back
+  ## (`probe` has it as it is shown).
+  turnedSize(probe.width, probe.height, probe.rotation)
+
+proc ispPlaneSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): tuple[width, height: int] =
+  ## A turned picture's frames on a display plane (the ISP's, turned as they
+  ## are copied: video/turn.nim): the whole picture at the size it is shown
+  ## for a `width` x `height` box (ispSize: cover's covering the box, the
+  ## plane taking its middle), never bigger than the source (the display
+  ## scales it up, the CPU turns fewer pixels), made even for 4:2:0.
+  let s = ispSize(width, height, fit, srcWidth, srcHeight)
+  var (w, h) = (s.width, s.height)
+  if srcWidth > 0 and srcHeight > 0 and (w > srcWidth or h > srcHeight):
+    if fit == vfFill:
+      w = min(w, srcWidth)
+      h = min(h, srcHeight)
+    else:
+      let k = min(srcWidth / w, srcHeight / h)
+      w = int(round(w.float * k))
+      h = int(round(h.float * k))
+  (max(w - w mod 2, 2), max(h - h mod 2, 2))
+
+proc ispPlaneFits*(caps: DecodeCaps, decode: VideoDecode, fit: VideoFit, width, height: int,
+    probe: ProbeResult): bool =
+  ## Whether a launch for a display plane goes through the VideoCore's
+  ## decoder and ISP, its pictures turned as they are copied onto the plane:
+  ## a turned picture (zeroCopyFits shows a picture as it is), where the ISP
+  ## path would take it (ispFits) and its frames are ones the ISP makes. The
+  ## other way, ffmpeg turns each frame at its full size on the CPU.
+  if probe.rotation == 0 or not ispFits(caps, decode, fit, width, height, probe):
+    return false
+  let (w, h) = ispPlaneSize(width, height, fit, probe.width, probe.height)
+  w >= IspMinEdge and h >= IspMinEdge
 
 proc zeroCopyFits*(caps: DecodeCaps, decode: VideoDecode, probe: ProbeResult): bool =
   ## Whether a launch for a display plane shows the VideoCore decoder's own
@@ -407,36 +471,18 @@ proc pickLaunch*(decode: VideoDecode, caps: DecodeCaps, flags: LaunchFlags, fit:
     probe: ProbeResult): VideoDecode =
   ## `decode` (pickDecode's) as one launch takes it (docs/video.md "Which way
   ## a video plays"). For a display plane: the decoder's frames on it (zero
-  ## copy), else ffmpeg's YUV on it. For the canvas: the VideoCore's decoder
-  ## and ISP, else ffmpeg's decode and scale. Each gives way to the next when
-  ## it fails (player.nim's readerMain).
+  ## copy), for a turned picture the ISP's turned onto it, else ffmpeg's YUV
+  ## on it. For the canvas: the VideoCore's decoder and ISP, else ffmpeg's
+  ## decode and scale. Each gives way to the next when it fails (player.nim's
+  ## readerMain).
   result = decode
   result.zeroCopy = flags.onPlane and not flags.zeroCopyOff and not flags.zeroCopyBroken and
     zeroCopyFits(caps, decode, probe)
   result.isp = not flags.onPlane and not flags.ispOff and not flags.ispBroken and
     ispFits(caps, decode, fit, width, height, probe)
-
-proc ispSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): tuple[width, height, x, y: int] =
-  ## What the ISP makes of a `srcWidth` x `srcHeight` picture for a `width` x
-  ## `height` box, and where in it the frame is: contain and fill are the
-  ## frame itself (frameSize); cover is the picture scaled to cover the box,
-  ## the box's part of it taken from the middle as it is copied (the ISP
-  ## crops from a picture's corner only, 2026-11-24).
-  let (fw, fh) = frameSize(width, height, fit, srcWidth, srcHeight)
-  if fit != vfCover or srcWidth <= 0 or srcHeight <= 0:
-    return (fw, fh, 0, 0)
-  let
-    w = clamp(width, 1, MaxFrameEdge)
-    h = clamp(height, 1, MaxFrameEdge)
-  var sw, sh: int
-  if srcWidth * h >= srcHeight * w:
-    # Wider than the box: its height, the sides cut off.
-    sh = h
-    sw = max(w, int(round(h.float * srcWidth.float / srcHeight.float)))
-  else:
-    sw = w
-    sh = max(h, int(round(w.float * srcHeight.float / srcWidth.float)))
-  (sw, sh, (sw - w) div 2, (sh - h) div 2)
+  # A turned picture on a plane: the ISP's, turned as it is copied there.
+  result.ispPlane = flags.onPlane and not result.zeroCopy and not flags.ispOff and not flags.ispBroken and
+    ispPlaneFits(caps, decode, fit, width, height, probe)
 
 proc keepFrame*(index: int64, srcFps, outFps: float): bool =
   ## Whether the `index`th decoded frame (from 0) is one of `outFps` a
@@ -514,12 +560,15 @@ proc parseProbe*(text: string): ProbeResult =
   result.fps = parseRate(stream{"avg_frame_rate"}.getStr())
   if result.fps <= 0:
     result.fps = parseRate(stream{"r_frame_rate"}.getStr())
+  # Clockwise, as ffmpeg's autorotate turns it: the display matrix's angle
+  # (ffprobe's side data) is counterclockwise, the old `rotate` tag clockwise.
+  # A phone held upright says -90 there, 90 here.
   var rotation = 0.0
   let sideData = stream{"side_data_list"}
   if not sideData.isNil and sideData.kind == JArray:
     for item in sideData:
       if item.kind == JObject and item.hasKey("rotation"):
-        rotation = jsonFloat(item["rotation"])
+        rotation = -jsonFloat(item["rotation"])
   let tags = stream{"tags"}
   if rotation == 0 and not tags.isNil and tags.kind == JObject and tags.hasKey("rotate"):
     rotation = jsonFloat(tags["rotate"])

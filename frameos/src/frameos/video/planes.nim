@@ -41,6 +41,7 @@ type
     ## part of the frame it shows (`srcX` .. `srcH`, in the frame's pixels).
     x*, y*, w*, h*: int
     srcX*, srcY*, srcW*, srcH*: float
+    sourceW*, sourceH*: int ## the size of the frame `srcX` .. `srcH` are in; 0: whatever is shown (inFrame)
 
   PlaneBuffer* = object
     ## One YUV420 frame's memory: `map` is where the reader writes it, `id` what
@@ -183,7 +184,26 @@ proc clipped*(rect: PlaneRect, x, y, w, h: int): PlaneRect =
     sy = rect.srcH / rect.h.float
   PlaneRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0,
     srcX: rect.srcX + float(x0 - rect.x) * sx, srcY: rect.srcY + float(y0 - rect.y) * sy,
-    srcW: float(x1 - x0) * sx, srcH: float(y1 - y0) * sy)
+    srcW: float(x1 - x0) * sx, srcH: float(y1 - y0) * sy, sourceW: rect.sourceW, sourceH: rect.sourceH)
+
+proc inFrame*(rect: PlaneRect, frameW, frameH: int): PlaneRect =
+  ## `rect` for a frame of `frameW` x `frameH` holding the same whole picture
+  ## at another size: a turned video's, which the ISP makes at the size it is
+  ## shown (video/player.nim), where a render pass measured the source in the
+  ## source's size. Its source scaled to it; as it is when either says no size.
+  result = rect
+  if frameW <= 0 or frameH <= 0 or rect.sourceW <= 0 or rect.sourceH <= 0 or
+      (frameW == rect.sourceW and frameH == rect.sourceH):
+    return
+  let
+    kx = frameW / rect.sourceW
+    ky = frameH / rect.sourceH
+  result.srcX = rect.srcX * kx
+  result.srcW = rect.srcW * kx
+  result.srcY = rect.srcY * ky
+  result.srcH = rect.srcH * ky
+  result.sourceW = frameW
+  result.sourceH = frameH
 
 proc overlaps*(ax, ay, aw, ah, bx, by, bw, bh: int): bool =
   ## Two rectangles share a pixel.
@@ -857,10 +877,13 @@ proc hidePlanes*() =
           planes[i].allowed = false
           planes[i].claimed = false
 
-proc presentPlane*(plane: int, owner: pointer, buffer: uint32, onGlass: var bool): bool =
+proc presentPlane*(plane: int, owner: pointer, buffer: uint32, onGlass: var bool, frameW = 0,
+    frameH = 0): bool =
   ## The reader's frame on the glass now. False when it cannot be (the plane
   ## is not allowed there now, or the device said no); `onGlass` whether the
   ## plane may show at all, so a reader holds its frame while it may not.
+  ## `frameW` x `frameH`: the frame's size when it is not the one the render
+  ## pass measured (inFrame).
   onGlass = false
   if plane < 0 or plane >= MaxPlanes:
     return false
@@ -870,7 +893,7 @@ proc presentPlane*(plane: int, owner: pointer, buffer: uint32, onGlass: var bool
       if not p.used or p.owner != owner or not p.allowed:
         return false
       onGlass = true
-      if sink.show(plane, buffer, p.rect):
+      if sink.show(plane, buffer, p.rect.inFrame(frameW, frameH)):
         p.buffer = buffer
         p.shownRect = p.rect
         return true
