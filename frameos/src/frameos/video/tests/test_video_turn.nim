@@ -89,3 +89,40 @@ suite "a picture turned as it is copied":
           for x in 0 ..< tcw:
             let (sx, sy) = whence(turn, cw, ch, x, y)
             check dst[at + y * tcw + x] == src[at + sy * cw + sx]
+
+  test "a YUV420 frame turned into a plane's buffer: each plane at its own pitch, the padding not written":
+    # A phone's picture as the ISP makes it for a 720x720 panel's plane,
+    # smaller: an odd half width, so the chroma has an edge the blocks leave.
+    let (w, h) = (42, 26)
+    let (cw, ch) = (w div 2, h div 2)
+    var src = newSeq[byte](w * h + 2 * cw * ch)
+    for i in 0 ..< src.len:
+      src[i] = byte((i * 7 + 3) mod 253)
+    for turn in [90, 270]:
+      let (tw, th) = turnedSize(w, h, turn)
+      let (tcw, tch) = turnedSize(cw, ch, turn)
+      let yPitch = tw + 10
+      let cPitch = (yPitch + 1) div 2
+      let uAt = yPitch * th
+      let vAt = uAt + cPitch * tch
+      var buf = newSeq[byte](vAt + cPitch * tch)
+      let m = cast[ptr UncheckedArray[byte]](addr buf[0])
+      turnYuv420Into(cast[ptr UncheckedArray[byte]](addr src[0]), w, h, m,
+        cast[ptr UncheckedArray[byte]](addr buf[uAt]), cast[ptr UncheckedArray[byte]](addr buf[vAt]),
+        yPitch, cPitch, turn)
+      var wrong = 0
+      for y in 0 ..< th:
+        for x in 0 ..< yPitch:
+          if x < tw:
+            let (sx, sy) = whence(turn, w, h, x, y)
+            if buf[y * yPitch + x] != src[sy * w + sx]: inc wrong
+          elif buf[y * yPitch + x] != 0: inc wrong
+      for plane in 0 ..< 2:
+        let (at, to) = (w * h + plane * cw * ch, if plane == 0: uAt else: vAt)
+        for y in 0 ..< tch:
+          for x in 0 ..< cPitch:
+            if x < tcw:
+              let (sx, sy) = whence(turn, cw, ch, x, y)
+              if buf[to + y * cPitch + x] != src[at + sy * cw + sx]: inc wrong
+            elif buf[to + y * cPitch + x] != 0: inc wrong
+      check wrong == 0

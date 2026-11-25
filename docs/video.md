@@ -203,9 +203,13 @@ and the canvas plays the video everywhere else, as it always did:
   2026-11-25 it held the player's lock while it did, 100 to 160 ms on a Pi
   Zero, and every frame due meanwhile waited: a stutter once a second. Now:
   - The render thread marks the buffer it copies (`copying`) and copies
-    outside the lock. A reader waits only to write over, give back or free
-    that one buffer (`waitUncopied`), and fills one that is neither on the
-    glass nor being copied (`nextFill`).
+    outside the lock. A reader fills one that is neither on the glass nor
+    being copied (`nextFill`), and waits only to free that one buffer
+    (`waitUncopied`).
+  - A zero-copy reader gives the decoder back the frame being copied once
+    the copy is done (`copied`, `copiedBack`) and goes on meanwhile. It used
+    to wait: the copy of a 720p frame takes about 70 ms on a Pi Zero, so a
+    frame a second was 30 ms late and one in five of those was dropped.
   - `yuvInto` reads each source row once into memory the CPU caches, and runs
     without Nim's checks.
   - The reader thread runs at nice -5 (`ReaderNice`), ahead of the render
@@ -239,15 +243,24 @@ times late in 11 s of steady play, two runs each, builds in turn:
 | 1080p, zero copy | 5 to 10 | 0 | 0 | 0 |
 | 720p turned, the ISP onto a plane | 126 to 153 | 52 to 65 | 18 to 33 | 4 to 6 |
 
-The bench's `video` suite on the build with all of it and the faster copy,
-each clip's start left out (Cloud-W, 2026-11-25):
+Then the residue the bench found, in the Video player on repeat, 30 s of
+steady play after the first 30, two runs each, builds in turn:
 
-| Clip | Way | Frames a second | Late | Dropped | Worst late |
-|---|---|---|---|---|---|
-| 360p (24) | zero copy | 24.1 | 0 | 0 | 49 ms |
-| 720p (30) | zero copy | 29.8 | 0 | 7 in 35 s | 41 ms |
-| 1080p (30) | zero copy | 29.7 | 0 | 7 in 35 s | 47 ms |
-| 720p turned (30) | the ISP onto a plane | 30.0 | 29 in 34 s | 0 | 82 ms |
+| Clip | Before | After |
+|---|---|---|
+| 720p, zero copy: dropped | 5 and 9 | 0 and 0 (the decoder's frame back after the copy, no wait) |
+| 720p turned: late, worst | 61 and 38, 84 and 71 ms | 0 and 0, 26 and 38 ms (the faster turn, into the plane buffer) |
+
+The bench's `video` suite, each clip's start left out (Cloud-W,
+2026-11-25): first on the build with all of that and the faster copy, then
+with the two fixes below (no issue):
+
+| Clip | Way | Frames a second | Late | Dropped | Worst late | After the fixes |
+|---|---|---|---|---|---|---|
+| 360p (24) | zero copy | 24.1 | 0 | 0 | 49 ms | 24.0, 0, 0, 21 ms |
+| 720p (30) | zero copy | 29.8 | 0 | 7 in 35 s | 41 ms | 30.0, 0, 0, 18 ms |
+| 1080p (30) | zero copy | 29.7 | 0 | 7 in 35 s | 47 ms | 30.0, 0, 0, 23 ms |
+| 720p turned (30) | the ISP onto a plane | 30.0 | 29 in 34 s | 0 | 82 ms | 30.0, 0, 0, 34 ms |
 
 A 360p video now plays all 24 of its frames a second (20 before: the copy
 under the lock was where they went).
@@ -289,7 +302,9 @@ reached by `atVisible`.
   reader holds at most two more (`PlaneHold`): the one on the glass and the
   one waiting for its time; a third lets the decoder write meanwhile
   (`ZeroCopyHeld`). A frame goes back to the decoder only once the plane has
-  moved off it: SETPLANE returns at the vblank that put the next one up. Each
+  moved off it: SETPLANE returns at the vblank that put the next one up. One
+  the canvas's copy still reads goes back when the copy is done, the reader
+  not waiting for it (`copiedBack`). Each
   is a frame of the coded size in CMA (3 MB at 1080p), which the display
   shares; such a launch makes no plane buffers of its own.
 - **When.** The reader's clock, as for ffmpeg's frames (`planeStep`): a frame
@@ -350,9 +365,13 @@ itself, as for the canvas (`ispPlaneFits`, decoder `h264_v4l2m2m+isp+plane`):
   shown (`ispPlaneSize`): the whole picture, for cover the picture covering
   the box, never bigger than the source (the display scales up), made even.
 - **The CPU turns.** The reader's copy of each picture turns it
-  (`video/turn.nim`): the ISP's picture is read once, a row at a time, turned
-  in 16x16 tiles in memory the CPU caches, and written into the plane buffer
-  row by row.
+  (`video/turn.nim`): the ISP's picture is read once, a row at a time, into
+  memory the CPU caches, and turned straight into the plane buffer
+  (`turnYuv420Into`), four by four pixels a step: four words read, four
+  written, the bytes moved in registers (`turnBytes`). The plane buffer takes
+  those writes as fast as cached memory does. A 405x720 frame on a Pi Zero:
+  5.6 ms to read, 6.5 ms to turn into the plane (18.7 ms for both and a copy
+  after, a byte at a time, until 2026-11-25).
 - **The plane is told the size.** The render pass measures the plane's source
   rectangle in the source's size; `presentPlane` scales it to the frames
   actually shown (`inFrame`).
@@ -641,10 +660,14 @@ box). All three skip without ffmpeg.
        - A cap on what all the players ask of the VideoCore at once, so it
          is never overloaded and wedged. Four 720p videos did that; whether
          ffmpeg's decoder does the same was not tried.
-       - Why the zero-copy reader drops a frame every few seconds at 720p
-         and 1080p (7 in 35 s, the bench's `video` suite), and why a turned
-         picture shows about one frame a second late (its reader turns every
-         frame on the core the render thread has too).
+       - The canvas's copy of a plane's frame once a second: about 70 ms of a
+         Pi Zero's core for a 720p video's (720x405 out of 1280x720), most of
+         it reading the decoder's memory uncached. No frame waits for it now,
+         but a turned video's reader shares the core with it.
+       - A turned picture is still shown 25 to 40 ms late now and then (a
+         vblank or two). Handing the decoder's next frames to the ISP before
+         the reader waits was tried (2026-11-25): fewer frames late at the
+         start, more in steady play.
        - The Camera wall draws a label over each feed, so its feeds stay in
          the canvas.
      - *The UI over a video* (the Video player's controls) in a plane above

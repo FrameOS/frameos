@@ -61,6 +61,10 @@ const
     ## A plane's frames in flight: one on the glass, one the reader fills, one
     ## spare for a vblank late.
   PlaneCopySeconds* = 1.0
+    ## A video on a plane is copied into the canvas this often, and when it
+    ## pauses or ends: what a snapshot or `GET /image` shows of it, and what
+    ## the canvas holds the moment the plane goes. Also how often the scene
+    ## renders for it: nothing of the video is drawn by a render.
   LateFrames* = 1.5
     ## A frame shown this many frame times after it was due is late: a
     ## stutter (`playback`, the `video:playback` log line).
@@ -69,10 +73,6 @@ const
     ## once-a-second copy of a plane's frame into the canvas otherwise held a
     ## Pi Zero's frames back (2026-11-25). Where the runtime may not (not
     ## root), the default.
-    ## A video on a plane is copied into the canvas this often, and when it
-    ## pauses or ends: what a snapshot or `GET /image` shows of it, and what
-    ## the canvas holds the moment the plane goes. Also how often the scene
-    ## renders for it: nothing of the video is drawn by a render.
 
 type
   Shared = object
@@ -864,14 +864,12 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
     let (ispW, ispH) = turnedSize(shownW, shownH, turn)
     let bpp = if onPlane: 1 else: bytesPerPixel(pixels)
     # A turned picture's copies: the ISP's picture as it is (memory the CPU
-    # reads uncached: a row at a time, once), then turned where the ring's
-    # frame is not all of it (a cover's middle) and for a plane (its rows have
-    # the buffer's pitch). A plane's unturned picture is the YUV's rows packed.
+    # reads uncached: a row at a time, once), then turned into the plane
+    # buffer, or into the ring's frame, or where that is not all of it (a
+    # cover's middle) whole first. A plane's picture is the YUV's rows packed.
     var unturned, turned: seq[byte]
     if onPlane:
       unturned = newSeq[byte](yuv420Bytes(ispW, ispH))
-      if turn != 0:
-        turned = newSeq[byte](yuv420Bytes(shownW, shownH))
     elif turn != 0:
       unturned = newSeq[byte](ispW * ispH * bpp)
       if scaled.x != 0 or scaled.y != 0 or scaled.width != frameWidth or scaled.height != frameHeight:
@@ -1038,18 +1036,24 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
             if not sink.nextPicture(picture):
               break
             if onPlane:
-              # Turned into a plane buffer not on the glass, shown when it is due.
+              # Into a plane buffer neither on the glass nor being copied,
+              # turned as it goes, and shown when it is due. The ISP's picture
+              # is read once, a row at a time (memory the CPU reads uncached),
+              # and a turned one written straight into the plane buffer: as
+              # fast as into memory the CPU caches, and no copy after it.
               let whole = copyYuvPicture(picture, sink.output, ispW, ispH, bytesOf(unturned))
               sink.requeue(picture)
               if not whole:
                 raise newException(V4l2Unsupported, "the ISP made a picture smaller than " & $ispW & "x" & $ispH)
-              var frame = bytesOf(unturned)
-              if turn != 0:
-                turnYuv420(frame, ispW, ispH, bytesOf(turned), turn)
-                frame = bytesOf(turned)
               let fill = nextFill(s, planeRun[])
               waitUncopied(s, planeRun.bufs[fill].id)
-              fillPlaneBuffer(planeRun.bufs[fill], frame, planeRun.width, planeRun.height)
+              let b = planeRun.bufs[fill]
+              if turn != 0:
+                turnYuv420Into(bytesOf(unturned), ispW, ispH, b.map,
+                  cast[ptr UncheckedArray[byte]](addr b.map[b.uOffset]),
+                  cast[ptr UncheckedArray[byte]](addr b.map[b.vOffset]), b.pitch, (b.pitch + 1) div 2, turn)
+              else:
+                fillPlaneBuffer(b, bytesOf(unturned), planeRun.width, planeRun.height)
               var media = startAt + float(seqNo - firstSeq) * frameTime
               withLock s.lock:
                 if s.stop or s.gen != gen:
@@ -1234,6 +1238,9 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
     var frames: seq[DecodedFrame]   ## by index: what a hold names
     var hold = initPlaneHold()
     var waitingSeq: int64 = 0
+    # Frames the plane moved off while the render thread still copies them
+    # into the canvas: the decoder's again once it is done (copiedBack).
+    var copied: seq[int]
     result = leEof
     try:
       discard c_setpriority(0, p.processID.cuint, 5)
@@ -1277,12 +1284,35 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
       template letGo(given: int) =
         # A frame back to the decoder (one of an older configuration is not).
         # `given` once: a template would run an expression (hold.wait) twice,
-        # and give back the frame that waits as well.
+        # and give back the frame that waits as well. One the render thread
+        # is copying into the canvas goes back once it is done, and the
+        # reader goes on meanwhile: waiting for that copy (70 ms of a 720p
+        # frame on a Pi Zero, once a second) made a frame a second late, and
+        # one in five dropped (2026-11-25).
         let index = given
         if index >= 0:
-          if index < imported.len:
-            waitUncopied(s, imported[index].id)
-          dec.release(frames[index])
+          var later = false
+          if index < imported.len and imported[index].id != 0:
+            withLock s.lock:
+              later = s.copying == imported[index].id
+          if later:
+            copied.add index
+          else:
+            dec.release(frames[index])
+      template copiedBack() =
+        # The frames the canvas's copy is done with, the decoder's again.
+        if copied.len > 0:
+          var copying: uint32
+          withLock s.lock:
+            copying = s.copying
+          var i = 0
+          while i < copied.len:
+            let index = copied[i]
+            if index < imported.len and imported[index].id != 0 and imported[index].id == copying:
+              inc i
+            else:
+              dec.release(frames[index])
+              copied.del(i)
       proc forgetImports(imported: var seq[PlaneBuffer], hold: var PlaneHold, lingering: var PlaneBuffer) =
         # A new configuration of the decoder: its old buffers' framebuffers
         # go, but for the one on the glass, which lingers until a new one shows.
@@ -1315,6 +1345,7 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
         # The frame's buffer as a framebuffer: imported the first time it comes.
         if frame.generation != importedGen:
           forgetImports(imported, hold, lingering)
+          copied.setLen(0)
           importedGen = frame.generation
           withLock s.lock:
             s.planeSrcX = dec.format.visible.x
@@ -1350,8 +1381,9 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
             reason = "the hardware decoder made no frame in " & $hardwareFirstFrameSeconds & " s"
             result = leFailed
             break run
+          copiedBack()
           # The frame waiting for its time.
-          var timeoutMs = PollMs
+          var timeoutMs = if copied.len > 0: 5 else: PollMs
           if hold.waiting >= 0:
             if paused:
               # Unpaused, the clock starts again at this frame.
@@ -1382,7 +1414,7 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
                 inc kept
                 continue
               of psWait:
-                timeoutMs = max(1, int(min(due - now, 0.05) * 1000))
+                timeoutMs = max(1, int(min(due - now, if copied.len > 0: 0.005 else: 0.05) * 1000))
               of psShow, psResync:
                 var onGlass = false
                 if presentPlane(plane, cast[pointer](s), imported[hold.waiting].id, onGlass):
