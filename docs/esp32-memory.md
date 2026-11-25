@@ -820,6 +820,29 @@ large at the lows: Wi-Fi TX buffers while the board sends a big answer or
 its picture (up to ~26 KB), and the HTTP server's stacks (next section).
 +592 bytes of flash.
 
+## The metrics ring in PSRAM (2026-11-25)
+
+The hardware bench's soak had the reTerminal E1002's internal RAM falling
+about 1.9 KB every round, PSRAM flat. Twelve rounds and four idle minutes
+later it was no leak: 96.2 KB free, 2 KB less a round for seven rounds,
+then 81 KB and flat. Alternating two scenes cost 968 bytes a round, whichever
+two: 484 bytes a render. A walk of the internal heap before and after ten
+switches (`heap_caps_walk`, a debug build) found ten new blocks of 480
+bytes, each a `{"event":"metrics",...}` line.
+
+`fos_client.c` keeps the last 32 metrics samples for `GET /metrics` and the
+cloud's `get_metrics`, each a `strdup` of its ~470-byte line, so under
+`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` in internal RAM: 15.5 KB once the ring
+is full, which it is 32 renders after a boot. The other boards' soaks came
+long after theirs had filled; the E1002's came right after a settings
+restart. The copies are PSRAM-first now (`metrics_copy`), the ring's and the
+ones its readers get.
+
+On the E1002 from a restart, the same nine rounds of its four scenes: internal
+RAM free 97.2 KB, then 96.3-96.5 KB through every round and an idle minute
+(81 KB at that point before); the ring is in PSRAM instead. +35 bytes of
+flash.
+
 ## Task stacks (2026-11-23)
 
 Every FrameOS task's stack is internal RAM (a task that touches flash must

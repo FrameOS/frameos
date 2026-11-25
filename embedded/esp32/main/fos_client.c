@@ -350,6 +350,20 @@ bool fos_client_renders_locally(void)
  * log line, which is how the backend's Metrics panel ingests it. */
 #define FOS_METRICS_RING_CAP 32
 
+/* A sample's copy, in PSRAM where there is any: malloc() serves everything
+ * under 16 KB from internal RAM (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL), and
+ * the ring's 32 samples of ~470 B were 15.5 KB of it once full. It fills
+ * over the first 32 renders after a boot, which read as a leak on the
+ * reTerminal E1002 (1.9 KB of internal RAM a soak round, then flat: the
+ * hardware bench, 2026-11-25). Freed with free() like any other block. */
+static char *metrics_copy(const char *json)
+{
+    size_t len = strlen(json) + 1;
+    char *copy = heap_caps_malloc_prefer(len, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
+    if (copy != NULL) memcpy(copy, json, len);
+    return copy;
+}
+
 static SemaphoreHandle_t s_metrics_lock = NULL;
 static fos_metrics_sample_t s_metrics_ring[FOS_METRICS_RING_CAP];
 static size_t s_metrics_next = 0;
@@ -535,7 +549,7 @@ static void log_metrics_sample(void)
 
     if (s_metrics_lock == NULL) s_metrics_lock = xSemaphoreCreateMutex();
     if (s_metrics_lock == NULL) return;
-    char *copy = strdup(json);
+    char *copy = metrics_copy(json);
     if (copy == NULL) return;
     double now = (double)time(NULL);
     xSemaphoreTake(s_metrics_lock, portMAX_DELAY);
@@ -570,7 +584,7 @@ size_t fos_client_metrics_recent(fos_metrics_sample_t *out, size_t max)
     for (size_t i = 0; i < take; i++) {
         const fos_metrics_sample_t *src = &s_metrics_ring[(start + i) % FOS_METRICS_RING_CAP];
         if (src->json == NULL) continue;
-        char *copy = strdup(src->json);
+        char *copy = metrics_copy(src->json);
         if (copy == NULL) break;
         out[copied].json = copy;
         out[copied].timestamp = src->timestamp;

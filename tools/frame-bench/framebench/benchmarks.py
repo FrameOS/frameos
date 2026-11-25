@@ -269,6 +269,14 @@ def suite_benchmark(ctx, frame):
     debug_was = next((l.split()[-1] for l in con.command('status', 2.5) if l.startswith('debug:')), None)
     n = getattr(ctx, 'bench_n', 5) if not ctx.quick else 2
     slow = frame.get('refresh_s', 0) >= SLOW_PANEL_S
+    # Whether the last render left the panel refreshing. On a slow panel the
+    # next switch waits for that refresh (a 13.3" Spectra on 8 MB draws its
+    # next picture in the canvas the refresh still reads), so it is let finish
+    # before a cold switch is timed: the E1004's `ui` switch took 28 s on main
+    # and 5.6 s on 2026.11.14, all of it the raster benchmark's last refresh,
+    # which main makes because its interpreter (and the benchmark's moving
+    # picture) now lives across renders (the hardware bench, 2026-11-25).
+    refreshing = False
     try:
         # Journaled either way, so a killed run's scenes are deleted.
         isolate(con, frame, backend_url if getattr(ctx, 'isolate', True) else None)
@@ -290,9 +298,12 @@ def suite_benchmark(ctx, frame):
             note_scene(frame, scene['id'])
             key = scene['id'].split('-')[2]
             entry = {'id': scene['id'], 'bytes': len(payload)}
+            if slow and refreshing:
+                con.idle(frame.get('refresh_s', 0))
             t0 = time.time()
             ok, t_cmd, t_done, line, w = switch_scene(con, frame, scene['id'], scene['name'])
             entry['cold'] = {**_render_entry(w, t_cmd, t_done), 'ok': ok}
+            refreshing = (entry['cold'].get('refresh') or [None])[-1] == 'update'
             if not ok:
                 issues.append(issue('fail', 'bench_switch', scene['name'], (line or 'no render within timeout')[:200]))
                 results[key] = entry
@@ -325,6 +336,7 @@ def suite_benchmark(ctx, frame):
                     t_done, line, got = wait_render(con, render_timeout(frame))
                     _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
                     warm.append(_render_entry(summarize(got + tail), t, t_done))
+                    refreshing = (warm[-1].get('refresh') or [None])[-1] == 'update'
                     if not t_done:
                         issues.append(issue('fail', 'bench_render', scene['name'], 'a `render` produced no render within the timeout'))
                         break
