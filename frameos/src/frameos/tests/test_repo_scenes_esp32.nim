@@ -31,6 +31,9 @@ let networkApps = toHashSet([
   # the Weather, Bird field journal and Flights Above Me samples' own JS apps:
   # Open-Meteo, iNaturalist and OpenSky for the scenes' default places
   "weatherOpenMeteoJS", "birdJournal", "flightRadar",
+  # the weather samples' shared forecast app (Weather dial and its siblings):
+  # Open-Meteo for the default place; offline CI got "No weather yet"
+  "openMeteo",
   # the Archive films sample's own JS app: archive.org's search
   "archiveFilms"
 ])
