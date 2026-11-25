@@ -699,11 +699,6 @@ picks the edge a press drags (`cursor_shape.nim` `edgeCursor`).
 
 ## Fields and the keyboard
 
-The on-screen keyboard has a Tab key (an arrow to a bar, left of the comma or
-the space): it moves the focus to the next field down the tree, around past
-the last; held, to the one before. A keyboard's Tab does the same, Shift+Tab
-back. A `<select>` is passed over.
-
 What a person could do on a UI is also what the voice key sends its control
 plane (docs/voice-chat.md "Voice actions", `ui/layout.nim` `uiSpots`): each
 element with an `onClick`, each field and each box with more to scroll, with

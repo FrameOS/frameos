@@ -4,7 +4,7 @@
 ## back, run through the To-do sample's real app: what it lists (the fields,
 ## the buttons by their text, the icons by their `title`, each with the row
 ## it sits on), typing a to-do in and sending it, ticking one off by its
-## circle, and the on-screen keyboard's Tab key walking the fields.
+## circle.
 ##
 ## FRAMEOS_VOICE_SCREEN_DUMP=<dir> writes each digest there: the snapshots the
 ## planes' eval set (cloud/apps/auth-web/evals/voice-actions) is built on.
@@ -17,7 +17,6 @@ import frameos/types
 import frameos/values
 import frameos/voice_screen
 import frameos/ui/events
-import frameos/ui/keyboard
 import frameos/ui/layout
 
 const
@@ -124,51 +123,6 @@ suite "voice actions":
     # A target that is gone does nothing.
     check not dispatchUiEvent("tests/voice-todo-act", "uiAction", %*{"target": "2:999999"})
     check not dispatchUiEvent("tests/voice-todo-act", "uiAction", %*{"target": "nonsense"})
-
-  test "the keyboard's Tab goes to the next field, held to the one before":
-    let ui = newUi("""
-export function get(app) {
-  return (
-    <div className="flex flex-col gap-2 p-2 w-full h-full bg-white">
-      <input className="h-10" value={frameos.recall('a') || ''} placeholder="First" onChange={(e) => frameos.remember('a', e.target.value)} />
-      <input className="h-10" value={frameos.recall('b') || ''} placeholder="Second" onChange={(e) => frameos.remember('b', e.target.value)} />
-      <input className="h-10" value={frameos.recall('c') || ''} placeholder="Third" onChange={(e) => frameos.remember('c', e.target.value)} />
-    </div>
-  )
-}
-""", "tests/voice-tab")
-    discard ui.render()
-    var digest = ui.screen()
-    check dispatchUiEvent("tests/voice-tab", "uiAction", %*{"target": digest.find("label", "First")["id"]})
-    discard ui.render()
-    check ui.screen()["kb"].getBool()
-    let target = uiTarget("tests/voice-tab", 2, create = false)
-    proc tabKey(): array[2, float32] =
-      for r in target.regions:
-        if r.handlers[ueClick] - 1 == KeyBase + ord(kTab):
-          return [r.x + r.w / 2, r.y + r.h / 2]
-      check false
-    proc focused(): string =
-      for t in ui.screen()["t"]:
-        if t{"focus"}.getBool(): return t["label"].getStr()
-    check focused() == "First"
-    var at = tabKey()
-    check dispatchUiEvent("tests/voice-tab", "tap", %*{"x": at[0], "y": at[1], "pointerId": 0, "pointerType": "touch"})
-    discard ui.render()
-    check focused() == "Second"
-    at = tabKey()
-    discard dispatchUiEvent("tests/voice-tab", "tap", %*{"x": at[0], "y": at[1], "pointerId": 0, "pointerType": "touch"})
-    discard ui.render()
-    check focused() == "Third"
-    at = tabKey()
-    discard dispatchUiEvent("tests/voice-tab", "tap", %*{"x": at[0], "y": at[1], "pointerId": 0, "pointerType": "touch"})
-    discard ui.render()
-    check focused() == "First" # around past the last
-    # Held: the one before, around the other way.
-    at = tabKey()
-    discard dispatchUiEvent("tests/voice-tab", "longPress", %*{"x": at[0], "y": at[1], "pointerId": 0, "pointerType": "touch"})
-    discard ui.render()
-    check focused() == "Third"
 
   test "Voice memos: its memos, pages and Save are on the screen digest, and voiceMemo saves one":
     let dir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "build" / "voice-memos-assets"
