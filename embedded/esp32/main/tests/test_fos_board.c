@@ -178,6 +178,9 @@ static void test_event_maps(void)
           "sunton double press is the switcher");
     CHECK(strstr(sunton, "longPress") == NULL, "sunton held is nothing");
     CHECK(strstr(sunton, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "sunton left edge is back");
+    const char *guition = event_map("guition_esp32_4848s040");
+    CHECK(strstr(guition, "button") == NULL, "guition has no key");
+    CHECK(strstr(guition, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "guition top edge");
     /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks, and
      * the edges swipe as on every touch preset. */
     const char *sticky = event_map("seeed_reterminal_sticky");
@@ -396,6 +399,8 @@ static void test_touch_pins(void)
      * fos_touch.c frees from the PHY first), reset 38, no interrupt line. */
     CHECK(strcmp(fos_board_touch_pins("sunton_esp32_8048s070"), "sda=19,scl=20,int=-1,rst=38,en=-1") == 0,
           "sunton touch");
+    CHECK(strcmp(fos_board_touch_pins("guition_esp32_4848s040"), "sda=19,scl=45,int=-1,rst=-1,en=-1") == 0,
+          "guition touch");
     CHECK(strcmp(fos_board_touch_pins(""), "") == 0, "no preset");
     /* The Indicator's and the Sticky's glass read both axes the other way; the others match. */
     CHECK(fos_board_touch_mirror("seeed_sensecap_indicator_d1") ==
@@ -404,6 +409,9 @@ static void test_touch_pins(void)
     CHECK(fos_board_touch_mirror("seeed_reterminal_sticky") ==
               (FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y),
           "sticky touch mirrored");
+    CHECK(fos_board_touch_mirror("guition_esp32_4848s040") ==
+              (FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y),
+          "guition touch mirrored");
     CHECK(fos_board_touch_mirror("seeed_reterminal_e1003") == 0, "e1003 touch not mirrored");
     CHECK(fos_board_touch_mirror("") == 0 && fos_board_touch_mirror(NULL) == 0, "no preset: not mirrored");
     CHECK(strcmp(fos_board_touch_pins(NULL), "") == 0, "NULL preset");

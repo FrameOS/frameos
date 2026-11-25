@@ -22,7 +22,7 @@ from .console import Console, parse_payload_json
 from . import linux
 
 # Boards with a touch panel the bench can tap (module ids from fos_board.c).
-TOUCH_MODULES = {'seeed_sensecap_indicator_d1', 'sunton_esp32_8048s070', 'waveshare_esp32_s3_touch_amoled_1_75', 'seeed_reterminal_sticky', 'seeed_reterminal_e1003',
+TOUCH_MODULES = {'seeed_sensecap_indicator_d1', 'guition_esp32_4848s040', 'sunton_esp32_8048s070', 'waveshare_esp32_s3_touch_amoled_1_75', 'seeed_reterminal_sticky', 'seeed_reterminal_e1003',
                  'waveshare_esp32s3_touch_lcd_4', 'hyperpixel'}
 # Seconds a full refresh takes, for timeouts and pacing (a guess for unknown panels).
 PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_13in3e': 35, 'EPD_10in3': 4, 'EPD_3in97': 4, 'EPD_7in5_V2': 6}

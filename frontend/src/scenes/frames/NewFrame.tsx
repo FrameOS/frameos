@@ -709,6 +709,17 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
     sdCardAssets: SUNTON_ESP32_8048S070_SD_CARD_ASSETS,
   },
+  // GPIO0 is an RGB data line, so there is no key: only the edges swipe.
+  guition_esp32_4848s040: {
+    label: 'Guition ESP32-4848S040 (4" LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st7701s_480x480',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: SEEED_SENSECAP_INDICATOR_PINS,
+    gpioButtons: [],
+    eventMap: TOUCH_EDGE_SWIPES,
+  },
   waveshare_esp32_s3_touch_amoled_1_75: {
     label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75 (1.75" round AMOLED)',
     platform: EMBEDDED_ESP32_S3,

@@ -39,11 +39,15 @@
 #include "lcd_loading.h"
 #include "lcd_splash.h"
 
-/* Pick the board's wiring by hardware preset ("seeed_sensecap_indicator_d1"
- * or "sunton_esp32_8048s070"); an unknown or empty preset goes by the panel
- * key instead (LCD_EK9716_800x480 is the Sunton's), and neither keeps the
- * Indicator's. Called by fos_display_init before the first blit. */
+/* Pick the board's wiring by hardware preset ("seeed_sensecap_indicator_d1",
+ * "sunton_esp32_8048s070" or "guition_esp32_4848s040"); an unknown or empty
+ * preset goes by the panel key instead (LCD_EK9716_800x480 is the Sunton's,
+ * LCD_ST7701S_480x480 the Indicator's), else the Indicator's.
+ * Called by fos_display_init before the first blit. */
 void fos_lcd_st7701s_select_board(const char *hardware_preset, const char *panel);
+
+/* The preset of the board fos_lcd_st7701s_select_board chose. */
+const char *fos_lcd_st7701s_board(void);
 
 /* The selected board's glass, in pixels. The panel table entry the rest of
  * the firmware sizes the render target, the canvas and the backend's

@@ -87,6 +87,11 @@ const boardChoices = [
     platform: genericPlatform,
   },
   {
+    label: 'Guition ESP32-4848S040 (4" LCD ESP32-S3)',
+    value: 'hw:guition_esp32_4848s040',
+    platform: genericPlatform,
+  },
+  {
     label: 'Sunton ESP32-8048S070 (7" LCD ESP32-S3)',
     value: 'hw:sunton_esp32_8048s070',
     platform: genericPlatform,
