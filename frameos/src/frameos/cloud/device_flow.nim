@@ -46,6 +46,11 @@ const
   # after this many starts the frame stops asking (each start is a provider
   # row) and waits for a reboot or the admin page.
   LINK_CODE_MAX_STARTS* = 12
+  ## How long a link the frame page asked for may show codes, from the press:
+  ## then it stops ("lapsed"), and a new press starts the clock again. A code
+  ## lives only while somebody is at the panel (docs/scene-settings.md
+  ## "Connecting the frame"); the ESP32 holds its one window to the same.
+  PANEL_LINK_SECONDS* = 15 * 60
   LINK_CODE_START_BACKOFF_MIN_SECONDS = 10.0
   LINK_CODE_START_BACKOFF_MAX_SECONDS = 300.0
 
@@ -352,15 +357,20 @@ proc savePendingLinkCode(pending: JsonNode) {.gcsafe.} =
     writeFile(tmp, $pending & "\n")
     moveFile(tmp, path)
 
-proc writePendingLinkCode*(providerUrl: string): bool {.gcsafe.} =
+proc writePendingLinkCode*(providerUrl: string, until = 0.0): bool {.gcsafe.} =
   ## Queues a panel-displayed link: the next hub pass starts the device flow
-  ## and the runner draws the code. Entry point for the setup portal.
+  ## and the runner draws the code. Entry point for the setup portal, and for
+  ## the frame page, whose link ends at `until` (epoch seconds; 0: no end
+  ## but the start budget) and with the process (dropPanelLinkAtStart).
   {.gcsafe.}:
     var url = normalizeProviderUrl(providerUrl)
     if url.len == 0:
       url = DEFAULT_CLOUD_PROVIDER_URL
     try:
-      savePendingLinkCode(%*{"provider_url": url, "starts": 0})
+      let pending = %*{"provider_url": url, "starts": 0}
+      if until > 0:
+        pending["until"] = %until
+      savePendingLinkCode(pending)
       true
     except CatchableError:
       false
@@ -375,6 +385,40 @@ proc clearPendingLinkCode*() {.gcsafe.} =
 proc pendingLinkCodeQueued*(): bool {.gcsafe.} =
   {.gcsafe.}:
     fileExists(pendingLinkCodePath())
+
+proc endConnectingLink() {.gcsafe.} =
+  ## The device flow waiting for its code to be entered ends, its code off
+  ## the panel; never a link made.
+  {.gcsafe.}:
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      if state{"status"}.getStr() == "connecting" and not isManagedLink(state):
+        resetLinkState(state)
+        saveCloudLinkState(state)
+
+proc dropPanelLinkAtStart*() {.gcsafe.} =
+  ## At startup: a link the frame page asked for did not outlive the page, so
+  ## it does not outlive the process either (a crash, a restart, a reboot):
+  ## no code shows again with nobody at the frame.
+  {.gcsafe.}:
+    let pending = loadPendingLinkCode()
+    if pending != nil and pending{"until"}.getFloat(0) > 0:
+      clearPendingLinkCode()
+      endConnectingLink()
+
+proc noteLinkCodeFailed(pending: JsonNode, failed, detail: string, stopped: bool) {.gcsafe.} =
+  ## Why the queued link has no code, for the frame page (docs/scene-settings.md
+  ## "Connecting the frame": the page's words for `failed`). `stopped`: no
+  ## more tries until the page's Try again queues it afresh.
+  pending["failed"] = %failed
+  pending["detail"] = %detail
+  if stopped:
+    pending["stopped"] = %true
+  try:
+    savePendingLinkCode(pending)
+  except CatchableError:
+    discard
+  requestRender()
 
 # ---------------------------------------------------------------------------
 # Background tick (hub thread, idle pass every ~2 s)
@@ -411,6 +455,16 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
       mode = state{"mode"}.getStr("")
       intervalSeconds = max(1, state{"interval_seconds"}.getInt(5))
     let now = epochTime()
+    if pendingLinkCodeQueued():
+      # The frame page's link has had its time (PANEL_LINK_SECONDS): it stops
+      # where it is, its code off the panel.
+      let pending = loadPendingLinkCode()
+      let until = if pending == nil: 0.0 else: pending{"until"}.getFloat(0)
+      if until > 0 and now >= until and not pending{"stopped"}.getBool():
+        log(%*{"event": "cloud:linkCode:lapsed"})
+        endConnectingLink()
+        noteLinkCodeFailed(pending, "lapsed", "", stopped = true)
+        return false
     case status
     of "connecting":
       if now >= nextDeviceFlowPollAt:
@@ -433,14 +487,14 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
       if now < nextLinkCodeStartAt:
         return false
       let pending = loadPendingLinkCode()
-      if pending == nil:
+      if pending == nil or pending{"stopped"}.getBool():
         return false
       let starts = pending{"starts"}.getInt(0)
       if starts >= LINK_CODE_MAX_STARTS:
         log(%*{"event": "cloud:linkCode:gaveUp", "starts": starts,
                "message": "No one claimed the link code shown on the display; " &
                           "restart the link from the admin page or reboot to show it again."})
-        clearPendingLinkCode()
+        noteLinkCodeFailed(pending, "lapsed", "", stopped = true)
         return false
       var displayName = "FrameOS frame"
       let ownName = frameDisplayName(frameConfig)
@@ -451,6 +505,9 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
         displayName, headlessLocalOrigin(frameConfig), LINK_CODE_DEFAULT_SCOPES)
       if outcome.ok:
         pending["starts"] = %(starts + 1)
+        for key in ["failed", "detail"]:
+          if pending.hasKey(key):
+            pending.delete(key)
         try:
           savePendingLinkCode(pending)
         except CatchableError:
@@ -459,12 +516,19 @@ proc deviceFlowTick*(frameConfig: FrameConfig): bool {.gcsafe.} =
         nextLinkCodeStartAt = 0.0
         log(%*{"event": "cloud:linkCode:shown", "start": starts + 1})
       elif outcome.networkError:
-        # Wi-Fi not up yet, or the provider is away: try again, more slowly.
+        # Wi-Fi not up yet, or the provider is away: try again, more slowly,
+        # and the page says it has had no answer so far.
         nextLinkCodeStartAt = now + linkCodeStartBackoff
         linkCodeStartBackoff = min(linkCodeStartBackoff * 2, LINK_CODE_START_BACKOFF_MAX_SECONDS)
+        noteLinkCodeFailed(pending, "reach", outcome.error, stopped = false)
       else:
+        # The address itself refused (status 0), or a server that is no
+        # FrameOS Cloud: no use asking again until it is changed.
         log(%*{"event": "cloud:linkCode:refused", "status": outcome.status, "error": outcome.error})
-        clearPendingLinkCode()
+        if outcome.status == 0:
+          noteLinkCodeFailed(pending, "address", outcome.error, stopped = true)
+        else:
+          noteLinkCodeFailed(pending, "reach", "HTTP " & $outcome.status, stopped = true)
     false
 
 # ---------------------------------------------------------------------------

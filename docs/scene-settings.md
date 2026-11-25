@@ -262,18 +262,46 @@ same page:
   instead of "scan …") where the panel leaves no room for one that scans
   (under 96 px);
 - while the cloud has not answered yet, or has and the frame is enrolling,
-  "Waiting for FrameOS Cloud…" and Cancel.
+  "Waiting for cloud.frameos.net…" (the server it asked) and Cancel;
+- for the cloud, the server under its name and a **Cloud address** field
+  under the page, saved with **Save**: where Link to cloud goes from then on
+  (an ESP32's `cloud_url`, a Pi's link state `provider_url`; typed without a
+  scheme it is `https://`, empty is FrameOS Cloud's own, plain `http://` only
+  to a local host). A link under way or stopped starts over against it; a
+  link made is never moved;
+- a cloud link that stopped stays up saying why, with **Try again** and
+  Cancel: no FrameOS Cloud answered at that address (`reach`, with the HTTP
+  status or "no answer"), the address is refused (`address`), the cloud
+  would not take the code (`refused`), nobody entered it in time (`lapsed`),
+  or the approved frame could not enroll (`enroll`). A Pi notes `reach` on a
+  link it keeps retrying (a provider away, Wi-Fi not up yet) as well.
 
 The host hands the page one fact for it, `link`: `{to: "cloud" | "backend",
-code, where, qr}`. Starting either ends the other; **Cancel**
+code, where, qr}`, and for the cloud `server` and, once stopped, `failed`
+(the word above) and `detail`. Starting either ends the other; **Cancel**
 (`cancelLink`) ends either, never a link made and never a local network
-access code. Back leaves the page and the code stands until its window ends.
+access code, and so does **Back**, which goes back to the frame page.
+
+**A code lives only while its page is up, and never long.** Leaving the
+frame page any way (Back, the scene's settings, another scene, a window beside
+it: the host's `close`) ends a code still waiting to be entered, and a cloud
+link that stopped; a cloud link already approved and enrolling finishes. A
+backend's code is good for 300 s and five tries, out of a wrong-code budget
+that outlives restarts (`fos_lan_access.h`, `local_access.nim`). A cloud
+link shows codes for 15 minutes from the press at most (`PANEL_LINK_SECONDS`
+on a Pi, whose device flow starts a new code when one lapses; one window
+held to it on an ESP32), then stops as `lapsed`. Nothing of a page's link
+outlives the process: an ESP32 keeps it in RAM, and a Pi drops a link the page
+asked for when it starts (`dropPanelLinkAtStart`), so a crash or a reboot
+never shows a code again with nobody at the frame. (The setup portal's link,
+which has no page, keeps its marker and its start budget.)
 
 - **The cloud** (`linkCloud`; not offered to a Pi whose frame.json names a
   backend, which the cloud refuses to enroll): the device flow of
   `docs/cloud-frames.md` "B. Link code on the device", run off the render
   task (a Pi queues `state/cloud_link_code_pending.json` for the hub thread,
-  `device_flow.nim`; an ESP32's cloud task, `fos_cloud.c`). `where` is the
+  `device_flow.nim`; an ESP32's cloud task, `fos_cloud.c`, which a frame that
+  was never on the cloud starts at its first Link to cloud). `where` is the
   page the code is typed in without its scheme, `qr` is
   `verification_uri_complete`, the same page with the code in it
   (`/device?user_code=…`, which the cloud's device page fills in). Approved,

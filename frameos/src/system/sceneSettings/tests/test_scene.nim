@@ -842,10 +842,58 @@ block the_frame_page_links_a_control_plane:
   var tree = page.tree(480, 480, false, "", info = facts)
   words = texts(tree)
   doAssert "ABCD-1234" in words and "cloud.frameos.net/device" in words, words
-  doAssert "Scan the QR code" in words and "Connect" in words and "Save" notin words, words
+  doAssert "Scan the QR code" in words and "Connect" in words, words
+  doAssert "Cloud address" notin words, "the address that gave the code is not changed under it"
   doAssert not qrIn(tree).isNil, "a QR code where there is room"
   scene.tap(regionWith(20000 + 10))
   doAssert actions[^1] == "cancelLink", $actions
+  # Where the cloud link goes, on its page and changed there: Save hands the
+  # address to the host, which starts the link over against it.
+  var applied: seq[JsonNode]
+  frameSettingsApply = proc (changes: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add copy(changes)
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "cloud", "code": "",
+    "server": "https://cloud.example.com"}}
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  # Waiting for the first answer is a moment: no field to type in yet.
+  doAssert "Waiting for FrameOS Cloud" in words and "Cloud address" notin words, words
+  # It answered with a code, from a cloud the person did not mean: Change
+  # address brings the field up beside the code, and its Save starts over.
+  facts["link"]["code"] = %"ABCD-1234"
+  facts["link"]["where"] = %"cloud.example.com/device"
+  facts["link"]["qr"] = %"https://cloud.example.com/device?user_code=ABCD-1234"
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Change address" in words and "Cloud address" notin words, words
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 11))
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Cloud address" in words and "ABCD-1234" in words and "Change address" notin words, words
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-cloud-address.png")
+  scene.state["frameValues"] = %*{"cloudUrl": "frames.example.org"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0]{"cloudUrl"}.getStr() == "frames.example.org", $applied
+  doAssert "Cloud address" notin texts(page.tree(480, 480, false, "", info = facts))
+  facts["link"]["code"] = %""
+  # Stopped: the page stays, says why and offers Try again.
+  facts["link"]["failed"] = %"reach"
+  facts["link"]["detail"] = %"HTTP 404"
+  facts["note"] = %"The address must be an http(s) URL"
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "No FrameOS Cloud answered there" in words and "HTTP 404" in words, words
+  doAssert "Try again" in words and "Cancel" in words and "must be an http(s) URL" in words, words
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-cloud-failed.png")
+  scene.tap(regionWith(20000 + 8))
+  doAssert actions[^1] == "linkCloud", $actions
+  # Back from connecting is to the frame page: the link ends there.
+  discard scene.draw()
+  scene.tap(regionWith(0))
+  doAssert actions[^1] == "cancelLink" and scene.state["page"].getStr() == "frame", $actions
+  frameSettingsApply = nil
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "cloud", "code": "ABCD-1234",
+    "where": "cloud.frameos.net/device", "qr": "https://cloud.frameos.net/device?user_code=ABCD-1234"}}
   # No room for a QR code that scans: the words alone, and they say so.
   tree = page.tree(150, 150, false, "", info = facts)
   doAssert qrIn(tree).isNil
@@ -859,6 +907,7 @@ block the_frame_page_links_a_control_plane:
   words = texts(tree)
   doAssert "Your FrameOS backend" in words and "123456" in words and "192.168.1.20:8787" in words, words
   doAssert "Adopt frame" in words and "Cancel" in words, words
+  doAssert "Cloud address" notin words, words
   doAssert not qrIn(tree).isNil
   # Tall: the QR code over the words.
   if previews.len > 0:

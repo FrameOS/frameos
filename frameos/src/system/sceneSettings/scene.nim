@@ -87,6 +87,7 @@ const
   ALinkCloud = 8 ## a FrameOS Cloud link code (the host's `linkCloud`)
   AAdopt = 9 ## an adoption code for a backend (the host's `adopt`)
   ACancelLink = 10 ## either one, while it is pending
+  AAddress = 11 ## the cloud's address, to change while its code shows
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -239,7 +240,9 @@ proc current(edits, info: JsonNode, name: string): JsonNode =
   ## A frame field's value: as changed on the page, else as the host has it.
   result = edits{name}
   if result.isNil:
-    result = if name == "wifiSsid": info{"wifi", "ssid"} else: info{name}
+    result = if name == "wifiSsid": info{"wifi", "ssid"}
+      elif name == "cloudUrl": info{"link", "server"}
+      else: info{name}
 
 proc text(value: JsonNode): string =
   ## A value as the text a field shows: a string as it is, a whole number
@@ -375,8 +378,14 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
   ## them, and a name to type), its password, the rotation and the scale.
   ## The scales offered leave a layout of 320 px or more on the panel's
   ## shorter edge `unit` (uiScale's floor: past it the page itself stops
-  ## following), and the scale set elsewhere stays as it is.
+  ## following), and the scale set elsewhere stays as it is. While a plane is
+  ## being connected, that page's own: the cloud's address, or none.
   result = newJArray()
+  let link = info{"link"}
+  if not link.isNil and link.kind == JObject:
+    if link.str("to") == "cloud":
+      result.elems.add field("cloudUrl", "Cloud address", "string")
+    return
   let wifi = info{"wifi"}
   if not wifi.isNil and wifi.kind == JObject:
     let
@@ -536,6 +545,7 @@ proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
   ## alone for the saved network. The page stays up so what it did shows.
   let changes = collect(fields, self.objectAt("frameValues"))
   self.state.put("frameValues", newJObject())
+  self.state.put("address", newJBool(false))
   # A new rotation restarts the frame (the canvas is sized when it starts:
   # fos_frame_settings.c, frame_settings_linux.nim), and the page says so
   # until then: a reTerminal Sticky going blank for ten seconds after Save
@@ -589,7 +599,10 @@ proc press(self: SceneSettingsScene, action: int) =
     frameAction("checkUpdate")
   elif action >= ALinkCloud and action <= ACancelLink:
     # The host's own words for them, in the order of the numbers.
+    self.state.put("address", newJBool(false))
     frameAction(["linkCloud", "adopt", "cancelLink"][action - ALinkCloud])
+  elif action == AAddress:
+    self.state.put("address", newJBool(true))
   elif action == ALayout:
     self.openLayoutPage()
   elif action == ARender:
@@ -624,6 +637,10 @@ proc acting(self: SceneSettingsScene) =
     self.state.put("confirm", newJInt(-1))
   if handler == HCancel:
     if self.onLayoutPage(): self.showPage(true)
+    elif frame and not info{"link"}.isNil:
+      # Back from connecting a plane is to the frame page: the link ends.
+      self.state.put("frameValues", newJObject())
+      self.press(ACancelLink)
     elif frame and not self.openedOnFrame(): self.showPage(false)
     else: leave()
   elif handler == HSave:
@@ -898,7 +915,9 @@ proc pressButton(look: Look, label: string, action: int, asking = -1): SvgNode =
     result.attrs[0][1].add(if look.paper: " bg-black text-white" else: " bg-red-600 active:bg-red-500")
 
 proc note(list: SvgNode, look: Look, text: string) =
-  ## A smaller grey line under what it is about.
+  ## A smaller grey line under what it is about; none for no text.
+  if text.len == 0:
+    return
   var c = look.grey
   c.px("text", look.size * 3 div 4)
   list.children.add el("div", move c, SvgNode(text: text)).role("muted")
@@ -920,18 +939,32 @@ const LinkHints = [
   "In your FrameOS backend, Adopt frame with the address and code above, or paste what the QR code says."]
   ## What to do, by plane (cloud, backend) and whether a QR code shows.
 
-proc linkPage(look: Look, link: JsonNode, width, height: int, color: bool): SvgNode =
+const
+  LinkFailed = ["reach", "address", "refused", "lapsed", "enroll"]
+    ## Why a cloud link stopped, by the host's word for it (`link.failed`).
+  LinkFailedWords = [
+    "No FrameOS Cloud answered there. Check the address and try again.",
+    "This address cannot be used. Change it below.",
+    "It did not take the code. Try again.",
+    "Nobody entered the code in time. Try again.",
+    "The code was approved, but the frame could not join. Try again."]
+
+proc linkPage(look: Look, link: JsonNode, width, height: int, color: bool, address: SvgNode): SvgNode =
   ## A control plane being connected (docs/scene-settings.md "Connecting the
   ## frame"): the same page for the cloud and a backend, a QR code of what
   ## the person has to share beside its code, where it goes and Cancel. The
   ## host draws neither code anywhere else and keeps no picture while one
   ## shows. The QR code is black on white, as a camera reads it best, on
   ## every panel, and left out where there is no room for one that scans.
+  ## The cloud's `address` field (where it asked) when the link stopped, or
+  ## when Change address beside its code asked for it; a link that stopped
+  ## stays up saying why, with Try again.
   let
     backend = link.str("to") == "backend"
     code = link.str("code")
     side = min(height * 45 div 100, width * 2 div 5)
     text = link.str("qr")
+    failed = link.str("failed")
   if code.len == 0 or side < 96 or text.len == 0:
     linkQr = nil
   elif linkQr.isNil or linkQrText != text or linkQr.width != side:
@@ -954,7 +987,10 @@ proc linkPage(look: Look, link: JsonNode, width, height: int, color: bool): SvgN
   let words = el("div", move c,
     el("div", "font-bold", SvgNode(text: if backend: "Your FrameOS backend" else: "FrameOS Cloud")))
   result.children.add words
-  if code.len == 0:
+  if failed.len > 0:
+    words.children.add el("div", "", SvgNode(text: LinkFailedWords[max(LinkFailed.find(failed), 0)]))
+    words.note(look, link.str("detail"))
+  elif code.len == 0:
     # Asked for, and not answered yet; or approved, and enrolling.
     words.note(look, "Waiting for FrameOS Cloud\xe2\x80\xa6")
   else:
@@ -966,7 +1002,15 @@ proc linkPage(look: Look, link: JsonNode, width, height: int, color: bool): SvgN
     words.children.add el("div", move k, SvgNode(text: code))
     words.children.add el("div", look.grey, SvgNode(text: link.str("where"))).role("muted")
     words.note(look, LinkHints[ord(backend) * 2 + ord(not linkQr.isNil)])
-  words.children.add el("div", "flex", look.pressButton("Cancel", ACancelLink))
+  if not address.isNil:
+    words.children.add address
+  let row = el("div", "flex flex-wrap gap-2")
+  if failed.len > 0:
+    row.children.add look.pressButton("Try again", ALinkCloud)
+  row.children.add look.pressButton("Cancel", ACancelLink)
+  if code.len > 0 and not backend and address.isNil:
+    row.children.add look.pressButton("Change address", AAddress)
+  words.children.add row
 
 proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit, width,
     height: int): SvgNode =
@@ -978,7 +1022,16 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     link = info{"link"}
   if not link.isNil and link.kind == JObject:
     # Whether the panel shows colors (utils/asset_colors): an accent for the code.
-    return look.linkPage(link, width, height, panelShowsColor(self.frameConfig.device))
+    # The link's own field (the cloud's address, saved with Save), and what
+    # the host would not take of it.
+    let fields = self.frameFields(info, "")
+    var address: SvgNode
+    # Not while it waits for its first answer: that is a moment, too short
+    # to type in.
+    if fields.elems.len > 0 and (link.str("failed").len > 0 or self.state{"address"}.getBool()):
+      address = look.row(fields.elems[0], current(self.objectAt("frameValues"), info, "cloudUrl"), 0)
+      address.note(look, info.str("note"))
+    return look.linkPage(link, width, height, panelShowsColor(self.frameConfig.device), address)
   linkQr = nil
   var c = "flex flex-col"
   c.px("p", look.pad)
@@ -1181,8 +1234,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
-  if not connecting:
-    header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
+  header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header.role("bar")
   let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit,
       width, height)

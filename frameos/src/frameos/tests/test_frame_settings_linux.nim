@@ -170,8 +170,41 @@ suite "the frame page on a Linux frame":
     check facts["link"]["to"].getStr() == "cloud"
     check facts["link"]["code"].getStr() == ""
     check facts["actions"] == %*["restart"]
+    # Where it goes, shown on the page and changed there: the queued link
+    # starts over against the new address, and the next link goes there too.
+    check facts["link"]["server"].getStr() == DEFAULT_CLOUD_PROVIDER_URL
+    linuxFrameSettingsApply(%*{"cloudUrl": "frames.example.org/"})
+    check parseFile(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))["provider_url"].getStr() ==
+      "https://frames.example.org"
+    check linuxFrameSettingsRead()["link"]["server"].getStr() == "https://frames.example.org"
+    # Plain http to a host on the internet is refused, and the page says why.
+    linuxFrameSettingsApply(%*{"cloudUrl": "http://frames.example.org"})
+    check linuxFrameSettingsRead()["note"].getStr().len > 0
+    check linuxFrameSettingsRead()["link"]["server"].getStr() == "https://frames.example.org"
+    # A link that stopped says why until Try again or Cancel.
+    let stopped = parseFile(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+    stopped["failed"] = %"reach"
+    stopped["detail"] = %"HTTP 404"
+    stopped["stopped"] = %true
+    writeFile(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"), $stopped)
+    check linuxFrameSettingsRead()["link"]["failed"].getStr() == "reach"
+    linuxFrameSettingsAction("linkCloud")
+    check linuxFrameSettingsRead()["link"]{"failed"}.isNil
+    linuxFrameSettingsApply(%*{"cloudUrl": ""})
+    check linuxFrameSettingsRead()["link"]["server"].getStr() == DEFAULT_CLOUD_PROVIDER_URL
     linuxFrameSettingsAction("cancelLink")
     check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+    check linuxFrameSettingsRead(){"link"}.isNil
+    # Leaving the page, however, ends either code: it lives only while its
+    # page is up.
+    linuxFrameSettingsAction("linkCloud")
+    check fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+    linuxFrameSettingsAction("close")
+    check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+    linuxFrameSettingsAction("adopt")
+    check pendingLocalAccessScope() == LocalAccessScopeAdopt
+    linuxFrameSettingsAction("close")
+    check pendingLocalAccessScope() == ""
     check linuxFrameSettingsRead(){"link"}.isNil
 
   test "a frame that is only a picture, or waits for a backend, is not offered the cloud":

@@ -169,12 +169,23 @@ void fos_cloud_request_state(void);
  * (cancel never touches an enrolled link). */
 void fos_cloud_link_start(void);
 void fos_cloud_link_cancel(void);
-/* True while a link is pending, from the start until it ends; `code` and
- * `uri` get the code to enter and the page with it in
- * (verification_uri_complete), "" while the provider has not answered yet
- * and after the approval. */
+/* The frame page went away: a code waiting to be entered (or a link that
+ * failed) ends with it; one already approved and enrolling finishes. */
+void fos_cloud_link_leave(void);
+/* True while a link is pending, from the start until it ends, and while one
+ * that failed is on the page; `code` and `uri` get the code to enter and the
+ * page with it in (verification_uri_complete), "" while the provider has not
+ * answered yet, after the approval and after a failure. */
 bool fos_cloud_link_code(char *code, size_t code_len, char *uri, size_t uri_len);
-/* How long a pending link holds the frame awake, 0 when none. */
+/* Why the link failed, as the frame page's word for it ("reach",
+ * "address", "refused", "lapsed", "enroll"), with what the network or the
+ * provider said in `detail`; NULL while none failed. A failed link stays
+ * until the next start or a cancel. */
+const char *fos_cloud_link_failure(char *detail, size_t detail_len);
+/* Where a link goes: cloud_url, else https://cloud.frameos.net. */
+const char *fos_cloud_link_server(void);
+/* How long a pending link holds the frame awake, 0 when none (a failed one
+ * included). */
 uint32_t fos_cloud_link_seconds_left(void);
 /* "esp32-s3" | "esp32-c3" | "esp32": the platform a frame reports. */
 const char *fos_platform_name(void);

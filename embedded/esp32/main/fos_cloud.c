@@ -910,7 +910,9 @@ static esp_err_t enroll_once(const char *base, const char *bearer, bool *permane
  * window that lapses unclaimed just ends. */
 #define LINK_DEFAULT_PROVIDER "https://cloud.frameos.net"
 
-typedef enum { LINK_IDLE = 0, LINK_STARTING, LINK_POLLING, LINK_ENROLLING } link_phase_t;
+/* FAILED: stopped, and why stays on the page (Try again, Cancel) until the
+ * next start or a cancel. */
+typedef enum { LINK_IDLE = 0, LINK_STARTING, LINK_POLLING, LINK_ENROLLING, LINK_FAILED } link_phase_t;
 
 /* The phase, the code and its window: written by the cloud task and by the
  * render task (start, cancel), read by the render task. */
@@ -921,6 +923,10 @@ static uint32_t s_link_gen = 0;
 static char s_link_user_code[16];
 static char s_link_uri[192]; /* verification_uri_complete: the page's QR code */
 static int64_t s_link_expires_us = 0;
+/* Why a FAILED link stopped: the page's word for it (fos_cloud.h) and what
+ * the provider or the network said. */
+static const char *s_link_failed = NULL;
+static char s_link_detail[64];
 /* Cloud task only. The approval's token waits in s_access_token, which
  * nothing reads before the state is FOS_CLOUD_ENROLLED. */
 static char s_link_device_code[128];
@@ -935,6 +941,13 @@ static void link_clear_locked(void)
     s_link_user_code[0] = '\0';
     s_link_uri[0] = '\0';
     s_link_expires_us = 0;
+    s_link_failed = NULL;
+    s_link_detail[0] = '\0';
+}
+
+const char *fos_cloud_link_server(void)
+{
+    return fos_config()->cloud_url[0] ? fos_config()->cloud_url : LINK_DEFAULT_PROVIDER;
 }
 
 void fos_cloud_link_start(void)
@@ -944,13 +957,33 @@ void fos_cloud_link_start(void)
     link_clear_locked();
     s_link_phase = LINK_STARTING;
     portEXIT_CRITICAL(&s_link_lock);
+    /* A frame that was never on the cloud runs no cloud task until now
+     * (cloud_task_needed): without one, the page waited for a code nobody
+     * asked for (2026-11-25). */
     if (s_task != NULL) xTaskNotifyGive(s_task);
+    else fos_cloud_start();
+}
+
+const char *fos_cloud_link_failure(char *detail, size_t detail_len)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const char *failed = s_link_phase == LINK_FAILED ? s_link_failed : NULL;
+    if (detail_len) strlcpy(detail, failed ? s_link_detail : "", detail_len);
+    portEXIT_CRITICAL(&s_link_lock);
+    return failed;
 }
 
 void fos_cloud_link_cancel(void)
 {
     portENTER_CRITICAL(&s_link_lock);
     link_clear_locked();
+    portEXIT_CRITICAL(&s_link_lock);
+}
+
+void fos_cloud_link_leave(void)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    if (s_link_phase != LINK_ENROLLING) link_clear_locked();
     portEXIT_CRITICAL(&s_link_lock);
 }
 
@@ -967,7 +1000,7 @@ bool fos_cloud_link_code(char *code, size_t code_len, char *uri, size_t uri_len)
 uint32_t fos_cloud_link_seconds_left(void)
 {
     portENTER_CRITICAL(&s_link_lock);
-    const bool pending = s_link_phase != LINK_IDLE;
+    const bool pending = s_link_phase != LINK_IDLE && s_link_phase != LINK_FAILED;
     const int64_t left_us = s_link_expires_us - esp_timer_get_time();
     portEXIT_CRITICAL(&s_link_lock);
     if (!pending) return 0;
@@ -984,6 +1017,25 @@ static void link_end(uint32_t gen, const char *why)
     portEXIT_CRITICAL(&s_link_lock);
     crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
     if (why) ESP_LOGW(TAG, "link: %s", why);
+    if (ours && fos_scenes_settings_shown()) fos_client_render_now();
+}
+
+/* Attempt `gen` stopped for `failed` (the page's word: reach, address,
+ * refused, lapsed, enroll), unless a newer one replaced it: the page says
+ * why until the next start or a cancel. */
+static void link_fail(uint32_t gen, const char *failed, const char *detail)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const bool ours = s_link_gen == gen;
+    if (ours) {
+        link_clear_locked();
+        s_link_phase = LINK_FAILED;
+        s_link_failed = failed;
+        strlcpy(s_link_detail, detail ? detail : "", sizeof(s_link_detail));
+    }
+    portEXIT_CRITICAL(&s_link_lock);
+    crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
+    printf("cloud link: %s %s\n", failed, detail ? detail : "");
     if (ours && fos_scenes_settings_shown()) fos_client_render_now();
 }
 
@@ -1016,10 +1068,18 @@ static uint32_t link_begin(const char *base, uint32_t gen)
     s_link_interval_ms = cJSON_IsNumber(interval) && interval->valueint >= 1 && interval->valueint <= 60
                              ? (uint32_t)interval->valueint * 1000
                              : 5000;
-    const int64_t window_s = cJSON_IsNumber(window) && window->valueint >= 30 ? window->valueint : 600;
+    /* The provider's window, held to 15 minutes from the press (the Pi's
+     * PANEL_LINK_SECONDS): the code lives only while somebody is at the
+     * panel. It is in RAM alone, so no restart brings it back. */
+    int64_t window_s = cJSON_IsNumber(window) && window->valueint >= 30 ? window->valueint : 600;
+    if (window_s > 15 * 60) window_s = 15 * 60;
     cJSON_Delete(json);
     if (!ok) {
-        link_end(gen, "no code");
+        char detail[24];
+        if (status == 0) strlcpy(detail, "no answer", sizeof(detail));
+        else if (status == 200) strlcpy(detail, "not a FrameOS Cloud", sizeof(detail));
+        else snprintf(detail, sizeof(detail), "HTTP %d", status);
+        link_fail(gen, "reach", detail);
         return 0;
     }
     portENTER_CRITICAL(&s_link_lock);
@@ -1046,7 +1106,7 @@ static bool link_lapsed(void)
     const uint32_t gen = s_link_gen;
     const bool lapsed = s_link_phase == LINK_POLLING && esp_timer_get_time() >= s_link_expires_us;
     portEXIT_CRITICAL(&s_link_lock);
-    if (lapsed) link_end(gen, "lapsed");
+    if (lapsed) link_fail(gen, "lapsed", NULL);
     return lapsed;
 }
 
@@ -1078,7 +1138,9 @@ static uint32_t link_poll(const char *base, uint32_t gen)
     }
     /* Not approved yet (428), unreachable or busy: the window decides. */
     if (status == 0 || status == 428 || status == 429 || status >= 500) return s_link_interval_ms;
-    link_end(gen, "refused"); /* denied, expired, ... */
+    char detail[16];
+    snprintf(detail, sizeof(detail), "HTTP %d", status);
+    link_fail(gen, "refused", detail); /* denied, expired, ... */
     return 0;
 }
 
@@ -1092,7 +1154,7 @@ static uint32_t link_enroll(const char *base, uint32_t gen)
     }
     if (permanent || ++s_link_tries >= 3) {
         crypto_wipe(s_access_token, sizeof(s_access_token));
-        link_end(gen, s_last_error);
+        link_fail(gen, "enroll", s_last_error);
         return 0;
     }
     return 10000;
@@ -1116,7 +1178,7 @@ static uint32_t link_step(void)
         return 0;
     }
     if (!fos_cloud_url_transport_ok(base, &why)) {
-        link_end(gen, why);
+        link_fail(gen, "address", why);
         return 0;
     }
     if (phase == LINK_STARTING) return link_begin(base, gen);
@@ -4258,7 +4320,7 @@ static void cloud_task(void *arg)
         /* A link code the frame page asked for (flow B). The waits end
          * early on a new start (fos_cloud_link_start notifies). */
         uint32_t wait_ms = 5000;
-        if (s_link_phase != LINK_IDLE) {
+        if (s_link_phase != LINK_IDLE && s_link_phase != LINK_FAILED) {
             wait_ms = link_step();
         } else if (s_access_token[0]) {
             crypto_wipe(s_access_token, sizeof(s_access_token)); /* an approval cancelled before its enroll */
@@ -4279,6 +4341,8 @@ static bool cloud_task_needed(void)
     const fos_config_t *config = fos_config();
     if (s_state != FOS_CLOUD_NONE) return true;
     if (config->cloud_url[0] && config->claim_token[0]) return true;
+    /* The frame page's Link to cloud: from then on (fos_cloud_link_start). */
+    if (s_link_phase != LINK_IDLE) return true;
     return fos_scenes_from_cloud();
 }
 

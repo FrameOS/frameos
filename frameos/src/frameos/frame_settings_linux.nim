@@ -29,7 +29,7 @@ import frameos/frame_settings_lock
 import frameos/cloud/link_state
 import frameos/local_access
 from frameos/cloud/device_flow import activeLinkCode, writePendingLinkCode, pendingLinkCodeQueued,
-  clearPendingLinkCode
+  clearPendingLinkCode, loadPendingLinkCode, dropPanelLinkAtStart, PANEL_LINK_SECONDS
 from frameos/cloud/enrollment import otherControlPlaneActive, loadPendingEnrollment
 import frameos/server/api
 from frameos/upgrade import installedFrameOSVersion
@@ -252,6 +252,18 @@ proc linkFacts(config: FrameConfig, f: WifiFacts, result: JsonNode) =
     if scheme >= 0: where = where[scheme + 3 .. ^1]
     result["link"] = %*{"to": "cloud", "code": code.userCode, "where": where,
       "qr": if code.verificationUriComplete.len > 0: code.verificationUriComplete else: code.verificationUri}
+    # Where it goes, which the page shows and lets be changed, and why the
+    # queued link has no code if it stopped or has had no answer
+    # (device_flow.nim deviceFlowTick).
+    let pending = loadPendingLinkCode()
+    var server = cloud.providerUrl
+    if pending != nil:
+      let queued = normalizeProviderUrl(pending{"provider_url"}.getStr())
+      if queued.len > 0: server = queued
+      if not code.active and pending{"failed"}.getStr().len > 0:
+        result["link"]["failed"] = pending{"failed"}
+        result["link"]["detail"] = %pending{"detail"}.getStr()
+    result["link"]["server"] = %server
   if linking or adoptCode.len > 0 or cloud.managed or cloud.connected or f.hotspot or
       managedBy(config).len > 0 or loadPendingEnrollment() != nil or not localAccessPanelDevice(config.device):
     return
@@ -298,6 +310,18 @@ proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
     except Exception:
       result = nil
 
+proc endPendingLinks() =
+  ## A link under way ends: a device flow still waiting for its code to be
+  ## entered (or one queued, or stopped), and an adoption code. Never a link
+  ## made, never a local network access code.
+  clearPendingLinkCode()
+  withLock cloudLinkLock:
+    let state = loadCloudLinkState()
+    if state{"status"}.getStr() == "connecting" and not isManagedLink(state):
+      resetLinkState(state)
+      saveCloudLinkState(state)
+  clearLocalAccessChallenge(LocalAccessScopeAdopt)
+
 proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     try:
@@ -317,6 +341,10 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
       of "close":
         withLock factsLock:
           pageOpen = false
+        # Left the page, however (Back, the scene's settings, another scene,
+        # a window beside it): a pairing code lives only while its page is up
+        # (docs/scene-settings.md "Connecting the frame").
+        endPendingLinks()
       of "linkCloud", "adopt", "cancelLink":
         # Connecting a control plane (docs/scene-settings.md "Connecting the
         # frame"): whatever was under way ends (a device flow still waiting
@@ -324,20 +352,15 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
         # a local network access code), and the one asked for starts. The hub
         # thread runs the device flow (device_flow.nim deviceFlowTick): no
         # network on the runner. The page shows either code.
-        clearPendingLinkCode()
-        withLock cloudLinkLock:
-          let state = loadCloudLinkState()
-          if state{"status"}.getStr() == "connecting" and not isManagedLink(state):
-            resetLinkState(state)
-            saveCloudLinkState(state)
-        clearLocalAccessChallenge(LocalAccessScopeAdopt)
+        endPendingLinks()
         let config = runnerConfig()
         let cloud = cloudLinkFacts()
         if action != "cancelLink" and config != nil and localAccessPanelDevice(config.device) and
             not cloud.managed:
           if action == "adopt":
             discard startLocalAccessChallenge(LocalAccessScopeAdopt)
-          elif otherControlPlaneActive(config) or not writePendingLinkCode(cloud.providerUrl):
+          elif otherControlPlaneActive(config) or
+              not writePendingLinkCode(cloud.providerUrl, epochTime() + PANEL_LINK_SECONDS.float):
             return
           log(%*{"event": "settings:frame:" & action, "origin": "panel"})
         sendEvent(evRender, newJObject(), eoSystem)
@@ -346,9 +369,47 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
     except Exception:
       discard
 
+proc applyCloudUrl(typed: string) =
+  ## The cloud's address from the Connect page (docs/scene-settings.md
+  ## "Connecting the frame"): where a link goes from now on (the link
+  ## state's provider_url, as the admin page's link sets it), "" for
+  ## FrameOS Cloud's own. A link waiting for its code starts over against it;
+  ## an established one is never moved.
+  var url = typed.strip()
+  if url.len > 0 and "://" notin url:
+    url = "https://" & url
+  url = if url.len == 0: DEFAULT_CLOUD_PROVIDER_URL else: normalizeProviderUrl(url)
+  let problem = if url.len == 0: "The address must be an http(s) URL" else: providerTransportProblem(url)
+  if problem.len > 0:
+    withLock factsLock:
+      facts.note = problem
+    return
+  var moved = false
+  withLock cloudLinkLock:
+    let state = loadCloudLinkState()
+    if isManagedLink(state) or state{"status"}.getStr() == "connected":
+      return
+    if providerUrlFromState(state) != url:
+      if state{"status"}.getStr() == "connecting":
+        resetLinkState(state)
+      state["provider_url"] = %url
+      saveCloudLinkState(state)
+      moved = true
+  let pending = loadPendingLinkCode()
+  if pending != nil and (moved or pending{"provider_url"}.getStr() != url):
+    # Its clock keeps running: a new address is no new time for the code.
+    discard writePendingLinkCode(url, pending{"until"}.getFloat(0))
+  withLock factsLock:
+    facts.note = ""
+  log(%*{"event": "settings:frame:cloudUrl", "origin": "panel", "cloudUrl": url})
+  sendEvent(evRender, newJObject(), eoSystem)
+
 proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     try:
+      let cloudUrl = changes{"cloudUrl"}
+      if not cloudUrl.isNil and cloudUrl.kind == JString:
+        applyCloudUrl(cloudUrl.getStr())
       if not changes{"wifiSsid"}.isNil or not changes{"wifiPassword"}.isNil:
         # A password alone is for the saved network.
         var
@@ -411,6 +472,8 @@ proc installFrameSettingsHooks*(frameOS: FrameOS) =
   ## FrameOS outlives every thread, so the worker takes it by handle.
   runtime = netportal.runtimeHandle(frameOS)
   liveConfig = cast[pointer](frameOS.frameConfig)
+  # The page is not up after a start: a link it asked for ends here.
+  dropPanelLinkAtStart()
   sceneSettings.frameSettingsRead = linuxFrameSettingsRead
   sceneSettings.frameSettingsApply = linuxFrameSettingsApply
   sceneSettings.frameSettingsAction = linuxFrameSettingsAction
