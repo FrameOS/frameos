@@ -971,6 +971,110 @@ def test_the_voice_tools_match_the_cloud():
         assert f'{tool}: "{switch}"' in cloud, tool
     for switch, value in DEFAULT_VOICE_PERMISSIONS.items():
         assert f"{switch}: {'true' if value else 'false'}" in cloud, switch
+    # And what the panel says while a turn runs: the words, how often, how much of the transcript.
+    from app.utils.voice_chat import VOICE_PROGRESS_EVERY_SECONDS, VOICE_PROGRESS_TRANSCRIPT_CHARS, VOICE_PROGRESS_WORDS
+
+    for stage, words in VOICE_PROGRESS_WORDS.items():
+        assert f'{stage}: "{words}"' in cloud, stage
+    assert f"VOICE_PROGRESS_EVERY_MS = {int(VOICE_PROGRESS_EVERY_SECONDS * 1000):_}" in cloud
+    assert f"VOICE_PROGRESS_TRANSCRIPT_CHARS = {VOICE_PROGRESS_TRANSCRIPT_CHARS}" in cloud
+
+
+@pytest.mark.asyncio
+async def test_a_frame_that_asks_hears_each_stage_before_the_answer(async_client, no_auth_client, db, redis, heard, monkeypatch):
+    """docs/voice-chat.md "Progress on the panel": a closing chunk sent with
+    `Accept: application/x-ndjson` is answered as it goes, a line per stage
+    with the words the frame draws over its picture (a tool with none, like
+    list_scenes, is no news), and last the same answer a frame that did not
+    ask gets."""
+    frame = await voice_frame(async_client, db)
+    openai = ScriptedOpenAi([
+        ("", [call("list_scenes", {}, "c1")]),
+        ("", [call("activate_scene", {"scene_id": "cal-2"}, "c2")]),
+        ("Switched to Calendar.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await no_auth_client.post(
+        url(frame, 0, done=1),
+        content=SECOND_OF_SPEECH,
+        headers={**auth(frame), **PCM_HEADERS, "Accept": "application/x-ndjson"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert response.headers["x-accel-buffering"] == "no"
+    lines = [json.loads(line) for line in response.text.splitlines()]
+    assert lines == [
+        {"progress": "transcribing", "text": "Transcribing…"},
+        {"progress": "heard", "text": '"switch to the calendar please"\nThinking…'},
+        {"progress": "activate_scene", "text": '"switch to the calendar please"\nSwitching the scene…'},
+        {
+            "ok": True,
+            "transcript": "switch to the calendar please",
+            "reply": "Switched to Calendar.",
+            "tools": ["list_scenes", "activate_scene"],
+        },
+    ]
+    # The turn is the same turn: queued, and stored as three rows.
+    commands = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).all()
+    assert [(c.type, c.payload) for c in commands] == [("set_current_scene", {"scene_id": "cal-2"})]
+    chat = db.query(Chat).filter(Chat.project_id == frame.project_id).one()
+    assert db.query(ChatMessage).filter(ChatMessage.chat_id == chat.id).count() == 3
+
+    # An error is the last line too, after the stages that came before it.
+    heard["text"]["value"] = ""
+    response = await no_auth_client.post(
+        url(frame, 0, done=1, session="second-session"),
+        content=SECOND_OF_SPEECH,
+        headers={**auth(frame), **PCM_HEADERS, "Accept": "application/x-ndjson"},
+    )
+    lines = [json.loads(line) for line in response.text.splitlines()]
+    assert lines == [
+        {"progress": "transcribing", "text": "Transcribing…"},
+        {"ok": False, "error": "nothing_heard", "detail": "the transcription came back empty"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_long_stage_is_told_again_until_the_answer():
+    """Without news for VOICE_PROGRESS_EVERY_SECONDS the stream says the stage
+    again (`still`), so a scene the AI builds for a minute is not a frozen
+    panel; a raise in the turn is the frame's `chat_failed`."""
+    import asyncio
+
+    from app.utils.voice_chat import voice_progress_stream
+
+    async def build(progress):
+        progress("heard", "make a clock")
+        progress("create_scene")
+        await asyncio.sleep(0.25)
+        return {"ok": True, "reply": "Here it is."}
+
+    lines = [json.loads(line) async for line in voice_progress_stream(build, every_seconds=0.1)]
+    assert lines[0] == {"progress": "heard", "text": '"make a clock"\nThinking…'}
+    assert lines[1] == {"progress": "create_scene", "text": '"make a clock"\nBuilding the scene…'}
+    still = lines[2:-1]
+    assert len(still) >= 1 and all(line == {"progress": "still", "text": lines[1]["text"]} for line in still), lines
+    assert lines[-1] == {"ok": True, "reply": "Here it is."}
+
+    async def broken(progress):
+        raise RuntimeError("the model went away")
+
+    lines = [json.loads(line) async for line in voice_progress_stream(broken, every_seconds=0.1)]
+    assert lines == [{"ok": False, "error": "chat_failed", "detail": "the model went away"}]
+
+
+def test_the_progress_text_cuts_the_transcript_and_counts_the_seconds():
+    from app.utils.voice_chat import voice_progress_text, wants_voice_progress
+
+    assert voice_progress_text("", "Transcribing…") == "Transcribing…"
+    assert voice_progress_text("hi", "Thinking…", 9) == '"hi"\nThinking…'
+    assert voice_progress_text("hi", "Building the scene…", 42) == '"hi"\nBuilding the scene… 42 s'
+    long = "word " * 60
+    cut = voice_progress_text(long, "Thinking…").split("\n")[0]
+    # 160 characters of it in quotes, its last an ellipsis.
+    assert len(cut) == 162 and cut.endswith('word…"'), cut
+    assert wants_voice_progress("application/x-ndjson") and wants_voice_progress("application/json, application/x-ndjson")
+    assert not wants_voice_progress(None) and not wants_voice_progress("*/*")
 
 
 def test_a_voice_turn_leaves_layouts_out():

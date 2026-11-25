@@ -3033,43 +3033,118 @@ static bool restart_notice_drawable(void)
     return fos_display_present() && (fos_display_is_lcd() || fos_display_supports_partial());
 }
 
+/* The last image with `text` over it in the notice's box (`lines` at most),
+ * in the fast waveform (fos_display_quick_update): the restart notice's band
+ * and the voice chat's progress. `glass` (may be NULL) holds what the glass
+ * shows, for a driver that lost track of it after a quick update: made from
+ * the last image when it is NULL (not on an LCD, nor on a controller that
+ * keeps its own picture) and given the new picture. ESP_ERR_NOT_FOUND
+ * without a stored image to draw over (or no box for the text),
+ * ESP_ERR_NO_MEM without a copy, else what the update says. Render task. */
+static esp_err_t band_over_last_image(const char *text, int lines, uint8_t **glass)
+{
+    wake_mark_stop();
+    /* Timed: a restart never waits on a reader of the snapshot (/image). */
+    if (!s_snapshot_lock || xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(200)) != pdTRUE) return ESP_ERR_NOT_FOUND;
+    size_t len = s_last_frame ? s_last_frame_len : 0;
+    fos_panel_surface_t surface = {
+        .buf = len ? fos_big_malloc(len) : NULL, .width = s_last_frame_width, .height = s_last_frame_height,
+        .format = s_last_frame_format, .rotate = fos_config()->rotate,
+    };
+    if (surface.buf) memcpy(surface.buf, s_last_frame, len);
+    if (glass && !*glass && len && !fos_display_is_lcd() && !fos_display_glass_supported()) {
+        *glass = fos_big_malloc(len);
+        if (*glass) memcpy(*glass, s_last_frame, len);
+    }
+    xSemaphoreGive(s_snapshot_lock);
+    esp_err_t err = len && !surface.buf ? ESP_ERR_NO_MEM : ESP_ERR_NOT_FOUND;
+    fos_panel_code_box_t box;
+    if (surface.buf && fos_panel_notice_box(&surface, text, surface.width >= 600 ? 3 : 2, lines, &box)) {
+        fos_panel_draw_notice(&surface, &box, text);
+        err = fos_display_quick_update(surface.buf, NULL, len);
+        if (err == ESP_ERR_NOT_SUPPORTED && glass && *glass) err = fos_display_quick_update(surface.buf, *glass, len);
+        if (err == ESP_OK) {
+            /* The glass shows what no stored hash describes: the next render
+             * draws, even an unchanged scene. */
+            forget_display_state();
+            if (glass && *glass) memcpy(*glass, surface.buf, len);
+        }
+    }
+    free(surface.buf);
+    return err;
+}
+
 /* The last image with `text` in a band across it, in the fast waveform.
  * Render task. Nothing when there is no stored image to draw it over. */
 static void draw_restart_notice(const char *text)
 {
-    wake_mark_stop();
-    const char *status = "no-snapshot";
-    /* Timed: a restart never waits on a reader of the snapshot (/image). */
-    if (!restart_notice_drawable()) return;
-    if (s_snapshot_lock && xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
-        size_t len = s_last_frame ? s_last_frame_len : 0;
-        int width = s_last_frame_width, height = s_last_frame_height;
-        fos_pixel_format_t format = s_last_frame_format;
-        uint8_t *copy = len ? fos_big_malloc(len) : NULL;
-        if (copy) memcpy(copy, s_last_frame, len);
-        xSemaphoreGive(s_snapshot_lock);
-        if (len && !copy) status = "no-memory";
-        fos_panel_surface_t surface = {
-            .buf = copy, .width = width, .height = height, .format = format, .rotate = fos_config()->rotate,
-        };
-        fos_panel_code_box_t box;
-        if (copy && fos_panel_notice_box(&surface, text, width >= 600 ? 3 : 2, 1, &box)) {
-            fos_panel_draw_notice(&surface, &box, text);
-            esp_err_t err = fos_display_quick_update(copy, NULL, len);
-            /* The glass shows what no stored hash describes: the first render
-             * after the restart draws, even an unchanged scene. */
-            if (err == ESP_OK) forget_display_state();
-            /* The image has no esp_err_to_name table: the reasons by name. */
-            status = err == ESP_OK ? "ok" : err == ESP_ERR_NOT_SUPPORTED ? "no-fast-waveform"
-                     : err == ESP_ERR_INVALID_SIZE ? "size" : err == ESP_ERR_INVALID_STATE ? "no-panel" : "error";
-        }
-        free(copy);
+    if (!restart_notice_drawable()) {
+        wake_mark_stop();
+        return;
     }
+    esp_err_t err = band_over_last_image(text, 1, NULL);
+    /* The image has no esp_err_to_name table: the reasons by name. */
+    const char *status = err == ESP_OK ? "ok" : err == ESP_ERR_NOT_FOUND ? "no-snapshot"
+                         : err == ESP_ERR_NO_MEM ? "no-memory" : err == ESP_ERR_NOT_SUPPORTED ? "no-fast-waveform"
+                         : err == ESP_ERR_INVALID_SIZE ? "size" : err == ESP_ERR_INVALID_STATE ? "no-panel" : "error";
     /* On the console at once (a restart follows), and for the bench. */
     ESP_LOGW(TAG, "restart notice: %s", status);
     char line[96];
     snprintf(line, sizeof(line), "{\"event\":\"restart:notice\",\"source\":\"esp32\",\"status\":\"%s\"}", status);
     frameos_nim_log_hook(line);
+}
+
+/* ------------------------------------------------------ the voice progress */
+
+/* What the voice chat's plane says it is doing while the frame waits for the
+ * answer (fos_client_voice_progress, docs/voice-chat.md "Progress on the
+ * panel"): a band over the last image, as the restart notice's, in the
+ * notice's box. Only while the session holds the panel: the answer's render
+ * or repaint takes it away. The text is written under s_notice_lock, the rest
+ * is the render task's. */
+#define PROGRESS_TEXT_LEN 320
+static char s_progress_text[PROGRESS_TEXT_LEN];
+static volatile bool s_progress_pending = false;
+static uint8_t *s_progress_glass = NULL; /* what the glass shows: band_over_last_image */
+static int64_t s_progress_hold_us = 0;   /* the session (its hold) the glass belongs to */
+
+void fos_client_voice_progress(const char *text)
+{
+    if (!text || !text[0] || !s_events || !restart_notice_drawable()) return;
+    portENTER_CRITICAL(&s_notice_lock);
+    strlcpy(s_progress_text, text, sizeof(s_progress_text));
+    s_progress_pending = true;
+    portEXIT_CRITICAL(&s_notice_lock);
+    xEventGroupSetBits(s_events, RESTART_NOTICE_BIT);
+}
+
+static void voice_progress_end(void)
+{
+    free(s_progress_glass);
+    s_progress_glass = NULL;
+    s_progress_pending = false;
+}
+
+static void draw_voice_progress(void)
+{
+    if (!s_progress_pending) return;
+    char text[PROGRESS_TEXT_LEN];
+    int64_t hold_us;
+    portENTER_CRITICAL(&s_notice_lock);
+    strlcpy(text, s_progress_text, sizeof(text));
+    s_progress_pending = false;
+    hold_us = s_render_hold_until_us;
+    portEXIT_CRITICAL(&s_notice_lock);
+    if (!render_held()) return;
+    /* A session's first band goes over the last image. */
+    if (hold_us != s_progress_hold_us) {
+        voice_progress_end();
+        s_progress_hold_us = hold_us;
+    }
+    /* The last picture may still be going up on the display's task. */
+    int64_t until_us = esp_timer_get_time() + 5000000LL;
+    while (fos_display_refreshing() && esp_timer_get_time() < until_us) vTaskDelay(pdMS_TO_TICKS(50));
+    if (band_over_last_image(text, 6, &s_progress_glass) == ESP_OK) s_sleep_mark_on_glass = false;
 }
 
 /* The deep sleep mark (fos_panel_draw_sleep_mark) over the last image, in
@@ -3121,9 +3196,11 @@ static void draw_sleep_mark(void)
     frameos_nim_log_hook(line);
 }
 
-/* A notice another task asked for, from this task's waits. */
+/* A notice another task asked for, from this task's waits: a restart's, or
+ * the voice chat's progress (the same bit). */
 static void serve_restart_notice(void)
 {
+    draw_voice_progress();
     int64_t asked = s_restart_notice_asked_us;
     if (asked == 0) return;
     s_restart_notice_asked_us = 0;
@@ -5227,6 +5304,7 @@ static void client_task(void *arg)
                 wait_until_us = esp_timer_get_time() + 1000000;
             }
             if (bits & RELEASE_BIT) {
+                voice_progress_end();
                 /* The voice session is over and its answer is pending. A
                  * render owed from the hold (the chat's switch, its state, an
                  * interval that ran out) carries the notice; with none, the

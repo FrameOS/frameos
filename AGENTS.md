@@ -554,11 +554,15 @@
   `POST …/voice/permissions`), enforced where the turn's tool list is built
   (`VOICE_TOOL_PERMISSIONS` / `voiceToolPermissions`), and the controls are
   drawn only on a frame with a microphone (`utils/voiceChat.ts`). The upload route, the
-  caps, the prompt and the tool definitions are the same on both planes
+  caps, the prompt, the tool definitions and the progress words (what the
+  panel says while a turn runs: the closing chunk answered as NDJSON for a
+  frame that asks, docs/voice-chat.md "Progress on the panel") are the same
+  on both planes
   (`backend/app/api/embedded_voice.py` + `app/utils/voice_chat.py`;
   `cloud/.../frames/[frameId]/voice/[sessionId]/route.ts` + `src/lib/ai/voice.ts`);
   the backend's test reads the cloud's `voice.ts` and the cloud's unit test
-  reads the backend's `voice_chat.py`, so change both or neither.
+  reads the backend's `voice_chat.py`, so change both or neither. The words
+  are the planes', never the firmware's: it draws the text it is sent.
 - On the device the binding is read off the map by `fos_voice_binding.c`
   (cJSON, host-tested) and the hold run by `fos_voice_hold.c` (pure,
   host-tested) in the button task — `voiceChat` is the one emit acted on
