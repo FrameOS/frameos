@@ -42,6 +42,7 @@ import {
   frameFirmwareUpdateProgress,
   frameHasActivityLog,
   frameHost,
+  frameIsActive,
   frameUpgradeIsQueued,
   type FrameFirmwareUpdateOutcome,
   type FrameFirmwareUpdateProgress,
@@ -2514,6 +2515,11 @@ function EmbeddedFirmwareSection({
     /-/g,
     ''
   )} --port /dev/tty.usbmodem* --baud 460800 --flash_size ${flashSize} write_flash 0x0 frameos-<version>-${releasePlatform}.bin`
+  // Online is "heard from lately", never the status word: every render moves
+  // an ESP32's status to "rendering" and back, and a deploy through
+  // "deploying" and "starting", so the two cards below swapped places with
+  // each of them (twice a second on a scene that renders every second).
+  const online = frameIsActive(frame)
 
   return (
     <section className="mb-5 space-y-2">
@@ -2587,7 +2593,7 @@ function EmbeddedFirmwareSection({
             ) : null}
           </div>
           {/* Over the air first when the frame is online: it needs no cable. */}
-          {frame.status === 'ready' || frame.status === 'deploying' ? (
+          {online ? (
             <OtaUpdateCard
               frame={frame}
               onOtaUpdate={onOtaUpdate}
@@ -2598,7 +2604,7 @@ function EmbeddedFirmwareSection({
             />
           ) : null}
           <EmbeddedUsbConnect frame={frame} manualFlashCommand={releaseAvailable ? flashCommand : undefined} />
-          {frame.status === 'ready' || frame.status === 'deploying' ? null : (
+          {online ? null : (
             <OtaUpdateCard
               frame={frame}
               onOtaUpdate={onOtaUpdate}

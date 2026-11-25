@@ -225,6 +225,49 @@ static void test_bursts(void)
     CHECK(!fos_animation_burst_end(&a, 310 * S, &st, &owed), "and nothing ends");
 }
 
+static void test_a_fast_loop_is_a_burst(void)
+{
+    CHECK(fos_animation_fast_loop(0.05, false), "a 0.05 s scene on e-paper is a fast loop");
+    CHECK(fos_animation_fast_loop(0.999, false), "just under a second is one");
+    CHECK(!fos_animation_fast_loop(1.0, false), "a second is the ordinary loop");
+    CHECK(!fos_animation_fast_loop(0.0, false), "0 is no opinion");
+    CHECK(!fos_animation_fast_loop(0.05, true), "an animation logs its own way");
+
+    /* The Kitchen sink on the reTerminal Sticky: one pass a second, a
+     * ~100 ms render, and now and then a pass whose pulls hold its frame
+     * back (1.8 s between one frame's end and the next one's start). */
+    fos_animation_t a;
+    memset(&a, 0, sizeof(a));
+    fos_animation_stats_t st;
+    bool owed = false;
+    int64_t t = 100 * S;
+    int loud = 0, frames = 0;
+    for (int i = 0; i < 60; i++) {
+        fos_animation_set_loop(&a, true);
+        bool quiet = fos_animation_burst_quiet(&a, t);
+        if (!quiet) loud++;
+        frames++;
+        fos_animation_burst_frame_done(&a, t, t + 100 * MS, quiet);
+        CHECK(!fos_animation_burst_end(&a, t + 900 * MS, &st, &owed), "the loop goes on at pass %d", i);
+        t += (i % 7 == 6) ? 1900 * MS : 1 * S;
+    }
+    CHECK(loud >= 5 && loud <= 7, "one frame in ten seconds in full, got %d of %d", loud, frames);
+    CHECK(fos_animation_steady(&a, t), "the passes are steady");
+
+    /* The scene goes back to a minute: the burst ends on its own second. */
+    fos_animation_set_loop(&a, false);
+    CHECK(!fos_animation_burst_end(&a, t - 1 * S + 100 * MS + 999 * MS, &st, &owed), "within the second: not over");
+    CHECK(fos_animation_burst_end(&a, t + 100 * MS, &st, &owed), "over");
+    CHECK(st.frames == 60, "every frame of the loop, got %u", (unsigned)st.frames);
+    CHECK(!fos_animation_steady(&a, t + 5 * S), "not steady after it");
+
+    /* Animating: never a loop. */
+    CHECK(fos_animation_update(&a, true, 0.05, 400 * S), "starts");
+    fos_animation_set_loop(&a, true);
+    CHECK(!a.loop, "an animation is no fast loop");
+    CHECK(fos_animation_steady(&a, 400 * S), "but it is steady");
+}
+
 static void test_input_hold(void)
 {
     fos_input_hold_t h = {0};
@@ -436,6 +479,7 @@ int main(void)
     test_logging_cadence();
     test_a_scene_start_is_not_a_frame();
     test_bursts();
+    test_a_fast_loop_is_a_burst();
     test_input_hold();
     test_loading_taps();
     test_who_the_input_hold_is_for();

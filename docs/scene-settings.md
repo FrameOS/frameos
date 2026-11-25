@@ -94,7 +94,12 @@ Commander from F4, the frame's from F1 and the clock.
 ## The frame page
 
 A gear left of Save opens the frame's own settings: **Frame settings**, where
-Cancel becomes Back and the gear stays lit. Back, the gear again, a key with
+Cancel becomes Back and the gear stays lit. On a rectangular panel the gear and
+the code button beside it (docs/code-editor.md) are wider than they are tall,
+for a thumb, and both are on every page of the panel: the scene's, the frame's
+and a layout's (the gear lit on the last two, where it goes back to the
+scene's form; the code button opens the scene's code, on a layout's page the
+layout's). Back, the gear again, a key with
 the role `back` and the frame's `back` (once any keyboard is away) go back to
 the scene's form with its edits kept; the swipe that opened the panel closes
 it from either page. `sceneSettings {page: "frame"}` (the tray of the Windows 98
