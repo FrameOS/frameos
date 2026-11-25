@@ -327,11 +327,20 @@ block: # Long path data read when its element is drawn draws the same picture
   doAssert same(whole, newImage(late))
   doAssert whole[100, 120] == rgbx(167, 211, 245, 255) # inside the coast's fill
   doAssert late.coversOpaque(200, 200)
-  # Drawn in two windows, each reading the data for itself.
+  # Drawn in two windows, each reading the data for itself. Within one
+  # level, not the same: a window's rows are sampled at the same fifths of
+  # a pixel, but a sloped edge's crossings are worked out in the window's
+  # coordinates and may round the other way. This coast drew the same by
+  # chance (with steps of .031 instead of .03 three pixels did not, before
+  # round joins became arcs, 2026-11-25).
   let parts = newImage(200, 200)
   late.renderInto(parts.view(0, 0, 200, 90), 0, 0)
   late.renderInto(parts.view(0, 90, 200, 110), 0, 90)
-  doAssert same(whole, parts)
+  for y in 0 ..< 200:
+    for x in 0 ..< 200:
+      let (a, b) = (whole[x, y], parts[x, y])
+      doAssert abs(a.r.int - b.r.int) <= 1 and abs(a.g.int - b.g.int) <= 1 and
+        abs(a.b.int - b.b.int) <= 1 and a.a == b.a, $x & "," & $y
   # The same text is the same element, whichever way it was parsed twice.
   let
     empty = parseSvg(el("svg", {"width": "200", "height": "200"}), 200, 200)
