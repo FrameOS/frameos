@@ -20,7 +20,7 @@ from collections import defaultdict
 from .benchmarks import PHOTO_MPX
 from .records import read
 
-SCORE_VERSION = 1
+SCORE_VERSION = 2  # 2: a lower-is-better time floored at a twentieth of its reference (LOWER_FLOOR, 2026-11-25)
 REFERENCE_BUILD = '2026.11.12'
 
 # metric, better, normalization: None, 'panel' (per panel megapixel) or
