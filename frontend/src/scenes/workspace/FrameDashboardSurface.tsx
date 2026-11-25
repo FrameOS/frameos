@@ -63,7 +63,7 @@ import {
   setFrameosSceneDragData,
 } from './sceneDrag'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
-import { frameSceneStorage, frameStorageLabel, sceneSizeLabel } from '../../utils/frameSceneStorage'
+import { frameSceneStorage, sceneSizeLabel } from '../../utils/frameSceneStorage'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
 import {
   LAYOUTS_GROUP_EXPANSION_PATH,
@@ -850,7 +850,6 @@ function FrameScenesBlock({
     setMultiSelect(false)
   }
   const searchIsActive = search.trim().length > 0
-  const storageLabel = frameStorageLabel(frame)
   // While searching, `scenes` is only the matching subset; dependency grouping
   // needs the full (live) list so parents of a match still render.
   // Alphabetical: this list is how you find a scene, and a new one (a
@@ -980,7 +979,6 @@ function FrameScenesBlock({
           </>
         ) : null}
       </div>
-      {storageLabel ? <div className="frameos-muted mb-2 text-xs text-slate-500">{storageLabel}</div> : null}
       <ScenePreviewRow frame={frame} />
       {sceneOverviewEntries.length > 0 ? (
         <div className="flex flex-wrap gap-4">

@@ -43,6 +43,93 @@ export function frameSceneStorage(frame: Pick<FrameType, 'hardware' | 'embedded'
   }
 }
 
+export type FrameStorageTone = 'ok' | 'filling' | 'full'
+
+/** One scene's footprint on the frame, for the storage popup. */
+export interface FrameStorageScene {
+  id: string
+  /** From the frame's scene list; null for a scene the list does not hold
+   * (one the frame has that was never imported, say): shown by its id. */
+  name: string | null
+  bytes: number
+}
+
+/** What the frame's disk indicator and its popup show: the partition's
+ * numbers made whole (used never over the total), what the scenes take, and
+ * what everything else takes (assets kept on the frame, saved scene state, the
+ * frame's own files). */
+export interface FrameStorageSummary {
+  totalBytes: number
+  usedBytes: number
+  freeBytes: number
+  usedPercent: number
+  scenesBytes: number
+  sceneCount: number
+  otherBytes: number
+  /** Each scene the frame reported a size for, largest first. */
+  scenes: FrameStorageScene[]
+}
+
+/** Used, in whole percent. Never 0 while something is stored, never 100
+ * until nothing is free: a rounded "100%" on a frame that still takes a scene
+ * would say the opposite of what is true. */
+export function storageUsedPercent(usedBytes: number, totalBytes: number): number {
+  if (!(totalBytes > 0)) {
+    return 0
+  }
+  const used = Math.max(0, Math.min(usedBytes, totalBytes))
+  const percent = Math.round((used / totalBytes) * 100)
+  if (used > 0 && percent === 0) {
+    return 1
+  }
+  if (used < totalBytes && percent === 100) {
+    return 99
+  }
+  return percent
+}
+
+/** Color band for how full the partition is: fine below 80%, filling up to
+ * 95%, full from there. */
+export function frameStorageTone(usedPercent: number): FrameStorageTone {
+  if (usedPercent >= 95) {
+    return 'full'
+  }
+  if (usedPercent >= 80) {
+    return 'filling'
+  }
+  return 'ok'
+}
+
+export function frameStorageSummary(
+  frame: Pick<FrameType, 'hardware' | 'embedded'> & { scenes?: Pick<FrameScene, 'id' | 'name'>[] | null }
+): FrameStorageSummary | null {
+  const storage = frameSceneStorage(frame)
+  if (!storage) {
+    return null
+  }
+  const totalBytes = storage.stateTotalBytes
+  const usedBytes = Math.max(0, Math.min(storage.stateUsedBytes, totalBytes))
+  const names = new Map<string, string>()
+  for (const scene of frame.scenes ?? []) {
+    if (scene?.id && scene.name?.trim()) {
+      names.set(scene.id, scene.name.trim())
+    }
+  }
+  const scenes = Object.entries(storage.sceneBytes)
+    .map(([id, bytes]) => ({ id, name: names.get(id) ?? null, bytes }))
+    .sort((a, b) => b.bytes - a.bytes || (a.name ?? a.id).localeCompare(b.name ?? b.id))
+  return {
+    totalBytes,
+    usedBytes,
+    freeBytes: totalBytes - usedBytes,
+    usedPercent: storageUsedPercent(usedBytes, totalBytes),
+    scenesBytes: storage.scenesBytes,
+    sceneCount: storage.sceneCount,
+    otherBytes: Math.max(0, usedBytes - storage.scenesBytes),
+    scenes,
+  }
+}
+
 /** Free space first: the partition is small (a 1 MB one holds about 950 KB),
  * and what fits is the question. */
 export function frameStorageLabel(frame: Pick<FrameType, 'hardware' | 'embedded'>): string | null {
