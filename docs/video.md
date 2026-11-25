@@ -259,7 +259,26 @@ reached by `atVisible`.
   `FRAMEOS_VIDEO_ZERO_COPY=0` plays ffmpeg's YUV on the plane instead
   (`FRAMEOS_VIDEO_ISP=0` leaves the VideoCore's devices alone, this too).
 
-ZERO_COPY_MEASURED
+Measured on a Pi Zero W (Cloud-W, HyperPixel 4 Square, 2026-11-25): frames on
+the glass a second, by the runtime's own count. Zero copy is compared with
+ffmpeg's YUV on the plane and with the ISP into the canvas.
+
+| Clip | Zero copy | ffmpeg's YUV on the plane | ISP into the canvas |
+|---|---|---|---|
+| 1080p (30 a second) | 24.8 | 7.9 | 14.1 |
+| 720p (30) | 25.4 | 19.2 | 16.2 |
+| 360p (24) | 20.4 | 22.1 | 16.5 |
+
+Zero copy took 3 to 5% of the core for ffmpeg's demux and 22 to 27% for the
+runtime, whose share is the canvas's copy once a second and its render. ffmpeg's
+YUV on the plane took 58 to 60% (ffmpeg) and 37 to 39% (the runtime). The ISP
+took 89 to 90% of the runtime's.
+
+- **Four videos at once.** Four 360p videos each take a plane and a decoder.
+- **More than the VideoCore decodes.** Four 720p videos are too much: its
+  decoders all but stop, and afterwards its firmware makes no decoder at all
+  (`failed to create component ... Not enough GPU mem?`) until the Pi restarts.
+  Every player then plays in software.
 
 ## Hardware
 
@@ -525,8 +544,13 @@ box). All three skip without ffmpeg.
   2. *DRM planes*: done for a video nothing covers ("Planes"), its frames
      still copied twice on the way (out of the decoder by ffmpeg, through
      the pipe into the plane's buffer: a 1080p frame is 3 MB). What is left:
-     - *Zero copy*: the decoder's own buffers (dma-bufs, the ISP way's V4L2
-       client) handed to the plane, for 1080p at 30 and four cameras at once.
+     - *Zero copy*: done ("Zero copy" in "Planes"). What is left of it:
+       - A cap on what all the players ask of the VideoCore at once, so it
+         is never overloaded and wedged. Four 720p videos did that; whether
+         ffmpeg's decoder does the same was not tried.
+       - Why a 360p video plays 20 of its 24 frames a second.
+       - The Camera wall draws a label over each feed, so its feeds stay in
+         the canvas.
      - *The UI over a video* (the Video player's controls) in a plane above
        it with alpha, rather than the canvas meanwhile; and a video's name
        over it while it loads keeps it in the canvas until it plays.
