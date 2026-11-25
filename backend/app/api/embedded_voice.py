@@ -107,7 +107,9 @@ def voice_sessions() -> VoiceSessionStore:
 
 def _voice_chat(db: Session, frame: Frame) -> Chat:
     """The frame's voice chat: one per frame, the workspace lists it under
-    the frame with its other chats."""
+    the frame with its other chats. Made with the first exchange it stores,
+    in that exchange's commit: called anywhere earlier, its INSERT opens
+    SQLite's write lock across the turn's awaits (see `answer`)."""
     project_id = int(frame.project_id)
     proposed = voice_chat_id(int(frame.id))
     chat = find_project_chat(db, project_id, proposed)
@@ -235,8 +237,15 @@ async def api_embedded_device_voice(
         active_scene_id = await _active_scene_id(
             redis, frame, [*(frame.scenes or []), *([preview_scene] if preview_scene else [])]
         )
-        chat = _voice_chat(db, frame)
-        history = _history(db, chat, now)
+        # Only reads until the turn is over. A write here (the first turn's
+        # chat was made here) opens SQLite's write lock and holds it through the
+        # transcription and the model, and every other writer, the frame's own
+        # log lines among them, then waits out the busy timeout ON the event
+        # loop, which freezes this turn too: "Transcribing" until a timeout,
+        # "database is locked" in the logs (2026-11-25). Every write of the
+        # turn (the tools', the exchange's) commits before its next await.
+        chat = find_project_chat(db, int(frame.project_id), voice_chat_id(int(frame.id)))
+        history = _history(db, chat, now) if chat is not None else []
         scene_names = [
             str(scene.get("name")) for scene in voice_scenes(frame.scenes) if scene.get("name")
         ]
@@ -417,6 +426,7 @@ async def api_embedded_device_voice(
         # was done (the workspace draws it as a log bubble; the next turn reads it
         # as history), the reply. A millisecond apart keeps them in order on a
         # database whose default timestamp is the whole second.
+        chat = _voice_chat(db, frame)
         stored_at = datetime.utcnow()
         chat.updated_at = stored_at
         db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="user", content=outcome.transcript,
