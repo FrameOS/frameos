@@ -980,6 +980,17 @@ void fos_cloud_link_cancel(void)
     portEXIT_CRITICAL(&s_link_lock);
 }
 
+/* The frame page's Unlink, for the cloud task: it tells the cloud and forgets
+ * the link (cloud_task). */
+static volatile bool s_unlink_requested = false;
+
+void fos_cloud_unlink(void)
+{
+    if (s_state != FOS_CLOUD_ENROLLED) return;
+    s_unlink_requested = true;
+    if (s_task != NULL) xTaskNotifyGive(s_task);
+}
+
 void fos_cloud_link_leave(void)
 {
     portENTER_CRITICAL(&s_link_lock);
@@ -4215,6 +4226,20 @@ static void cloud_task(void *arg)
     int64_t ws_stall_since_us = 0;
 
     while (true) {
+        if (s_unlink_requested) {
+            /* Unlinked on the frame page (fos_cloud_unlink): the cloud hears
+             * it first where it can (its frame says revoked, as when the
+             * owner revokes it), and the frame leaves whatever it answers. */
+            s_unlink_requested = false;
+            if (fos_wifi_state() == FOS_WIFI_CONNECTED) {
+                char response[FOS_CLOUD_RESPONSE_MAX];
+                provider_post(fos_cloud_link_server(), "/api/backends/unlink", "{}", s_access_token, response);
+            }
+            cloud_demote("unlinked on the frame");
+            s_state = FOS_CLOUD_NONE;
+            ws_started = false;
+            if (fos_scenes_settings_shown()) fos_client_render_now();
+        }
         /* Re-derived every tick rather than pushed from each state change: it
          * costs two string splits, it cannot be forgotten at a new call site,
          * and it is what makes a demotion, a fresh enrollment or a console

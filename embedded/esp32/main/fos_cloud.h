@@ -172,6 +172,10 @@ void fos_cloud_link_cancel(void);
 /* The frame page went away: a code waiting to be entered (or a link that
  * failed) ends with it; one already approved and enrolling finishes. */
 void fos_cloud_link_leave(void);
+/* The frame page's Unlink on a frame the cloud manages: the cloud task tells
+ * the cloud (POST /api/backends/unlink, best effort) and forgets the link;
+ * the scenes the frame holds stay. */
+void fos_cloud_unlink(void);
 /* True while a link is pending, from the start until it ends, and while one
  * that failed is on the page; `code` and `uri` get the code to enter and the
  * page with it in (verification_uri_complete), "" while the provider has not

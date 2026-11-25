@@ -1,4 +1,4 @@
-import std/[json, options, os, strutils, unittest]
+import std/[json, locks, options, os, strutils, unittest]
 import frameos/channels
 import frameos/config
 import frameos/types
@@ -125,9 +125,9 @@ suite "the frame page on a Linux frame":
     # to enroll it, a backend's adoption still takes it.
     writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5")
     check actions() == %*["restart", "adopt"]
-    # A backend holds it: neither.
+    # A backend holds it: neither, and Unlink.
     writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5", serverApiKey = "k")
-    check actions() == %*["restart"]
+    check actions() == %*["restart", "unlink"]
 
   test "a backend's code: on the frame page, with the address and what the QR code says":
     writeConfig(true, device = "waveshare.EPD_7in5_V2")
@@ -206,6 +206,42 @@ suite "the frame page on a Linux frame":
     linuxFrameSettingsAction("close")
     check pendingLocalAccessScope() == ""
     check linuxFrameSettingsRead(){"link"}.isNil
+
+  test "Unlink leaves the plane that manages the frame, a backend's or the cloud's":
+    # A backend: the frame forgets its address (the Save that clears the
+    # server, which tells the backend it left) and restarts.
+    writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "127.0.0.1", serverApiKey = "key")
+    check %"unlink" in actions().elems
+    check %"adopt" notin actions().elems
+    linuxFrameSettingsAction("unlink")
+    for _ in 0 ..< 200:
+      if parseFile(configPath){"serverHost"}.getStr("x") == "":
+        break
+      sleep(20)
+    check parseFile(configPath){"serverHost"}.getStr("x") == ""
+    noteFrameConfigChanged()
+    check %"unlink" notin actions().elems
+    # The cloud: its link is reset (the cloud is told first where it can be
+    # reached; here it cannot, and the frame leaves all the same).
+    writeConfig(true, device = "waveshare.EPD_7in5_V2")
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      state["status"] = %"connected"
+      state["provider_url"] = %"http://127.0.0.1:1"
+      state["access_token"] = %"token"
+      saveCloudLinkState(state)
+    check %"unlink" in actions().elems
+    linuxFrameSettingsAction("unlink")
+    var status = "connected"
+    for _ in 0 ..< 200:
+      withLock cloudLinkLock:
+        status = loadCloudLinkState(){"status"}.getStr("disconnected")
+      if status != "connected":
+        break
+      sleep(20)
+    check status != "connected"
+    check %"unlink" notin actions().elems
+    check %"linkCloud" in actions().elems
 
   test "a frame that is only a picture, or waits for a backend, is not offered the cloud":
     writeConfig(true)

@@ -37,6 +37,7 @@
 #include "fos_ota.h"
 #include "fos_rtc.h"
 #include "fos_scenes.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -231,6 +232,9 @@ char *fos_frame_settings_json(void)
     if (!cloud && !adopt && !config->backend_url[0] && fos_cloud_state() != FOS_CLOUD_ENROLLED &&
         fos_cloud_state() != FOS_CLOUD_PENDING && state == FOS_WIFI_CONNECTED) {
         put(&out, "\"linkCloud\",\"adopt\"");
+    } else if (config->backend_url[0] || fos_cloud_state() == FOS_CLOUD_ENROLLED) {
+        /* Leaving the plane that manages it (the page asks twice). */
+        put(&out, "\"unlink\"");
     }
     put(&out, "]}");
     return out.buf;
@@ -482,6 +486,24 @@ void fos_frame_settings_action(const char *action)
             strlcpy(s_refused, "Too many wrong codes: try in an hour", sizeof(s_refused));
         }
         fos_client_render_now();
+    } else if (strcmp(action, "unlink") == 0) {
+        /* The frame page's Unlink, asked twice there (docs/scene-settings.md
+         * "Unlinking"). A backend's address, key and frame id go, with the
+         * service keys it sent, and the frame restarts standalone, as a
+         * console `set backend ""` and a restart leave it; the cloud's link
+         * goes on its own task, which tells the cloud first. The scenes stay. */
+        fos_config_t *config = fos_config();
+        if (config->backend_url[0]) {
+            config->backend_url[0] = '\0';
+            config->api_key[0] = '\0';
+            config->frame_id = 0;
+            fos_settings_forget_cache();
+            if (fos_config_save() != ESP_OK) ESP_LOGW(TAG, "unlink not saved");
+            frameos_nim_log_hook("{\"event\":\"settings:frame:unlink\",\"source\":\"esp32\",\"origin\":\"panel\"}");
+            if (xTaskCreate(restart_task, "fos_fs_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) esp_restart();
+        } else {
+            fos_cloud_unlink();
+        }
     } else if (strcmp(action, "close") == 0) {
         /* Left the page, however (Back, the scene's settings, another
          * scene, a window beside it): a pairing code lives only while its

@@ -356,6 +356,31 @@ through `frameos.frame('read')` gets them without `link`. A frame with no
 panel (a Pi whose device is only a picture) is offered neither: its picture is
 all it shows, and that is exactly what is not kept.
 
+### Unlinking
+
+A frame a plane holds (the card's **Managed by** names it) has **Unlink**
+where the link buttons were (the host's action `unlink`). It asks first, on a
+page of its own: "Unlink from FrameOS Cloud?" (or the backend), what the frame
+keeps (its scenes, its Wi-Fi) and what stops (scenes, settings and commands
+from it), with **Unlink** and **Cancel**; and **Unlink** asks again ("Tap
+again") before it acts. Back and Cancel go back to the frame page.
+
+- **The cloud:** the plane hears it first where it can be reached (`POST
+  /api/backends/unlink` with the frame's own token: its frame there says
+  revoked, as when the owner revokes it), and the frame forgets the link
+  whatever it answers: a Pi resets its link state as the admin page's
+  Disconnect does (on the page's worker thread), an ESP32's cloud task demotes
+  it (`fos_cloud_unlink`, `cloud_demote`, the provider's service keys with it).
+- **A backend:** a Pi clears `serverHost` through the same update a Save that
+  clears the server makes, which sends the backend `server:detached`
+  (`backendChangeNotice`), and restarts; an ESP32 clears its backend URL, key
+  and frame id and the service keys the backend sent, and restarts. The
+  backend's row stays until its owner removes it there.
+
+The frame is then a frame no plane holds, and the page offers **Link to cloud**
+and **Link to backend** again. An app's `frameos.frame('action', 'unlink')` is
+refused: no scene takes a frame out of its owner's hands.
+
 ### What a control plane learns
 
 - **Wi-Fi: nothing.** A network set here is the device's alone, as the

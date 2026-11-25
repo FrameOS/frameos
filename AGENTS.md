@@ -288,7 +288,8 @@
   one page for FrameOS Cloud (the device flow) or a backend (scope `adopt`,
   exchanged at the frame's `POST /api/adopt`), each its code, a QR code and
   Cancel, the cloud's also its server and a Cloud address to change, and a
-  stopped link saying why with Try again (doc section "Connecting the frame": both codes are presence codes,
+  stopped link saying why with Try again, and on a frame a plane holds Unlink,
+  asked twice (doc sections "Unlinking" and "Connecting the frame": both codes are presence codes,
   shown on the page, and no picture is kept while one shows; keep the
   Pi's `adopt_routes.nim` and the ESP32's `fos_http.c` alike). The page is
   built in the scene from FACTS a host hands over through three hooks

@@ -828,6 +828,37 @@ block the_frame_page_links_a_control_plane:
   facts["managedBy"] = %"FrameOS Cloud"
   words = texts(page.tree(480, 480, false, "", info = facts))
   doAssert "Nobody" notin words and "Link to backend" notin words and "FrameOS Cloud" in words, words
+  # Managed: Unlink where the link buttons were, asked on a page of its own
+  # and again on its button.
+  facts["actions"] = %*["unlink"]
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Unlink" in words and "Link to cloud" notin words, words
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 12))
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Unlink from FrameOS Cloud?" in words and "keeps its scenes" in words and "Wi-Fi network" notin words, words
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-unlink.png")
+  scene.tap(regionWith(20000 + 13))
+  doAssert "unlink" notin actions, $actions
+  doAssert "Tap again" in texts(page.tree(480, 480, false, "", info = facts))
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 13))
+  doAssert actions[^1] == "unlink", $actions
+  doAssert "Wi-Fi network" in texts(page.tree(480, 480, false, "", info = facts))
+  # Cancel and Back go back to the frame page, nothing done.
+  actions.setLen(0)
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 12))
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 14))
+  doAssert "Unlink from" notin texts(page.tree(480, 480, false, "", info = facts))
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 12))
+  discard scene.draw()
+  scene.tap(regionWith(0))
+  doAssert scene.state["page"].getStr() == "frame" and actions.len == 0, $actions
+  doAssert "Unlink from" notin texts(page.tree(480, 480, false, "", info = facts))
   # The cloud, asked and not answered yet.
   facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "cloud", "code": ""}}
   words = texts(page.tree(480, 480, false, "", info = facts))

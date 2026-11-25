@@ -29,7 +29,8 @@ import frameos/frame_settings_lock
 import frameos/cloud/link_state
 import frameos/local_access
 from frameos/cloud/device_flow import activeLinkCode, writePendingLinkCode, pendingLinkCodeQueued,
-  clearPendingLinkCode, loadPendingLinkCode, dropPanelLinkAtStart, PANEL_LINK_SECONDS
+  clearPendingLinkCode, loadPendingLinkCode, dropPanelLinkAtStart, PANEL_LINK_SECONDS, cloudRequest
+from frameos/cloud/hub_client import refreshLocalNetworkPolicy
 from frameos/cloud/enrollment import otherControlPlaneActive, loadPendingEnrollment
 import frameos/server/api
 from frameos/upgrade import installedFrameOSVersion
@@ -40,7 +41,7 @@ const
   ScanFreshSeconds = 30.0 ## a scan when the page comes up, unless one is this fresh
 
 type
-  JobKind = enum jkStatus, jkScan, jkJoin
+  JobKind = enum jkStatus, jkScan, jkJoin, jkUnlink
   Job = object
     kind: JobKind
     ssid, password: string
@@ -164,6 +165,50 @@ proc join(handle: netportal.RuntimeHandle, ssid, password: string) {.gcsafe.} =
         facts.ssid = ssid
     log(%*{"event": "settings:frame:wifi", "origin": "panel", "ok": ok})
 
+proc unlink() {.gcsafe.} =
+  ## The frame page's Unlink, asked twice there (docs/scene-settings.md
+  ## "Unlinking"), on the worker: the plane being left hears it first, then
+  ## the frame forgets it, as the admin page's Disconnect (the cloud) and a
+  ## Save that clears the server (a backend) do. The scenes stay.
+  # Nothing shared: each read is its own parse, and the config is a private copy.
+  {.cast(gcsafe).}:
+    var
+      cloudLinked = false
+      providerUrl = ""
+      accessToken = ""
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      if isManagedLink(state) or state{"status"}.getStr() == "connected":
+        cloudLinked = true
+        providerUrl = providerUrlFromState(state)
+        accessToken = state{"access_token"}.getStr()
+    if cloudLinked:
+      if accessToken.len > 0:
+        try:
+          discard cloudRequest(providerUrl, "/api/backends/unlink", accessToken = accessToken, body = %*{})
+        except CatchableError:
+          discard # it leaves while the cloud is down too
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        resetLinkState(state)
+        saveCloudLinkState(state)
+      clearPendingLinkCode()
+      refreshLocalNetworkPolicy(requestFrameConfig())
+      log(%*{"event": "settings:frame:unlink", "origin": "panel", "plane": "cloud"})
+      sendEvent(evRender, newJObject(), eoSystem)
+      return
+    let payload = %*{"server_host": ""}
+    let preview = previewFrameApiUpdate(payload)
+    if preview.existing{"serverHost"}.getStr().len == 0:
+      return
+    let notice = backendChangeNotice(preview.existing, preview.next)
+    if notice != nil:
+      log(notice)
+      discard notifyPreviousBackend(preview.existing, notice)
+    persistFrameApiUpdate(payload)
+    log(%*{"event": "settings:frame:unlink", "origin": "panel", "plane": "backend"})
+    sendEvent(evRestart, newJObject(), eoSystem)
+
 proc workerLoop(handle: netportal.RuntimeHandle) {.thread.} =
   while true:
     let job = jobs.recv()
@@ -175,6 +220,11 @@ proc workerLoop(handle: netportal.RuntimeHandle) {.thread.} =
     of jkJoin:
       join(handle, job.ssid, job.password)
       readStatus(handle)
+    of jkUnlink:
+      try:
+        unlink()
+      except Exception as error:
+        log(%*{"event": "settings:frame:unlink:error", "origin": "panel", "error": error.msg})
     news()
 
 proc queue(job: sink Job) =
@@ -264,6 +314,9 @@ proc linkFacts(config: FrameConfig, f: WifiFacts, result: JsonNode) =
         result["link"]["failed"] = pending{"failed"}
         result["link"]["detail"] = %pending{"detail"}.getStr()
     result["link"]["server"] = %server
+  if not linking and adoptCode.len == 0 and (cloud.managed or cloud.connected or managedBy(config).len > 0):
+    # Leaving the plane that manages it (the page asks twice).
+    result["actions"].add %"unlink"
   if linking or adoptCode.len > 0 or cloud.managed or cloud.connected or f.hotspot or
       managedBy(config).len > 0 or loadPendingEnrollment() != nil or not localAccessPanelDevice(config.device):
     return
@@ -345,6 +398,8 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
         # a window beside it): a pairing code lives only while its page is up
         # (docs/scene-settings.md "Connecting the frame").
         endPendingLinks()
+      of "unlink":
+        queue(Job(kind: jkUnlink))
       of "linkCloud", "adopt", "cancelLink":
         # Connecting a control plane (docs/scene-settings.md "Connecting the
         # frame"): whatever was under way ends (a device flow still waiting

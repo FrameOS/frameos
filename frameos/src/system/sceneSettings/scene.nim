@@ -88,6 +88,9 @@ const
   AAdopt = 9 ## an adoption code for a backend (the host's `adopt`)
   ACancelLink = 10 ## either one, while it is pending
   AAddress = 11 ## the cloud's address, to change while its code shows
+  AUnlink = 12 ## asks whether to leave the plane that manages the frame
+  AUnlinkNow = 13 ## leaves it (the host's `unlink`), on a second tap
+  ACancelUnlink = 14 ## back from asking, nothing done
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -603,6 +606,8 @@ proc press(self: SceneSettingsScene, action: int) =
     frameAction(["linkCloud", "adopt", "cancelLink"][action - ALinkCloud])
   elif action == AAddress:
     self.state.put("address", newJBool(true))
+  elif action == AUnlink or action == ACancelUnlink:
+    self.state.put("unlinking", newJBool(action == AUnlink))
   elif action == ALayout:
     self.openLayoutPage()
   elif action == ARender:
@@ -610,6 +615,9 @@ proc press(self: SceneSettingsScene, action: int) =
   elif self.state{"confirm"}.getInt(-1) == action:
     if action == AInstallUpdate:
       frameAction("installUpdate")
+    elif action == AUnlinkNow:
+      self.state.put("unlinking", newJBool(false))
+      frameAction("unlink")
     elif action == AUpdateScenes:
       if not sceneStoreAction.isNil:
         sceneStoreAction(self.uiId, "updateAll", "{}")
@@ -637,6 +645,8 @@ proc acting(self: SceneSettingsScene) =
     self.state.put("confirm", newJInt(-1))
   if handler == HCancel:
     if self.onLayoutPage(): self.showPage(true)
+    elif frame and self.state{"unlinking"}.getBool():
+      self.state.put("unlinking", newJBool(false))
     elif frame and not info{"link"}.isNil:
       # Back from connecting a plane is to the frame page: the link ends.
       self.state.put("frameValues", newJObject())
@@ -940,6 +950,8 @@ const LinkHints = [
   ## What to do, by plane (cloud, backend) and whether a QR code shows.
 
 const
+  UnlinkWords = "The frame keeps its scenes and its Wi-Fi, and stops taking scenes, settings and " &
+    "commands from it. To manage it again, link it again from this page."
   LinkFailed = ["reach", "address", "refused", "lapsed", "enroll"]
     ## Why a cloud link stopped, by the host's word for it (`link.failed`).
   LinkFailedWords = [
@@ -1037,6 +1049,17 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   c.px("p", look.pad)
   c.px("gap", look.gap)
   result = el("div", move c)
+  if self.state{"unlinking"}.getBool() and actions.offers("unlink"):
+    # Leaving the plane that manages the frame (the host's `unlink`): asked
+    # here, and again on the button ("Tap again"), as nothing at the frame
+    # links it back but a new code.
+    result.children.add el("div", "font-bold",
+      SvgNode(text: "Unlink from " & info.str("managedBy") & "?"))
+    result.children.add el("div", "", SvgNode(text: UnlinkWords))
+    let row = el("div", "flex gap-2", look.pressButton("Unlink", AUnlinkNow, self.state{"confirm"}.getInt(-1)))
+    row.children.add look.pressButton("Cancel", ACancelUnlink)
+    result.children.add row
+    return
   let card = el("div", if look.paper: "flex flex-col gap-1 p-3 rounded-lg border-2 border-black"
     else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
   proc line(card: SvgNode, look: Look, label, text: string) =
@@ -1098,6 +1121,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
   if cloud: buttons.children.add look.pressButton("Link to cloud", ALinkCloud)
   if backend: buttons.children.add look.pressButton("Link to backend", AAdopt)
+  if actions.offers("unlink"): buttons.children.add look.pressButton("Unlink", AUnlink)
   result.children.add buttons
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -1219,7 +1243,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     layoutPage = self.onLayoutPage()
   header.children.add look.button(if frame or layoutPage: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
-    SvgNode(text: if connecting: "Connect" elif frame: "Frame settings" else: title))
+    SvgNode(text: if connecting: "Connect" elif frame and self.state{"unlinking"}.getBool(): "Unlink"
+      elif frame: "Frame settings" else: title))
   # The scene's code (on the layout's page the layout's), where the frame
   # holds the code editor (not the editor's own: it is open on it already).
   let code = self.codeOf(codeEditor()).len > 0
