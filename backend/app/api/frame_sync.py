@@ -1569,6 +1569,16 @@ def backend_state_push_payload(frame: Frame) -> dict[str, Any]:
         raw = backend_frame.get(key)
         value = _sync_frame_value(key, raw)
         if value in (None, "", [], {}):
+            if key == "event_map" and raw is None:
+                # A frame never given a map gets `null`, which takes the key
+                # out of its frame.json (api.nim `putJsonIfPresent`), so it
+                # runs its device's own (a HyperPixel's edge swipes,
+                # frameos/device_event_map.nim), as an SSH deploy's frame.json
+                # without the key does. The "off" form `[]` is the owner's
+                # choice of no map: sent for a frame that never had one, it
+                # turned a HyperPixel's swipes off (cloud-w, 2026-11-25).
+                payload[key] = None
+                continue
             value = _sync_frame_push_off_value(key, raw)
         if value is not None:
             payload[key] = value

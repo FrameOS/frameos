@@ -778,7 +778,9 @@ the preview alike. There are two, applied in this order:
   as the scene's settings (`frameos/device_event_map.nim`, applied when
   frame.json has
   no `eventMap`; the backend leaves the key out until the owner saves one,
-  the frame API reports it as `null`, and the cloud sees it in what the frame
+  and its admin-API deploy sends it as `null`, which takes the key out of
+  the frame's frame.json (`[]` there would turn the swipes off), the frame
+  API reports it as `null`, and the cloud sees it in what the frame
   reports). An empty list is a choice and stays empty. It needs no scene: it
   is checked before the scene is looked up.
 - **The installed scene's** (`eventMap` next to `nodes` in what a frame
