@@ -193,8 +193,11 @@ one under a box in the canvas).
 ## Hardware
 
 What decodes a source is chosen for its codec (ffprobe's), in this order
-(`pickDecode` in `video/args.nim`):
+(`pickDecode` in `video/args.nim`, then `ispFits`):
 
+- **The VideoCore's decoder and ISP, driven by the player** (H.264 on a Pi 0
+  to 4, "The ISP path" below): ffmpeg only demuxes, and nothing of a frame
+  is scaled or converted on the CPU.
 - **A V4L2 mem2mem decoder** (`-c:v h264_v4l2m2m`): a Pi 0 to 4's VideoCore,
   through its `bcm2835-codec` (`/dev/video10`): H.264, and MPEG-2, MPEG-4 and
   VC-1 where the firmware has them. Used when the machine has a V4L2 decoder
@@ -219,8 +222,9 @@ allocate memory": a VideoCore's are CMA, which every player and the display
 share), or no decoder of its own ("Invalid argument", the kernel saying
 "failed to create component ril.video_decode": a VideoCore decoding other
 videos flat out did not make another in time). Each fallback is in the
-frame's log once, as `video:software` with the decoder, ffmpeg's reason and
-`hardwareKept`, also while the runner has paused a fast scene's log.
+frame's log once, as `video:fallback` with what gave way (`from`), what took
+over (`to`), the reason and `hardwareKept`, also while the runner has paused
+a fast scene's log.
 
 **A V4L2 decoder's buffers.** ffmpeg asks for 16 coded and 20 decoded ones;
 at 1080p a VideoCore's are 1.5 and 3 MB of CMA each, 85 MB a video, and on a
@@ -233,6 +237,53 @@ asks for 6 and 10 (`V4l2OutputBuffers`, `V4l2CaptureBuffers`): 43 MB at
 wall's, ran together with 65 MB of CMA left, and three rounds of starting
 them and stopping them with SIGTERM left nothing behind. Fewer than 8 decoded
 buffers had ffmpeg warn that all of them were in use.
+
+**The ISP path** (`video/isp.nim`). Where ffmpeg's `h264_v4l2m2m` would
+decode an H.264 source and the VideoCore's decoder (`bcm2835-codec-decode`)
+and ISP (`bcm2835-codec-isp`) are both there (found by name, `codecDevices`,
+never by number), the player drives them itself: ffmpeg only takes the
+video out of its container (`demuxArgs`: `-c:v copy -bsf:v h264_mp4toannexb
+-f h264`, the same input rules), the reader thread splits the stream into
+access units (`video/annexb.nim`) and gives the decoder one a buffer
+(`video/v4l2_decoder.nim`), each decoded frame goes into the ISP as the
+decoder's own dma-buf, and the ISP's picture, at the frame's size in the
+canvas's pixels (RGB565, RGBA, the luma of YUV420 for grey), is copied into
+the ring: the CPU's one touch of a frame, and everything after the ring is
+as above. `ispFits` leaves to ffmpeg a turned picture (the ISP does not
+turn), a source past the decoder's 1920 a side and a frame under the ISP's
+32. `FRAMEOS_VIDEO_ISP=0` leaves the path alone. What the VideoCore needs,
+found on a Pi Zero W (2026-11-24):
+- Both devices are multi-planar only (`video/v4l2.nim`).
+- The decoder starts only once its capture queue streams: it is set up at
+  once from the size it was told, and again on its source-change event (the
+  real one: 1920x1088 frames, a 1920x1080 picture).
+- Frames are NV12: the ISP rounds a YUV420 stride up (a 480 px wide video's
+  frames would be too small for it) and takes NV12's as the decoder writes
+  it. A stride they still disagree on leaves the video to ffmpeg.
+- A new frame size needs a new ISP: its buffer sizes stay with the open
+  device.
+- The ISP's crop keeps a size and drops the corner: `cover` is the picture
+  scaled to cover the box, its middle taken as it is copied (`ispSize`).
+- A stream copy starts at the keyframe before a start: the frames up to it
+  are decoded and dropped (`startSkip`; a slow decoder starts at the
+  keyframe anyway); a source faster than the app's rate is thinned as the
+  fps filter would (`keepFrame`).
+A launch that fails gives way to ffmpeg's `h264_v4l2m2m` from where it got
+to, and the rules above go on from there. If that decoder then plays it, no
+player of the runtime tries the path again (`ispFailed`), unless the path was
+busy (`hardwareBusy`) or would not do this video (`V4l2Unsupported`: a
+stride, a size, a format the ISP changes).
+
+Measured on a Pi Zero W (Cloud-W, 2026-11-24), the frames on its 720x720
+RGB565 panel counted where the video's timecode changes: 720p 16.3 frames a
+second through the ISP path against 6.2 through ffmpeg's decode and scale,
+1080p 11.8 against 6.1, 360p 16.3 against 4.7. ffmpeg demuxing takes 4 to 6%
+of the core and the reader thread 20 to 25% (the picture's copy out of the
+ISP, 0.6 MB a frame the CPU reads uncached: about 8 ms); the render thread
+has the rest, 66 to 77%, which is what is left ("Holes" in "Next"). The chain
+alone, without the runtime, runs 1080p into 720x405 RGB565 at 37 to 42 frames
+a second on 9 ms of CPU a frame, 720p at 54 and 270p at 65. Paused, the path
+costs 2% of the core until the idle stop lets it go.
 
 **A decoder that is behind.** A launch whose frames take more than 1.2 frame
 times to make over its first 12 is started again where it was with a slow
@@ -373,7 +424,9 @@ box). All three skip without ffmpeg.
 
 - **Holes**: a `<video>` drawn straight into the canvas as a `<Scene>` is,
   the UI around it not run per frame (`docs/scene-layouts.md`, `seekHoles`).
-  Today the app's `get()` and the layout run every frame.
+  Today the app's `get()` and the layout run every frame: with the ISP path
+  that render is what holds a Pi Zero W at 12 to 16 frames a second (66 to
+  77% of its core, 2026-11-24).
 - **Real time on a Pi 0 to 4.** Where a 1080p frame goes on a Pi Zero W with
   the VideoCore decoding (ffmpeg's CPU a frame, `-benchmark`, 2026-11-24):
   - *Reading the decoder's frames.* Its buffers are uncached for the CPU:
@@ -391,15 +444,11 @@ box). All three skip without ffmpeg.
   30 frames a second is 33 ms a frame for all of it, so the pixels have to
   leave the CPU. Two ways, which meet in the end (the decoder's buffers
   straight onto a plane):
-  1. *The ISP*: the VideoCore's `bcm2835-codec-isp` (`/dev/video12`, a V4L2
-     mem2mem device) scales and converts to RGB565, reading the decoder's
-     buffers as dma-bufs, no copy. Upstream ffmpeg has no filter for it, so
-     the runtime drives the decoder and the ISP itself (V4L2's stateful
-     decoder: the formats, the source-change event, the drain, a seek's
-     flush) and ffmpeg only demuxes (`-c:v copy -bsf:v h264_mp4toannexb -f
-     h264`). The CPU then reads 0.6 MB of RGB565 a frame; with holes, an
-     estimated 20 to 30 frames a second. Pi 0 to 4 only, and testable only
-     on one.
+  1. *The ISP*: done ("The ISP path" in "Hardware"). The CPU reads 0.6 MB
+     of RGB565 a frame out of the ISP instead of scaling a 1080p one: what
+     is left is the runtime's own ("Holes"). Its decoder client
+     (`video/v4l2_decoder.nim`) hands out the decoded frames as dma-bufs,
+     which is what a plane takes.
   2. *DRM planes*: done for a video nothing covers ("Planes"), its frames
      still copied twice on the way (out of the decoder by ffmpeg, through
      the pipe into the plane's buffer: a 1080p frame is 3 MB). What is left:

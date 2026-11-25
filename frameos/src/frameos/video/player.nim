@@ -25,6 +25,8 @@ import frameos/utils/canvas_log
 import frameos/utils/redacted_url
 import frameos/video/args
 import frameos/video/planes
+when defined(linux):
+  import frameos/video/[annexb, v4l2, v4l2_decoder, isp]
 
 export args, planes
 
@@ -102,6 +104,8 @@ type
     fallbackFromLen: int
     fallbackWhy: array[MessageKeep, char]  ## ... ffmpeg's reason
     fallbackWhyLen: int
+    fallbackTo: array[DecoderKeep, char]   ## ... what takes over ("h264_v4l2m2m", "software")
+    fallbackToLen: int
     fallbackBusy: bool     ## ... the hardware busy (hardwareBusy), so it stays on
     # A display plane (video/planes.nim). Asked for by the render thread:
     planeWanted: bool      ## the next launch shows its frames on `plane`
@@ -202,6 +206,7 @@ var capsLock: Lock
 var capsRead: bool
 var caps: DecodeCaps
 var hwFailedCodecs: seq[string]
+var ispBroken: bool ## the ISP path failed where ffmpeg's hardware decoder then played
 initLock(capsLock)
 
 proc nowSeconds*(): float =
@@ -270,6 +275,13 @@ proc readDecodeCaps(): DecodeCaps =
     return
   if v4l2DecoderDevice():
     result.v4l2Decoders = parseDecoderList(ffmpegSays(["-hide_banner", "-decoders"]))
+    # The VideoCore's decoder and ISP for the player's own V4L2 (video/isp.nim).
+    when defined(linux):
+      if getEnv("FRAMEOS_VIDEO_ISP") != "0":
+        let (decoder, isp) = codecDevices()
+        if decoder.len > 0 and isp.len > 0:
+          result.v4l2Device = decoder
+          result.ispDevice = isp
   var renderNode = false
   try:
     for _ in walkFiles("/dev/dri/renderD*"):
@@ -303,12 +315,25 @@ proc setDecodeCapsForTest*(value: DecodeCaps) =
       caps = value
       capsRead = true
       hwFailedCodecs.setLen(0)
+      ispBroken = false
 
 proc hardwareFailed*(codec: string): bool =
   ## Its hardware decoder failed here while ffmpeg's own played it.
   {.cast(gcsafe).}:
     withLock capsLock:
       result = codec in hwFailedCodecs
+
+proc ispFailed*(): bool =
+  ## The ISP path failed here while ffmpeg's hardware decoder played the
+  ## video: no player of this runtime tries it again.
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      result = ispBroken
+
+proc markIspFailed() =
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      ispBroken = true
 
 proc markHardwareFailed(codec: string) =
   {.cast(gcsafe).}:
@@ -339,12 +364,17 @@ proc messageOf(s: ptr Shared): string =
   for i in 0 ..< s.messageLen:
     result[i] = s.message[i]
 
-proc noteFallback(s: ptr Shared, decoder, why: string, busy: bool) =
-  ## A hardware launch gave way to ffmpeg's own. Under the lock.
+proc noteFallback(s: ptr Shared, decoder, to, why: string, busy: bool) =
+  ## A hardware launch gave way: to ffmpeg's own decoder, or from the ISP
+  ## path to ffmpeg's hardware one. Under the lock.
   let d = min(decoder.len, DecoderKeep)
   for i in 0 ..< d:
     s.fallbackFrom[i] = decoder[i]
   s.fallbackFromLen = d
+  let t = min(to.len, DecoderKeep)
+  for i in 0 ..< t:
+    s.fallbackTo[i] = to[i]
+  s.fallbackToLen = t
   let w = min(why.len, MessageKeep)
   for i in 0 ..< w:
     s.fallbackWhy[i] = why[i]
@@ -692,6 +722,266 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
         withLock s.lock:
           s.setMessage(why)
 
+const
+  StreamAhead = 1024 * 1024
+    ## Coded video read ahead of the decoder at most (the ISP path): seconds
+    ## of a 1080p video.
+
+proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
+    probe: ProbeResult, caps: DecodeCaps, startAt, fps: float, loopFile: bool, firstSeq: int64,
+    decode: VideoDecode, made: var int64, exitCode: var int, why: var string, busy: var bool): LaunchEnd =
+  ## One launch through the VideoCore's own decoder and ISP (video/isp.nim):
+  ## ffmpeg only demuxes the H.264 (demuxArgs); its access units go to the
+  ## decoder (video/annexb.nim, video/v4l2_decoder.nim), each decoded frame
+  ## into the ISP as a dma-buf, and the ISP's picture, at the frame's size in
+  ## the canvas's pixels, is copied into the ring: the CPU's one touch of a
+  ## frame. Ends as runLaunch does; `busy` also says the ISP would not do this
+  ## video (V4l2Unsupported: its stride, size or format), no fault of the path.
+  let s = arg.shared
+  let shownDecoder = decodeName(decode)
+  withLock s.lock:
+    let n = min(shownDecoder.len, DecoderKeep)
+    for i in 0 ..< n:
+      s.decoder[i] = shownDecoder[i]
+    s.decoderLen = n
+    s.fast = decode.fast
+  when not defined(linux):
+    why = "the VideoCore's ISP is a Linux device"
+    busy = true
+    return leFailed
+  else:
+    let (frameWidth, frameHeight) = frameSize(width, height, fit, probe.width, probe.height)
+    let fb = frameBytes(frameWidth, frameHeight, pixels)
+    let scaled = ispSize(width, height, fit, probe.width, probe.height)
+    let srcFps = if probe.fps > 0: probe.fps else: fps
+    let frameTime = 1.0 / fps
+    # A stream copy starts at the keyframe before the time asked for: its
+    # frames up to that time are decoded and dropped. A slow decoder's launch
+    # starts at a keyframe already (readerMain).
+    var skip = 0
+    if not decode.fast and arg.source.scheme.len == 0 and startAt > 0.05:
+      skip = startSkip(keyframeBefore(arg, startAt), startAt, srcFps)
+    var p: Process
+    try:
+      p = startProcessSerialized(ffmpegCommand(), demuxArgs(arg.source, startAt, loopFile), options = {poUsePath})
+    except CatchableError:
+      withLock s.lock:
+        s.setMessage("ffmpeg is not installed on this frame")
+      return leFailed
+    var errText = ""
+    var reason = ""  ## the V4L2 side's, when it is what failed
+    var dec = V4l2Decoder(fd: -1)
+    var sink = IspSink(fd: -1)
+    result = leEof
+    try:
+      discard c_setpriority(0, p.processID.cuint, 5)
+      try:
+        p.inputStream().close()
+      except CatchableError:
+        discard
+      let
+        outFd = cint(p.outputHandle())
+        errFd = cint(p.errorHandle())
+      discard fcntl(outFd, F_SETFL, fcntl(outFd, F_GETFL) or O_NONBLOCK)
+      discard fcntl(errFd, F_SETFL, fcntl(errFd, F_GETFL) or O_NONBLOCK)
+      var
+        errOpen = true
+        streamEnded = false
+        unitFirst, unitLast = -1  ## an access unit waiting for a coded buffer
+        splitter: AnnexBSplitter
+        errBuf: array[2048, char]
+        seqNo = firstSeq
+        decodedCount: int64 = 0   ## frames out of the decoder past the skip
+        roomAt = -1.0             ## when the ring last had room and no picture came yet
+      let launchedAt = nowSeconds()
+      # The coded buffers hold an access unit each: 1.5 MB at 1080p (ffmpeg's).
+      dec = openDecoder(caps.v4l2Device, probe.width, probe.height,
+        codedSize = max(probe.width * probe.height * 3 div 4, 256 * 1024))
+      template drainErr() =
+        if errOpen:
+          while true:
+            let n = posix.read(errFd, addr errBuf[0], errBuf.len)
+            if n > 0:
+              for i in 0 ..< n:
+                errText.add errBuf[i]
+              if errText.len > 8192:
+                errText = errText[^4096 .. ^1]
+            elif n == 0:
+              errOpen = false
+              break
+            else:
+              break
+      block run:
+        while true:
+          var room = false
+          withLock s.lock:
+            if s.stop or s.gen != gen:
+              result = leSuperseded
+              break run
+            room = s.count < s.slots
+            if not room and nowSeconds() - s.lastTake > IdleSeconds:
+              result = leIdle
+              break run
+            if not room and made > 0:
+              # A full ring (a pause, renders slower than the frames): nothing
+              # to do until a take. The devices are not polled meanwhile: a
+              # mem2mem device none of whose queues holds a buffer answers a
+              # poll at once (its pictures wait here, its frames there).
+              s.waitFor(PollMs)
+              continue
+          if room and roomAt < 0:
+            roomAt = nowSeconds()
+          # Wait for any side: ffmpeg's stream (while not far ahead), its
+          # stderr, the decoder and the ISP once they stream (before, a
+          # mem2mem device answers a poll at once).
+          var fds: array[4, TPollfd]
+          var n = 0
+          let wantStream = not streamEnded and splitter.pending < StreamAhead
+          if wantStream:
+            fds[n] = TPollfd(fd: outFd, events: POLLIN)
+            inc n
+          if errOpen:
+            fds[n] = TPollfd(fd: errFd, events: POLLIN)
+            inc n
+          if dec.started and not dec.ended:
+            # (Past its last frame a decoder is always readable.)
+            fds[n] = TPollfd(fd: dec.fd, events: POLLIN or POLLOUT or POLLPRI)
+            inc n
+          if sink.fd >= 0:
+            fds[n] = TPollfd(fd: sink.fd, events: (if room: POLLIN else: 0) or POLLOUT)
+            inc n
+          let ready = posix.poll(addr fds[0], n.Tnfds, PollMs)
+          if ready < 0 and osLastError().int32 != EINTR:
+            result = leFailed
+            break run
+          drainErr()
+          if made == 0 and nowSeconds() - launchedAt > hardwareFirstFrameSeconds:
+            reason = "the hardware decoder made no frame in " & $hardwareFirstFrameSeconds & " s"
+            result = leFailed
+            break run
+          # The stream in.
+          if wantStream:
+            let dst = splitter.room(65536)
+            let got = posix.read(outFd, dst, 65536)
+            if got > 0:
+              splitter.added(got)
+            elif got == 0:
+              streamEnded = true
+            elif osLastError().int32 notin [EAGAIN, EWOULDBLOCK, EINTR]:
+              streamEnded = true
+          # Access units into the decoder.
+          while dec.canFeed():
+            if unitFirst < 0 and not splitter.nextUnit(unitFirst, unitLast, eof = streamEnded):
+              break
+            dec.feed(cast[ptr UncheckedArray[byte]](addr splitter.buf[unitFirst]), unitLast - unitFirst)
+            unitFirst = -1
+          if streamEnded and unitFirst < 0 and splitter.pending == 0 and not dec.draining:
+            if dec.fed == 0:
+              # ffmpeg ended with no video: its reason says why.
+              result = leFailed
+              break run
+            dec.drain()
+          # A new set of frames (the decoder's size, after its source change): a new ISP.
+          if dec.started and (dec.reconfigured() or sink.fd < 0 or sink.generation != dec.format.generation):
+            sink.close()
+            sink = openIsp(caps.ispDevice, dec.format, pixels, scaled.width, scaled.height)
+          # Decoded frames: dropped up to an exact start, thinned to the
+          # output's rate, the rest into the ISP.
+          var frame: DecodedFrame
+          while sink.fd >= 0 and dec.nextFrame(frame):
+            if skip > 0:
+              dec skip
+              dec.release(frame)
+              continue
+            let keep = keepFrame(decodedCount, srcFps, fps)
+            inc decodedCount
+            if keep:
+              sink.submit(frame, dec.format)
+            else:
+              dec.release(frame)
+          # Frames the ISP is done with: the decoder's again.
+          var done: DecodedFrame
+          while sink.fd >= 0 and sink.readFrame(done):
+            dec.release(done)
+          # Pictures into the ring while it has room. The slot is in no one's
+          # ring until it is counted: the copy goes outside the lock.
+          while room and sink.fd >= 0:
+            var picture: IspPicture
+            if not sink.nextPicture(picture):
+              break
+            var dst: ptr UncheckedArray[byte]
+            withLock s.lock:
+              if s.stop or s.gen != gen:
+                sink.requeue(picture)
+                result = leSuperseded
+                break run
+              let slot = (s.head + s.count) mod s.slots
+              dst = cast[ptr UncheckedArray[byte]](addr s.buf[slot * fb])
+            copyPicture(picture, pixels, scaled.x, scaled.y, frameWidth, frameHeight, dst)
+            sink.requeue(picture)
+            withLock s.lock:
+              if s.stop or s.gen != gen:
+                result = leSuperseded
+                break run
+              let slot = (s.head + s.count) mod s.slots
+              s.slotSeq[slot] = seqNo
+              var media = startAt + float(seqNo - firstSeq) * frameTime
+              if s.duration > 0 and loopFile:
+                media = media mod s.duration
+              s.slotMedia[slot] = media
+              inc s.count
+              let arrived = nowSeconds()
+              if s.arrivedAt > 0 and roomAt > 0:
+                let took = arrived - roomAt
+                s.makeSeconds = if s.makeSeconds == 0: took else: s.makeSeconds * 0.8 + took * 0.2
+              s.arrivedAt = arrived
+              if s.failed:
+                s.failed = false
+                s.retrying = false
+                s.messageLen = 0
+              room = s.count < s.slots
+            roomAt = if room: nowSeconds() else: -1.0
+            inc seqNo
+            inc made
+          # The end: the decoder's last frame came and the ISP gave back
+          # every picture of it.
+          if dec.ended and (sink.fd < 0 or sink.inFlight == 0):
+            break run
+    except V4l2Unsupported as e:
+      reason = e.msg
+      busy = true
+      result = leFailed
+    except V4l2Error as e:
+      reason = e.msg
+      busy = hardwareBusy(e.msg)
+      result = leFailed
+    finally:
+      sink.close()
+      dec.close()
+      if p.peekExitCode() == -1:
+        p.stopProcess()
+      try:
+        let errFd = cint(p.errorHandle())
+        var tail: array[2048, char]
+        while true:
+          let n = posix.read(errFd, addr tail[0], tail.len)
+          if n <= 0: break
+          for i in 0 ..< n:
+            errText.add tail[i]
+          if errText.len > 16384: break
+      except CatchableError:
+        discard
+      let code = p.peekExitCode()
+      exitCode = code
+      p.close()
+      if result == leEof and made == 0:
+        result = leFailed
+      if result == leFailed:
+        let said = if reason.len > 0: reason else: cleaned(errText, arg.shownSource, arg.source.input)
+        why = if said.len > 0: said else: "the VideoCore's decoder and ISP could not play it"
+        withLock s.lock:
+          s.setMessage(why)
+
 proc dropPlaneRun(s: ptr Shared, run: var PlaneRun) =
   ## A reader's plane buffers go (a canvas launch, a new size, its end):
   ## first out of the render thread's reach, then off the device. One a plane
@@ -747,6 +1037,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
     var fast = slowMachine()
     var software = false ## the hardware failed this player: ffmpeg's own
     var suspect = false  ## ... and it is the hardware's fault once ffmpeg's own plays it
+    var ispOff = false   ## the ISP path gave way for this player: ffmpeg's hardware decoder
+    var suspectIsp = false ## ... and it is the path's fault once ffmpeg's hardware decoder plays it
     while true:
       var
         gen, width, height: int
@@ -827,7 +1119,14 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       let loopFile = loop and arg.source.scheme.len == 0 and probe.duration > 0
       var launchAt = startAt
       while true:
-        let decode = pickDecode(probe.codec, caps, fast, software or hardwareFailed(probe.codec))
+        var decode = pickDecode(probe.codec, caps, fast, software or hardwareFailed(probe.codec))
+        # The VideoCore's own decoder and ISP first where they take the video
+        # (video/isp.nim): ffmpeg only demuxes, and nothing of a frame is
+        # scaled or converted on the CPU.
+        # (A launch for a display plane takes ffmpeg's YUV: the ISP's pictures
+        # are the canvas's.)
+        decode.isp = not onPlane and not ispOff and not ispFailed() and
+          ispFits(caps, decode, fit, width, height, probe)
         let hardware = decode.decoder.len > 0 or decode.hwaccel.len > 0
         if decode.fast and arg.source.scheme.len == 0 and launchAt > 0.5:
           # A slow decoder starts at the keyframe before: an exact start makes
@@ -839,9 +1138,19 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         var code = 0
         var why = ""
         var busy = false
-        let ended = runLaunch(arg, gen, width, height, fit, pixels, probe.width, probe.height, launchAt, fps,
-          loopFile, seqNo, decode, made, code, why, busy, (if onPlane: addr run else: nil), plane)
+        let ended =
+          if decode.isp:
+            runIspLaunch(arg, gen, width, height, fit, pixels, probe, caps, launchAt, fps, loopFile, seqNo,
+              decode, made, code, why, busy)
+          else:
+            runLaunch(arg, gen, width, height, fit, pixels, probe.width, probe.height, launchAt, fps,
+              loopFile, seqNo, decode, made, code, why, busy, (if onPlane: addr run else: nil), plane)
         seqNo += made
+        if suspectIsp and not decode.isp and decode.decoder.len > 0 and made > 0:
+          # ffmpeg's hardware decoder played what the ISP path would not: the
+          # path's fault, so no player here tries it again.
+          markIspFailed()
+          suspectIsp = false
         if suspect and not hardware and made > 0:
           # ffmpeg's own played what the hardware would not: the hardware's
           # fault, not the source's, so no player here tries it for this codec.
@@ -858,6 +1167,21 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           fast = true
           launchAt = reached
           continue
+        if decode.isp and not atEnd and
+            (ended == leFailed or (ended == leEof and code != 0 and code != -1)):
+          # The ISP path would not: ffmpeg's hardware decoder from where it got
+          # to, and its rules from there. One that could not take it now, or
+          # would not do this video (a stride, a size it changes), is no fault
+          # of the path's: the next player tries it again.
+          ispOff = true
+          suspectIsp = not busy
+          var next = decode
+          next.isp = false
+          withLock s.lock:
+            s.messageLen = 0
+            s.noteFallback(decodeName(decode), decodeName(next), why, busy)
+          launchAt = reached
+          continue
         if hardware and not atEnd and
             (ended == leFailed or (ended == leEof and code != 0 and code != -1)):
           # The hardware would not (a codec or profile it lacks, a stream it
@@ -870,7 +1194,7 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           suspect = not busy
           withLock s.lock:
             s.messageLen = 0
-            s.noteFallback(decodeName(decode), why, busy)
+            s.noteFallback(decodeName(decode), "software", why, busy)
           launchAt = reached
           continue
         if ended == leIdle:
@@ -916,6 +1240,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           # tried again with it.
           software = false
           suspect = false
+          ispOff = false
+          suspectIsp = false
         launchAt = 0
   except CatchableError as e:
     withLock s.lock:
@@ -1440,7 +1766,8 @@ proc status*(player: VideoPlayer): VideoStatus =
 type VideoFallback* = object
   ## The last hardware launch of a player that gave way to ffmpeg's own.
   count*: int         ## how many have, so far (0: none)
-  decoder*: string    ## the hardware decoder that failed ("h264_v4l2m2m")
+  decoder*: string    ## the hardware decoder that failed ("h264_v4l2m2m", "h264_v4l2m2m+isp")
+  to*: string         ## what took over ("h264_v4l2m2m", "software")
   reason*: string     ## ffmpeg's reason
   busy*: bool         ## the hardware could not take it now: it stays on for the next player
 
@@ -1461,6 +1788,9 @@ proc lastFallback*(player: VideoPlayer): VideoFallback =
     result.decoder = newString(s.fallbackFromLen)
     for i in 0 ..< s.fallbackFromLen:
       result.decoder[i] = s.fallbackFrom[i]
+    result.to = newString(s.fallbackToLen)
+    for i in 0 ..< s.fallbackToLen:
+      result.to[i] = s.fallbackTo[i]
     result.reason = newString(s.fallbackWhyLen)
     for i in 0 ..< s.fallbackWhyLen:
       result.reason[i] = s.fallbackWhy[i]

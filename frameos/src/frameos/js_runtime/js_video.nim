@@ -268,15 +268,16 @@ else:
       logger.disable()
 
   proc logFallback(owner: AppRoot, video: var JsVideo) =
-    ## A hardware launch of `video` gave way to ffmpeg's own: said once, with
-    ## ffmpeg's reason (docs/video.md "Hardware").
+    ## A hardware launch of `video` gave way (to ffmpeg's own decoder, or from
+    ## the ISP path to ffmpeg's hardware one): said once, with the reason
+    ## (docs/video.md "Hardware").
     let count = video.player.fallbacks()
     if count == video.toldFallbacks:
       return
     video.toldFallbacks = count
     let fallback = video.player.lastFallback()
-    logSignal(owner, %*{"event": "video:software", "src": shownName(video.src),
-      "decoder": fallback.decoder, "reason": fallback.reason,
+    logSignal(owner, %*{"event": "video:fallback", "src": shownName(video.src),
+      "from": fallback.decoder, "to": fallback.to, "reason": fallback.reason,
       "hardwareKept": fallback.busy})
 
   var planesTold: bool
