@@ -57,7 +57,10 @@ export interface sceneSettingsLogicValues {
   permissionRows: ScenePermissionRow[]
   renderScaleFieldName: string | null
   renderScaleOptions: RenderScaleOption[]
-  roundOptions: { value: string; label: string }[]
+  roundOptions: {
+    label: string
+    value: string
+  }[]
   scene: FrameScene | null
   sceneAccess: SceneAccess | null
   sceneIndex: number
@@ -107,7 +110,10 @@ export interface sceneSettingsLogicMeta {
     layoutProblem: (scene: FrameScene | null) => string | null
     renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
     windowSizeOptions: (scene: FrameScene | null) => WindowSizeOption[]
-    roundOptions: (scene: FrameScene | null) => { value: string; label: string }[]
+    roundOptions: (scene: FrameScene | null) => {
+      label: string
+      value: string
+    }[]
     categoryOptions: (scene: FrameScene | null) => SceneCategoryOption[]
     iconPath: (scene: FrameScene | null) => string | null
     iconProblem: (scene: FrameScene | null) => string | null

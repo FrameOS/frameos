@@ -223,11 +223,11 @@ export interface templatesLogicValues {
   isAddTemplateUrlFormSubmitting: boolean
   isAddTemplateUrlFormValid: boolean
   isExpanded: (url: string) => boolean
-  latestLimit: number
   isTemplateFormSubmitting: boolean
   isTemplateFormValid: boolean
   isUploadTemplateFormSubmitting: boolean
   isUploadTemplateFormValid: boolean
+  latestLimit: number
   modalTarget: 'cloud' | 'localTemplate' | 'zip'
   repositories: RepositoryType[]
   savedSceneCount: number
@@ -460,6 +460,9 @@ export interface templatesLogicActions {
   showAddRepository: () => {
     value: true
   }
+  showMoreLatest: () => {
+    value: true
+  }
   showRemoteTemplate: () => {
     value: true
   }
@@ -546,9 +549,6 @@ export interface templatesLogicActions {
   }
   toggleExpanded: (url: string) => {
     url: string
-  }
-  showMoreLatest: () => {
-    value: true
   }
   touchAddRepositoryFormField: (key: string) => {
     key: string
@@ -981,7 +981,7 @@ export const templatesLogic = kea<templatesLogicType>([
     // How many of the store's newest scenes its Latest shelf shows: a few,
     // and "Show more" adds a page at a time.
     latestLimit: [
-      STORE_LATEST_PAGE,
+      STORE_LATEST_PAGE as number,
       {
         showMoreLatest: (limit) => limit + STORE_LATEST_PAGE * 2,
       },
