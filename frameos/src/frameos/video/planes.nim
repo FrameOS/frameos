@@ -318,7 +318,7 @@ proc planeStep*(due, now, frameTime, resync: float, newerReady: bool): PlaneStep
   elif late > resync: psResync
   else: psShow
 
-proc yuvToRgb*(y, u, v: int): tuple[r, g, b: int] =
+proc yuvToRgb*(y, u, v: int): tuple[r, g, b: int] {.inline.} =
   ## BT.601, limited range: what a decoder makes of SD and most HD video
   ## without a colour description. Integer, as the panel's 565 needs no more.
   let

@@ -61,6 +61,14 @@ const
     ## A plane's frames in flight: one on the glass, one the reader fills, one
     ## spare for a vblank late.
   PlaneCopySeconds* = 1.0
+  LateFrames* = 1.5
+    ## A frame shown this many frame times after it was due is late: a
+    ## stutter (`playback`, the `video:playback` log line).
+  ReaderNice = -5
+    ## The reader thread's priority (nice): ahead of the render thread, whose
+    ## once-a-second copy of a plane's frame into the canvas otherwise held a
+    ## Pi Zero's frames back (2026-11-25). Where the runtime may not (not
+    ## root), the default.
     ## A video on a plane is copied into the canvas this often, and when it
     ## pauses or ends: what a snapshot or `GET /image` shows of it, and what
     ## the canvas holds the moment the plane goes. Also how often the scene
@@ -121,6 +129,13 @@ type
     shownSeq: int64
     shownMedia: float
     shownCount: int        ## frames a plane showed so far, every launch
+    copying: uint32        ## the buffer the render thread copies into the canvas, outside the lock (take)
+    # Its playback since the render thread last asked (`playback`): counted
+    # by a plane's reader as it shows each frame, and by take for the canvas.
+    playFrames: int        ## frames shown
+    playLate: int          ## ... more than LateFrames frame times after they were due
+    playWorst: float       ## ... the latest, seconds after it was due
+    playDropped: int       ## frames decoded and never shown (too late)
     planeSrcX, planeSrcY: int ## where the picture starts in the frames shown (a decoder's, 0 else)
     # The ring: `count` frames from `head`, oldest first, each `frameWidth` x
     # `frameHeight` (frameSize: a contained picture's own size, else the box).
@@ -172,6 +187,7 @@ type
     askedAt, askedWait: float
     lastUse*: float        ## monotonic seconds the app last asked for it
     endTold: int           ## the launch whose end a render was asked for
+    playbackAt: float      ## when `playback` last counted from
     error: string
 
   VideoPlaneSpot* = object
@@ -474,6 +490,37 @@ type LaunchEnd = enum
   leSuperseded, leEof, leFailed, leIdle
   leSlow ## a decoder without the shortcuts fell behind: again with them
 
+proc played(s: ptr Shared, lateBy, frameTime: float) =
+  ## A frame shown `lateBy` seconds after it was due (< 0: no clock to say,
+  ## the first of a launch, a live stream's). Under the player's lock.
+  inc s.playFrames
+  if lateBy >= 0:
+    if lateBy > LateFrames * frameTime:
+      inc s.playLate
+    s.playWorst = max(s.playWorst, lateBy)
+
+proc waitUncopied(s: ptr Shared, id: uint32) =
+  ## The render thread copies the frame on the glass into the canvas outside
+  ## the lock (take), so that no frame waits for it: a reader about to write
+  ## over that buffer, give it back to its decoder or free it waits instead.
+  if id == 0:
+    return
+  withLock s.lock:
+    while s.copying == id:
+      s.waitFor(5)
+
+proc nextFill(s: ptr Shared, run: PlaneRun): int =
+  ## The plane buffer the next frame goes into: one neither on the glass nor
+  ## being copied into the canvas (waitUncopied), so the copy never holds a
+  ## frame back. Of three there is always one: the one after the shown, or
+  ## the one after that while the render thread copies the other.
+  result = (if run.shown < 0: 0 else: run.shown + 1) mod run.count
+  var copying: uint32
+  withLock s.lock:
+    copying = s.copying
+  if copying != 0 and run.bufs[result].id == copying and run.count > 2:
+    result = (result + 1) mod run.count
+
 proc fillPlaneBuffer(b: PlaneBuffer, frame: ptr UncheckedArray[byte], width, height: int) =
   ## A packed YUV420 frame (rows of its width: Y, then U and V at half) into a
   ## plane buffer's rows (its pitch).
@@ -501,6 +548,7 @@ proc showWhenDue(s: ptr Shared, gen, plane: int, run: var PlaneRun, fill: int, s
   let live = s.duration <= 0
   while true:
     var paused, idle = false
+    var lateBy = -1.0
     withLock s.lock:
       if s.stop or s.gen != gen:
         return psSuperseded
@@ -521,16 +569,20 @@ proc showWhenDue(s: ptr Shared, gen, plane: int, run: var PlaneRun, fill: int, s
         withLock s.lock:
           s.waitFor(max(1, int(min(due - now, 0.05) * 1000)))
         continue
+      lateBy = due
       if now - due > ResyncSeconds:
         # Behind and not catching up: the clock comes to the frames.
         clockStart = 0
     var onGlass = false
     if presentPlane(plane, cast[pointer](s), run.bufs[fill].id, onGlass, run.width, run.height):
+      if lateBy >= 0:
+        lateBy = nowSeconds() - lateBy
       if clockStart <= 0:
         clockStart = nowSeconds()
         clockSeq = seqNo
       run.shown = fill
       withLock s.lock:
+        s.played(lateBy, frameTime)
         s.shownBuf = run.bufs[fill]
         s.shownGen = gen
         s.shownSeq = seqNo
@@ -637,11 +689,12 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
         var fill = -1
         if onPlane:
           # A plane buffer that is not on the glass.
-          fill = (if run.shown < 0: 0 else: run.shown + 1) mod run.count
+          fill = nextFill(s, run[])
           withLock s.lock:
             if s.stop or s.gen != gen:
               result = leSuperseded
               break frames
+          waitUncopied(s, run.bufs[fill].id)
           dst = if staging.len > 0: cast[ptr UncheckedArray[byte]](addr staging[0]) else: run.bufs[fill].map
         else:
           withLock s.lock:
@@ -994,7 +1047,8 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
               if turn != 0:
                 turnYuv420(frame, ispW, ispH, bytesOf(turned), turn)
                 frame = bytesOf(turned)
-              let fill = (if planeRun.shown < 0: 0 else: planeRun.shown + 1) mod planeRun.count
+              let fill = nextFill(s, planeRun[])
+              waitUncopied(s, planeRun.bufs[fill].id)
               fillPlaneBuffer(planeRun.bufs[fill], frame, planeRun.width, planeRun.height)
               var media = startAt + float(seqNo - firstSeq) * frameTime
               withLock s.lock:
@@ -1127,6 +1181,7 @@ proc dropLingering(s: ptr Shared, lingering: var PlaneBuffer) =
     if s.shownBuf.id == lingering.id:
       s.shownBuf = PlaneBuffer()
       s.planeShown = false
+  waitUncopied(s, lingering.id)
   freePlaneBuffer(lingering)
   lingering = PlaneBuffer()
 
@@ -1225,6 +1280,8 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
         # and give back the frame that waits as well.
         let index = given
         if index >= 0:
+          if index < imported.len:
+            waitUncopied(s, imported[index].id)
           dec.release(frames[index])
       proc forgetImports(imported: var seq[PlaneBuffer], hold: var PlaneHold, lingering: var PlaneBuffer) =
         # A new configuration of the decoder: its old buffers' framebuffers
@@ -1235,6 +1292,7 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
           imported[hold.shown] = PlaneBuffer()
         for b in imported:
           if b.id != 0:
+            waitUncopied(s, b.id)
             freePlaneBuffer(b)
         imported.setLen(0)
         hold = initPlaneHold()
@@ -1310,6 +1368,8 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
               case step
               of psDrop:
                 # The late one goes back unseen; the newer one waits instead.
+                withLock s.lock:
+                  inc s.playDropped
                 if not framebuffer(newer, dec, imported, importedGen, hold, lingering, reason):
                   dec.release(newer)
                   result = leFailed
@@ -1326,6 +1386,7 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
               of psShow, psResync:
                 var onGlass = false
                 if presentPlane(plane, cast[pointer](s), imported[hold.waiting].id, onGlass):
+                  let lateBy = if clockStart > 0 and not live: nowSeconds() - due else: -1.0
                   if clockStart <= 0 or step == psResync:
                     clockStart = nowSeconds()
                     clockSeq = waitingSeq
@@ -1333,6 +1394,7 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
                   let back = hold.flipped()
                   var media = startAt + float(waitingSeq - firstSeq) * frameTime
                   withLock s.lock:
+                    s.played(lateBy, frameTime)
                     if s.duration > 0 and loopFile:
                       media = media mod s.duration
                     s.shownBuf = imported[shown]
@@ -1436,6 +1498,7 @@ proc runZeroCopyLaunch(arg: ReaderArg, gen: int, probe: ProbeResult, caps: Decod
         imported[hold.shown] = PlaneBuffer()
       for b in imported:
         if b.id != 0:
+          waitUncopied(s, b.id)
           freePlaneBuffer(b)
       dec.close()
       if p.peekExitCode() == -1:
@@ -1474,6 +1537,7 @@ proc dropPlaneRun(s: ptr Shared, run: var PlaneRun) =
         s.shownBuf = PlaneBuffer()
         s.planeShown = false
   for i in 0 ..< run.count:
+    waitUncopied(s, run.bufs[i].id)
     freePlaneBuffer(run.bufs[i])
   run = PlaneRun(shown: -1)
 
@@ -1494,8 +1558,16 @@ proc makePlaneRun(run: var PlaneRun, width, height: int): bool =
   run.shown = -1
   true
 
+when defined(linux):
+  var SYS_gettid {.importc, header: "<sys/syscall.h>".}: clong
+  proc c_syscall(number: clong): clong {.importc: "syscall", header: "<unistd.h>", varargs.}
+
 proc readerMain(arg: ReaderArg) {.thread.} =
   let s = arg.shared
+  when defined(linux):
+    # The frames' timing is this thread's: ahead of the render thread's work
+    # (ReaderNice). Best effort.
+    discard c_setpriority(0, cuint(c_syscall(SYS_gettid)), ReaderNice)
   var run = PlaneRun(shown: -1)
   var lingering: PlaneBuffer ## a decoder's frame a zero-copy launch left on the glass
   try:
@@ -1797,7 +1869,8 @@ proc newVideoPlayer*(source: VideoSource, shownSource: string, loop: bool, maxFp
   s.startAt = max(startAt, 0)
   s.lastTake = nowSeconds()
   s.plane = -1
-  result = VideoPlayer(shared: s, loop: loop, maxFps: maxFps, lastUse: nowSeconds(), late: 0.004,
+  result = VideoPlayer(shared: s, loop: loop, maxFps: maxFps, lastUse: nowSeconds(), playbackAt: nowSeconds(),
+    late: 0.004,
     shownMedia: max(startAt, 0), pausedAt: max(startAt, 0), planeSlot: -1)
   result.placeholder = newImage(16, 9)
   result.placeholder.fill(rgbx(0, 0, 0, 255))
@@ -1947,6 +2020,7 @@ proc copyFrame(image: Image, src: ptr UncheckedArray[byte], width, height, x, y:
     for r in 0 ..< height:
       copyMem(dst[(y + r) * stride + x * bpp].addr, src[r * row].addr, row)
 
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 proc yuvInto*(image: Image, x, y, w, h: int, buf: PlaneBuffer, srcX, srcY, srcW, srcH: float) =
   ## A plane's YUV420 frame (or a decoder's NV12, `interleaved`) into
   ## `image`'s `w` x `h` at (`x`, `y`), the nearest pixel of its (`srcX`,
@@ -1958,14 +2032,29 @@ proc yuvInto*(image: Image, x, y, w, h: int, buf: PlaneBuffer, srcX, srcY, srcW,
   var xs = newSeq[int](w)
   for i in 0 ..< w:
     xs[i] = clamp(int(srcX + (i.float + 0.5) * srcW / w.float), 0, buf.width - 1)
+  # A source row is read whole, once, into memory the CPU caches: the frame
+  # is a decoder's or the display's, which it reads uncached, and three
+  # reads of it a pixel were most of the copy's time.
+  let cw = (buf.width + 1) div 2
+  var yLine = newSeq[byte](buf.width)
+  var cLine = newSeq[byte](2 * cw) ## NV12: the row's U and V pairs; YUV420: its U row, then its V row
+  var lastY, lastC = -1
   for row in 0 ..< h:
     let ty = y + row
     if ty < 0 or ty >= image.height:
       continue
-    let
-      sy = clamp(int(srcY + (row.float + 0.5) * srcH / h.float), 0, buf.height - 1)
-      yRow = sy * buf.pitch
-      cRow = (sy div 2) * cp
+    let sy = clamp(int(srcY + (row.float + 0.5) * srcH / h.float), 0, buf.height - 1)
+    if sy != lastY:
+      copyMem(addr yLine[0], addr buf.map[sy * buf.pitch], buf.width)
+      lastY = sy
+    if sy div 2 != lastC:
+      let cRow = (sy div 2) * cp
+      if buf.interleaved:
+        copyMem(addr cLine[0], addr buf.map[buf.uOffset + cRow], 2 * cw)
+      else:
+        copyMem(addr cLine[0], addr buf.map[buf.uOffset + cRow], cw)
+        copyMem(addr cLine[cw], addr buf.map[buf.vOffset + cRow], cw)
+      lastC = sy div 2
     for col in 0 ..< w:
       let tx = x + col
       if tx < 0 or tx >= image.width:
@@ -1973,18 +2062,17 @@ proc yuvInto*(image: Image, x, y, w, h: int, buf: PlaneBuffer, srcX, srcY, srcW,
       let
         sx = xs[col]
         (u, v) =
-          if buf.interleaved:
-            let c = buf.uOffset + cRow + (sx div 2) * 2
-            (int(buf.map[c]), int(buf.map[c + 1]))
-          else:
-            (int(buf.map[buf.uOffset + cRow + sx div 2]), int(buf.map[buf.vOffset + cRow + sx div 2]))
-        (r, g, b) = yuvToRgb(int(buf.map[yRow + sx]), u, v)
+          if buf.interleaved: (int(cLine[(sx div 2) * 2]), int(cLine[(sx div 2) * 2 + 1]))
+          else: (int(cLine[sx div 2]), int(cLine[cw + sx div 2]))
+        (r, g, b) = yuvToRgb(int(yLine[sx]), u, v)
         at = ty * image.width + tx
       case image.format
       of pfRgb565: image.data16[at] = uint16(((r shr 3) shl 11) or ((g shr 2) shl 5) or (b shr 3))
       of pfRgbx: image.data[at] = rgbx(r.uint8, g.uint8, b.uint8, 255)
       of pfGray8: image.data8[at] = uint8((r * 77 + g * 150 + b * 29) shr 8)
       else: discard
+
+{.pop.}
 
 proc pixelsFor*(like: Image): VideoPixels =
   ## The frames' format: the canvas's where a copy of them can be drawn as it
@@ -2017,24 +2105,46 @@ proc prepareImage(player: VideoPlayer, w, h: int, like: Image, pixels: VideoPixe
   else:
     framed
 
-proc copyPlaneFrame(player: VideoPlayer, s: ptr Shared, w, h: int, fit: VideoFit, like: Image,
-    pixels: VideoPixels): Rect =
-  ## The frame a plane shows into `player.image`, where the canvas would draw
-  ## it (under the player's lock: its reader keeps the buffer meanwhile).
-  let
-    buf = s.shownBuf
-    (fw, fh) = frameSize(w, h, fit, s.srcWidth, s.srcHeight)
-    framed = rect(float32((w - fw) div 2), float32((h - fh) div 2), fw.float32, fh.float32)
-  result = player.prepareImage(w, h, like, pixels, framed)
-  let r = planeRect(0, 0, w, h, ord(fit), fw, fh, buf.width - s.planeSrcX, buf.height - s.planeSrcY).
-    atVisible(s.planeSrcX, s.planeSrcY)
-  readingFrame(buf, true)
-  yuvInto(player.image, r.x, r.y, r.w, r.h, buf, r.srcX, r.srcY, r.srcW, r.srcH)
-  readingFrame(buf, false)
+type PlaneCopy = object
+  ## What the render thread copies out of a plane's frame (take), taken under
+  ## the player's lock; the copy is made outside it (drawPlaneCopy).
+  ok: bool
+  buf: PlaneBuffer
+  srcWidth, srcHeight: int
+  planeSrcX, planeSrcY: int
+
+proc startPlaneCopy(player: VideoPlayer, s: ptr Shared): PlaneCopy =
+  ## Under the player's lock: the frame on the glass, kept from its reader
+  ## (`copying`, waitUncopied) until drawPlaneCopy is done with it.
+  let buf = s.shownBuf
+  s.copying = buf.id
   player.shownGen = s.shownGen
   player.shownSeq = s.shownSeq
   player.shownMedia = s.shownMedia
   player.hasFrame = true
+  PlaneCopy(ok: true, buf: buf, srcWidth: s.srcWidth, srcHeight: s.srcHeight, planeSrcX: s.planeSrcX,
+    planeSrcY: s.planeSrcY)
+
+proc drawPlaneCopy(player: VideoPlayer, s: ptr Shared, copy: PlaneCopy, w, h: int, fit: VideoFit,
+    like: Image, pixels: VideoPixels): Rect =
+  ## The frame a plane shows into `player.image`, where the canvas would draw
+  ## it, outside the player's lock: its reader goes on showing frames
+  ## meanwhile (a copy under it held them back, a stutter once a second).
+  let
+    buf = copy.buf
+    (fw, fh) = frameSize(w, h, fit, copy.srcWidth, copy.srcHeight)
+    framed = rect(float32((w - fw) div 2), float32((h - fh) div 2), fw.float32, fh.float32)
+  try:
+    result = player.prepareImage(w, h, like, pixels, framed)
+    let r = planeRect(0, 0, w, h, ord(fit), fw, fh, buf.width - copy.planeSrcX, buf.height - copy.planeSrcY).
+      atVisible(copy.planeSrcX, copy.planeSrcY)
+    readingFrame(buf, true)
+    yuvInto(player.image, r.x, r.y, r.w, r.h, buf, r.srcX, r.srcY, r.srcW, r.srcH)
+    readingFrame(buf, false)
+  finally:
+    withLock s.lock:
+      s.copying = 0
+      broadcast(s.cond)
 
 proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
     spot = VideoPlaneSpot()): bool =
@@ -2071,6 +2181,7 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
   if spot.ok and not player.planeFailed and player.planeSlot < 0:
     player.planeSlot = acquirePlane(cast[pointer](s))
   var drawn: Rect
+  var copy: PlaneCopy ## a plane's frame for the canvas, copied after the lock
   var claim = false
   var placed: PlaneRect
   var hd = false
@@ -2084,7 +2195,7 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
       if player.planeMode and not planeNow and s.planeShown and not s.shownBuf.map.isNil:
         # Back to the canvas: the frame on the glass into it first, so the
         # picture does not go back to an older one until ffmpeg's next.
-        drawn = player.copyPlaneFrame(s, w, h, fit, like, pixels)
+        copy = player.startPlaneCopy(s)
       player.width = w
       player.height = h
       player.fit = fit
@@ -2101,6 +2212,10 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
       player.pixels = pixels
     if s.failed:
       player.error = s.messageOf()
+      if copy.ok:
+        # Not copied after all: its reader may have the buffer back.
+        s.copying = 0
+        broadcast(s.cond)
       return false
     player.error = ""
     if player.planeMode:
@@ -2126,7 +2241,7 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
       # The canvas's copy of it: once a second, and when it pauses or ends.
       if s.planeShown and not s.shownBuf.map.isNil and s.shownCount != player.copiedCount and
           (now - player.copiedAt >= PlaneCopySeconds or player.paused or s.ended):
-        drawn = player.copyPlaneFrame(s, w, h, fit, like, pixels)
+        copy = player.startPlaneCopy(s)
         player.copiedCount = s.shownCount
         player.copiedAt = now
     else:
@@ -2170,6 +2285,13 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
         if pick < 0:
           break canvas
         let slot = (s.head + pick) mod s.slots
+        # How late it is drawn (the clock that just started or came to the
+        # frames says none), and the older ones never drawn.
+        let lateBy =
+          if player.paused or live or player.clockStart == now: -1.0
+          else: now - (player.clockStart + float(s.slotSeq[slot] - player.clockSeq) / fps)
+        s.played(lateBy, 1.0 / fps)
+        s.playDropped += pick
         # A contained picture goes in the middle of the box, on black.
         let framed = rect(float32((w - s.frameWidth) div 2), float32((h - s.frameHeight) div 2),
           s.frameWidth.float32, s.frameHeight.float32)
@@ -2183,6 +2305,8 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
         s.head = (s.head + pick + 1) mod s.slots
         s.count -= pick + 1
         broadcast(s.cond)
+  if copy.ok:
+    drawn = player.drawPlaneCopy(s, copy, w, h, fit, like, pixels)
   if claim:
     claimPlane(player.planeSlot, placed, hd)
   if drawn.w <= 0 or player.image.isNil:
@@ -2309,6 +2433,34 @@ proc status*(player: VideoPlayer): VideoStatus =
       result.error = if text.len > 0: text else: "the video could not be played"
   if result.state == "ended" and result.duration > 0:
     result.time = result.duration
+
+type VideoPlayback* = object
+  ## How a player's frames went since `playback` was last asked: what the
+  ## `video:playback` log line says (js_video.nim), and the bench reads.
+  seconds*: float
+  frames*: int       ## shown
+  late*: int         ## ... more than LateFrames frame times after they were due: a stutter
+  worstLate*: float  ## ... the latest, seconds after it was due
+  dropped*: int      ## decoded and never shown
+
+proc playback*(player: VideoPlayer): VideoPlayback =
+  ## Its frames since the last time asked (or since it was made), counted
+  ## from now again.
+  let now = nowSeconds()
+  result.seconds = now - player.playbackAt
+  player.playbackAt = now
+  if player.shared.isNil:
+    return
+  let s = player.shared
+  withLock s.lock:
+    result.frames = s.playFrames
+    result.late = s.playLate
+    result.worstLate = s.playWorst
+    result.dropped = s.playDropped
+    s.playFrames = 0
+    s.playLate = 0
+    s.playWorst = 0
+    s.playDropped = 0
 
 type VideoFallback* = object
   ## The last hardware launch of a player that gave way to ffmpeg's own.

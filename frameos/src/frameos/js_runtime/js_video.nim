@@ -83,6 +83,42 @@ else:
         return
       result.input = full
 
+  proc logSignal(owner: AppRoot, payload: JsonNode) =
+    ## A line that goes out even while the runner has the scene's log off (a
+    ## video renders fast: "render:pause"), as the runner's own signals do.
+    if owner.isNil or owner.scene.isNil or owner.scene.logger.isNil:
+      return
+    let logger = owner.scene.logger
+    let wasEnabled = logger.enabled
+    if not wasEnabled:
+      logger.enable()
+    frameos_apps.log(owner, payload)
+    if not wasEnabled:
+      logger.disable()
+
+  const PlaybackLogSeconds = 30.0
+    ## How often a playing video's `video:playback` line is logged.
+
+  proc logPlayback(owner: AppRoot, video: var JsVideo, final = false) =
+    ## How its frames went (VideoPlayback): a line every PlaybackLogSeconds
+    ## while it plays, and its last when it stops (another file under its
+    ## key, released). Late frames are stutters; the bench's `video` suite
+    ## reads these (tools/frame-bench). A stretch with no frame says nothing.
+    if video.player.isNil:
+      return
+    let now = nowSeconds()
+    if not final and now - video.playbackLogged < PlaybackLogSeconds:
+      return
+    video.playbackLogged = now
+    let p = video.player.playback()
+    if p.frames == 0 and p.dropped == 0:
+      return
+    let st = video.player.status()
+    logSignal(owner, %*{"event": "video:playback", "src": shownName(video.src), "decoder": st.decoder,
+      "plane": video.player.onPlane, "seconds": round(p.seconds, 1), "frames": p.frames,
+      "fps": round(p.frames.float / max(p.seconds, 0.001), 1), "rate": round(st.fps, 2),
+      "late": p.late, "worstLateMs": int(round(p.worstLate * 1000)), "dropped": p.dropped})
+
   proc closeVideos(runtime: JsAppRuntime) {.raises: [].} =
     ## The interpreter goes: its videos stop.
     for video in runtime.videos:
@@ -144,6 +180,7 @@ else:
       # Another video under the same key: the old one stops, and its last
       # frame shows until the new one's first (no black between two files).
       if not runtime.videos[at].player.isNil:
+        logPlayback(e.owner, runtime.videos[at], final = true)
         lastPicture = runtime.videos[at].player.image
         runtime.videos[at].player.close()
       runtime.images.del(runtime.videos[at].id)
@@ -152,11 +189,13 @@ else:
     if at < 0:
       if runtime.videos.len >= MaxVideos:
         if not runtime.videos[0].player.isNil:
+          logPlayback(e.owner, runtime.videos[0], final = true)
           runtime.videos[0].player.close()
         runtime.images.del(runtime.videos[0].id)
         runtime.videos.delete(0)
       inc runtime.nextImageId
-      var video = JsVideo(key: key, src: src, storage: storage, headers: headers, id: runtime.nextImageId)
+      var video = JsVideo(key: key, src: src, storage: storage, headers: headers, id: runtime.nextImageId,
+        playbackLogged: nowSeconds())
       var error = ""
       let source = videoSourceFor(e, arg, error)
       if error.len == 0 and not videoAvailable():
@@ -240,6 +279,7 @@ else:
         if what == "seek":
           e.runtime.videos[i].player.seek(arg{"at"}.getFloat(0))
         else:
+          logPlayback(e.owner, e.runtime.videos[i], final = true)
           e.runtime.videos[i].player.close()
           e.runtime.images.del(e.runtime.videos[i].id)
           e.runtime.videos.delete(i)
@@ -253,19 +293,6 @@ else:
     except CatchableError as err:
       frameos_apps.logError(e.owner, "frameos.video " & what & " failed: " & err.msg)
       return nimStringToJS(ctx, $(%*{"error": err.msg}))
-
-  proc logSignal(owner: AppRoot, payload: JsonNode) =
-    ## A line that goes out even while the runner has the scene's log off (a
-    ## video renders fast: "render:pause"), as the runner's own signals do.
-    if owner.isNil or owner.scene.isNil or owner.scene.logger.isNil:
-      return
-    let logger = owner.scene.logger
-    let wasEnabled = logger.enabled
-    if not wasEnabled:
-      logger.enable()
-    frameos_apps.log(owner, payload)
-    if not wasEnabled:
-      logger.disable()
 
   proc logFallback(owner: AppRoot, video: var JsVideo) =
     ## A hardware launch of `video` gave way (to ffmpeg's own decoder, or from
@@ -397,6 +424,7 @@ else:
         if player.onPlane and not owner.scene.isNil and owner.scene notin planeScenes:
           planeScenes.add owner.scene
         logFallback(owner, runtime.videos[i])
+        logPlayback(owner, runtime.videos[i])
         let shown = player.shownImage()
         if node.image != shown:
           node.image = shown

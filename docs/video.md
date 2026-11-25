@@ -198,8 +198,59 @@ and the canvas plays the video everywhere else, as it always did:
   `yuvInto`): what `GET /image`, the scene snapshot and the web sockets show,
   and what is there the moment the plane goes. The scene renders that often
   for it; nothing else of the video is a render's.
+- **The copy holds no frame back.** It reads the frame on the glass, which
+  is a decoder's or the display's memory the CPU reads uncached. Until
+  2026-11-25 it held the player's lock while it did, 100 to 160 ms on a Pi
+  Zero, and every frame due meanwhile waited: a stutter once a second. Now:
+  - The render thread marks the buffer it copies (`copying`) and copies
+    outside the lock. A reader waits only to write over, give back or free
+    that one buffer (`waitUncopied`), and fills one that is neither on the
+    glass nor being copied (`nextFill`).
+  - `yuvInto` reads each source row once into memory the CPU caches, and runs
+    without Nim's checks.
+  - The reader thread runs at nice -5 (`ReaderNice`), ahead of the render
+    thread, where the runtime may set that (root).
 - `FRAMEOS_VIDEO_PLANES=0` keeps every video in the canvas; the frame's log
   says once whether planes are on and why not (`video:planes`).
+
+### Playback in the log
+
+Every playing video logs how its frames went (`video:playback`,
+`js_video.nim` `logPlayback`, from the player's `playback`): every 30 s,
+and once more when another file takes its key or it is released. The
+render-log pause does not hold it back.
+
+- `frames`, `seconds` and `fps`: what was shown; `rate` is the video's own.
+- `late`: frames shown more than 1.5 frame times (`LateFrames`) after they
+  were due. A late frame is a stutter. A plane's reader counts them as it
+  shows each frame; for the canvas, a render does.
+- `worstLateMs`: the latest frame.
+- `dropped`: frames decoded and never shown (too late).
+- `decoder` and `plane`: the way it played.
+
+The bench's `video` suite judges a Linux frame by these lines
+(`tools/frame-bench/framebench/video.py`, the frame-bench skill).
+
+Measured on Cloud-W (Pi Zero W, 2026-11-25), frames more than 1.5 frame
+times late in 11 s of steady play, two runs each, builds in turn:
+
+| Clip | main | the copy outside the lock | ... and a free buffer | ... and the reader at nice -5 |
+|---|---|---|---|---|
+| 1080p, zero copy | 5 to 10 | 0 | 0 | 0 |
+| 720p turned, the ISP onto a plane | 126 to 153 | 52 to 65 | 18 to 33 | 4 to 6 |
+
+The bench's `video` suite on the build with all of it and the faster copy,
+each clip's start left out (Cloud-W, 2026-11-25):
+
+| Clip | Way | Frames a second | Late | Dropped | Worst late |
+|---|---|---|---|---|---|
+| 360p (24) | zero copy | 24.1 | 0 | 0 | 49 ms |
+| 720p (30) | zero copy | 29.8 | 0 | 7 in 35 s | 41 ms |
+| 1080p (30) | zero copy | 29.7 | 0 | 7 in 35 s | 47 ms |
+| 720p turned (30) | the ISP onto a plane | 30.0 | 29 in 34 s | 0 | 82 ms |
+
+A 360p video now plays all 24 of its frames a second (20 before: the copy
+under the lock was where they went).
 
 Measured on a Pi Zero W (Cloud-W, HyperPixel 4 Square, the VideoCore
 decoding, 2026-11-24), frames a second into the 720x720 panel, plane against
@@ -590,7 +641,10 @@ box). All three skip without ffmpeg.
        - A cap on what all the players ask of the VideoCore at once, so it
          is never overloaded and wedged. Four 720p videos did that; whether
          ffmpeg's decoder does the same was not tried.
-       - Why a 360p video plays 20 of its 24 frames a second.
+       - Why the zero-copy reader drops a frame every few seconds at 720p
+         and 1080p (7 in 35 s, the bench's `video` suite), and why a turned
+         picture shows about one frame a second late (its reader turns every
+         frame on the core the render thread has too).
        - The Camera wall draws a label over each feed, so its feeds stay in
          the canvas.
      - *The UI over a video* (the Video player's controls) in a plane above

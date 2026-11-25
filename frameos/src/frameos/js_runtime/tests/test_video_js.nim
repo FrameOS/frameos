@@ -287,6 +287,42 @@ export function get(app) {
         check said[0]{"reason"}.getStr() == "output VIDIOC_REQBUFS failed: Cannot allocate memory"
         check said[0]{"hardwareKept"}.getBool()
 
+  test "how a video's frames went is logged when another file takes its place, the log off or not":
+    if not haveFfmpeg:
+      skip()
+    else:
+      logged.setLen(0)
+      let ui = newUi(player, "tests/video-playback")
+      ui.scene.logger.disable()
+      discard ui.playFor(20, proc(): bool = ui.videoState{"state"}.getStr() == "playing" and
+        ui.videoState{"time"}.getFloat() >= 1.0)
+      check ui.videoState{"state"}.getStr() == "playing"
+      # Another file under its key: the first one's last line (the bench's
+      # `video` suite reads these), then nothing of it.
+      ui.scene.state["src"] = %*"videos/nothing.mp4"
+      discard ui.render()
+      var said: seq[JsonNode]
+      for entry in logged:
+        if entry{"event"}.getStr().endsWith(":video:playback"):
+          said.add entry
+      check said.len == 1
+      check not ui.scene.logger.enabled
+      if said.len == 1:
+        let p = said[0]
+        check p{"src"}.getStr() == "clip.mp4"
+        check p{"decoder"}.getStr() == "software"
+        check p{"plane"}.getBool() == false
+        check p{"frames"}.getInt() >= 5
+        check p{"seconds"}.getFloat() >= 1.0
+        check p{"fps"}.getFloat() > 0 and p{"rate"}.getFloat() > 0
+        check p{"late"}.getInt() >= 0 and p{"worstLateMs"}.getInt() >= 0 and p{"dropped"}.getInt() >= 0
+      discard ui.render()
+      var again = 0
+      for entry in logged:
+        if entry{"event"}.getStr().endsWith(":video:playback"):
+          inc again
+      check again == 1
+
   test "a video nothing covers is shown on a display plane, one under the UI stays in the canvas":
     if not haveFfmpeg:
       skip()

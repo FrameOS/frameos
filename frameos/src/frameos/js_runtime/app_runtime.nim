@@ -94,6 +94,7 @@ type
     when not defined(frameosEmbedded) and not defined(frameosWasm):
       player: VideoPlayer
       toldFallbacks: int ## the player's fallbacks to ffmpeg's own already logged
+      playbackLogged: float ## when its last `video:playback` line was (js_video.nim logPlayback)
       spotAt: tuple[x, y, w, h: int] ## where its <img> was on the panel the last render (a plane's)
 
   JsAppRuntime* = ref object
