@@ -79,7 +79,8 @@ def test_nothing_talks_to_the_panel_while_a_picture_is_owed():
         "fos_display_blit refreshes in place without waiting for the refresh task"
     )
     # A deep sleep and a restart wait for the refresh too.
-    assert "esp_register_shutdown_handler(refresh_shutdown)" in DISPLAY.read_text()
+    assert "refresh_shutdown()" in functions["fos_display_before_restart"]
+    assert "fos_on_restart(fos_display_before_restart)" in (ESP32_DIR / "main" / "main.c").read_text()
 
 
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")

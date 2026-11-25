@@ -214,10 +214,6 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     for (size_t i = 0; i < FOS_PANEL_PARTIAL_COUNT; i++) {
         if (strcmp(fos_panel_partial_table[i].name, entry->name) == 0) s_partial = &fos_panel_partial_table[i];
     }
-    static bool partial_shutdown_registered = false;
-    if (s_partial && !partial_shutdown_registered) {
-        partial_shutdown_registered = esp_register_shutdown_handler(partial_shutdown) == ESP_OK;
-    }
     const int8_t panel_pins[] = {config->rst, config->dc, config->cs, config->cs2,
                                  config->busy, config->sck, config->mosi};
     memcpy(s_panel_pins, panel_pins, sizeof(s_panel_pins));
@@ -619,6 +615,12 @@ static void partial_shutdown(void)
     s_panel_awake = false;
 }
 
+void fos_display_before_restart(void)
+{
+    refresh_shutdown();
+    partial_shutdown();
+}
+
 static bool refresh_task_ready(void)
 {
     if (s_refresh_task != NULL) return true;
@@ -631,7 +633,6 @@ static bool refresh_task_ready(void)
         s_refresh_task = NULL;
         goto fail;
     }
-    esp_register_shutdown_handler(refresh_shutdown);
     return true;
 fail:
     if (s_refresh_lock) vSemaphoreDelete(s_refresh_lock);

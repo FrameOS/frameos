@@ -20,3 +20,22 @@
  * any task: the render task draws it (it alone touches the panel), and the
  * caller waits for it at most ~2 s (fos_client.c). Call it, then restart. */
 void fos_restart_notice(const char *text);
+
+#include <stdbool.h>
+
+/* What FrameOS does on the way down from esp_restart() (a reboot, an update,
+ * the console's `restart`): a hook a module, run newest first, as ESP-IDF
+ * runs its own. Never esp_register_shutdown_handler(): ESP-IDF keeps five
+ * such handlers in all (esp_system.c SHUTDOWN_HANDLERS_NO), its timekeeping
+ * takes one and the Wi-Fi driver one more when its station or access point
+ * first comes up. FrameOS's modules once took six of their own, so on a board
+ * that brings Wi-Fi up late (a frame with no network saved, whose frame page
+ * scans for one) the driver found the five taken and
+ * esp_netif_create_default_wifi_sta aborted the board: the frame page's gear
+ * restarted a reTerminal Sticky flashed without Wi-Fi (2026-11-25), and on a
+ * board that joined early the sixth hook had been left out without a word.
+ * FrameOS takes one of the five, here (fos_restart.c), the first time a hook
+ * is added. The same hook twice is kept once; false when the list is full
+ * (FOS_RESTART_HOOKS_MAX). */
+typedef void (*fos_restart_hook_t)(void);
+bool fos_on_restart(fos_restart_hook_t hook);

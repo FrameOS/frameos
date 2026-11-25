@@ -24,6 +24,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_restart.h"
 #include "fos_events_gen.h"
 #include "fos_json_guard.h"
 #include "fos_mem.h"
@@ -2807,7 +2808,7 @@ static bool store_task_ready(void)
         s_store_task = NULL;
         return false;
     }
-    esp_register_shutdown_handler(store_shutdown);
+    fos_on_restart(store_shutdown);
     return true;
 }
 

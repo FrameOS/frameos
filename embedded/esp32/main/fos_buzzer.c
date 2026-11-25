@@ -13,6 +13,7 @@
 
 #include "fos_codec.h"
 #include "fos_config.h"
+#include "fos_restart.h"
 #include "fos_led.h"
 
 /* Nothing else in the firmware uses LEDC. Take the last timer and channel
@@ -229,7 +230,7 @@ void fos_buzzer_init(void)
      * "Starting...", 2026-11-23). Take the pin now, first thing in app_main,
      * idle low; the first click later finds it ready, on any task. */
     attach(fos_config()->buzzer_pin);
-    esp_register_shutdown_handler(quiet_for_restart);
+    fos_on_restart(quiet_for_restart);
     s_lock = xSemaphoreCreateMutex();
     const esp_timer_create_args_t args = {
         .callback = stop_tone,

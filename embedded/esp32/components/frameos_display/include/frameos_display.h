@@ -321,6 +321,11 @@ void fos_display_glass_wait(void);
  * for a while: pack the canvas and hand it to fos_display_update, not as input. */
 bool fos_display_settle_due(int64_t now_us);
 void fos_display_park(void);
+
+/* Before a restart (main.c adds it to fos_on_restart): a refresh in flight
+ * waited out, bounded, and a panel a partial update left awake put to sleep,
+ * its high voltage off. Safe before the display is up. */
+void fos_display_before_restart(void);
 void fos_display_park_if_idle(int64_t now_us);
 /* A block of PSRAM kept for good, NULL when there is none to give. */
 void *fos_display_alloc_psram(size_t len);

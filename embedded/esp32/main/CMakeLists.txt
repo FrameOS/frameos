@@ -6,6 +6,7 @@ idf_component_register(
         "fos_buttons.c"
         "fos_button_timing.c"
         "fos_buzzer.c"
+        "fos_restart.c"
         "fos_led.c"
         "fos_i2c.c"
         "fos_charger.c"
