@@ -962,14 +962,15 @@ def _asked_restart(con, frame, t, where, rotate=None):
     turned = [int(m.group(1)) for x in lines for m in [re.search(r'nim runtime initialized: \S+ rotate=(\d+)', x)] if m]
     boots = [b for b in con.boots if b >= t]
     # The notice it drew before going (fos_restart.h): on a board that has the
-    # fast waveform or an LCD, `ESP_OK`; nothing on firmware before it.
+    # fast waveform or an LCD, `ok` (`ESP_OK` on the firmware that first had
+    # it: the image names its reasons since); nothing on firmware before it.
     notices = [(event(x) or {}).get('status') for x in lines if '"event":"restart:notice"' in x]
     out = {'restart_ms': round((t_boot - t) * 1000), 'to_render_ms': round((t_done - t) * 1000) if t_done else None,
            'wake': causes[-1] if causes else None, 'rotate': turned[-1] if turned else None, 'boots': len(boots),
            'notice': notices[-1] if notices else None}
     if linux:
         out['applied_by'] = 'restart' if '"event":"bootup"' in (line or '') else 'reload'
-    if notices and notices[-1] != 'ESP_OK':
+    if notices and notices[-1] not in ('ok', 'ESP_OK'):
         issues.append(issue('note', 'restart_notice', where, f'the restart notice was not drawn: {notices[-1]}'))
     if out['restart_ms'] > 25000:
         issues.append(issue('slow', 'restart_slow', where, f"{out['restart_ms']} ms from the ask to the boot"))
@@ -1018,8 +1019,18 @@ def _switcher_pages(ctx, frame, rounds=2, pages=3):
     for r in range(rounds):
         where = f'switcher round {r + 1}'
         con.drain()
+        t_ask = time.time()
         con.send('event sceneSwitcher')
-        t_open, _, _ = wait_scene_render(con, render_timeout(frame), lambda x: 'system/sceneSwitcher' in x or '"Scene switcher"' in x)
+        t_open, _, _ = wait_scene_render(con, drag_wait, lambda x: 'system/sceneSwitcher' in x or '"Scene switcher"' in x)
+        if not t_open:
+            # Opened a few seconds after the render that closed it, its
+            # picture is a burst's quiet frame: drawn, and only counted in the
+            # `render:burst` line (the E1003's second round, which waited out
+            # the render timeout and said it never opened).
+            seen = con.history_since(t_ask)
+            if (any('"event":"event:open"' in x and 'system/sceneSwitcher' in x for x in seen) and
+                    any('"event":"render:burst"' in x for x in seen)):
+                t_open = time.time()
         steps, fits = [], False
         for p in range(pages):
             con.drain()
