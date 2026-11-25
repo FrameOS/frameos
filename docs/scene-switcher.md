@@ -143,7 +143,7 @@ It shows them grouped (`grouped`, the same rule as the desktops' JavaScript
 `grouped`, docs/scene-layouts.md "Long lists of scenes"): a category's scenes
 together under a heading with its name, "System" first (the frame's own apps:
 the Scene store, Files, the terminal, the code editor, Fonts, the readers, the
-Calculator; the owner's call, 2026-11-25), then the categories sorted by name
+Calculator, the Browser; the owner's call, 2026-11-25), then the categories sorted by name
 with case aside (the raw name breaking a tie), each trimmed, and the scenes
 without one, or in a category named "Other" in any case, last under "Other".
 Within a group the scenes keep the list's order (the flash.frameos.net
