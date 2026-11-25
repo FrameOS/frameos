@@ -128,8 +128,8 @@ static const lcd_board_t k_boards[] = {
         .bounce_lines = 20,
     },
     /* Guition ESP32-4848S040: no IO expander, so the controller's CS is a
-     * GPIO and nothing resets it. GPIO20 is the S3's USB D+ pad, freed from
-     * the USB-Serial/JTAG PHY by touch init (fos_touch.c). Wiring, porches
+     * GPIO and nothing resets it. GPIO20 (G1) is the S3's USB D+ pad, which
+     * rgb_init claims from the USB-Serial/JTAG PHY (s_claim_pads). Wiring, porches
      * and init values are ESPHome's GUITION-4848S040 model
      * (components/mipi_rgb/models/guition.py). */
     {
@@ -188,6 +188,13 @@ void fos_lcd_st7701s_select_board(const char *hardware_preset, const char *panel
 const char *fos_lcd_st7701s_board(void)
 {
     return s_board->preset;
+}
+
+static void (*s_claim_pads)(int pin_a, int pin_b) = NULL;
+
+void fos_lcd_st7701s_set_pad_claimer(void (*claim)(int pin_a, int pin_b))
+{
+    s_claim_pads = claim;
 }
 
 void fos_lcd_st7701s_size(int *width, int *height)
@@ -410,10 +417,12 @@ static esp_err_t expander_init(void)
 /* ------------------------------------------------ the controller's SPI */
 
 /* Seeed's lcd_panel_config.c, bit for bit: a 9-bit frame is the D/C bit then
- * the byte, MSB first, clocked at ~50 kHz; chip-select and reset are the
- * expander's, clock and data two GPIOs. The stray clocks their code leaves
- * around a frame are kept — the controller drops whatever is pending when
- * CS rises, and this is the waveform the glass is known to accept. */
+ * the byte, MSB first, clocked at ~50 kHz; clock and data are two GPIOs, and
+ * chip-select and reset the expander's (the Guition's chip-select is a GPIO,
+ * gpio_lcd_cs, and nothing resets its controller). The stray clocks their
+ * code leaves around a frame are kept — the controller drops whatever is
+ * pending when CS rises, and this is the waveform the glass is known to
+ * accept. */
 #define SPI_DELAY() esp_rom_delay_us(10)
 
 static void spi_sck(int level) { gpio_set_level((gpio_num_t)s_board->spi_sck, level); }
@@ -658,7 +667,13 @@ static esp_err_t rgb_init(void)
         .disp_gpio_num = -1,
         .flags.fb_in_psram = 1,
     };
-    for (int i = 0; i < 16; i++) config.data_gpio_nums[i] = b->data[i];
+    for (int i = 0; i < 16; i++) {
+        config.data_gpio_nums[i] = b->data[i];
+        /* A data line on a USB pad (the Guition's G1, GPIO20) is the panel's
+         * from here on: with the PHY still on the pad, that bit of every
+         * pixel (the boot splash's included) is the PHY's, not ours. */
+        if (s_claim_pads) s_claim_pads(b->data[i], -1);
+    }
     esp_err_t err = esp_lcd_new_rgb_panel(&config, &s_panel);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RGB panel failed: %s", esp_err_to_name(err));

@@ -25,6 +25,7 @@ export const TOUCH_PRESETS = new Set([
   'seeed_reterminal_sticky',
   'seeed_reterminal_e1003',
   'seeed_sensecap_indicator_d1',
+  'guition_esp32_4848s040',
   'sunton_esp32_8048s070',
   'waveshare_esp32_s3_touch_amoled_1_75',
 ])

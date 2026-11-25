@@ -180,6 +180,8 @@ static void test_event_maps(void)
     CHECK(strstr(sunton, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "sunton left edge is back");
     const char *guition = event_map("guition_esp32_4848s040");
     CHECK(strstr(guition, "button") == NULL, "guition has no key");
+    /* No key rules: the swipes open the list, with no comma before them. */
+    CHECK(strncmp(guition, "[{\"event\":\"edgeSwipe\"", 20) == 0, "guition map starts with a swipe");
     CHECK(strstr(guition, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "guition top edge");
     /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks, and
      * the edges swipe as on every touch preset. */

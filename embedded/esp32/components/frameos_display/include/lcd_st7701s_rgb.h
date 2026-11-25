@@ -1,7 +1,8 @@
 /*
  * IPS LCDs on the ESP32-S3's parallel RGB interface: the ST7701S 480x480 of
- * the Seeed SenseCAP Indicator (D1, D1S, D1L, D1Pro) and the EK9716 800x480
- * of the Sunton (GUITION) ESP32-8048S070.
+ * the Seeed SenseCAP Indicator (D1, D1S, D1L, D1Pro) and of the Guition
+ * ESP32-4848S040, and the EK9716 800x480 of the Sunton (GUITION)
+ * ESP32-8048S070.
  *
  * Not a Waveshare panel: a hand-written entry in the runtime panel table
  * (generate_panel_table.py EXTRA_PANELS) with the same init/clear/display/
@@ -17,12 +18,15 @@
  * LCD peripheral's. The Indicator's controller setup goes over a 9-bit
  * 3-wire SPI bit-banged on two GPIOs with chip-select and reset on an I2C
  * IO expander (a TCA9535 at 0x20, an HT8574 at 0x39 on later batches), the
- * way Seeed's own firmware does it; the Sunton's EK9716 scans what the
- * host writes and takes no setup at all. All of that is the board's
- * wiring, so the hardware preset selects the table, or the panel key when
- * there is no preset (fos_lcd_st7701s_select_board): LCD_ST7701S_480x480
- * on the Indicator and LCD_EK9716_800x480 on the Sunton. The two boards
- * known are the SenseCAP Indicator and the Sunton ESP32-8048S070.
+ * way Seeed's own firmware does it. The Guition's is the same SPI with
+ * chip-select on a GPIO (39) and no reset line, and no expander at all; the
+ * Sunton's EK9716 scans what the host writes and takes no setup at all. All
+ * of that is the board's wiring, so the hardware preset selects the table,
+ * or the panel key when there is no preset (fos_lcd_st7701s_select_board):
+ * LCD_EK9716_800x480 is the Sunton's, and LCD_ST7701S_480x480 the
+ * Indicator's, so the Guition, on the same glass, works only through its
+ * preset. The three boards known are the SenseCAP Indicator, the Guition
+ * ESP32-4848S040 and the Sunton ESP32-8048S070.
  *
  * The Indicator's expander I2C bus (SDA39/SCL40) also carries the FT6336U
  * touch controller: fos_lcd_st7701s_i2c_bus hands the bus to fos_touch.c
@@ -48,6 +52,13 @@ void fos_lcd_st7701s_select_board(const char *hardware_preset, const char *panel
 
 /* The preset of the board fos_lcd_st7701s_select_board chose. */
 const char *fos_lcd_st7701s_board(void);
+
+/* GPIO19/20 are the S3's native USB pads, and main owns them
+ * (fos_usb_pads.c). A board whose RGB data lines use one (the Guition's G1
+ * on GPIO20) claims it through `claim` before the panel comes up, so the
+ * USB-Serial/JTAG PHY is off the pad and the console leaves it alone. Set
+ * it before fos_display_init; `claim` ignores any pin that is not a pad. */
+void fos_lcd_st7701s_set_pad_claimer(void (*claim)(int pin_a, int pin_b));
 
 /* The selected board's glass, in pixels. The panel table entry the rest of
  * the firmware sizes the render target, the canvas and the backend's

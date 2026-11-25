@@ -184,7 +184,7 @@ static const struct {
     {"sunton_esp32_8048s070", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
     /* The Guition ESP32-4848S040: a touch screen and no key (its BOOT pad,
      * GPIO0, is the glass's R4 data line), so the edges are the whole map. */
-    {"guition_esp32_4848s040", TOUCH_EDGE_SWIPES, NULL, false},
+    {"guition_esp32_4848s040", "", NULL, true},
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
 };
 
@@ -194,9 +194,12 @@ void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
     if (hardware_preset == NULL) return;
     for (size_t i = 0; i < sizeof(k_event_maps) / sizeof(k_event_maps[0]); i++) {
         if (strcmp(hardware_preset, k_event_maps[i].preset) != 0) continue;
-        snprintf(out, out_len, "[%s%s%s%s%s]", k_event_maps[i].keys, k_event_maps[i].voice ? "," : "",
-                 k_event_maps[i].voice ? k_event_maps[i].voice : "", k_event_maps[i].edge_swipes ? "," : "",
-                 k_event_maps[i].edge_swipes ? TOUCH_EDGE_SWIPES : "");
+        /* A board with no key (the Guition) has "" for keys: no comma after it. */
+        const char *keys = k_event_maps[i].keys;
+        const char *voice = k_event_maps[i].voice;
+        bool swipes = k_event_maps[i].edge_swipes;
+        snprintf(out, out_len, "[%s%s%s%s%s]", keys, keys[0] && voice ? "," : "", voice ? voice : "",
+                 (keys[0] || voice) && swipes ? "," : "", swipes ? TOUCH_EDGE_SWIPES : "");
         return;
     }
 }
