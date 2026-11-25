@@ -390,7 +390,11 @@ def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
     # More than one file may be never becomes a combined file.
     store = fns["store_backend_payload"]
     assert store.index("set->bytes > FOS_SCENE_STORE_MAX_BYTES") < store.index("fos_scene_store_write_set(SCENES_PATH")
-    assert "(512 * 1024)" in scenes and "SCENES_MAX_BYTES" not in scenes.replace("FOS_SCENE_STORE_MAX_BYTES", "")
+    # What is held in memory is 512 KB, said once (fos_scenes.h: the console's
+    # `scenes-deflated` inflates to no more).
+    assert "#define FOS_SCENES_HELD_MAX_BYTES (512 * 1024)" in _source("fos_scenes.h")
+    assert "#define SCENES_HELD_MAX_BYTES FOS_SCENES_HELD_MAX_BYTES" in scenes
+    assert "(512 * 1024)" not in scenes and "SCENES_MAX_BYTES" not in scenes.replace("FOS_SCENE_STORE_MAX_BYTES", "")
 
 
 def test_a_set_taken_whole_is_the_list_not_the_catalog_from_before():
@@ -490,7 +494,7 @@ def test_a_change_that_shows_its_scene_is_written_unpaced():
     fns = _functions(scenes)
     change = fns["apply_store_change"]
     order = [change.index(s) for s in (
-        "store_lock()", "s_store_urgent = urgent", "ensure_split_locked()", "fos_scene_store_apply(",
+        "store_lock()", "s_store_urgent = urgent", "ensure_split_locked(&set_waits)", "fos_scene_store_apply(",
         "s_store_urgent = false", "store_unlock()")]
     assert order == sorted(order), "apply_store_change: urgent from before the split to before the unlock"
     assert fns["store_pace_hook"].index("!s_store_urgent") < fns["store_pace_hook"].index("store_pace()")
@@ -564,6 +568,6 @@ def test_the_scenes_module_asks_flash_as_little_as_the_store_does():
     # The apply on the render task and every change ask the tracker first.
     assert "if (s_patch_pending && !combined_stored()) return apply_index_change();" in fns["fos_scenes_apply_pending"]
     assert "combined_stored() ? read_file(SCENES_PATH, &len) : NULL" in fns["fos_scenes_apply_pending"]
-    assert fns["ensure_split_locked"].index("!combined_stored()") < fns["ensure_split_locked"].index("stat(SCENES_PATH")
+    assert "combined_stored() && stat(SCENES_PATH" in fns["ensure_split_locked"]
     store = _source("fos_scene_store.c")
     assert "remove(tmp);\n    if (s_hooks.make_room)" not in store, "a write removed its tmp first: one more lookup"
