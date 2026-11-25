@@ -39,10 +39,15 @@ sleep) are fixed and host-tested. Still open:
   for the frame" bookkeeping an ESP32 gets. A queue client
   (`POST /embedded/commands`, `render` and `reboot` are the verbs that mean
   anything here) is also what a cloud link would carry.
-- **No FrameOS Cloud link** — blocked on the hub rendering for thin clients
-  (`docs/convergence-todo.md` §3). When that exists: a WebSocket client over
-  altcp TLS, Ed25519 enrollment (Monocypher is portable), and the contract's
-  `pico` profile (`docs/cloud-frames-contract.json` has only `linux`/`esp32`).
+- **No FrameOS Cloud link.** Not blocked any more: the cloud draws for the
+  ESP32-C3 (`docs/cloud-frames.md` "Hardware the cloud renders for") and
+  counts a `pico` board as cloud-rendered (`cloud-rendered.ts`). Left is the
+  board's half: a WebSocket client over altcp TLS, Ed25519 enrollment
+  (Monocypher is portable), the render pull pointed at the cloud with the
+  device's token, the contract's `pico` profile
+  (`docs/cloud-frames-contract.json` has only `linux`/`esp32`), and a way to
+  set a Pico up from the cloud's add-frame panel (a UF2, then `usb_api` with
+  a claim code; today it flashes only ESP32s).
 - The ESP32-C3 thin client's buttons do not reach its scene: the firmware
   has no runtime there (`frameos_nim_available()` is false) and drops the
   edges. (Events sent to it do reach the scene: the backend holds them for

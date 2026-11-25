@@ -371,6 +371,12 @@ to end.
   `Flash size 16MB: using the esp32-s3-16mb image built for that layout`,
   the board boots, and its first OTA check asks for
   `platform=esp32-s3-16mb`; an 8 MB board stays on `esp32-s3-generic`.
+- [ ] **An ESP32-C3 from the cloud flasher** (TRMNL OG, XTEINK X4; added
+  2026-11-25): on a plan with room for a frame the cloud draws, "Connect &
+  flash" writes `esp32-c3-generic` (or the 16 MB layout on the X4), the board
+  enrolls, and its panel shows the picture the cloud drew within a pull;
+  on the free plan the flash is refused before the port prompt, with the
+  link to the plans.
 - [ ] **Backend OTA onto the release image** (needs an OTA-capable board on
   a self-hosted backend — the 4 MB C3 is not one): "Update over the air" /
   Full deploy logs `ota:backend downloading … verified`, the frames list

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bootWaitFailureMessage,
   browserTimeZone,
+  cloudRenderedRoomError,
   describeSerialPort,
   Esp32CloudFlasher,
   layoutMatchedPlatform,
@@ -220,6 +221,9 @@ function mockCloudApi(
   // The enrollment watcher's frames-list snapshot/polling. Defaults to an
   // account with no frames that never gains one.
   frames: () => unknown[] = () => [],
+  // GET /api/account/usage's cloud_rendered_frames: the room an ESP32-C3
+  // takes. Defaults to a plan with one free.
+  cloudRendered: { count: number; max_count: number } = { count: 0, max_count: 1 },
 ) {
   fetchMock.mockImplementation((input) => {
     const url = String(input);
@@ -237,6 +241,9 @@ function mockCloudApi(
     }
     if (url === "/api/frames") {
       return Promise.resolve(Response.json({ frames: frames() }));
+    }
+    if (url === "/api/account/usage") {
+      return Promise.resolve(Response.json({ usage: { cloud_rendered_frames: cloudRendered } }));
     }
     return Promise.reject(new Error(`unexpected fetch: ${url}`));
   });
@@ -289,6 +296,23 @@ afterEach(() => {
   esptool.calls.disconnects = 0;
   vi.unstubAllGlobals();
   delete (navigator as { serial?: unknown }).serial;
+});
+
+describe("cloudRenderedRoomError", () => {
+  it("says what the plan lacks when it has no room for one more frame drawn by the cloud", () => {
+    expect(cloudRenderedRoomError({ cloud_rendered_frames: { count: 0, max_count: 0 } })).toMatch(/needs a paid plan/);
+    expect(cloudRenderedRoomError({ cloud_rendered_frames: { count: 3, max_count: 3 } })).toMatch(
+      /has 3 frames drawn by FrameOS Cloud, and all of them are in use/,
+    );
+    expect(cloudRenderedRoomError({ cloud_rendered_frames: { count: 1, max_count: 1 } })).toMatch(/has 1 frame drawn/);
+  });
+
+  it("refuses nothing when there is room or the payload says nothing", () => {
+    expect(cloudRenderedRoomError({ cloud_rendered_frames: { count: 2, max_count: 3 } })).toBeUndefined();
+    expect(cloudRenderedRoomError(null)).toBeUndefined();
+    expect(cloudRenderedRoomError({})).toBeUndefined();
+    expect(cloudRenderedRoomError({ cloud_rendered_frames: { count: "1", max_count: 0 } })).toBeUndefined();
+  });
 });
 
 describe("wifiInputError", () => {
@@ -739,13 +763,13 @@ describe("Esp32CloudFlasher", () => {
     expect(port.writes.some((line) => line.startsWith("set panel"))).toBe(false);
   });
 
-  it("lists every ESP32-S3 hardware bundle and no ESP32-C3 boards", async () => {
+  it("lists every hardware bundle, the ESP32-C3 boards apart", async () => {
     // Mirrors the S3 subset of EMBEDDED_HARDWARE_PRESETS in
     // backend/app/tasks/embedded_firmware.py (and the preset table in
     // fos_console.c) — a preset missing here cannot be provisioned from the
-    // browser at all. The C3 boards (TRMNL OG/BWRY, XTEINK X4) are thin
-    // clients with no cloud render source yet, so the cloud flasher must not
-    // offer them until the cloud can render for them.
+    // browser at all. The C3 boards are thin clients the cloud draws for
+    // (docs/cloud-frames.md "Hardware the cloud renders for"), in a group of
+    // their own that says so.
     mockCloudApi();
     stubSerial(createHealthyPort());
     render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
@@ -776,11 +800,66 @@ describe("Esp32CloudFlasher", () => {
         "hw:elecrow_crowpanel_5in79",
       ]),
     );
-    expect(values).not.toContain("hw:trmnl_og");
-    expect(values).not.toContain("hw:trmnl_bwry");
-    expect(values).not.toContain("hw:xteink_x4");
-    expect(values).not.toContain("hw:seeed_xiao_epaper_7in5");
+    const c3Group = picker.querySelector('optgroup[label^="ESP32-C3 boards"]');
+    expect(
+      Array.from(c3Group?.querySelectorAll("option") ?? []).map((option) => option.getAttribute("value")),
+    ).toEqual([
+      "hw:trmnl_og",
+      "hw:trmnl_bwry",
+      "hw:xteink_x4",
+      "hw:seeed_xiao_epaper_7in5",
+      "hw:esp32_c3_042_oled",
+    ]);
   });
+
+  it("flashes an ESP32-C3 board with the C3 image when the plan has room for it", async () => {
+    mockCloudApi();
+    esptool.calls.chipName = "ESP32-C3";
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await fillRequiredFields("hw:trmnl_og");
+    expect(screen.getByText(/FrameOS Cloud draws them/)).toBeTruthy();
+
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(fetchedUrls()).toContain("/api/account/usage");
+    expect(fetchedUrls()).toContain("/api/frames/firmware?platform=esp32-c3-generic");
+    expect(port.writes).toContain('set hardware "trmnl_og"');
+  });
+
+  it("refuses an ESP32-C3 board before flashing when the plan has no room for it", async () => {
+    // Enrollment would refuse it only after the flash (enroll/route.ts
+    // assertCloudRenderedQuota), and the board drops its code on a 4xx.
+    mockCloudApi(undefined, undefined, undefined, { count: 0, max_count: 0 });
+    esptool.calls.chipName = "ESP32-C3";
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await fillRequiredFields("hw:xteink_x4");
+
+    clickFlash();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/needs a paid plan/);
+    expect(alert.querySelector("a")?.getAttribute("href")).toBe("/account/usage");
+    expect(esptool.calls.main).not.toHaveBeenCalled();
+    expect(fetchedUrls()).not.toContain("/api/frames/claim-tokens");
+  });
+
+  it("asks nothing of the plan for an ESP32-S3 board", async () => {
+    mockCloudApi();
+    stubSerial(createHealthyPort());
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await fillRequiredFields("hw:seeed_reterminal_e1001");
+    expect(screen.queryByText(/FrameOS Cloud draws them/)).toBeNull();
+
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    expect(fetchedUrls()).not.toContain("/api/account/usage");
+  });
+
 
   it("hides the panel picker for releases without the all-panels firmware", async () => {
     // Old single-panel firmware hard-fails display init on any other panel,

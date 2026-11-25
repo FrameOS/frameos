@@ -58,16 +58,15 @@ const genericC3FirmwareSuffix = '-esp32-c3-generic.bin'
 // default: nobody actually runs the firmware's baked-in EPD_7in5_V2 combo,
 // and silently provisioning any one bundle would misconfigure every other
 // board — so the picker starts on a placeholder and flashing requires a
-// choice. `platform` picks the firmware asset: ESP32-C3 boards would need the
-// esp32-c3-generic build (thin-client only — no PSRAM, so no on-device
+// choice. `platform` picks the firmware asset: ESP32-C3 boards take the
+// esp32-c3-generic build (thin-client only: no PSRAM, so no on-device
 // renderer), everything else flashes the esp32-s3-generic one.
 //
-// ESP32-C3 boards (TRMNL OG/BWRY, XTEINK X4) are deliberately NOT offered
-// here yet: a cloud-managed C3 frame has no render source (the cloud's S3
-// frames render on-device; thin clients pull bitmaps from a self-hosted
-// backend), so flashing one from the cloud would hand the user a status
-// screen. Re-add them once the cloud can render for thin clients — the
-// platform plumbing below already supports the esp32-c3-generic asset.
+// An ESP32-C3 is drawn by the cloud (docs/cloud-frames.md "Hardware the cloud
+// renders for", firmware 2026.11.7 on), and counts against the plan's
+// cloud_rendered_frames, which the free plan has none of. Enrollment refuses
+// one past it only after the board is flashed, so the flash asks first
+// (cloudRenderedRoomError).
 const boardChoices = [
   {
     label: 'Waveshare PhotoPainter 7.3" (ESP32-S3 — buttons, SD card)',
@@ -145,7 +144,42 @@ const boardChoices = [
     value: 'hw:elecrow_crowpanel_5in79',
     platform: genericPlatform,
   },
+  // The C3 presets of EMBEDDED_HARDWARE_PRESETS (esp32Hardware.ts, fos_console.c).
+  { label: 'TRMNL OG (7.5" ESP32-C3)', value: 'hw:trmnl_og', platform: genericC3Platform },
+  { label: 'TRMNL BWRY (7.5" color ESP32-C3)', value: 'hw:trmnl_bwry', platform: genericC3Platform },
+  { label: 'XTEINK X4 (4.26" ESP32-C3)', value: 'hw:xteink_x4', platform: genericC3Platform },
+  {
+    label: 'Seeed XIAO 7.5" ePaper Panel (ESP32-C3)',
+    value: 'hw:seeed_xiao_epaper_7in5',
+    platform: genericC3Platform,
+  },
+  {
+    label: 'ESP32-C3 0.42" OLED dev board',
+    value: 'hw:esp32_c3_042_oled',
+    platform: genericC3Platform,
+  },
 ] as const
+
+/** The account's room for one more frame the cloud draws, from GET
+ * /api/account/usage's `usage.cloud_rendered_frames`: what to say when there
+ * is none, else undefined. A payload that says nothing is no refusal: the
+ * enrollment still counts. */
+export function cloudRenderedRoomError(usage: unknown): string | undefined {
+  const room =
+    usage && typeof usage === 'object'
+      ? (usage as { cloud_rendered_frames?: { count?: unknown; max_count?: unknown } }).cloud_rendered_frames
+      : undefined
+  const count = room?.count
+  const max = room?.max_count
+  if (typeof count !== 'number' || typeof max !== 'number' || count < max) {
+    return undefined
+  }
+  return max > 0
+    ? `Your plan has ${max} frame${max === 1 ? '' : 's'} drawn by FrameOS Cloud, and all of them are in use. ` +
+        'Free one up or move to a larger plan. Nothing was flashed.'
+    : 'An ESP32-C3 board needs a paid plan: it has too little memory to draw scenes, so FrameOS Cloud draws them ' +
+        'for it. Nothing was flashed.'
+}
 
 // The console's `set pins` spec (fos_config_parse_pins): comma-separated
 // key=gpio pairs, -1 meaning "not wired".
@@ -724,6 +758,8 @@ export function Esp32CloudFlasher({
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
   const [error, setError] = useState<string | undefined>()
+  // The error is the plan's (cloudRenderedRoomError): it links to the plans.
+  const [planNeeded, setPlanNeeded] = useState(false)
   // Panel selection needs the all-panels firmware; the picker only shows when
   // the latest release actually publishes it (older releases hard-fail the
   // display init on a panel other than the one compiled in).
@@ -768,6 +804,27 @@ export function Esp32CloudFlasher({
   const chosenBoard = boardChoices.find((choice) => choice.value === panelChoice)
   const firmwarePlatform = chosenBoard?.platform ?? genericPlatform
   const needsCarrierPanel = Boolean(chosenBoard && 'takesAnyPanel' in chosenBoard)
+  const drawnByCloud = firmwarePlatform === genericC3Platform
+
+  // The account's usage (GET /api/account/usage), asked once a board the cloud
+  // draws for is picked and read by the flash; null when it could not be read,
+  // which refuses nothing (the enrollment still counts).
+  const usageRead = useRef<Promise<unknown> | null>(null)
+  function readUsage(): Promise<unknown> {
+    usageRead.current ??= fetch('/api/account/usage')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: unknown) => (data && typeof data === 'object' ? (data as { usage?: unknown }).usage : null))
+      .catch(() => null)
+    return usageRead.current
+  }
+
+  function pickHardware(value: string): void {
+    setPanelChoice(value)
+    const picked = boardChoices.find((choice) => choice.value === value)
+    if (!reenrollFrame && picked?.platform === genericC3Platform) {
+      void readUsage()
+    }
+  }
 
   // The handoff to the freshly enrolled frame: once provisioning is done the
   // board reboots and enrolls on its own schedule, so watch the frames list
@@ -849,6 +906,7 @@ export function Esp32CloudFlasher({
     if (busyRef.current) {
       return
     }
+    setPlanNeeded(false)
     const inputError = wifiInputError(wifiSsid, wifiPassword)
     if (inputError) {
       setError(inputError)
@@ -876,6 +934,25 @@ export function Esp32CloudFlasher({
       setError('Pick the e-paper panel plugged into your board.')
       setPhase('error')
       return
+    }
+    // A new frame the cloud draws for, asked before anything is flashed (see
+    // boardChoices). A board being re-enrolled is already counted, and only
+    // re-enrollment hands over a held port, so nothing waits before
+    // takeHeldPort. The answer was asked for when the board was picked, so the
+    // click keeps its user activation for the port prompt.
+    if (drawnByCloud && !reenrollFrame) {
+      busyRef.current = true
+      const usage = await readUsage().finally(() => {
+        busyRef.current = false
+      })
+      usageRead.current = null
+      const roomError = cloudRenderedRoomError(usage)
+      if (roomError) {
+        setError(roomError)
+        setPlanNeeded(true)
+        setPhase('error')
+        return
+      }
     }
     if (rememberWifi && wifiSsid) {
       storeRememberedWifi(wifiSsid, wifiPassword)
@@ -1213,18 +1290,29 @@ export function Esp32CloudFlasher({
               aria-label="Frame hardware"
               className={controlClassName}
               disabled={busy}
-              onChange={(event) => setPanelChoice(event.target.value)}
+              onChange={(event) => pickHardware(event.target.value)}
               value={panelChoice}
             >
               <option disabled value="">
                 Choose your board or e-paper panel…
               </option>
               <optgroup label="Integrated boards">
-                {boardChoices.map((choice) => (
-                  <option key={choice.value} value={choice.value}>
-                    {choice.label}
-                  </option>
-                ))}
+                {boardChoices
+                  .filter((choice) => choice.platform !== genericC3Platform)
+                  .map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+              </optgroup>
+              <optgroup label="ESP32-C3 boards, drawn by FrameOS Cloud (paid plans)">
+                {boardChoices
+                  .filter((choice) => choice.platform === genericC3Platform)
+                  .map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
               </optgroup>
               <optgroup label="Seeed XIAO ESP32-S3 + Waveshare panel">
                 {esp32Panels.map((panel) => (
@@ -1234,6 +1322,13 @@ export function Esp32CloudFlasher({
                 ))}
               </optgroup>
             </select>
+            {drawnByCloud ? (
+              <p className="frameos-muted text-xs">
+                An ESP32-C3 has too little memory to draw scenes, so FrameOS Cloud draws them and sends the board the
+                picture. Each one counts as one of your plan&apos;s frames drawn by FrameOS Cloud, which the paid plans
+                include.
+              </p>
+            ) : null}
             {needsCarrierPanel ? (
               <select
                 aria-label="Panel on this board"
@@ -1321,6 +1416,14 @@ export function Esp32CloudFlasher({
       {error ? (
         <p className="frameos-warning-button rounded-xl border px-3 py-2 text-xs" role="alert">
           {error}
+          {planNeeded ? (
+            <>
+              {' '}
+              <a className="font-semibold underline" href="/account/usage">
+                See the plans
+              </a>
+            </>
+          ) : null}
         </p>
       ) : null}
       {phase === 'done' ? (

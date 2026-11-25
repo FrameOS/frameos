@@ -120,16 +120,16 @@ line is the thin-client design, not an image proxy
 which both enrollment flows and the settings push enforce
 (`cloud/docs/accounting-todo.md` §0.2). What is left is code:
 
-- [ ] The frame hub renders for thin clients. The renderer is there since
-  2026-11: the hub runs virtual frames (`docs/cloud-frames.md` "Virtual
-  frames", `cloud/apps/frame-hub/src/virtual-device.ts`), a device with the
-  cloud's own runtime behind it, with the plan's count and floor enforced.
-  What a board still needs is its half: a hub client in the C3 and Pico
-  firmware (enrollment, the WebSocket, a render pull that takes the hub's
-  picture in the panel's format), and a thin-client session on the hub that
-  reuses the virtual device's render path. Until then C3 and Pico boards
-  stay out of the cloud flasher and cannot link to the cloud at all; the
-  self-hosted backend is their only control plane.
+- [ ] The cloud renders for thin clients. Done for the ESP32-C3: the
+  firmware links to the cloud and pulls its picture from
+  `GET …/embedded/render` (firmware 2026.11.7 on, `docs/cloud-frames.md`
+  "Hardware the cloud renders for"), counted against the plan's
+  `cloud_rendered_frames`, and the cloud's flasher offers the C3 boards
+  (2026-11-25), refusing one before it flashes when the plan has no room.
+  Left: the Pico's half (`docs/embedded-todo.md` "No FrameOS Cloud link"):
+  enrollment, the WebSocket, the render pull pointed at the cloud, the
+  contract's `pico` profile and a way to set one up from the cloud. Until
+  then the self-hosted backend is a Pico's only control plane.
 - [ ] The capability line is data, not per-board fights. New boards declare
   PSRAM and get a renderer assigned; the fat path stops being re-earned
   8 MB board by 8 MB board.

@@ -408,7 +408,17 @@ function StandaloneCard(): JSX.Element {
         hint={
           chosen?.touch
             ? 'This board has a touch screen, so you can also set up Wi-Fi on the frame later: swipe down from the top, then tap the gear.'
-            : 'ESP32-C3 boards and Inky Frames are not listed: they need a FrameOS backend to draw their scenes.'
+            : (
+              <>
+                ESP32-C3 boards and Inky Frames are not listed: something else has to draw their scenes. With a FrameOS
+                backend, add the frame there and use the Flash button on its USB card: it opens this page for that
+                frame, also when the backend is on http. An ESP32-C3 can also join{' '}
+                <a className="underline" href="https://cloud.frameos.net" target="_blank" rel="noreferrer">
+                  FrameOS Cloud
+                </a>{' '}
+                on a paid plan.
+              </>
+            )
         }
       >
         <select className={inputClass} value={board} onChange={(event) => setBoard(event.target.value)}>

@@ -39,8 +39,8 @@ Everything *else* an ESP32 frame does, this firmware does too:
 | Scene events | A custom event sent from FrameOS (the workspace, the API) waits in the backend and runs in the scene on the board's next pull, which the backend asks for; a board asleep on battery gets it when it wakes |
 
 What it does **not** have: OTA (2–4 MB of flash with no second slot — update
-by UF2, `bootsel` makes that one click), a FrameOS Cloud link (the cloud
-cannot render for thin clients yet, see "Limitations"), SD-card assets (the
+by UF2, `bootsel` makes that one click), a FrameOS Cloud link (this
+firmware has no client for it yet, see "Limitations"), SD-card assets (the
 scene runs on the backend, which has its own asset store).
 
 ## Supported hardware
@@ -249,10 +249,13 @@ not the wiring. In order, with the console open:
 
 ## Limitations
 
-- **No FrameOS Cloud link.** The cloud does not render for thin clients yet
-  (`docs/convergence-todo.md` §3 — the entitlement shipped, the renderer did
-  not), so a cloud-only Pico would have nothing to show. `set cloud_url` says
-  so. When the hub renders, this firmware needs a WebSocket client and the
-  enrollment handshake; everything else is already shaped for it.
+- **No FrameOS Cloud link.** The cloud does render for thin clients: an
+  ESP32-C3 links to it and pulls its picture (`docs/cloud-frames.md`
+  "Hardware the cloud renders for"), and `cloud-rendered.ts` already counts a
+  `pico` board as one of the plan's frames the cloud draws. What is missing
+  is this firmware's half: a WebSocket client over altcp TLS, the enrollment
+  handshake, the contract's `pico` profile, and a way to set a Pico up from
+  the cloud (its add-frame panel flashes only ESP32s). Until then the
+  self-hosted backend is its only plane, and `set cloud_url` says so.
 - `GET /state` / `/states` are not served: scene state for a thin client lives
   in the backend's store.
