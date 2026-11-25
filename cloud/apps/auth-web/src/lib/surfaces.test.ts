@@ -62,7 +62,7 @@ describe("surface routing", () => {
 
   // The flasher takes jobs from pages it does not know, on an origin the
   // session cookie is sent to: its host answers the firmware and nothing else.
-  it("answers no API on the flasher host but the firmware", () => {
+  it("answers no API on the flasher host but the firmware and the store's covers", () => {
     configureMergedOrigins();
     process.env.FRAMEOS_FLASHER_APP_URL = "https://flash.frameos.net";
 
@@ -73,9 +73,16 @@ describe("surface routing", () => {
       "/api/frames/firmware/extra",
       "/api/store/device/scenes",
       "/api/photos/albums",
+      "/api/store/scenes/49f88a34-92ac-4090-9afd-1c5affb4bfec/download",
+      "/api/store/scenes/49f88a34-92ac-4090-9afd-1c5affb4bfec/image/extra",
+      "/api/store/account/repository.json",
     ]) {
       expect(resolveSurfaceRoute(new URL(`https://flash.frameos.net${path}`))).toEqual({ kind: "notFound" });
     }
+    // The store's public listing and a cover: the scene list's thumbnails.
+    expect(flasherServesApi("/api/store/repository.json", "GET")).toBe(true);
+    expect(flasherServesApi("/api/store/scenes/49f88a34-92ac-4090-9afd-1c5affb4bfec/image", "GET")).toBe(true);
+    expect(flasherServesApi("/api/store/repository.json", "POST")).toBe(false);
     expect(resolveSurfaceRoute(new URL("https://flash.frameos.net/api/frames/firmware"), null, "POST")).toEqual({
       kind: "notFound",
     });

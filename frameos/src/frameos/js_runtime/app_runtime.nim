@@ -707,10 +707,17 @@ proc jsFrame(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.}
     if facts.isNil:
       answer = if what == "read": "" else: SettingsOffCode
     elif what == "read":
+      # A link code is a presence code (docs/scene-settings.md "Connecting
+      # the frame"): read off the panel, never by an app that could send it on.
+      facts.fields.del("link")
       answer = $facts
     elif what == "action":
       if text in [evRender, evRestart, evReboot]:
         sendEvent(text, newJObject(), eoPanel)
+      elif text == "unlink":
+        # Leaving the plane is decided at the panel, twice (docs/scene-settings.md
+        # "Unlinking"): no app takes a frame out of its owner's hands.
+        answer = "!unlink is the frame page's alone"
       elif not frameSettingsAction.isNil:
         frameSettingsAction(text)
     elif what == "apply":

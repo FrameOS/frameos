@@ -15,6 +15,9 @@
 
 #include "fos_lan_access.h"
 
+#define LAN FOS_LAN_ACCESS_SCOPE_LAN
+#define ADOPT FOS_LAN_ACCESS_SCOPE_ADOPT
+
 static int g_failures = 0;
 static int g_checks = 0;
 
@@ -65,7 +68,7 @@ static uint32_t start_with(uint32_t value, int64_t now)
     static uint32_t one[1];
     one[0] = value;
     script(one, 1);
-    return fos_lan_access_start(now, scripted_rng);
+    return fos_lan_access_start(now, scripted_rng, FOS_LAN_ACCESS_SCOPE_LAN);
 }
 
 static void test_mint_is_six_digits_and_rejects_the_biased_band(void)
@@ -125,18 +128,18 @@ static void test_right_code_once(void)
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
     uint32_t gen = start_with(654321, 10000);
     CHECK(gen != 0, "generation is never 0");
-    CHECK(fos_lan_access_panel_code(10000, code) == gen, "the panel shows this challenge");
+    CHECK(fos_lan_access_panel_code(10000, LAN, code) == gen, "the panel shows this challenge");
     CHECK(strcmp(code, "654321") == 0, "panel code %s", code);
     CHECK(fos_lan_access_seconds_left(10000) == FOS_LAN_ACCESS_TTL_SEC, "left %u",
           fos_lan_access_seconds_left(10000));
     CHECK(fos_lan_access_seconds_left(10100) == FOS_LAN_ACCESS_TTL_SEC - 100, "left %u",
           fos_lan_access_seconds_left(10100));
 
-    CHECK(fos_lan_access_consume("654321", 10100) == FOS_LAN_ACCESS_OK, "the right code");
-    CHECK(fos_lan_access_panel_code(10100, code) == 0 && code[0] == '\0',
+    CHECK(fos_lan_access_consume("654321", 10100, LAN) == FOS_LAN_ACCESS_OK, "the right code");
+    CHECK(fos_lan_access_panel_code(10100, LAN, code) == 0 && code[0] == '\0',
           "answered: nothing on the panel");
     CHECK(fos_lan_access_seconds_left(10100) == 0, "answered: nothing pending");
-    CHECK(fos_lan_access_consume("654321", 10101) == FOS_LAN_ACCESS_CODE_EXPIRED,
+    CHECK(fos_lan_access_consume("654321", 10101, LAN) == FOS_LAN_ACCESS_CODE_EXPIRED,
           "single use");
 }
 
@@ -144,12 +147,12 @@ static void test_missing_code_spends_nothing(void)
 {
     start_with(111111, 20000);
     for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS + 2; i++) {
-        CHECK(fos_lan_access_consume(NULL, 20000) == FOS_LAN_ACCESS_CODE_REQUIRED, "NULL");
-        CHECK(fos_lan_access_consume("", 20000) == FOS_LAN_ACCESS_CODE_REQUIRED, "empty");
+        CHECK(fos_lan_access_consume(NULL, 20000, LAN) == FOS_LAN_ACCESS_CODE_REQUIRED, "NULL");
+        CHECK(fos_lan_access_consume("", 20000, LAN) == FOS_LAN_ACCESS_CODE_REQUIRED, "empty");
     }
-    CHECK(fos_lan_access_consume("111111", 20001) == FOS_LAN_ACCESS_OK,
+    CHECK(fos_lan_access_consume("111111", 20001, LAN) == FOS_LAN_ACCESS_OK,
           "no attempt was spent on a missing code");
-    CHECK(fos_lan_access_consume(NULL, 20002) == FOS_LAN_ACCESS_CODE_REQUIRED,
+    CHECK(fos_lan_access_consume(NULL, 20002, LAN) == FOS_LAN_ACCESS_CODE_REQUIRED,
           "a missing code is code_required even with nothing pending");
 }
 
@@ -158,67 +161,67 @@ static void test_five_attempts(void)
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
     uint32_t gen = start_with(222222, 30000);
     for (int i = 1; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) {
-        CHECK(fos_lan_access_consume("222223", 30000 + i) == FOS_LAN_ACCESS_INVALID_CODE,
+        CHECK(fos_lan_access_consume("222223", 30000 + i, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
               "wrong attempt %d", i);
-        CHECK(fos_lan_access_panel_code(30000 + i, code) == gen, "still showing after %d", i);
+        CHECK(fos_lan_access_panel_code(30000 + i, LAN, code) == gen, "still showing after %d", i);
     }
-    CHECK(fos_lan_access_consume("000000", 30010) == FOS_LAN_ACCESS_TOO_MANY_ATTEMPTS,
+    CHECK(fos_lan_access_consume("000000", 30010, LAN) == FOS_LAN_ACCESS_TOO_MANY_ATTEMPTS,
           "the fifth wrong code");
-    CHECK(fos_lan_access_panel_code(30010, NULL) == 0, "cleared: the panel repaints");
-    CHECK(fos_lan_access_consume("222222", 30011) == FOS_LAN_ACCESS_CODE_EXPIRED,
+    CHECK(fos_lan_access_panel_code(30010, LAN, NULL) == 0, "cleared: the panel repaints");
+    CHECK(fos_lan_access_consume("222222", 30011, LAN) == FOS_LAN_ACCESS_CODE_EXPIRED,
           "even the right code is too late now");
 
     /* The right code on the last attempt still counts. */
     start_with(333333, 30100);
     for (int i = 1; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) {
-        fos_lan_access_consume("1", 30100);
+        fos_lan_access_consume("1", 30100, LAN);
     }
-    CHECK(fos_lan_access_consume("333333", 30100) == FOS_LAN_ACCESS_OK, "fifth try right");
+    CHECK(fos_lan_access_consume("333333", 30100, LAN) == FOS_LAN_ACCESS_OK, "fifth try right");
 }
 
 static void test_wrong_shapes_are_wrong_codes(void)
 {
     start_with(444444, 40000);
-    CHECK(fos_lan_access_consume("44444", 40000) == FOS_LAN_ACCESS_INVALID_CODE, "short");
-    CHECK(fos_lan_access_consume("4444444", 40000) == FOS_LAN_ACCESS_INVALID_CODE, "long");
-    CHECK(fos_lan_access_consume("44444a", 40000) == FOS_LAN_ACCESS_INVALID_CODE, "letter");
-    CHECK(fos_lan_access_consume("444 444", 40000) == FOS_LAN_ACCESS_INVALID_CODE,
+    CHECK(fos_lan_access_consume("44444", 40000, LAN) == FOS_LAN_ACCESS_INVALID_CODE, "short");
+    CHECK(fos_lan_access_consume("4444444", 40000, LAN) == FOS_LAN_ACCESS_INVALID_CODE, "long");
+    CHECK(fos_lan_access_consume("44444a", 40000, LAN) == FOS_LAN_ACCESS_INVALID_CODE, "letter");
+    CHECK(fos_lan_access_consume("444 444", 40000, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
           "an inner space is part of what was typed");
-    CHECK(fos_lan_access_consume("444444", 40000) == FOS_LAN_ACCESS_OK, "fifth try right");
+    CHECK(fos_lan_access_consume("444444", 40000, LAN) == FOS_LAN_ACCESS_OK, "fifth try right");
 
     /* The control planes strip spaces before the code reaches the device;
      * what still carries one is not the code. */
     start_with(454545, 40100);
-    CHECK(fos_lan_access_consume(" 454545", 40100) == FOS_LAN_ACCESS_INVALID_CODE, "padded");
-    CHECK(fos_lan_access_consume("454545", 40100) == FOS_LAN_ACCESS_OK, "exact");
+    CHECK(fos_lan_access_consume(" 454545", 40100, LAN) == FOS_LAN_ACCESS_INVALID_CODE, "padded");
+    CHECK(fos_lan_access_consume("454545", 40100, LAN) == FOS_LAN_ACCESS_OK, "exact");
     start_with(464646, 40200);
-    CHECK(fos_lan_access_consume("464646", 40200) == FOS_LAN_ACCESS_OK, "exact again");
+    CHECK(fos_lan_access_consume("464646", 40200, LAN) == FOS_LAN_ACCESS_OK, "exact again");
     start_with(474747, 40300);
     char long_code[200];
     memset(long_code, '4', sizeof(long_code) - 1);
     long_code[sizeof(long_code) - 1] = '\0';
-    CHECK(fos_lan_access_consume(long_code, 40300) == FOS_LAN_ACCESS_INVALID_CODE, "very long");
-    CHECK(fos_lan_access_consume("474747          x", 40300) == FOS_LAN_ACCESS_INVALID_CODE,
+    CHECK(fos_lan_access_consume(long_code, 40300, LAN) == FOS_LAN_ACCESS_INVALID_CODE, "very long");
+    CHECK(fos_lan_access_consume("474747          x", 40300, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
           "trailing garbage");
-    CHECK(fos_lan_access_consume("474747", 40300) == FOS_LAN_ACCESS_OK, "then right");
+    CHECK(fos_lan_access_consume("474747", 40300, LAN) == FOS_LAN_ACCESS_OK, "then right");
 }
 
 static void test_expiry(void)
 {
     uint32_t gen = start_with(555555, 50000);
     const int64_t last = 50000 + FOS_LAN_ACCESS_TTL_SEC - 1;
-    CHECK(fos_lan_access_panel_code(last, NULL) == gen, "alive at %lld", (long long)last);
+    CHECK(fos_lan_access_panel_code(last, LAN, NULL) == gen, "alive at %lld", (long long)last);
     CHECK(fos_lan_access_seconds_left(last) == 1, "one second left");
-    CHECK(fos_lan_access_panel_code(last + 1, NULL) == 0, "gone at the TTL");
+    CHECK(fos_lan_access_panel_code(last + 1, LAN, NULL) == 0, "gone at the TTL");
     CHECK(fos_lan_access_seconds_left(last + 1) == 0, "nothing left");
-    CHECK(fos_lan_access_consume("555555", last + 1) == FOS_LAN_ACCESS_CODE_EXPIRED,
+    CHECK(fos_lan_access_consume("555555", last + 1, LAN) == FOS_LAN_ACCESS_CODE_EXPIRED,
           "the right code after expiry");
 
     /* Expiry seen first by consume, not by the panel. */
     start_with(565656, 60000);
-    CHECK(fos_lan_access_consume("565656", 60000 + FOS_LAN_ACCESS_TTL_SEC) ==
+    CHECK(fos_lan_access_consume("565656", 60000 + FOS_LAN_ACCESS_TTL_SEC, LAN) ==
               FOS_LAN_ACCESS_CODE_EXPIRED, "expired at consume");
-    CHECK(fos_lan_access_panel_code(60000, NULL) == 0,
+    CHECK(fos_lan_access_panel_code(60000, LAN, NULL) == 0,
           "an expired challenge is gone, not revived by an earlier clock");
 }
 
@@ -226,17 +229,17 @@ static void test_new_challenge_replaces(void)
 {
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
     uint32_t first = start_with(777777, 70000);
-    fos_lan_access_consume("000001", 70000);
+    fos_lan_access_consume("000001", 70000, LAN);
     uint32_t second = start_with(888888, 70010);
     CHECK(second != first, "a new generation: the panel repaints");
-    CHECK(fos_lan_access_panel_code(70010, code) == second && strcmp(code, "888888") == 0,
+    CHECK(fos_lan_access_panel_code(70010, LAN, code) == second && strcmp(code, "888888") == 0,
           "panel shows %s", code);
-    CHECK(fos_lan_access_consume("777777", 70011) == FOS_LAN_ACCESS_INVALID_CODE,
+    CHECK(fos_lan_access_consume("777777", 70011, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
           "the old code is dead");
     /* Fresh attempts and a fresh TTL. */
-    for (int i = 2; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("1", 70012);
+    for (int i = 2; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("1", 70012, LAN);
     CHECK(fos_lan_access_seconds_left(70010 + FOS_LAN_ACCESS_TTL_SEC - 5) == 5, "fresh TTL");
-    CHECK(fos_lan_access_consume("888888", 70020) == FOS_LAN_ACCESS_OK, "fresh attempts");
+    CHECK(fos_lan_access_consume("888888", 70020, LAN) == FOS_LAN_ACCESS_OK, "fresh attempts");
 }
 
 static void test_tokens(void)
@@ -259,7 +262,7 @@ static void spend_budget(int64_t at)
 {
     for (int round = 0; round < 2; round++) {
         start_with(171717, at);
-        for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("000000", at);
+        for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("000000", at, LAN);
     }
 }
 
@@ -275,14 +278,14 @@ static void test_wrong_code_budget(void)
 
     /* Two challenges' worth of wrong codes: 5 + 4, then a right one. */
     start_with(121212, t0);
-    for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("000000", t0 + 1);
+    for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("000000", t0 + 1, LAN);
     start_with(131313, t0 + 10);
     for (int i = 0; i < 4; i++) {
-        CHECK(fos_lan_access_consume("000000", t0 + 11) == FOS_LAN_ACCESS_INVALID_CODE,
+        CHECK(fos_lan_access_consume("000000", t0 + 11, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
               "wrong %d of the second challenge", i + 1);
     }
     CHECK(!fos_lan_access_rate_limited(t0 + 11), "nine wrong: one left");
-    CHECK(fos_lan_access_consume("131313", t0 + 12) == FOS_LAN_ACCESS_OK,
+    CHECK(fos_lan_access_consume("131313", t0 + 12, LAN) == FOS_LAN_ACCESS_OK,
           "a right code still works");
     CHECK(!fos_lan_access_rate_limited(t0 + 12), "and does not spend the budget");
 
@@ -290,41 +293,41 @@ static void test_wrong_code_budget(void)
      * after it. */
     uint32_t gen = start_with(141414, t0 + 20);
     CHECK(gen != 0, "a challenge with one wrong code left");
-    CHECK(fos_lan_access_consume("000000", t0 + 21) == FOS_LAN_ACCESS_INVALID_CODE,
+    CHECK(fos_lan_access_consume("000000", t0 + 21, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
           "the tenth wrong code");
     CHECK(fos_lan_access_rate_limited(t0 + 21), "spent after ten");
 
     /* Spent: refused before the pending challenge is looked at, so it is
      * neither answered nor expired nor replaced. */
-    CHECK(fos_lan_access_consume("141414", t0 + 22) == FOS_LAN_ACCESS_RATE_LIMITED,
+    CHECK(fos_lan_access_consume("141414", t0 + 22, LAN) == FOS_LAN_ACCESS_RATE_LIMITED,
           "even the right code");
-    CHECK(fos_lan_access_consume("999999", t0 + 22) == FOS_LAN_ACCESS_RATE_LIMITED,
+    CHECK(fos_lan_access_consume("999999", t0 + 22, LAN) == FOS_LAN_ACCESS_RATE_LIMITED,
           "a wrong code");
-    CHECK(fos_lan_access_consume(NULL, t0 + 22) == FOS_LAN_ACCESS_CODE_REQUIRED,
+    CHECK(fos_lan_access_consume(NULL, t0 + 22, LAN) == FOS_LAN_ACCESS_CODE_REQUIRED,
           "no code is still code_required");
-    CHECK(fos_lan_access_start(t0 + 23, lcg_rng) == 0, "no new challenge either");
-    CHECK(fos_lan_access_panel_code(t0 + 23, code) == gen && strcmp(code, "141414") == 0,
+    CHECK(fos_lan_access_start(t0 + 23, lcg_rng, FOS_LAN_ACCESS_SCOPE_LAN) == 0, "no new challenge either");
+    CHECK(fos_lan_access_panel_code(t0 + 23, LAN, code) == gen && strcmp(code, "141414") == 0,
           "the pending challenge is untouched: %s", code);
-    CHECK(fos_lan_access_consume("141414", t0 + FOS_LAN_ACCESS_TTL_SEC + 30) ==
+    CHECK(fos_lan_access_consume("141414", t0 + FOS_LAN_ACCESS_TTL_SEC + 30, LAN) ==
               FOS_LAN_ACCESS_RATE_LIMITED, "an expired challenge is not even looked at");
 
     /* The window runs from the first wrong code (t0 + 1). */
     const int64_t refill = t0 + 1 + hour;
     CHECK(fos_lan_access_rate_limited(refill - 1), "still spent a second before the hour");
-    CHECK(fos_lan_access_start(refill - 1, lcg_rng) == 0, "still no challenge");
+    CHECK(fos_lan_access_start(refill - 1, lcg_rng, FOS_LAN_ACCESS_SCOPE_LAN) == 0, "still no challenge");
     CHECK(!fos_lan_access_rate_limited(refill), "refilled an hour after the first wrong code");
     gen = start_with(151515, refill);
     CHECK(gen != 0, "challenges again");
-    CHECK(fos_lan_access_consume("000000", refill + 1) == FOS_LAN_ACCESS_INVALID_CODE,
+    CHECK(fos_lan_access_consume("000000", refill + 1, LAN) == FOS_LAN_ACCESS_INVALID_CODE,
           "a wrong code opens a new window");
-    CHECK(fos_lan_access_consume("151515", refill + 2) == FOS_LAN_ACCESS_OK, "and the right one");
+    CHECK(fos_lan_access_consume("151515", refill + 2, LAN) == FOS_LAN_ACCESS_OK, "and the right one");
 
     /* That window opens at its first wrong code, and is twice as long: the
      * one before it saw wrong codes. Nine more wrong spend it for two hours. */
     const int64_t t1 = refill + 1;
     for (int round = 0; round < 3; round++) {
         start_with(161616, t1 + 100 + round);
-        for (int i = 0; i < 3; i++) fos_lan_access_consume("000000", t1 + 100 + round);
+        for (int i = 0; i < 3; i++) fos_lan_access_consume("000000", t1 + 100 + round, LAN);
     }
     CHECK(fos_lan_access_rate_limited(t1 + 100), "1 + 9 wrong: spent");
     CHECK(fos_lan_access_rate_limited(t1 + hour), "an hour is no longer enough");
@@ -338,7 +341,7 @@ static void test_wrong_code_budget(void)
                                       ? doublings : FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS);
         spend_budget(at);
         CHECK(fos_lan_access_rate_limited(at + window - 1), "window %d: spent to its last second", doublings);
-        CHECK(fos_lan_access_start(at + window - 1, lcg_rng) == 0, "window %d: no challenge", doublings);
+        CHECK(fos_lan_access_start(at + window - 1, lcg_rng, LAN) == 0, "window %d: no challenge", doublings);
         CHECK(!fos_lan_access_rate_limited(at + window), "window %d: refilled after %lld h", doublings,
               (long long)(window / hour));
         at += window;
@@ -351,7 +354,7 @@ static void test_wrong_code_budget(void)
     int64_t quiet = at + FOS_LAN_ACCESS_BUDGET_QUIET_SEC;
     CHECK(!fos_lan_access_rate_limited(quiet - 86400), "long refilled, a day before the month is up");
     start_with(181818, quiet - 86400);
-    CHECK(fos_lan_access_consume("181818", quiet - 86400 + 1) == FOS_LAN_ACCESS_OK,
+    CHECK(fos_lan_access_consume("181818", quiet - 86400 + 1, LAN) == FOS_LAN_ACCESS_OK,
           "and a right code is no wrong one");
     spend_budget(quiet);
     CHECK(fos_lan_access_rate_limited(quiet + hour - 1), "spent for the hour");
@@ -362,8 +365,8 @@ static void test_wrong_code_budget(void)
     at = quiet + hour + FOS_LAN_ACCESS_BUDGET_QUIET_SEC;
     for (int week = 0; week < 12; week++, at += 7 * 86400) {
         start_with(191919, at);
-        CHECK(fos_lan_access_consume("000000", at + 1) == FOS_LAN_ACCESS_INVALID_CODE, "week %d: a typo", week);
-        CHECK(fos_lan_access_consume("191919", at + 2) == FOS_LAN_ACCESS_OK, "week %d: then the code", week);
+        CHECK(fos_lan_access_consume("000000", at + 1, LAN) == FOS_LAN_ACCESS_INVALID_CODE, "week %d: a typo", week);
+        CHECK(fos_lan_access_consume("191919", at + 2, LAN) == FOS_LAN_ACCESS_OK, "week %d: then the code", week);
         CHECK(!fos_lan_access_rate_limited(at + 3), "week %d: never limited", week);
     }
 
@@ -381,22 +384,61 @@ static void test_clear(void)
 {
     const int64_t t0 = 200000;
     uint32_t gen = start_with(181818, t0);
-    CHECK(fos_lan_access_panel_code(t0, NULL) == gen, "showing");
+    CHECK(fos_lan_access_panel_code(t0, LAN, NULL) == gen, "showing");
     fos_lan_access_clear();
-    CHECK(fos_lan_access_panel_code(t0, NULL) == 0, "cleared: the panel repaints");
+    CHECK(fos_lan_access_panel_code(t0, LAN, NULL) == 0, "cleared: the panel repaints");
     CHECK(fos_lan_access_seconds_left(t0) == 0, "nothing holds the sleep");
-    CHECK(fos_lan_access_consume("181818", t0 + 1) == FOS_LAN_ACCESS_CODE_EXPIRED,
+    CHECK(fos_lan_access_consume("181818", t0 + 1, LAN) == FOS_LAN_ACCESS_CODE_EXPIRED,
           "the cleared code is dead");
     fos_lan_access_clear(); /* nothing pending: harmless */
-    CHECK(fos_lan_access_panel_code(t0 + 2, NULL) == 0, "still nothing");
+    CHECK(fos_lan_access_panel_code(t0 + 2, LAN, NULL) == 0, "still nothing");
     uint32_t next = start_with(191919, t0 + 3);
     CHECK(next != 0 && next != gen, "a new challenge after a clear is a new generation");
 }
 
+/* An adoption code (POST /api/adopt) and a local network access code are
+ * the same ceremony, each good for its own scope alone, and each shown where
+ * its scope is: the local network code over the panel, the adoption code on
+ * the frame page. */
+static void test_scopes(void)
+{
+    const int64_t t0 = 300000;
+    static const uint32_t one[] = {212121};
+    script(one, 1);
+    uint32_t gen = fos_lan_access_start(t0, scripted_rng, ADOPT);
+    CHECK(gen != 0, "an adoption code starts");
+    char code[FOS_LAN_ACCESS_CODE_LEN + 1];
+    CHECK(fos_lan_access_panel_code(t0, ADOPT, code) == gen && strcmp(code, "212121") == 0,
+          "the frame page shows it");
+    CHECK(fos_lan_access_panel_code(t0, LAN, code) == 0 && code[0] == '\0',
+          "never drawn over the panel as a local network access code");
+    /* The wrong scope is no code at all: no attempt spent, nothing cleared,
+     * nothing counted against the budget. */
+    for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS + 1; i++) {
+        CHECK(fos_lan_access_consume("212121", t0 + 1, LAN) == FOS_LAN_ACCESS_CODE_EXPIRED,
+              "the adoption code does not turn local network access on (%d)", i);
+    }
+    CHECK(fos_lan_access_panel_code(t0 + 1, ADOPT, NULL) == gen, "still pending");
+    CHECK(fos_lan_access_consume("000000", t0 + 2, ADOPT) == FOS_LAN_ACCESS_INVALID_CODE,
+          "a wrong adoption code spends an attempt");
+    CHECK(fos_lan_access_consume("212121", t0 + 3, ADOPT) == FOS_LAN_ACCESS_OK,
+          "the right one in its scope");
+    CHECK(fos_lan_access_panel_code(t0 + 3, ADOPT, NULL) == 0, "answered: nothing pending");
+
+    /* A new challenge of the other scope replaces it. */
+    start_with(232323, t0 + 10);
+    CHECK(fos_lan_access_panel_code(t0 + 10, LAN, NULL) != 0, "a local network access code now");
+    CHECK(fos_lan_access_panel_code(t0 + 10, ADOPT, NULL) == 0, "and no adoption code");
+    CHECK(fos_lan_access_consume("232323", t0 + 11, ADOPT) == FOS_LAN_ACCESS_CODE_EXPIRED,
+          "and it does not adopt the frame");
+    CHECK(fos_lan_access_consume("232323", t0 + 12, LAN) == FOS_LAN_ACCESS_OK, "it turns access on");
+    CHECK(fos_lan_access_panel_code(t0 + FOS_LAN_ACCESS_TTL_SEC + 20, LAN, NULL) == 0, "nothing pending later");
+}
+
 int main(void)
 {
-    CHECK(fos_lan_access_panel_code(0, NULL) == 0, "nothing pending at boot");
-    CHECK(fos_lan_access_consume("123456", 0) == FOS_LAN_ACCESS_CODE_EXPIRED,
+    CHECK(fos_lan_access_panel_code(0, LAN, NULL) == 0, "nothing pending at boot");
+    CHECK(fos_lan_access_consume("123456", 0, LAN) == FOS_LAN_ACCESS_CODE_EXPIRED,
           "no challenge: code_expired");
     test_mint_is_six_digits_and_rejects_the_biased_band();
     test_right_code_once();
@@ -408,6 +450,7 @@ int main(void)
     test_tokens();
     test_wrong_code_budget();
     test_clear();
+    test_scopes();
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -25,16 +25,19 @@
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_system.h"
 
 #include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_lan_access.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_rtc.h"
 #include "fos_scenes.h"
+#include "fos_settings.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -64,8 +67,9 @@ static const char *manager(void)
 /* The page's facts as JSON, written as text: the keys are literals, and what
  * the frame says (a network's name) is escaped on its way in. A buffer of
  * JSON_CAP holds the worst case: every name in range and the saved one, 32
- * bytes each, every byte escaped to \u00XX. */
-#define JSON_CAP (768 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
+ * bytes each, every byte escaped to \u00XX, and a link code with its QR text,
+ * its server and why it failed. */
+#define JSON_CAP (1280 + (FOS_URL_LEN + 64) * 6 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
 
 typedef struct {
     char *buf;
@@ -189,8 +193,50 @@ char *fos_frame_settings_json(void)
         if (version[0]) put_pair(&out, "updateVersion", version);
     }
     if (s_refused[0]) put_pair(&out, "note", s_refused);
-    /* Restart is a reboot here: the page shows Reboot alone. */
-    put(&out, ",\"actions\":[]}");
+    /* A control plane being connected (docs/scene-settings.md "Connecting
+     * the frame"): its code, where to enter it and what its QR code says, for
+     * the page to show. The page is the only place either code is drawn, and
+     * no picture is kept while one shows (fos_client.c store_snapshot). */
+    char code[16], uri[192], pin[FOS_LAN_ACCESS_CODE_LEN + 1];
+    const bool cloud = fos_cloud_link_code(code, sizeof(code), uri, sizeof(uri));
+    const bool adopt = fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT, pin) != 0;
+    if (adopt) {
+        /* Port 80: the address alone. The QR code holds both, to paste. */
+        put(&out, ",\"link\":{\"to\":\"backend\",\"code\":");
+        put_string(&out, pin);
+        put_pair(&out, "where", fos_wifi_ip());
+        snprintf(line, sizeof(line), "%s %s", fos_wifi_ip(), pin);
+        put_pair(&out, "qr", line);
+        put(&out, "}");
+    } else if (cloud) {
+        put(&out, ",\"link\":{\"to\":\"cloud\",\"code\":");
+        put_string(&out, code);
+        put_pair(&out, "qr", uri);
+        const char *where = strstr(uri, "://");
+        uri[strcspn(uri, "?")] = '\0';
+        put_pair(&out, "where", where ? where + 3 : uri);
+        /* Where it goes, which the page shows and lets be changed, and why
+         * it stopped if it did. */
+        put_pair(&out, "server", fos_cloud_link_server());
+        char detail[64];
+        const char *failed = fos_cloud_link_failure(detail, sizeof(detail));
+        if (failed) {
+            put_pair(&out, "failed", failed);
+            put_pair(&out, "detail", detail);
+        }
+        put(&out, "}");
+    }
+    /* Restart is a reboot here: the page shows Reboot alone. Connecting is
+     * offered to a frame no plane holds, online, with nothing pending. */
+    put(&out, ",\"actions\":[");
+    if (!cloud && !adopt && !config->backend_url[0] && fos_cloud_state() != FOS_CLOUD_ENROLLED &&
+        fos_cloud_state() != FOS_CLOUD_PENDING && state == FOS_WIFI_CONNECTED) {
+        put(&out, "\"linkCloud\",\"adopt\"");
+    } else if (config->backend_url[0] || fos_cloud_state() == FOS_CLOUD_ENROLLED) {
+        /* Leaving the plane that manages it (the page asks twice). */
+        put(&out, "\"unlink\"");
+    }
+    put(&out, "]}");
     return out.buf;
 }
 
@@ -321,8 +367,30 @@ void fos_frame_settings_apply(const char *json)
             clock_changed = true;
         }
     }
+    /* The cloud's address, from the Connect page: where Link to cloud goes
+     * (fos_cloud_link_server), "" for FrameOS Cloud's own. Only on a frame no
+     * plane holds; a link under way starts over against it. */
+    const cJSON *cloud_text = cJSON_GetObjectItem(root, "cloudUrl");
+    bool cloud = false;
+    if (cJSON_IsString(cloud_text) && !config->backend_url[0] && fos_cloud_state() == FOS_CLOUD_NONE) {
+        char url[FOS_URL_LEN];
+        const char *typed = cloud_text->valuestring;
+        while (*typed == ' ') typed++;
+        if (typed[0] && !strstr(typed, "://")) snprintf(url, sizeof(url), "https://%s", typed);
+        else strlcpy(url, typed, sizeof(url));
+        size_t n = strlen(url);
+        while (n > 0 && (url[n - 1] == '/' || url[n - 1] == ' ')) url[--n] = '\0';
+        const char *why = NULL;
+        if (url[0] && !fos_cloud_url_transport_ok(url, &why)) {
+            snprintf(s_refused, sizeof(s_refused), "The address %s", why ? why : "is not one");
+        } else if (strcmp(url, config->cloud_url) != 0) {
+            strlcpy(config->cloud_url, url, sizeof(config->cloud_url));
+            cloud = true;
+        }
+    }
     cJSON_Delete(root);
 
+    if (cloud) strlcat(changes, "cloudUrl,", sizeof(changes));
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (sounds) strlcat(changes, "clickSounds,", sizeof(changes));
     if (awake) strlcat(changes, "awakeAfterInputSeconds,", sizeof(changes));
@@ -354,6 +422,13 @@ void fos_frame_settings_apply(const char *json)
     }
     /* The cloud's mirror follows the hardware report (hardware.clickSounds). */
     if ((sounds || awake) && !scale) fos_cloud_request_state();
+    if (cloud) {
+        /* The link on the page, under way or failed, starts over at the new
+         * address. */
+        char code[2], uri[2];
+        if (fos_cloud_link_code(code, sizeof(code), uri, sizeof(uri))) fos_cloud_link_start();
+        fos_client_render_now();
+    }
     if (wifi) {
         err = fos_wifi_start_background();
         if (err != ESP_OK) ESP_LOGW(TAG, "joining \"%s\" failed to start: %s", config->wifi_ssid, esp_err_to_name(err));
@@ -396,6 +471,45 @@ void fos_frame_settings_action(const char *action)
         fos_ota_check_start(0);
     } else if (strcmp(action, "installUpdate") == 0) {
         if (fos_ota_install_checked() != ESP_OK) ESP_LOGW(TAG, "update refused: nothing to install");
+    } else if (strcmp(action, "linkCloud") == 0 || strcmp(action, "adopt") == 0 ||
+               strcmp(action, "cancelLink") == 0) {
+        /* Connecting a control plane (docs/scene-settings.md "Connecting the
+         * frame"): whatever was under way ends, the one asked for starts, and
+         * the page shows it at once. Never an established link, never a
+         * local network access code. */
+        fos_cloud_link_cancel();
+        if (fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT, NULL)) fos_lan_access_clear();
+        if (action[0] == 'l') {
+            fos_cloud_link_start();
+        } else if (action[0] == 'a' && !fos_config()->backend_url[0] && fos_cloud_state() != FOS_CLOUD_ENROLLED &&
+                   fos_lan_access_start(fos_lan_access_now(), esp_random, FOS_LAN_ACCESS_SCOPE_ADOPT) == 0) {
+            strlcpy(s_refused, "Too many wrong codes: try in an hour", sizeof(s_refused));
+        }
+        fos_client_render_now();
+    } else if (strcmp(action, "unlink") == 0) {
+        /* The frame page's Unlink, asked twice there (docs/scene-settings.md
+         * "Unlinking"). A backend's address, key and frame id go, with the
+         * service keys it sent, and the frame restarts standalone, as a
+         * console `set backend ""` and a restart leave it; the cloud's link
+         * goes on its own task, which tells the cloud first. The scenes stay. */
+        fos_config_t *config = fos_config();
+        if (config->backend_url[0]) {
+            config->backend_url[0] = '\0';
+            config->api_key[0] = '\0';
+            config->frame_id = 0;
+            fos_settings_forget_cache();
+            if (fos_config_save() != ESP_OK) ESP_LOGW(TAG, "unlink not saved");
+            frameos_nim_log_hook("{\"event\":\"settings:frame:unlink\",\"source\":\"esp32\",\"origin\":\"panel\"}");
+            if (xTaskCreate(restart_task, "fos_fs_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) esp_restart();
+        } else {
+            fos_cloud_unlink();
+        }
+    } else if (strcmp(action, "close") == 0) {
+        /* Left the page, however (Back, the scene's settings, another
+         * scene, a window beside it): a pairing code lives only while its
+         * page is up (docs/scene-settings.md "Connecting the frame"). */
+        fos_cloud_link_leave();
+        if (fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT, NULL)) fos_lan_access_clear();
     } else if (strcmp(action, "open") == 0) {
         int64_t age = fos_wifi_scan_age_us();
         if (fos_wifi_state() != FOS_WIFI_CONNECTED && !fos_wifi_scanning() && (age < 0 || age > SCAN_FRESH_US)) {
@@ -403,4 +517,10 @@ void fos_frame_settings_action(const char *action)
         }
         if (fos_wifi_state() == FOS_WIFI_CONNECTED) fos_ota_check_start(UPDATE_CHECK_FRESH_S);
     }
+}
+
+bool fos_frame_settings_code_pending(void)
+{
+    return fos_cloud_link_seconds_left() > 0 ||
+           fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT, NULL) != 0;
 }

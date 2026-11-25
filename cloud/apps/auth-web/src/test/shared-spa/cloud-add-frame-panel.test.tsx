@@ -13,10 +13,12 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddFramePanel } from "../../../../../../cloud-frontend/src/components/AddFramePanel";
 import {
+  hasStashedLinkCode,
   LinkRunningFrameForm,
   stashLinkCode,
   takeStashedLinkCode,
 } from "../../../../../../cloud-frontend/src/components/LinkRunningFrameForm";
+import { addFramePanelWantsOpen, registerAddFramePanelReopen } from "../../../../../../frontend/src/scenes/workspace/addFramePanelRegistry";
 
 vi.mock(
   "../../../../../../cloud-frontend/src/components/SdImageBuilder",
@@ -414,6 +416,17 @@ describe("AddFramePanel", () => {
       } finally {
         Object.defineProperty(window, "location", { configurable: true, value: location });
       }
+    });
+
+    it("asks for its drawer to open at load while a code is parked, and leaves it parked", () => {
+      registerAddFramePanelReopen(hasStashedLinkCode);
+      expect(addFramePanelWantsOpen()).toBe(false);
+      stashLinkCode("H7LU-JLWN");
+      // The drawer opens (newFrameForm's afterMount asks), the panel takes it.
+      expect(addFramePanelWantsOpen()).toBe(true);
+      expect(addFramePanelWantsOpen()).toBe(true);
+      expect(takeStashedLinkCode()).toBe("H7LU-JLWN");
+      expect(addFramePanelWantsOpen()).toBe(false);
     });
 
     it("reopens on the link path with a parked code", () => {

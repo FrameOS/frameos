@@ -1462,6 +1462,21 @@ def embedded_panel_for_device(device: str | None) -> str | None:
     return None
 
 
+def embedded_device_for_panel(panel: str | None) -> str | None:
+    """The reverse of embedded_panel_for_device: the device string for a
+    firmware panel name (what a board reports as its `panel`), None for
+    "none" or a panel this backend has no driver for."""
+    panel = str(panel or "").strip()
+    if not panel or panel == "none":
+        return None
+    for device, device_panel in EMBEDDED_DEVICE_PANELS.items():
+        if device_panel == panel:
+            return device
+    if panel in EMBEDDED_SUPPORTED_PANELS:
+        return f"waveshare.{panel}"
+    return None
+
+
 def embedded_panel_for_frame(frame: Frame) -> str:
     """Map the frame's device string to a firmware panel name."""
     preset_key = embedded_hardware_preset_for_frame(frame)

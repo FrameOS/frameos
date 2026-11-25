@@ -6,7 +6,7 @@ import httpcore
 import frameos/channels
 import frameos/types
 import ./origin
-import ./routes/[web_routes, frame_api_routes, admin_api_routes, repository_api_routes, cloud_api_routes, common]
+import ./routes/[web_routes, frame_api_routes, admin_api_routes, repository_api_routes, cloud_api_routes, adopt_routes, common]
 
 proc shouldLogRouteNotFound*(path: string): bool =
   if path.startsWith("/img/"):
@@ -19,6 +19,7 @@ proc buildRouter*(connectionsState: ConnectionsState, adminConnectionsState: Con
   addAdminApiRoutes(result)
   addRepositoryApiRoutes(result)
   addCloudApiRoutes(result)
+  addAdoptRoutes(result)
 
   result.notFoundHandler = proc(request: Request) {.gcsafe.} =
     # A device on the setup hotspot whose DNS resolves everything to the

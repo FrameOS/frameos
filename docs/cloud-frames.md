@@ -260,6 +260,16 @@ link started from the admin page completes even after the browser tab
 closes, and the code comes down the moment the flow resolves or its window
 lapses.
 
+**From the frame's own screen.** The settings panel's frame page offers
+**Link to cloud** on a frame no control plane holds
+(`docs/scene-settings.md` "Connecting the frame"): a Pi queues the same panel
+link code as the portal below, and an ESP32 runs the flow on its cloud task
+(`fos_cloud.c`, scopes `frame:link` + `frame:managed`, then
+`/api/frames/enroll` with the flow's Bearer token; nothing survives a reboot,
+and an unclaimed window just ends). The page shows the code, where to enter
+it and a QR code of `verification_uri_complete`, which `/device` fills in;
+it is a presence code, and the frame keeps no picture while it shows.
+
 **Starting one without a browser.** The setup portal's cloud option no
 longer requires a claim code: saved without one, it queues
 `state/cloud_link_code_pending.json`, and once the frame is online the hub
@@ -950,6 +960,25 @@ frame's assignments, and *only* that — a declared-but-ungranted group
 appears neither in `settings` nor in `groups`. Assignments made before this
 existed carry no grant and are served everything they declare until the
 owner next saves the frame's scene list, which makes the grant explicit.
+
+**A grant reaches only a frame that is allowed keys at all.** The grant is
+per scene; whether the frame may pull the account's keys is its link's
+`settings:services`, the frame's "Deliver keys to this frame" switch. A
+claim-token enrollment holds it from the start, and so does a device-flow
+link that asks to be managed (`frame:managed`: a frame's own **Link to
+cloud**, the setup portal), with the logs and metrics scopes too:
+`/api/device/start` adds what a claim-token frame is granted
+(`settings:services`, `telemetry:logs`, `telemetry:metrics`), and the
+approval screen lists them. Before that (2026-11-25) such a link held only
+`frame:link` and `frame:managed`, so an install of "Word of the day" on a
+reTerminal Sticky linked from its screen said "please provide an OpenAI API
+key" with the key in the account, and the frame shipped no logs. A frame
+linked before then keeps what it was approved with (no scope is added to an
+approved link): the grant is recorded all the same, and `…/scenes/add`
+answers `keys_withheld`, the granted groups such a frame cannot get (`[]`
+when it can). The workspace asks the owner to deliver keys when a scene that
+uses them is added to such a frame, and the scene drawer says so with a
+**Deliver keys** button; both turn the switch on, never by themselves.
 
 **The six groups are cloud-owned on a managed frame.** A group absent from
 `settings` is **deleted** on the device — not left at its previous value.

@@ -63,6 +63,29 @@ export function missingSettingsGroups(row: {
 }
 
 /**
+ * The service-key groups a scene WAS granted on this frame but the frame
+ * cannot get: its link does not hold `settings:services`
+ * (`service_settings_enabled` false: a frame linked from its own screen, or
+ * one whose owner turned "Deliver keys to this frame" off), so the device's
+ * pull is refused whatever the grant says. Empty while delivery is on, and
+ * when the server did not say (`undefined`: a caller that cannot see the
+ * link).
+ */
+export function withheldSettingsGroups(
+  row: {
+    declared_settings_groups?: string[] | undefined
+    granted_settings_groups?: string[] | undefined
+  },
+  serviceSettingsEnabled: boolean | undefined
+): string[] {
+  if (serviceSettingsEnabled !== false) {
+    return []
+  }
+  const declared = new Set(row.declared_settings_groups ?? [])
+  return (row.granted_settings_groups ?? []).filter((group) => declared.has(group))
+}
+
+/**
  * The version of the scene the frame holds, as far as the control plane can
  * know: what the last push carried, else the pin. An assignment that follows
  * the latest is NOT at the store's latest — it only moves on a push — so the

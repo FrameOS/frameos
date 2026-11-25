@@ -46,6 +46,7 @@ from app.redis import get_redis
 from app.utils.deploy_progress import fold as fold_deploy_progress
 from app.utils.deploy_progress import fold_command as fold_deploy_progress_command
 from app.utils.embedded_commands import command_label
+from app.utils.embedded_scene_import import start_scene_import
 from app.utils.embedded_report import follow_device_address, reported_address
 from app.utils.request_ip import client_ip_for_request
 from app.utils.frame_commands import (
@@ -216,6 +217,8 @@ async def api_embedded_device_commands(
 
     await _remember_device_state(redis, frame, body)
     await _remember_device_storage(db, redis, frame, body)
+    # An adopted board whose own scenes are still to be read: it is awake now.
+    await start_scene_import(redis, frame)
     # A frame that joined another network on its own screen says where it
     # is now. Strict, as for a bootup: this can move frame_host (api/log.py).
     if follow_device_address(frame, reported_address(body), client_ip_for_request(request, strict=True)):

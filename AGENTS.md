@@ -283,7 +283,15 @@
   and its two copies, `device_event_map.nim`): keep the presets alike. Both
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
 - A gear left of Save opens the **frame page** (doc section "The frame page"):
-  Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot. The page is
+  Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot (under the
+  card), and on a frame no plane holds Link to cloud / Link to backend beside them:
+  one page for FrameOS Cloud (the device flow) or a backend (scope `adopt`,
+  exchanged at the frame's `POST /api/adopt`), each its code, a QR code and
+  Cancel, the cloud's also its server and a Cloud address to change, and a
+  stopped link saying why with Try again, and on a frame a plane holds Unlink,
+  asked twice (doc sections "Unlinking" and "Connecting the frame": both codes are presence codes,
+  shown on the page, and no picture is kept while one shows; keep the
+  Pi's `adopt_routes.nim` and the ESP32's `fos_http.c` alike). The page is
   built in the scene from FACTS a host hands over through three hooks
   (`frameSettingsRead` / `Apply` / `Action`): the ESP32's
   `main/fos_frame_settings.c` (via `embedded_runtime.nim`) and the Pi's
@@ -1384,7 +1392,8 @@
   cloud-frontend's second entry (`src/flasher`, `build.mjs`), served by
   auth-web's `app/flash` and host-routed like the playground
   (`surfaces.ts`, `FRAMEOS_FLASHER_APP_URL`); its host strips the cookie and
-  serves no API but `GET /api/frames/firmware` (`flasherServesApi`).
+  serves no API but `GET /api/frames/firmware` and the store's public listing
+  and covers, for the scene list's thumbnails (`flasherServesApi`).
 - **One engine**: `scenes/workspace/embeddedFlashRun.ts` (`flashAndSetUpBoard`,
   `updateBoardKeepingSettings`, `provisionOverUsb`) is what the backend's
   USB buttons and the flasher run. A fix to how a board is flashed goes

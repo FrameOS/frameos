@@ -15,6 +15,7 @@ import {
 } from "../../../../../../src/lib/frame-scenes";
 import {
   frameForAccount,
+  frameTakesServiceSettings,
   readServiceSettingGroups,
 } from "../../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
@@ -33,7 +34,11 @@ export const runtime = "nodejs";
 // `settings_groups` grants the scene the named service-key groups on this
 // frame (∩ what it declares); omitted, a new install is granted none and a
 // re-install keeps what it had. The answer's `granted_settings_groups` /
-// `declared_settings_groups` let the caller say what the scene still needs.
+// `declared_settings_groups` let the caller say what the scene still needs,
+// and `keys_withheld` the granted groups the frame cannot get at all: its
+// link does not hold `settings:services` (a frame linked through the device
+// flow, or one whose owner turned "Deliver keys to this frame" off), so the
+// grant is recorded and the pull is refused. Empty when the keys can go.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -152,6 +157,12 @@ export async function POST(
     )
     .limit(1);
 
+  const granted = outcome.result.grantedSettingsGroups[sceneId] ?? [];
+  const keysWithheld =
+    granted.length > 0 && !(await frameTakesServiceSettings(db, frame.id))
+      ? granted
+      : [];
+
   return NextResponse.json({
     already_assigned: alreadyAssigned,
     assigned_checksum: outcome.result.assignedChecksum,
@@ -159,7 +170,8 @@ export async function POST(
     connected: frame.connected,
     declared_settings_groups:
       readServiceSettingGroups(assignment?.declaredSettingsGroups) ?? [],
-    granted_settings_groups: outcome.result.grantedSettingsGroups[sceneId] ?? [],
+    granted_settings_groups: granted,
+    keys_withheld: keysWithheld,
     status: "queued",
   });
 }

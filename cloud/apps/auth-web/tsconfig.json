@@ -32,6 +32,9 @@
     // predates exactOptionalPropertyTypes. Vitest still runs it.
     "src/test/shared-spa/duplicate-scenes.test.ts",
     "src/test/shared-spa/frame-secrets-mirror.test.ts",
+    // Mounts the real frameLogic and framesModel (the form after a
+    // broadcast row): the same import graph as the one above.
+    "src/test/shared-spa/frame-form-after-broadcast.test.ts",
     // Same story: mounts the real framesModel, whose import graph reaches
     // the legacy workspace components (bare JSX namespace, pre-strict
     // typing). Vitest still runs it; only tsc leaves it out.

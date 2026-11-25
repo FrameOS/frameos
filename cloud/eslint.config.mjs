@@ -26,6 +26,8 @@ export default tseslint.config(
       // service therefore cannot parse it. Vitest still runs it.
       "**/src/test/shared-spa/duplicate-scenes.test.ts",
       "**/src/test/shared-spa/frame-secrets-mirror.test.ts",
+      // Mounts the real frameLogic and framesModel, as above.
+      "**/src/test/shared-spa/frame-form-after-broadcast.test.ts",
       // Same exclusion, same reason: mounts the real framesModel, whose
       // import graph reaches the legacy workspace components.
       "**/src/test/shared-spa/cloud-scene-deploy.test.ts",

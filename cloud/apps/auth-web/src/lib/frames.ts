@@ -1691,25 +1691,39 @@ export async function enqueueServiceSettingsRefreshIfScoped(
   frameId: string,
 ) {
   try {
-    const [row] = await db
-      .select({
-        providerClientMetadata: linkedClients.providerClientMetadata,
-        status: frames.status,
-      })
-      .from(frames)
-      .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
-      .where(and(eq(frames.id, frameId), isNull(linkedClients.revokedAt)))
-      .limit(1);
-    if (!row || row.status !== "active") {
-      return;
-    }
-    if (!linkedClientScopes(row).includes(frameServiceSettingsScope)) {
+    if (!(await frameTakesServiceSettings(db, frameId))) {
       return;
     }
     await enqueueServiceSettingsRefresh(db, frameId);
   } catch (error) {
     reportError("frames.service_settings_nudge_failed", error, { frameId });
   }
+}
+
+// Whether the keys this frame's scenes are granted can reach it at all: an
+// active frame on a live link that holds `settings:services` (the owner's
+// per-frame switch, service-settings/enabled). A claim-token enrollment holds
+// it from the start; a link made through the device flow (the frame's own
+// "Link to cloud", the setup portal, its admin page) holds what that flow
+// asked for, which so far is not it. A grant on a frame that answers false
+// here reaches nothing: the pull is refused.
+export async function frameTakesServiceSettings(
+  db: FramesDatabase,
+  frameId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({
+      providerClientMetadata: linkedClients.providerClientMetadata,
+      status: frames.status,
+    })
+    .from(frames)
+    .innerJoin(linkedClients, eq(linkedClients.id, frames.linkedClientId))
+    .where(and(eq(frames.id, frameId), isNull(linkedClients.revokedAt)))
+    .limit(1);
+  return (
+    row?.status === "active" &&
+    linkedClientScopes(row).includes(frameServiceSettingsScope)
+  );
 }
 
 // Read a jsonb list of service-settings group names — frames.service_setting_groups

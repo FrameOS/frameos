@@ -21,6 +21,7 @@ import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/scene_snapshot_writer
 import frameos/local_access
+from frameos/events_gen import SceneSettingsId
 import frameos/loading_mark_panel
 import frameos/cursor_panel
 import frameos/video/planes
@@ -427,9 +428,11 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       self.drawControlCode(context)
     # The status screen (system/index) draws the link code itself, beside
     # its rows; painting it over that screen too covered the very facts it
-    # shows.
+    # shows. The frame page draws it too (docs/scene-settings.md "Connecting
+    # the frame"), as large as it can, with where to enter it.
     let linkCode = activeLinkCode()
-    let linkCodeWanted = linkCode.active and scene.id.string != "system/index"
+    let pageShowsLink = scene.id.string == SceneSettingsId and scene.state{"page"}.getStr() == "frame"
+    let linkCodeWanted = linkCode.active and scene.id.string != "system/index" and not pageShowsLink
     let panelDevice = localAccessPanelDevice(self.frameConfig.device)
     if linkCodeWanted and not panelDevice:
       self.drawLinkCode(context, linkCode)
@@ -447,7 +450,12 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     applyGlobalColorCorrection(outImage)
     if outImage.isPanelCanvas and frameColorSettings.global.hasAdjustments():
       notePanelCanvasWritten()
-    setLastImage(outImage)
+    # A link code on the panel (the cloud's, or an adoption code on the frame
+    # page, which draws either into the render itself) is a presence code
+    # too: while one shows on a panel, no picture of it is kept, and
+    # `GET /image` keeps the one from before.
+    if not (panelDevice and (linkCode.active or pendingLocalAccessScope() == LocalAccessScopeAdopt)):
+      setLastImage(outImage)
     # The panel's own: the control QR with the key in it (an `http.upload`
     # frame's picture is its panel too, as it always was) and the link code.
     self.panelOverlayDrawn = false

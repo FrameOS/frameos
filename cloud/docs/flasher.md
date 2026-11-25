@@ -46,9 +46,11 @@ manifests are its planes' routes, and it has none.
   registrable domain, so the browser sends it here too, and the page takes
   jobs from pages it does not know. `proxy.ts` takes the cookie and any
   bearer off every request on the flasher host, and the host answers 404 for
-  every API path but `GET /api/frames/firmware` (`flasherServesApi`). A new
-  thing the page needs from the API goes on that list, and must be fine to
-  serve to anyone.
+  every API path but `GET /api/frames/firmware` and the store's public
+  listing and covers (`/api/store/repository.json`,
+  `/api/store/scenes/<id>/image`, the scene list's thumbnails)
+  (`flasherServesApi`). A new thing the page needs from the API goes on that
+  list, and must be fine to serve to anyone.
 - **No sign-in, no cross-origin opener policy.** It is no app origin
   (`getAppOrigins`). It must never send `Cross-Origin-Opener-Policy`: that
   would cut the bridge's link to the page that opened it.
@@ -173,11 +175,15 @@ when Flash is clicked. Two samples with one scene id fail the build.
 
 The list is grouped by category ("System" first, then the store's shelves),
 with a search. The Scene store is always on the frame and cannot be unticked.
-A scene that needs a fast screen cannot be ticked for e-paper. Presets tick a
+Any scene may go on any panel: a fast scene runs on e-paper too (the DVD logo
+on a fast e-paper, the kitchen sink), so nothing is held back by it. A sample
+the store carries has its cover as a thumbnail, which opens its store page in
+a new tab (the store's public listing, read by name). Presets tick a
 set (`presetPicks` in `standalone.ts`): "A few to start" (a short list by
 taste: a clock and the weather, plus the frame's tools on a touch board),
 "Interactive LCD scenes" (what needs `touch`, `keys` or `fast`), "Best for
-e-paper" (none of those), "Everything" and "Only the Scene store". A preset
+e-paper" (none of those: a suggestion, never a limit), "Everything" (every
+sample, on any panel) and "Only the Scene store". A preset
 follows the board picked after it; a tick by hand ends that. A preset fills
 the board while it has room and says how many did not fit; a set picked by
 hand that the board cannot take is refused before the flash: more than 128

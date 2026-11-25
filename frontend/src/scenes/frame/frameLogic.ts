@@ -50,7 +50,9 @@ import {
   pushCloudFrameSchedule,
   pushCloudFrameSettings,
   pushCloudFrameVoicePermissions,
+  setCloudFrameServiceSettingsEnabled,
 } from '../../utils/cloudFrameApi'
+import { confirmDialog } from '../../utils/confirmDialogLogic'
 import { voicePermissionsOf } from '../../utils/voiceChat'
 import {
   cloudFrameFormDiffKeys,
@@ -1188,11 +1190,20 @@ function normalizeBuildrootForComparison(value: unknown): Record<string, unknown
  * Compared whole, a sleeping ESP32 put "Embedded settings" in the pending
  * changes after every wake, the deploy's own boot included (frame 70,
  * 2026-10-13: only `lastBoot.at` differed). `storage` is what the state
- * partition holds at the frame's last check-in, reported the same way.
+ * partition holds at the frame's last check-in, reported the same way, and
+ * `sceneImport` says an adopted board's own scenes are still to be read
+ * (backend utils/embedded_scene_import.py).
  */
 function normalizeEmbeddedForComparison(value: unknown): Record<string, unknown> {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-  const { lastBoot: _lastBoot, layout: _layout, firmware: _firmware, storage: _storage, ...rest } = source
+  const {
+    lastBoot: _lastBoot,
+    layout: _layout,
+    firmware: _firmware,
+    storage: _storage,
+    sceneImport: _sceneImport,
+    ...rest
+  } = source
   return rest
 }
 
@@ -2019,6 +2030,58 @@ export function buildSplitScene(
     },
     frame
   )
+}
+
+/**
+ * A cloud frame that is not allowed the account's API keys at all (its link
+ * holds no `settings:services`: a frame linked from its own screen, or one
+ * whose owner turned "Deliver keys to this frame" off) gets none of the keys
+ * a new scene is granted: the scene renders "please provide an OpenAI API
+ * key" with the key in the account (2026-11-25). Adding such a scene is
+ * where the owner is looking, so this asks once whether to deliver them; it
+ * never turns delivery on by itself (the switch is the owner's,
+ * docs/cloud-frames.md "Scopes"), and the scene drawer asks again later.
+ */
+async function offerServiceKeyDelivery(
+  frameId: FrameId,
+  frame: Partial<FrameType> | null,
+  scenes: FrameScene[]
+): Promise<void> {
+  if (!isCloudMode() || !frame || frame.service_settings_enabled !== false) {
+    return
+  }
+  const groups = collectSecretSettingsFromScenes(scenes, appsModel.findMounted()?.values.apps ?? {})
+  if (groups.length === 0) {
+    return
+  }
+  const names = groups.map((group) => settingsDetails[group]?.title ?? group)
+  const keys =
+    names.length === 1 ? `${names[0]} key` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} keys`
+  const [only] = scenes
+  const what = scenes.length === 1 && only ? `"${only.name || 'This scene'}" uses` : 'These scenes use'
+  await confirmDialog({
+    title: `Deliver your API keys to ${frame.name ? `"${frame.name}"` : 'this frame'}?`,
+    message:
+      `${what} your ${keys}. This frame is not allowed your account's API keys, ` +
+      `so it would show ${scenes.length === 1 ? 'the scene' : 'them'} without ${groups.length === 1 ? 'it' : 'them'}.\n\n` +
+      "You can turn this off again in the frame's settings, under Service settings.",
+    confirmLabel: 'Deliver keys',
+    busyLabel: 'Delivering…',
+    cancelLabel: 'Not now',
+    onConfirm: async () => {
+      try {
+        await setCloudFrameServiceSettingsEnabled(frameId, true)
+        framesModel.actions.loadFrame(frameId)
+      } catch (error) {
+        reportTaskOutcome('error', {
+          frameId,
+          kind: 'save',
+          title: 'Delivering API keys',
+          detail: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
+  })
 }
 
 /**
@@ -3585,8 +3648,14 @@ export const frameLogic = kea<frameLogicType>([
       const formKeysMoved = !frame || !oldFrame || !frameFormKeysEqual(oldFrame, frame)
       if (formKeysMoved) {
         const previousMode = values.frameForm?.mode || oldFrame?.mode || 'rpios'
+        // Against the form the previous row made, not the row itself:
+        // sanitizeFrame fills in what a row may lack. A row first heard of
+        // through a broadcast has no secrets (backend frame_secrets.py), so
+        // its form's `frame_admin_auth.pass: ''` read as an edit, the full
+        // row from the GET never replaced the form, and an adopted frame
+        // opened with six secrets "unsaved" and "pending" (2026-11-25).
         const frameFormMatchesPrevious = oldFrame
-          ? computeChangeDetails(oldFrame, values.frameForm, previousMode, false).length === 0
+          ? computeChangeDetails(sanitizeFrame(oldFrame), values.frameForm, previousMode, false).length === 0
           : false
         if (frame && (!oldFrame || frameFormMatchesPrevious)) {
           actions.resetFrameForm(sanitizeFrame(frame) as FrameType)
@@ -3646,6 +3715,8 @@ export const frameLogic = kea<frameLogicType>([
       if (openDrawer) {
         openSceneControlDrawer(props.frameId, newScenes[0].id)
       }
+      // Not awaited: the install goes on while the owner answers.
+      void offerServiceKeyDelivery(props.frameId, values.frame, newScenes)
       await Promise.all(
         sceneGroups.map(({ template, scenes }) => saveTemplateSceneImages(props.frameId, template, scenes))
       )

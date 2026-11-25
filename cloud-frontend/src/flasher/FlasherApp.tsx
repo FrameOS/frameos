@@ -293,22 +293,36 @@ function ScenePicker(): JSX.Element {
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-[color:var(--tool-strong)]">
                   {group.category}
                 </h3>
-                {group.rows.map(({ sample, picked, unfit }) => (
+                {group.rows.map(({ sample, picked, cover }) => (
                   <label
                     key={sample.name}
                     className={clsx(
                       'flex items-start gap-2 rounded-lg px-1 py-1 text-sm',
-                      sample.store || unfit ? 'cursor-default' : 'cursor-pointer'
+                      sample.store ? 'cursor-default' : 'cursor-pointer'
                     )}
                   >
                     <input
                       type="checkbox"
                       className="mt-1"
                       checked={picked}
-                      disabled={sample.store || (Boolean(unfit) && !picked)}
+                      disabled={sample.store}
                       onChange={() => togglePicked(sample.name)}
                     />
-                    <span className={clsx('min-w-0 flex-1', unfit && !picked ? 'opacity-50' : null)}>
+                    {cover ? (
+                      // A link inside the label opens the store page and leaves the box as it is.
+                      <a
+                        href={cover.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`${sample.name} on the Scene store`}
+                        className="mt-0.5 block h-12 w-16 shrink-0 overflow-hidden rounded-md border border-[color:var(--tool-border)] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                      >
+                        <img src={cover.image} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      </a>
+                    ) : (
+                      <span className="mt-0.5 block h-12 w-16 shrink-0" aria-hidden />
+                    )}
+                    <span className="min-w-0 flex-1">
                       <span className="flex flex-wrap items-baseline gap-x-2">
                         <span className="font-semibold text-[color:var(--tool-strong)]">{sample.name}</span>
                         {SHOWN_NEEDS.filter((need) => sample.needs.includes(need)).map((need) => (
@@ -319,7 +333,6 @@ function ScenePicker(): JSX.Element {
                       </span>
                       <span className="frame-tool-muted line-clamp-2 block text-xs leading-5">
                         {sample.store ? 'Always on the frame: it installs the rest. ' : ''}
-                        {unfit ? `${unfit}. ` : ''}
                         {sample.description}
                       </span>
                     </span>

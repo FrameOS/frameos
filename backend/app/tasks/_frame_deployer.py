@@ -18,7 +18,8 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.apps import get_scene_apps_from_scenes
-from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
+from app.models.frame import SERVICE_SETTING_GROUPS, Frame, get_frame_json, get_interpreted_scenes_json
+from app.utils.frame_secrets import SETTINGS_FINGERPRINTS_KEY
 from app.utils.scene_execution import scene_is_interpreted
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -124,6 +125,8 @@ LOCAL_SOURCE_IGNORE_PATTERNS = (
 
 DEFAULT_FRAMEOS_SOURCE_ROOT = Path(__file__).resolve().parents[3] / "frameos"
 FRAMEOS_VERSION_KEYS = ("frameosVersion", "frameos_version", "frameos")
+# The frame.json the running FrameOS reads (and its admin page writes keys to).
+DEVICE_FRAME_JSON_PATH = "/srv/frameos/current/frame.json"
 
 
 def local_pixie_override_path() -> Path | None:
@@ -270,10 +273,58 @@ class FrameDeployer:
         """Upload the release-specific `frame.json`. It carries the frame's
         secrets (API keys, the Remote's shared secret), so 0600 on every
         transport."""
-        json_data = json.dumps(get_frame_json(self.db, self.frame), indent=4).encode() + b"\n"
+        frame_json = get_frame_json(self.db, self.frame)
+        await self._keep_device_service_keys(frame_json)
+        json_data = json.dumps(frame_json, indent=4).encode() + b"\n"
         await upload_file(
             self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport, mode=0o600
         )
+
+    async def _keep_device_service_keys(self, frame_json: dict) -> None:
+        """Keep in the frame.json this deploy writes the service keys the
+        device holds of its own. frame.json is written whole, so a group this
+        backend does not ship was gone after every SSH deploy, a key the frame
+        held before a backend adopted it among them (its own admin page's,
+        what it had standalone). The rule is the admin-API deploy's
+        (`service_settings_push_payload`): a group this backend ships wins,
+        one its last deploy shipped and this one does not goes (a grant taken
+        back), and one it never shipped stays the device's. What was shipped
+        is known only from a baseline that says (`settings_fingerprints`);
+        without one frame.json is the backend's alone, as before. Best
+        effort: a file that cannot be read keeps nothing."""
+        baseline = getattr(self.frame, "last_successful_deploy", None)
+        shipped_before = baseline.get(SETTINGS_FINGERPRINTS_KEY) if isinstance(baseline, dict) else None
+        settings = frame_json.get("settings")
+        if not isinstance(shipped_before, dict) or not isinstance(settings, dict):
+            return
+        try:
+            status, stdout, _stderr = await run_command(
+                self.db,
+                self.redis,
+                self.frame,
+                f"cat {shlex.quote(DEVICE_FRAME_JSON_PATH)}",
+                timeout=60,
+                log_output=False,
+                log_command=False,
+                transport=self.remote_transport,
+            )
+            device_json = json.loads(stdout) if status == 0 else None
+        except Exception:  # noqa: BLE001 - not readable (a first deploy has none): nothing to keep
+            return
+        held = device_json.get("settings") if isinstance(device_json, dict) else None
+        if not isinstance(held, dict):
+            return
+        kept: list[str] = []
+        for group in SERVICE_SETTING_GROUPS:
+            value = held.get(group)
+            if not isinstance(value, dict) or not value or group in shipped_before:
+                continue
+            if settings.get(group) not in (None, "", {}, []):
+                continue
+            settings[group] = value
+            kept.append(group)
+        if kept:
+            await self.log("stdout", f"- Kept the frame's own service keys: {', '.join(kept)}")
 
     async def _upload_scenes_json(self, path: str, gzip: bool = False, runtime_version: str | None = None) -> None:
         """Upload the release-specific `scenes.json`, as the FrameOS that will

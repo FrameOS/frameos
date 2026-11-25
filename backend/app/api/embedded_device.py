@@ -74,6 +74,7 @@ from app.models.frame import (
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
+from app.utils.embedded_scene_import import scene_import_pending, start_scene_import
 from app.utils.events_contract_gen import BUILT_IN_SCENE_IDS
 from app.utils.frame_commands import pending_command_types, previewed_scenes
 from app.utils.server_render import (
@@ -1663,6 +1664,16 @@ async def api_embedded_device_scenes(
     if_none_match: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    if scene_import_pending(frame):
+        # An adopted board whose own scenes are not read yet: a set, even an
+        # empty one, would replace them. Refused, it keeps what it holds
+        # (fos_scenes.c `http-error`), and the import goes first.
+        await start_scene_import(redis, frame)
+        return Response(
+            content="The frame's own scenes are read first",
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            headers={"Retry-After": "60"},
+        )
     payload = embedded_scenes_payload(db, frame)
     etag = embedded_payload_etag(payload)
     if if_none_match and if_none_match.strip() == etag:

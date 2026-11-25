@@ -10,6 +10,7 @@ import './index.css'
 import { initKea } from '../../frontend/src/initKea'
 import {
   registerAddFramePanel,
+  registerAddFramePanelReopen,
   registerFirstRunPanel,
   registerFramePanel,
 } from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
@@ -17,6 +18,7 @@ import { CloudAddFrameDrawer } from './components/CloudAddFrameDrawer'
 import { CloudFirstRunAddFrame } from './components/CloudFirstRunAddFrame'
 import { CloudFrameSdImageCard } from './components/CloudFrameSdImageCard'
 import { CloudFrameUsbRelink } from './components/CloudFrameUsbRelink'
+import { hasStashedLinkCode } from './components/LinkRunningFrameForm'
 import { cloudAssetsBasePath, cloudRouteBasePath, legacyCloudPathRedirect } from './routes'
 import { seedThemeFromSharedCookie, syncThemeToSharedCookie } from './cloudThemeSync'
 
@@ -49,6 +51,9 @@ if (typeof window !== 'undefined') {
 // is handed down instead — registered before the first render, so FramesHome
 // sees it the moment it mounts.
 registerAddFramePanel(CloudAddFrameDrawer)
+// Back from re-authenticating a link approval, the drawer opens again on the
+// parked code (LinkRunningFrameForm): it used to look like it had vanished.
+registerAddFramePanelReopen(hasStashedLinkCode)
 // And the same panel as the page's content while the fleet is empty.
 registerFirstRunPanel(CloudFirstRunAddFrame)
 

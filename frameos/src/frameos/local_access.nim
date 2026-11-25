@@ -52,6 +52,12 @@ const
   ## chromiumScreenshot run Chromium unsandboxed where FrameOS runs as root.
   LocalAccessScopeLocalNetwork* = "localNetwork"
   LocalAccessScopeShellApps* = "shellApps"
+  ## Not a fact but a handover: the frame page's Link to backend shows a code for a
+  ## backend, and `POST /api/adopt` takes it (server/routes/adopt_routes.nim,
+  ## docs/scene-settings.md "Connecting the frame"). Only the frame page
+  ## starts one and only the page draws it, never a control plane's
+  ## challenge: `isLocalAccessScope` leaves it out.
+  LocalAccessScopeAdopt* = "adopt"
 
   LocalAccessStatePath* = "./state/local_access.json"
     ## Deliberately NOT frame.json. A backend deploy uploads a freshly
@@ -364,6 +370,19 @@ proc clearLocalAccessChallenge*() =
   withLock localAccessLock:
     localAccessChallenge = LocalAccessChallenge()
 
+proc clearLocalAccessChallenge*(scope: string) =
+  ## Drops the pending challenge only when it was shown for `scope`: the
+  ## frame page's Cancel ends an adoption code, never a local network one.
+  withLock localAccessLock:
+    if localAccessChallenge.scope == scope:
+      localAccessChallenge = LocalAccessChallenge()
+
+proc pendingLocalAccessScope*(): string =
+  ## The scope of the code on the panel right now, or "" for none.
+  withLock localAccessLock:
+    if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime():
+      result = localAccessChallenge.scope
+
 proc activeLocalAccessCode*(): string =
   ## The code that should be on the panel right now, or "" for nothing.
   withLock localAccessLock:
@@ -378,8 +397,10 @@ proc localAccessPanelText*(): string =
   ## drew, which is how every end of a challenge — the right code, the fifth
   ## wrong one, expiry, a new challenge — takes the old code off the panel
   ## without anyone having to ask for a render.
+  ## An adoption code is the frame page's to show, never the runner's.
   withLock localAccessLock:
-    if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime():
+    if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime() and
+        localAccessChallenge.scope != LocalAccessScopeAdopt:
       let label =
         if localAccessChallenge.scope == LocalAccessScopeShellApps: "Shell apps code"
         else: "Local network access code"

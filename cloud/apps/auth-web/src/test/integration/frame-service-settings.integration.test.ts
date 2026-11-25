@@ -522,6 +522,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     await expect(installed.json()).resolves.toMatchObject({
       declared_settings_groups: ["unsplash"],
       granted_settings_groups: [],
+      keys_withheld: [],
     });
     // Re-installing with a grant (the store page's ticked checkbox) grants;
     // a malformed list is refused rather than dropped.
@@ -546,6 +547,74 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       routeParams(frame.frame_id),
     );
     expect(malformed.status).toBe(400);
+  });
+
+  it("names the granted keys a frame linked without settings:services cannot get", async () => {
+    // A link made through the device flow (a frame's own "Link to cloud")
+    // holds what that flow asked for: frame:link and frame:managed, no keys.
+    // The install's grant is recorded all the same, and goes nowhere.
+    const frame = await activeFrame();
+    const { linkedClientId } = await frameRow(frame.frame_id);
+    const [client] = await db
+      .select()
+      .from(linkedClients)
+      .where(eq(linkedClients.id, linkedClientId));
+    await db
+      .update(linkedClients)
+      .set({
+        providerClientMetadata: {
+          ...(client!.providerClientMetadata as Record<string, unknown>),
+          requestedScopes: ["frame:link", "frame:managed"],
+        },
+      })
+      .where(eq(linkedClients.id, linkedClientId));
+    await saveSettings({ unsplash: { accessKey: unsplashKey } });
+    await db.delete(frameCommands);
+
+    const scene = await createStoreScene(frame.accountId, "data/unsplash");
+    const install = () =>
+      addFrameScene(
+        postJson(
+          `/api/frames/${frame.frame_id}/scenes/add`,
+          { scene_id: scene.id, settings_groups: ["unsplash"] },
+          { origin: baseUrl },
+        ),
+        routeParams(frame.frame_id),
+      );
+    const withheld = await install();
+    expect(withheld.status).toBe(200);
+    await expect(withheld.json()).resolves.toMatchObject({
+      granted_settings_groups: ["unsplash"],
+      keys_withheld: ["unsplash"],
+    });
+    expect((await pull(frame.frame_id, frame.access_token)).status).toBe(403);
+    // Nothing to nudge: the frame would be refused the pull.
+    const nudges = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.type, "refresh_service_settings"));
+    expect(nudges).toHaveLength(0);
+
+    // The owner's switch (Settings, the scene drawer, the install's offer).
+    const enable = await setServiceSettingsEnabled(
+      postJson(
+        `/api/frames/${frame.frame_id}/service-settings/enabled`,
+        { enabled: true },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(enable.status).toBe(200);
+    await expect(
+      (await pull(frame.frame_id, frame.access_token)).json(),
+    ).resolves.toEqual({
+      groups: ["unsplash"],
+      settings: { unsplash: { accessKey: unsplashKey } },
+    });
+    await expect((await install()).json()).resolves.toMatchObject({
+      granted_settings_groups: ["unsplash"],
+      keys_withheld: [],
+    });
   });
 
   it("answers 304 to a matching If-None-Match and 200 once the key rotates", async () => {

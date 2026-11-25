@@ -118,9 +118,9 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
 | `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
-| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
+| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `linkCloud`, `adopt`, `cancelLink` |
 
 The page is for somebody at the frame. A key or a tap that came in over the
 frame's HTTP API with the frame access key (origin `http:write`,
@@ -140,8 +140,19 @@ What the page holds, top to bottom:
 
 - **A card**: Wi-Fi (connected to what, can't find it, wrong password?,
   connecting, the setup hotspot), signal, address, the battery on a frame
-  that has one, what the last Save could not do, who manages the frame, the
-  version.
+  that has one, what the last Save could not do, who manages the frame
+  ("Nobody" where a plane can be connected: below, "Connecting the
+  frame"), the version.
+- **The buttons**, right under the card, above the fields (which can run
+  longer than the panel): **Render again**, **Check for updates** / **Install
+  update** (below), **Update scenes** (below), **Restart FrameOS** (where the
+  host lists it), **Reboot**, and **Link to cloud** and **Link to backend**
+  where a plane can be connected (below, "Connecting the frame"). Restart,
+  Reboot, Install and Update scenes ask for a second tap ("Tap again",
+  red); anything else in between asks again. Render, Restart and Reboot send
+  the contract's device commands from the origin `panel`
+  (`docs/events-contract.json`), so every host runs the restart and reboot it
+  runs for a schedule.
 - **Wi-Fi network**: a select box of the networks in range, the saved one first
   when it is not among them, and "Other network…" for a hidden one (an input
   to type its name). "Scan for networks" sits right under it; a scan runs when
@@ -200,12 +211,6 @@ What the page holds, top to bottom:
   and the words stay on the page. It asks for a second tap, as Install update
   does. One only the owner may take is counted and left to the owner. A
   frame with no plane, or whose plane does not list updates, shows neither.
-- **Render again**, **Restart FrameOS** (where the host lists it) and
-  **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
-  anything else in between asks again. They send the
-  contract's device commands from the origin `panel`
-  (`docs/events-contract.json`), so every host runs the restart and reboot it
-  runs for a schedule.
 
 Save is lit only while there is something to save, on either page, and goes
 quiet once it is pressed: that is how the page says it took it. On the frame
@@ -239,6 +244,156 @@ was off can still be fixed at the frame, the device has the last word:
   `/boot/firmware`), while it is there (`frame_settings_lock.nim`);
 - an ESP32: `set settings_unlock 1` on the USB console, until `set
   settings_unlock 0`.
+
+### Connecting the frame
+
+A frame that no control plane holds (no cloud link of any kind, no backend
+with its key, no claim token queued) and that has a panel to show a code on
+says **Managed by: Nobody** on its card, and its buttons end with **Link
+to cloud** and **Link to backend**. The host decides what is offered (`actions`:
+`linkCloud`, `adopt`); the words are the page's. Either button then shows the
+same page:
+
+- the plane's name, its **code** (large, in the panel's accent where it shows
+  colors: sky on an LCD, red on a color e-paper), where it is entered, a line
+  that says what to do, and **Cancel**;
+- a **QR code** of what the person has to share, black on white as a camera
+  reads it best, beside the words, and left out (the words say "open …"
+  instead of "scan …") where the panel leaves no room for one that scans
+  (under 96 px);
+- while the cloud has not answered yet, or has and the frame is enrolling,
+  "Waiting for cloud.frameos.net…" (the server it asked) and Cancel;
+- for the cloud, the server under its name and a **Cloud address** field
+  under the page, saved with **Save**: where Link to cloud goes from then on
+  (an ESP32's `cloud_url`, a Pi's link state `provider_url`; typed without a
+  scheme it is `https://`, empty is FrameOS Cloud's own, plain `http://` only
+  to a local host). A link under way or stopped starts over against it; a
+  link made is never moved;
+- a cloud link that stopped stays up saying why, with **Try again** and
+  Cancel: no FrameOS Cloud answered at that address (`reach`, with the HTTP
+  status or "no answer"), the address is refused (`address`), the cloud
+  would not take the code (`refused`), nobody entered it in time (`lapsed`),
+  or the approved frame could not enroll (`enroll`). A Pi notes `reach` on a
+  link it keeps retrying (a provider away, Wi-Fi not up yet) as well.
+
+The host hands the page one fact for it, `link`: `{to: "cloud" | "backend",
+code, where, qr}`, and for the cloud `server` and, once stopped, `failed`
+(the word above) and `detail`. Starting either ends the other; **Cancel**
+(`cancelLink`) ends either, never a link made and never a local network
+access code, and so does **Back**, which goes back to the frame page.
+
+**A code lives only while its page is up, and never long.** Leaving the
+frame page any way (Back, the scene's settings, another scene, a window beside
+it: the host's `close`) ends a code still waiting to be entered, and a cloud
+link that stopped; a cloud link already approved and enrolling finishes. A
+backend's code is good for 300 s and five tries, out of a wrong-code budget
+that outlives restarts (`fos_lan_access.h`, `local_access.nim`). A cloud
+link shows codes for 15 minutes from the press at most (`PANEL_LINK_SECONDS`
+on a Pi, whose device flow starts a new code when one lapses; one window
+held to it on an ESP32), then stops as `lapsed`. Nothing of a page's link
+outlives the process: an ESP32 keeps it in RAM, and a Pi drops a link the page
+asked for when it starts (`dropPanelLinkAtStart`), so a crash or a reboot
+never shows a code again with nobody at the frame. (The setup portal's link,
+which has no page, keeps its marker and its start budget.)
+
+- **The cloud** (`linkCloud`; not offered to a Pi whose frame.json names a
+  backend, which the cloud refuses to enroll): the device flow of
+  `docs/cloud-frames.md` "B. Link code on the device", run off the render
+  task (a Pi queues `state/cloud_link_code_pending.json` for the hub thread,
+  `device_flow.nim`; an ESP32's cloud task, `fos_cloud.c`, which a frame that
+  was never on the cloud starts at its first Link to cloud). `where` is the
+  page the code is typed in without its scheme, `qr` is
+  `verification_uri_complete`, the same page with the code in it
+  (`/device?user_code=…`, which the cloud's device page fills in). Approved,
+  the frame enrolls with the flow's token and is cloud-managed, with what a
+  claim-token frame is granted: the account's service keys, its logs and
+  metrics (`/api/device/start` adds them to a `frame:managed` link). A Pi also
+  draws its code and a QR over any other scene, as it did before.
+- **A backend** (`adopt`): six digits, the local network access ceremony with
+  the scope `adopt` (`local_access.nim`, `fos_lan_access.c`: five tries, five
+  minutes, the same wrong-code budget). `where` is the address to type
+  (`ip:8787` on a Pi, the IP alone on an ESP32's port 80) and `qr` is that
+  address and the code, `192.168.1.20:8787 123456`: the frame does not know
+  its backend's address, so its QR code cannot open it; a phone shows the
+  text, and pasted into the **Adopt frame** form's address it fills the
+  address, the port and the code (`adoptPaste`, `adoptFrame.ts`). In the
+  form the code stands in for the admin login: the backend reads
+  `GET /api/adopt` on the frame (8787, then 80) and sends the code to
+  `POST /api/adopt`:
+  - a Pi answers with its admin login (minting one, `admin` and a random
+    password saved to frame.json, when it has none), and the backend goes on
+    as an adoption by password does: reads `GET /api/frames/1`, imports the
+    scenes, writes the service keys they use through `POST /api/settings`
+    and its address and key back (`adopt_standalone_frame`,
+    `backend/app/api/frame_sync.py`);
+  - an ESP32 is sent `{code, backend, apiKey, frameId, sendLogs}` for a row
+    the backend made from what `GET /api/adopt` said (platform, panel,
+    preset, size), writes them to NVS and restarts, and from then on is a
+    backend frame like a USB-provisioned one (`sendLogs` is that
+    provisioning's `server_send_logs`, which no settings pull carries). It
+    keeps its board settings and its scenes: the backend reads them over the
+    board's HTTP API with the key it was just given
+    (`GET /api/frames/<id>/scenes`, then each scene) as soon as it answers
+    again, into the row and the deploy baseline
+    (`backend/app/utils/embedded_scene_import.py`). Until they are read the
+    row says so (`embedded.sceneImport`) and the board is sent no scenes: its
+    scene pull answers 503 and the board keeps what it holds, and its next
+    check-in reads them.
+
+  Either way the scenes come with the service keys they use: the frame is
+  granted the groups its store scenes declare (`service_setting_groups`), as
+  installing them from the store grants them, and a scene of the owner's own
+  gets what it declares without a grant. A key the frame held of its own
+  stays where this backend has none to send: an ESP32 holds none (its keys
+  are a plane's, pulled every boot), and a Pi's frame.json keeps a group
+  this backend never shipped, through the admin route and an SSH deploy
+  alike.
+
+  `GET /api/adopt` says nothing but `{"adopting": false}` while no code shows;
+  `POST /api/adopt` answers the ceremony's tokens (`code_required` 400,
+  `invalid_code` / `too_many_attempts` 403, `code_expired` 410, `rate_limited`
+  429) and `managed` 409 on a cloud-managed frame, the token alone on an
+  ESP32 (the backend has the words). FrameOS Cloud adopts nothing: the
+  cloud's half is the link code.
+
+**Both codes are presence codes.** Whoever enters the cloud's code first
+links the frame to their account, and whoever sends the backend's adopts it,
+so reading either off the panel is the proof of being at the frame, as with
+the local network access code (`docs/lan-access.md`). The page is the only
+place either is drawn (a Pi's runner draws the cloud's over other scenes, and
+neither runner nor firmware draws the adoption code as an overlay), and while
+one is under way **no picture is kept**: a Pi does not store the render
+(`setLastImage`; `GET /image` and the scene snapshots keep the one from
+before), an ESP32 keeps its preview snapshot empty (`store_snapshot` in
+`fos_client.c`, `fos_frame_settings_code_pending`). An app reading the facts
+through `frameos.frame('read')` gets them without `link`. A frame with no
+panel (a Pi whose device is only a picture) is offered neither: its picture is
+all it shows, and that is exactly what is not kept.
+
+### Unlinking
+
+A frame a plane holds (the card's **Managed by** names it) has **Unlink**
+where the link buttons were (the host's action `unlink`). It asks first, on a
+page of its own: "Unlink from FrameOS Cloud?" (or the backend), what the frame
+keeps (its scenes, its Wi-Fi) and what stops (scenes, settings and commands
+from it), with **Unlink** and **Cancel**; and **Unlink** asks again ("Tap
+again") before it acts. Back and Cancel go back to the frame page.
+
+- **The cloud:** the plane hears it first where it can be reached (`POST
+  /api/backends/unlink` with the frame's own token: its frame there says
+  revoked, as when the owner revokes it), and the frame forgets the link
+  whatever it answers: a Pi resets its link state as the admin page's
+  Disconnect does (on the page's worker thread), an ESP32's cloud task demotes
+  it (`fos_cloud_unlink`, `cloud_demote`, the provider's service keys with it).
+- **A backend:** a Pi clears `serverHost` through the same update a Save that
+  clears the server makes, which sends the backend `server:detached`
+  (`backendChangeNotice`), and restarts; an ESP32 clears its backend URL, key
+  and frame id and the service keys the backend sent, and restarts. The
+  backend's row stays until its owner removes it there.
+
+The frame is then a frame no plane holds, and the page offers **Link to cloud**
+and **Link to backend** again. An app's `frameos.frame('action', 'unlink')` is
+refused: no scene takes a frame out of its owner's hands.
 
 ### What a control plane learns
 

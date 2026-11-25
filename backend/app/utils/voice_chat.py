@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import re
 import struct
 import sys
@@ -46,6 +47,8 @@ import httpx
 from app.models.frame import Frame
 from app.utils.ai_chat_agent import OpenAiRequestError, ToolBox, ToolOutput, build_initial_input, run_agent_loop
 from app.utils.ai_chat_tools import untrusted_result
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "VOICE_MAX_AUDIO_BYTES",
@@ -1066,6 +1069,12 @@ def voice_progress_text(transcript: str, words: str, seconds: int = 0) -> str:
     return f'"{heard}"\n{timed}' if heard else timed
 
 
+def error_detail(error: BaseException) -> str:
+    """What the frame and its log say of a failed turn: the error's message,
+    or its kind when it has none (an httpx timeout's is empty)."""
+    return (str(error) or type(error).__name__)[:500]
+
+
 def wants_voice_progress(accept: str | None) -> bool:
     """Whether the frame asked for its closing chunk's answer with progress."""
     return "application/x-ndjson" in (accept or "").lower()
@@ -1096,12 +1105,18 @@ async def voice_progress_stream(
             queue.put_nowait({"progress": stage, "text": voice_progress_text(state["heard"], VOICE_PROGRESS_WORDS[stage])})
 
     async def turn() -> None:
+        # Whatever becomes of the turn, the stream ends with an answer: a turn
+        # cancelled under it (the server going down) would otherwise leave the
+        # panel saying its stage again until the frame gives up.
+        answer: dict[str, Any] = {"ok": False, "error": "chat_failed", "detail": "the turn was cancelled"}
         try:
             answer = await run(progress)
         except Exception as error:  # noqa: BLE001 — the frame sounds it as an error
-            answer = {"ok": False, "error": "chat_failed", "detail": str(error)[:500]}
-        queue.put_nowait(answer)
-        queue.put_nowait(None)
+            logger.exception("voice chat: the turn raised")
+            answer = {"ok": False, "error": "chat_failed", "detail": error_detail(error)}
+        finally:
+            queue.put_nowait(answer)
+            queue.put_nowait(None)
 
     task = asyncio.create_task(turn())
     _progress_turns.add(task)
@@ -1233,7 +1248,7 @@ async def transcribe_and_answer(
             pcm, api_key=api_key, prompt=", ".join(scene_names) if scene_names else None, http_client=http_client
         )
     except (OpenAiRequestError, httpx.HTTPError, asyncio.TimeoutError) as error:
-        return "transcription_failed", str(error)
+        return "transcription_failed", error_detail(error)
     transcript = transcript.strip()
     if not transcript:
         return "nothing_heard", "the transcription came back empty"
@@ -1253,4 +1268,4 @@ async def transcribe_and_answer(
             progress=progress,
         )
     except (OpenAiRequestError, httpx.HTTPError, asyncio.TimeoutError) as error:
-        return "chat_failed", str(error)
+        return "chat_failed", error_detail(error)

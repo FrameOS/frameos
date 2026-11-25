@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 import json
 import re
+import time
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -15,13 +16,14 @@ from arq import ArqRedis as Redis
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.utils.frame_secrets import deployed_frame_snapshot
+from app.utils.frame_secrets import SETTINGS_FINGERPRINTS_KEY, deployed_frame_snapshot
 from app.models.frame import (
     frame_has_shell_access,  # noqa: F401 — re-exported for app.api.frames
     Frame,
     cached_app_configs,
     compact_timezone_updater,
     delete_frame,
+    grant_store_scene_setting_groups,
     new_frame,
     normalize_frame_admin_auth,
     normalize_error_behavior,
@@ -42,14 +44,31 @@ from app.tasks.buildroot_image import (
     clear_buildroot_sd_image,
     ensure_buildroot_frame_defaults,
 )
-from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
+from app.tasks.embedded_firmware import (
+    EMBEDDED_HARDWARE_PRESETS,
+    EMBEDDED_PLATFORMS,
+    embedded_backend_url_for_frame,
+    embedded_device_for_panel,
+    ensure_embedded_frame_defaults,
+    normalize_embedded_hardware_preset,
+    normalize_embedded_platform,
+)
+from app.utils.embedded_scene_import import (
+    IMPORT_RETRY_SECONDS,
+    SCENE_IMPORT_KEY,
+    SCENE_IMPORT_PENDING,
+    SceneImportError,
+    claim_scene_import,
+    import_embedded_frame_scenes,
+    release_scene_import,
+)
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
 from app.utils.server_address import split_address
 from app.utils.render_scale import normalize_render_scale
 from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_frame
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
-from app.utils.timezone import stored_timezone
+from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.versions import current_frameos_version, version_tuple
 
 FrameFetch = Callable[..., Awaitable[tuple[int, bytes, dict[str, Any]]]]
@@ -1743,6 +1762,339 @@ def _adopted_frame_name(remote_frame: dict[str, Any]) -> str:
     return frame_host
 
 
+# A Pi's web port; an ESP32 serves on 80 (what an adoption by code tries
+# next when nobody typed a port and 8787 does not answer).
+ADOPT_DEFAULT_FRAME_PORT = 8787
+ADOPT_EMBEDDED_FRAME_PORT = 80
+ADOPT_CODE_DIGITS = 6
+ADOPT_NO_CODE_SHOWING = (
+    "No adoption code is showing on the frame. On the frame, open Settings → the gear → Link to backend."
+)
+# The frame's refusals of POST /api/adopt (the LAN access ceremony's tokens,
+# docs/scene-settings.md "The frame page"), as the form shows them.
+ADOPT_REFUSALS = {
+    "code_required": "Enter the six-digit code the frame shows.",
+    "invalid_code": "That is not the code the frame shows. Check it and try again.",
+    "too_many_attempts": (
+        "Too many wrong codes: the frame no longer takes this one. On the frame, open Settings → the gear → "
+        "Link to backend for a new code."
+    ),
+    "code_expired": (
+        "The code ran out, or the frame is not showing one any more. On the frame, open Settings → the gear → "
+        "Link to backend for a new code."
+    ),
+    "rate_limited": "The frame is taking no more tries for a moment. Wait a minute and try again.",
+    "managed": (
+        "The frame is already managed by FrameOS Cloud or a backend, so it cannot be adopted here. "
+        "Unlink it there first."
+    ),
+}
+
+
+def _adoption_code(value: str | None) -> str | None:
+    """The code as the frame compares it: digits only (people type "123 456"
+    or "123-456"). None when no code was given: the admin login flow."""
+    if value is None:
+        return None
+    code = re.sub(r"[\s-]", "", value)
+    if not code:
+        _bad_request(ADOPT_REFUSALS["code_required"])
+    if len(code) != ADOPT_CODE_DIGITS or not code.isdigit():
+        _bad_request("The adoption code is the six digits the frame shows.")
+    return code
+
+
+def _adoption_target(host: str, port: int) -> Frame:
+    """A transient (never persisted) Frame for the adoption routes: no access
+    key, so no `?k=` and no Authorization header go out (the code is the
+    only credential), plain HTTP on the given port."""
+    return Frame(
+        frame_host=host,
+        frame_port=port,
+        frame_access="private",
+        frame_access_key="",
+        mode="rpios",
+    )
+
+
+def _frame_json(body: bytes) -> dict[str, Any]:
+    try:
+        parsed = json.loads(_decode_bytes(body) or "{}")
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def _adoption_probe(
+    host: str, typed_port: int | None, redis: Redis, fetch_frame_http_bytes: FrameFetch
+) -> tuple[int, dict[str, Any]]:
+    """GET /api/adopt on the frame: the port that answered and what the frame
+    said, refused unless an adoption code is showing. The typed port alone
+    when there is one, else 8787 and then 80."""
+    ports = [int(typed_port)] if typed_port else [ADOPT_DEFAULT_FRAME_PORT, ADOPT_EMBEDDED_FRAME_PORT]
+    unreachable: list[str] = []
+    for port in ports:
+        try:
+            # One try: a frame that does not answer on 8787 may well be an
+            # ESP32 on 80, and the form is waiting.
+            status, body, _headers = await fetch_frame_http_bytes(
+                _adoption_target(host, port), redis, path="/api/adopt", attempts=1
+            )
+        except HTTPException as exc:
+            if exc.status_code in (HTTPStatus.BAD_REQUEST, HTTPStatus.FORBIDDEN):
+                raise  # the address itself was refused (app/utils/network.py)
+            unreachable.append(f"{host}:{port} ({exc.detail})")
+            continue
+        except Exception as exc:  # noqa: BLE001 - the cause is the answer here
+            unreachable.append(f"{host}:{port} ({exc})")
+            continue
+        if status == HTTPStatus.NOT_FOUND:
+            _bad_request(
+                f"The frame at {host}:{port} does not offer adoption by code. Update its FrameOS, "
+                "or adopt it with its admin login."
+            )
+        if status >= 300:
+            _bad_request(f"The frame at {host}:{port} answered HTTP {status} when asked about adoption.")
+        adoption = _frame_json(body)
+        if adoption.get("adopting") is not True:
+            _bad_request(ADOPT_NO_CODE_SHOWING)
+        return port, adoption
+    raise HTTPException(
+        status_code=HTTPStatus.BAD_GATEWAY,
+        detail="Could not reach the frame at " + " or ".join(unreachable),
+    )
+
+
+async def _adoption_claim(
+    host: str, port: int, body: dict[str, Any], redis: Redis, fetch_frame_http_bytes: FrameFetch
+) -> dict[str, Any]:
+    """POST /api/adopt on the frame with the code: what it answered, its
+    refusals as readable 400s. One try only: every wrong code is spent from
+    the frame's budget, so a timeout is never resent."""
+    try:
+        status, raw, _headers = await fetch_frame_http_bytes(
+            _adoption_target(host, port),
+            redis,
+            path="/api/adopt",
+            method="POST",
+            body=json.dumps(body),
+            headers={"Content-Type": "application/json"},
+            attempts=1,
+        )
+    except HTTPException as exc:
+        if exc.status_code in (HTTPStatus.BAD_REQUEST, HTTPStatus.FORBIDDEN):
+            raise
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Could not reach the frame at {host}:{port} ({exc.detail})",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Could not reach the frame at {host}:{port} ({exc})",
+        ) from exc
+    answer = _frame_json(raw)
+    if status < 300:
+        return answer
+    token = str(answer.get("error") or "")
+    if token in ADOPT_REFUSALS:
+        _bad_request(ADOPT_REFUSALS[token])
+    detail = str(answer.get("detail") or answer.get("error") or _decode_bytes(raw)).strip()
+    _bad_request(f"The frame refused the adoption (HTTP {status}){': ' + detail if detail else ''}")
+    return {}  # unreachable: _bad_request raises
+
+
+def _reported_dimension(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = int(value)
+    return number if 0 < number <= 10000 else None
+
+
+async def _adopt_embedded_frame(
+    db: Session,
+    redis: Redis,
+    data: FrameAdoptRequest,
+    fetch_frame_http_bytes: FrameFetch,
+    *,
+    project_id: int | None,
+    host: str,
+    frame_port: int,
+    code: str,
+    adoption: dict[str, Any],
+    server_host: str,
+    server_port: int,
+    server_scheme: str | None,
+) -> Frame:
+    """Adopt an ESP32 that shows an adoption code.
+
+    It has no admin login to hand over: the row is created first, the way an
+    embedded frame is created (mode, platform, hardware preset, the panel as
+    the device, a fresh server API key), then the board is told this backend
+    (`backend`, `apiKey`, `frameId`), writes them, and restarts as a board
+    provisioned over USB would. Any failure deletes the row again: adoption
+    completes or leaves nothing behind."""
+    raw_platform = str(adoption.get("platform") or "").strip()
+    try:
+        platform = normalize_embedded_platform(raw_platform)
+    except ValueError:
+        _bad_request(
+            f"This backend does not know the frame's board ({raw_platform or 'not said'}): "
+            "update the backend and try again"
+        )
+    if EMBEDDED_PLATFORMS[platform]["family"] == "virtual":
+        _bad_request("A virtual frame cannot be adopted")
+    try:
+        preset = normalize_embedded_hardware_preset(adoption.get("hardwarePreset"))
+    except ValueError:
+        # A board from a newer release: its own panel name still says what it is.
+        logger.warning("adopt: %s reports unknown hardware preset %r", host, adoption.get("hardwarePreset"))
+        preset = ""
+    panel = str(adoption.get("panel") or "").strip()
+    device = embedded_device_for_panel(panel)
+    if preset and not device:
+        device = EMBEDDED_HARDWARE_PRESETS[preset]["device"]
+    if not device:
+        _bad_request(
+            f"This backend has no driver for the frame's panel ({panel or 'not said'}): "
+            "update the backend and try again"
+        )
+    rotate = adoption.get("rotate")
+
+    frame = await new_frame(
+        db,
+        redis,
+        data.name or _adopted_frame_name(adoption) or host,
+        host,
+        server_host,
+        device=device,
+        project_id=project_id,
+        server_port=server_port,
+        server_scheme=server_scheme,
+    )
+    try:
+        frame.frame_port = frame_port
+        # Its scenes are its own until they are read: no set may reach it
+        # before (app/utils/embedded_scene_import.py), so the mark is on the
+        # row before the board learns this backend.
+        embedded: dict[str, Any] = {"platform": platform, SCENE_IMPORT_KEY: SCENE_IMPORT_PENDING}
+        if preset:
+            embedded["hardwarePreset"] = preset
+        frame.embedded = embedded
+        # What the board said, else empty: its bootup fills them in
+        # (app/models/log.py), never a guess from the device table.
+        frame.width = _reported_dimension(adoption.get("width"))
+        frame.height = _reported_dimension(adoption.get("height"))
+        if isinstance(rotate, int) and not isinstance(rotate, bool) and rotate in (0, 90, 180, 270):
+            frame.rotate = rotate
+        settings = get_settings_dict(db, project_id=frame.project_id)
+        frame.timezone = frame_timezone(None, (settings.get("defaults") or {}).get("timezone"))
+        ensure_embedded_frame_defaults(frame, platform)
+        # new_frame mints a TLS pair and turns the proxy on; this board was
+        # never given that pair (only USB provisioning carries it), so the
+        # backend talks plain HTTP to it as it answered here.
+        frame.https_proxy = {**normalize_https_proxy(frame.https_proxy), "enable": False}
+        await update_frame(db, redis, frame)
+
+        answer = await _adoption_claim(
+            host,
+            frame_port,
+            {
+                "code": code,
+                "backend": embedded_backend_url_for_frame(frame),
+                "apiKey": frame.server_api_key,
+                "frameId": frame.id,
+                # As USB provisioning's `set server_send_logs`: a board that
+                # had them off would otherwise stay silent here, since its
+                # settings pull never carries the switch (fos_http.c adopt_post).
+                "sendLogs": frame.server_send_logs is not False,
+            },
+            redis,
+            fetch_frame_http_bytes,
+        )
+        if answer.get("ok") is not True:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"The frame at {host}:{frame_port} did not confirm the adoption",
+            )
+
+        # The board runs the release it reported and restarts onto this
+        # backend: the same baseline a finished USB provisioning records
+        # (api_frame_embedded_usb_deploy_complete), so the workspace does not
+        # ask for a first flash.
+        snapshot = frame.to_dict()
+        snapshot.pop("last_successful_deploy", None)
+        snapshot.pop("last_successful_deploy_at", None)
+        reported_version = adoption.get("version")
+        frameos_version = (
+            reported_version if isinstance(reported_version, str) and reported_version else current_frameos_version()
+        )
+        if isinstance(frameos_version, str) and frameos_version:
+            snapshot["frameos_version"] = frameos_version
+        record_successful_deploy(frame, snapshot)
+        frame.status = "starting"
+        await update_frame(db, redis, frame)
+        db.refresh(frame)
+    except HTTPException:
+        await delete_frame(db, redis, frame.id, frame.project_id)
+        raise
+    except Exception as exc:  # noqa: BLE001 - same rollback, and the cause reaches the caller
+        logger.exception("adopt: embedded %s failed after the frame row was created", host)
+        await delete_frame(db, redis, frame.id, frame.project_id)
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Adoption failed: {exc}") from exc
+
+    # The adoption is complete from here on, whatever the import does: the
+    # board holds this backend's key and comes back with the scenes it had.
+    imported = await _import_adopted_board_scenes(db, redis, frame, fetch_frame_http_bytes)
+    try:
+        await new_log(
+            db, redis, frame.id, "stdout",
+            "Adopted: the frame restarted and reports to this backend"
+            if imported
+            else "Adopted: the frame restarts and reports to this backend; its scenes are read when it checks in",
+        )
+    except Exception:  # noqa: BLE001 - the adoption is complete
+        logger.warning("adopt: could not log the adoption of %s", frame.id, exc_info=True)
+    return frame
+
+
+# How long an adoption waits for the board to come back on its new key and
+# read its scenes, trying every few seconds (it restarts 750 ms after the
+# claim, then joins its network). Past it the adoption still succeeds and the
+# board's first check-in reads them (embedded_scene_import.start_scene_import).
+ADOPT_SCENE_IMPORT_WAIT_SECONDS = 45.0
+ADOPT_SCENE_IMPORT_RETRY_SECONDS = 2.0
+
+
+async def _import_adopted_board_scenes(
+    db: Session, redis: Redis, frame: Frame, fetch_frame_http_bytes: FrameFetch
+) -> bool:
+    """Read an adopted board's own scenes into its row as soon as it answers
+    again; False when it did not in time (the row keeps its mark, so the
+    board is sent no scenes until they are read)."""
+    frame_id = int(frame.id)
+    # Held while waiting: the board's first check-in starts no second import.
+    await claim_scene_import(redis, frame_id, int(ADOPT_SCENE_IMPORT_WAIT_SECONDS) + IMPORT_RETRY_SECONDS)
+    deadline = time.monotonic() + ADOPT_SCENE_IMPORT_WAIT_SECONDS
+    reason = ""
+    try:
+        while True:
+            await asyncio.sleep(ADOPT_SCENE_IMPORT_RETRY_SECONDS)
+            try:
+                await import_embedded_frame_scenes(db, redis, frame, fetch_frame_http_bytes, attempts=1)
+                return True
+            except (SceneImportError, HTTPException) as exc:
+                reason = str(getattr(exc, "detail", None) or exc)
+            except Exception as exc:  # noqa: BLE001 - a restarting board fails in many ways
+                reason = str(exc) or type(exc).__name__
+            if time.monotonic() >= deadline:
+                break
+    finally:
+        await release_scene_import(redis, frame_id)
+    logger.info("adopt: the scenes of frame %s are not read yet: %s", frame_id, reason)
+    return False
+
+
 async def adopt_standalone_frame(
     db: Session,
     redis: Redis,
@@ -1763,19 +2115,23 @@ async def adopt_standalone_frame(
     exist, and a failed credential write-back deletes it again: adoption
     either completes or leaves nothing behind.
     """
-    admin_auth = {
-        "enabled": True,
-        "user": data.admin_username.strip(),
-        "pass": data.admin_password,
-    }
-    if not admin_auth["user"] or not admin_auth["pass"]:
-        _bad_request("The frame's admin username and password are required to adopt it")
+    code = _adoption_code(data.code)
+    admin_auth: dict[str, Any] = {}
+    if code is None:
+        admin_auth = {
+            "enabled": True,
+            "user": (data.admin_username or "").strip(),
+            "pass": data.admin_password or "",
+        }
+        if not admin_auth["user"] or not admin_auth["pass"]:
+            _bad_request("The frame's admin username and password are required to adopt it")
 
     # The frame's own address the same way ("frame.local", "10.0.0.7:8787",
     # "http://frame.local:8787/", "[::1]:8787"); its IPv6 brackets come off.
     typed_frame = split_address(data.frame_host)
     host = typed_frame.host.strip("[]")
-    frame_port = typed_frame.port if typed_frame.port is not None else int(data.frame_port or 8787)
+    typed_frame_port = typed_frame.port if typed_frame.port is not None else data.frame_port
+    frame_port = int(typed_frame_port or ADOPT_DEFAULT_FRAME_PORT)
     if not host:
         _bad_request("A frame host is required")
     # Both addresses end up persisted and one of them inside the device: the
@@ -1803,6 +2159,43 @@ async def adopt_standalone_frame(
     server_host_error = device_server_host_error(server_host, allow_loopback=False)
     if server_host_error:
         _bad_request(f"The frame cannot reach this backend at {server_host}: {server_host_error}")
+
+    if code is not None:
+        # The frame says what it is (GET /api/adopt) and the code buys what
+        # adoption needs: a Pi's admin login, which the password flow below
+        # then uses as if it had been typed; an ESP32 has no admin login and
+        # is told this backend instead (_adopt_embedded_frame).
+        frame_port, adoption = await _adoption_probe(host, typed_frame_port, redis, fetch_frame_http_bytes)
+        kind = adoption.get("kind")
+        if kind == "embedded":
+            return await _adopt_embedded_frame(
+                db,
+                redis,
+                data,
+                fetch_frame_http_bytes,
+                project_id=project_id,
+                host=host,
+                frame_port=frame_port,
+                code=code,
+                adoption=adoption,
+                server_host=server_host,
+                server_port=server_port,
+                server_scheme=server_scheme,
+            )
+        if kind != "linux":
+            _bad_request(
+                f"The frame at {host}:{frame_port} is a kind of frame this backend cannot adopt "
+                f"({kind or 'not said'}): update the backend and try again"
+            )
+        login = await _adoption_claim(host, frame_port, {"code": code}, redis, fetch_frame_http_bytes)
+        user = login.get("username")
+        password = login.get("password")
+        if not isinstance(user, str) or not user.strip() or not isinstance(password, str) or not password:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"The frame at {host}:{frame_port} took the code but sent no admin login back",
+            )
+        admin_auth = {"enabled": True, "user": user.strip(), "pass": password}
 
     # Probe first, create later: _fetch_frame_http_bytes only needs host,
     # port, access mode and the admin credentials, so a transient (never
@@ -1904,11 +2297,23 @@ async def adopt_standalone_frame(
             retire_apps_in_scenes(remote_scenes)
             normalize_scenes_execution(remote_scenes)
             frame.scenes = remote_scenes
+            # The service keys its store scenes use come with them, as a
+            # store install grants what its scene declares (an adopted
+            # ESP32's the same: app/utils/embedded_scene_import.py).
+            grant_store_scene_setting_groups(frame, remote_scenes)
         frame.frame_admin_auth = admin_auth
         # The frame is demonstrably running FrameOS — it just answered.
         frame.status = "ready"
         await update_frame(db, redis, frame)
         db.refresh(frame)
+
+        # The keys this backend ships for those scenes go to the device now,
+        # before the write-back reloads it: the baseline recorded below says
+        # they are there, so nothing would offer a deploy for them, and its
+        # scenes would ask for a key the backend holds. The route merges field
+        # by field: a key of the device's own that this backend does not ship
+        # stays (service_settings_push_payload).
+        service_keys_written = await _write_adopted_frame_service_keys(frame, db, redis, fetch_frame_http_bytes)
 
         # The write-back is what makes this an adoption: a non-empty
         # serverHost marks the device backend-managed (and blocks cloud
@@ -1945,6 +2350,9 @@ async def adopt_standalone_frame(
     # so the sync panel opens clean. The metadata echo to the device is best
     # effort — the adoption itself is already complete.
     _mark_frame_sync_baseline(frame)
+    if not service_keys_written and isinstance(frame.last_successful_deploy, dict):
+        # Not on the device: the workspace offers them as a change to deploy.
+        frame.last_successful_deploy = {**frame.last_successful_deploy, SETTINGS_FINGERPRINTS_KEY: {}}
     await update_frame(db, redis, frame)
     db.refresh(frame)
     try:
@@ -1953,6 +2361,38 @@ async def adopt_standalone_frame(
         logger.warning("adopt: metadata echo to %s failed", host, exc_info=True)
     await _restart_adopted_runtime(frame, db, redis, fetch_frame_http_bytes, remote_frame.get("version"))
     return frame
+
+
+async def _write_adopted_frame_service_keys(
+    frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
+) -> bool:
+    """The service keys this backend ships for an adopted Pi's scenes,
+    through its settings route, as the admin-API deploy writes them. Best
+    effort: False when they could not be written (the adoption goes on, and
+    the frame's log says to deploy); True when they were, or there were none."""
+    try:
+        written = await push_service_settings_to_device(frame, db, redis, fetch_frame_http_bytes)
+    except Exception as exc:  # noqa: BLE001 - the adoption does not hang on its keys
+        logger.warning("adopt: service keys for %s not written", frame.frame_host, exc_info=True)
+        detail = str(getattr(exc, "detail", None) or exc)
+        try:
+            await new_log(
+                db, redis, frame.id, "stderr",
+                f"Adopted, but this backend's service keys could not be written to the frame ({detail}). "
+                "Deploy the frame to send them.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("adopt: could not log the key failure for %s", frame.id, exc_info=True)
+        return False
+    if written:
+        try:
+            await new_log(
+                db, redis, frame.id, "stdout",
+                "Service keys written to the frame: " + ", ".join(sorted(written.keys())),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("adopt: could not log the keys written to %s", frame.id, exc_info=True)
+    return True
 
 
 # From this release on the runtime's log shipper takes a reloaded config's

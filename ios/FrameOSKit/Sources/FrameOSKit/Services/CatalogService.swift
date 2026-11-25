@@ -142,9 +142,15 @@ extension FrameOSService {
             let declared = answer["declared_settings_groups"]?.arrayValue?.compactMap(\.stringValue) ?? []
             let granted = answer["granted_settings_groups"]?.arrayValue?.compactMap(\.stringValue) ?? []
             let missing = declared.filter { !granted.contains($0) }
+            // Granted, but the frame is not allowed the account's keys at all
+            // (a frame linked from its own screen): the SPA asks to deliver them.
+            let withheld = answer["keys_withheld"]?.arrayValue?.compactMap(\.stringValue) ?? []
             var message = activate ? "Installed. The frame shows it when it next checks in." : "Installed and pushed."
             if !missing.isEmpty {
                 message += " It asks for these API keys, which it was not given: \(missing.joined(separator: ", "))."
+            }
+            if !withheld.isEmpty {
+                message += " This frame is not allowed your API keys, so it does not get \(withheld.joined(separator: ", ")). Turn on \"Scenes may use your API keys\" in its settings."
             }
             return ActionOutcome(kind: .queued, message: message)
         case .backendTemplate(let templateId):

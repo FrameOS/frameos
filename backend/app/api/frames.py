@@ -114,6 +114,7 @@ from app.utils.network import (
 )
 from app.utils.embedded_render import NETWORK_POLICY_PUBLIC, RenderQueueFull, preview_network_policy
 from app.utils.asset_headers import INERT_ASSET_CSP, inert_asset_headers
+from app.utils.embedded_scene_import import SCENE_IMPORT_KEY, SceneImportError, read_board_scene
 from app.utils.frame_secrets import TOP_LEVEL_SECRET_KEYS, redact_frame_secrets
 from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
 from app.utils.upload_limits import (
@@ -1514,6 +1515,35 @@ async def api_frame_get_states(
     }
 
 
+async def _uploaded_scenes_payload(frame: Frame, redis: Redis, answer: Any) -> dict[str, Any]:
+    """What `/getUploadedScenes` answered, as this route serves it: the scenes
+    the frame was handed, whole, and the one it shows as `sceneId` when it
+    says. A Pi answers `{"scenes": [<scene>, …]}` (web_routes.nim). An ESP32
+    answers its scene status under that key, `{"scenes": {"loaded",
+    "available", "currentSceneId", …, "scenes": [{"id", "name",
+    "refreshInterval"}, …]}}` (fos_http.c `uploaded_scenes_get_handler`):
+    names without nodes, nothing to show or install (the drawer installs what
+    this lists), so the scene it shows is read whole through its one-scene
+    route instead, and none is listed when that cannot be read."""
+    scenes = answer.get("scenes") if isinstance(answer, dict) else None
+    if isinstance(scenes, dict):
+        scene_id = scenes.get("currentSceneId")
+        if not isinstance(scene_id, str) or not scene_id:
+            return {"scenes": []}
+        try:
+            shown = await read_board_scene(frame, redis, _fetch_frame_http_bytes, scene_id)
+        except (SceneImportError, HTTPException):
+            # A firmware without the route (404), a board gone to sleep.
+            return {"sceneId": scene_id, "scenes": []}
+        return {"sceneId": scene_id, "scenes": [shown]}
+    payload: dict[str, Any] = {
+        "scenes": [scene for scene in scenes if isinstance(scene, dict)] if isinstance(scenes, list) else []
+    }
+    if isinstance(answer, dict) and isinstance(answer.get("sceneId"), str):
+        payload["sceneId"] = answer["sceneId"]
+    return payload
+
+
 @api_project.get(
     "/frames/{id:int}/uploaded_scenes", response_model=FrameUploadedScenesResponse
 )
@@ -1521,13 +1551,14 @@ async def api_frame_get_uploaded_scenes(
     id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     frame = _project_frame(db, id) or _not_found()
-    payload = await _forward_frame_request(
+    answer = await _forward_frame_request(
         frame,
         redis,
         path="/getUploadedScenes",
         cache_key=_frame_uploaded_scenes_cache_key(frame.id),
     )
-    if isinstance(payload, dict) and payload.get("sceneId") and not is_thin_client_frame(frame):
+    payload = await _uploaded_scenes_payload(frame, redis, answer)
+    if payload.get("sceneId") and not is_thin_client_frame(frame):
         await redis.set(f"frame:{frame.id}:active_scene", payload["sceneId"])
     return payload
 
@@ -5011,6 +5042,7 @@ async def api_frame_update_endpoint(
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
     previous_embedded_boot = (frame.embedded or {}).get("lastBoot") if isinstance(frame.embedded, dict) else None
     previous_embedded_storage = (frame.embedded or {}).get("storage") if isinstance(frame.embedded, dict) else None
+    previous_scene_import = (frame.embedded or {}).get(SCENE_IMPORT_KEY) if isinstance(frame.embedded, dict) else None
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
@@ -5046,6 +5078,13 @@ async def api_frame_update_endpoint(
             embedded["storage"] = previous_embedded_storage
         else:
             embedded.pop("storage", None)
+        # And whether an adopted board's own scenes are still to be read
+        # (utils/embedded_scene_import.py): a form must neither drop the mark
+        # nor bring it back.
+        if previous_scene_import is not None:
+            embedded[SCENE_IMPORT_KEY] = previous_scene_import
+        else:
+            embedded.pop(SCENE_IMPORT_KEY, None)
         frame.embedded = embedded
 
     if data.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
@@ -5334,7 +5373,10 @@ async def api_frame_import(
     # SD image this backend built) is this backend's to learn, never a
     # file's: a last boot address is where requests carrying the frame's
     # key are sent.
-    for owned_key, kept in (("embedded", ("lastBoot", "storage", "layout")), ("buildroot", ("sdImage",))):
+    for owned_key, kept in (
+        ("embedded", ("lastBoot", "storage", "layout", SCENE_IMPORT_KEY)),
+        ("buildroot", ("sdImage",)),
+    ):
         if isinstance(importable.get(owned_key), dict):
             importable[owned_key] = {k: v for k, v in importable[owned_key].items() if k not in kept}
     # The form's own checks: a cron line run as root, an assets folder

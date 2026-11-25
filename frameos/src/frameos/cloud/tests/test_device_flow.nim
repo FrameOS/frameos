@@ -241,13 +241,28 @@ suite "queued panel link code":
     check requestCount("/api/device/start") == before
     check not pendingLinkCodeQueued()
     check not activeLinkCode().active
-  test "a permanent provider refusal retires the queued marker":
+  test "a permanent provider refusal stops the queued link and says why":
     clearLinkState()
     setStubResponse("/api/device/start", 400, %*{"error": "invalid_request"})
     check writePendingLinkCode(providerUrl)
     discard deviceFlowTick(standaloneConfig())
-    check not pendingLinkCodeQueued()
+    # Kept for the frame page, which says why until Cancel or Try again.
+    let pending = loadPendingLinkCode()
+    check pending{"failed"}.getStr() == "reach"
+    check pending{"detail"}.getStr() == "HTTP 400"
+    check pending{"stopped"}.getBool()
     check linkStateNow(){"status"}.getStr("disconnected") == "disconnected"
+    # Stopped: no more starts.
+    let before = requestCount("/api/device/start")
+    discard deviceFlowTick(standaloneConfig())
+    check requestCount("/api/device/start") == before
+    # Try again queues it afresh.
+    setStubResponse("/api/device/start", 200, startResponse())
+    check writePendingLinkCode(providerUrl)
+    discard deviceFlowTick(standaloneConfig())
+    check activeLinkCode().active
+    check loadPendingLinkCode(){"failed"}.isNil
+    clearPendingLinkCode()
 
   test "the tick gives up after the start budget is spent":
     clearLinkState()
@@ -257,5 +272,45 @@ suite "queued panel link code":
     pending["starts"] = %LINK_CODE_MAX_STARTS
     writeFile(pendingLinkCodePath(), $pending & "\n")
     discard deviceFlowTick(standaloneConfig())
-    check not pendingLinkCodeQueued()
+    check loadPendingLinkCode(){"failed"}.getStr() == "lapsed"
+    check loadPendingLinkCode(){"stopped"}.getBool()
     check linkStateNow(){"status"}.getStr("disconnected") == "disconnected"
+    clearPendingLinkCode()
+
+  test "the frame page's link stops at its deadline and does not outlive the process":
+    clearLinkState()
+    clearPendingLinkCode()
+    setStubResponse("/api/device/start", 200, startResponse())
+    check writePendingLinkCode(providerUrl, epochTime() + PANEL_LINK_SECONDS.float)
+    discard deviceFlowTick(standaloneConfig())
+    check activeLinkCode().active
+    # Its time is up: the code comes off the panel and the page says why.
+    let pending = loadPendingLinkCode()
+    pending["until"] = %(epochTime() - 1)
+    writeFile(pendingLinkCodePath(), $pending & "\n")
+    discard deviceFlowTick(standaloneConfig())
+    check not activeLinkCode().active
+    check loadPendingLinkCode(){"failed"}.getStr() == "lapsed"
+    check linkStateNow(){"status"}.getStr("disconnected") == "disconnected"
+    # A restart (a crash) ends a page's link outright, and leaves the
+    # setup portal's, which has no deadline, alone.
+    check writePendingLinkCode(providerUrl, epochTime() + PANEL_LINK_SECONDS.float)
+    discard deviceFlowTick(standaloneConfig())
+    check activeLinkCode().active
+    dropPanelLinkAtStart()
+    check not pendingLinkCodeQueued()
+    check not activeLinkCode().active
+    check writePendingLinkCode(providerUrl)
+    dropPanelLinkAtStart()
+    check pendingLinkCodeQueued()
+    clearPendingLinkCode()
+
+  test "an unreachable provider is noted on the queued link, which keeps trying":
+    clearLinkState()
+    clearPendingLinkCode()
+    check writePendingLinkCode("http://127.0.0.1:1")
+    discard deviceFlowTick(standaloneConfig())
+    let pending = loadPendingLinkCode()
+    check pending{"failed"}.getStr() == "reach"
+    check not pending{"stopped"}.getBool()
+    clearPendingLinkCode()

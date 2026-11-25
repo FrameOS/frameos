@@ -47,7 +47,6 @@ import {
   pickedScenes,
   pickedScenesProblem,
   presetPicks,
-  sampleUnfitReason,
   sceneUploadSeconds,
   standaloneBoard,
   standaloneBoardKind,
@@ -55,7 +54,9 @@ import {
   standaloneProvisioning,
   standaloneSceneRoom,
   starterSceneSet,
+  storeCoversFromListing,
   type PickedScenes,
+  type StoreCover,
   type ScenePresetKey,
   type StandaloneBoardKind,
   type StandaloneChoices,
@@ -81,6 +82,8 @@ export function publicFirmwareSource(): FirmwareSource {
 // The samples a standalone frame can start with (build.mjs, sampleCatalog.ts):
 // the index, and each sample's scenes beside it, fetched once it is picked.
 const SAMPLES_URL = '/frames-app/flasher-scenes/'
+/** The store's public listing, which the flasher's host serves (surfaces.ts). */
+const STORE_LISTING_PATH = '/api/store/repository.json'
 
 export type FlasherMode = 'standalone' | 'bridge' | 'file'
 
@@ -104,8 +107,8 @@ interface FlasherCache {
 export interface FlasherSampleRow {
   sample: FlasherSample
   picked: boolean
-  /** Why it cannot go on this board, or null. */
-  unfit: string | null
+  /** Its store cover and page, when the store carries it. */
+  cover: StoreCover | null
 }
 
 export interface FlasherSampleGroup {
@@ -123,7 +126,7 @@ function matchesQuery(sample: FlasherSample, query: string): boolean {
 export function flasherSampleGroups(
   samples: FlasherSample[] | null,
   picked: readonly string[],
-  kind: StandaloneBoardKind,
+  covers: Record<string, StoreCover>,
   query: string
 ): FlasherSampleGroup[] {
   const groups = new Map<string, FlasherSampleRow[]>()
@@ -132,7 +135,11 @@ export function flasherSampleGroups(
       continue
     }
     const rows = groups.get(sample.category) ?? []
-    rows.push({ sample, picked: sample.store || picked.includes(sample.name), unfit: sampleUnfitReason(sample, kind) })
+    rows.push({
+      sample,
+      picked: sample.store || picked.includes(sample.name),
+      cover: covers[sample.name.toLowerCase()] ?? null,
+    })
     groups.set(sample.category, rows)
   }
   const hasStore = (group: FlasherSampleGroup): number => Number(group.rows.some((row) => row.sample.store))
@@ -160,6 +167,7 @@ export interface flasherLogicValues {
   timeZone: string | null
   samples: FlasherSample[] | null
   samplesError: string | null
+  storeCovers: Record<string, StoreCover>
   picked: string[]
   preset: ScenePresetKey | null
   noRoom: string[]
@@ -202,6 +210,8 @@ export interface flasherLogicActions {
   setPassword: (password: string) => { password: string }
   setTimeZone: (timeZone: string | null) => { timeZone: string | null }
   loadSamples: () => { value: true }
+  loadStoreCovers: () => { value: true }
+  setStoreCovers: (covers: Record<string, StoreCover>) => { covers: Record<string, StoreCover> }
   setSamples: (
     samples: FlasherSample[] | null,
     error: string | null
@@ -256,6 +266,8 @@ export const flasherLogic = kea<flasherLogicType>([
     setPassword: (password: string) => ({ password }),
     setTimeZone: (timeZone: string | null) => ({ timeZone }),
     loadSamples: true,
+    loadStoreCovers: true,
+    setStoreCovers: (covers: Record<string, StoreCover>) => ({ covers }),
     setSamples: (samples: FlasherSample[] | null, error: string | null) => ({ samples, error }),
     togglePicked: (name: string) => ({ name }),
     applyPreset: (preset: ScenePresetKey) => ({ preset }),
@@ -292,6 +304,7 @@ export const flasherLogic = kea<flasherLogicType>([
     timeZone: [null as string | null, { setTimeZone: (_, { timeZone }) => timeZone }],
     samples: [null as FlasherSample[] | null, { setSamples: (_, { samples }) => samples }],
     samplesError: [null as string | null, { setSamples: (_, { error }) => error }],
+    storeCovers: [{} as Record<string, StoreCover>, { setStoreCovers: (_, { covers }) => covers }],
     picked: [
       [] as string[],
       {
@@ -352,9 +365,9 @@ export const flasherLogic = kea<flasherLogicType>([
       (chosen: PickedScenes): number => sceneUploadSeconds(chosen.bytes, chosen.scenes),
     ],
     sampleGroups: [
-      (s) => [s.samples, s.picked, s.boardKind, s.query],
-      (samples: FlasherSample[] | null, picked: string[], kind: StandaloneBoardKind, query: string) =>
-        flasherSampleGroups(samples, picked, kind, query),
+      (s) => [s.samples, s.picked, s.storeCovers, s.query],
+      (samples: FlasherSample[] | null, picked: string[], covers: Record<string, StoreCover>, query: string) =>
+        flasherSampleGroups(samples, picked, covers, query),
     ],
     usbLogs: [
       (s) => [s.usbLogsByFrameId],
@@ -456,6 +469,19 @@ export const flasherLogic = kea<flasherLogicType>([
           actions.setSamples(Array.isArray(index.samples) ? index.samples : [], null)
         } catch (error) {
           actions.setSamples(null, `Could not load the scenes to start with (${errorDetail(error)}).`)
+        }
+      },
+      loadStoreCovers: async () => {
+        // Thumbnails only: without the listing the list is as it was.
+        try {
+          const response = await fetch(STORE_LISTING_PATH)
+          if (response.ok) {
+            actions.setStoreCovers(
+              storeCoversFromListing(await response.json(), new URL(STORE_LISTING_PATH, window.location.origin).href)
+            )
+          }
+        } catch {
+          // No covers.
         }
       },
       setSamples: () => {
@@ -647,6 +673,7 @@ export const flasherLogic = kea<flasherLogicType>([
       actions.setBoard(board)
     }
     actions.loadSamples()
+    actions.loadStoreCovers()
     if (new URLSearchParams(window.location.search).get('bridge') === '1') {
       actions.setMode('bridge')
       actions.setWaitingForBridge(true)

@@ -656,6 +656,20 @@ proc notifyPreviousBackend*(existing: JsonNode, notice: JsonNode): int =
     log(%*{"event": event & ":notify:error", "server": serverAddressLabel(previous), "error": e.msg})
     result = 0
 
+proc persistFrameAdminLogin*(user, pass: string) =
+  ## frame.json's `frameAdminAuth`, switched on with this login, and nothing
+  ## else: an adoption by a backend that read the code off the panel
+  ## (routes/adopt_routes.nim) on a frame that had no admin login to hand over.
+  withLock frameConfigWriteLock:
+    let configPath = getConfigFilename()
+    let nextConfig = loadConfigJson()
+    if nextConfig.kind != JObject or nextConfig.len == 0:
+      # An unreadable frame.json reads as {}: written back, it would be a
+      # frame with nothing but a login.
+      raise newException(IOError, "frame.json could not be read")
+    nextConfig["frameAdminAuth"] = %*{"enabled": true, "user": user, "pass": pass}
+    writeTextFileAtomically(configPath, pretty(nextConfig, indent = 4) & "\n")
+
 proc persistFrameApiUpdate*(payload: JsonNode) =
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "Frame update payload must be a JSON object")

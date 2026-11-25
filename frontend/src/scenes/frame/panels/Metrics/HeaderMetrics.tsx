@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { Fragment, useMemo } from 'react'
 import { useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
@@ -15,7 +15,10 @@ import { frameMetricsPreviewLogic } from '../../../workspace/frameMetricsPreview
 import type { FrameId } from '../../../../types'
 import { BatteryIndicator } from '../../../../components/BatteryIndicator'
 import { FrameBatteryPopover } from '../../../workspace/FrameBatteryPopover'
+import { FrameStorageIndicator } from '../../../workspace/FrameStoragePopover'
+import { StorageIndicator } from '../../../../components/StorageIndicator'
 import { framesModel } from '../../../../models/framesModel'
+import { frameSceneStorage } from '../../../../utils/frameSceneStorage'
 
 const chartHeight = 28
 const chartMargin = { top: 3, right: 1, bottom: 3, left: 1 }
@@ -116,37 +119,55 @@ export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
     useValues(frameMetricsPreviewLogic({ frameId }))
   const { frames } = useValues(framesModel)
   const frame = frames[frameId]
-  const metricEntries = Object.entries(headerMetricsByCategory).filter(([, series]) => series.length > 0)
+  const metricEntries = previewMetricsTimeRange
+    ? Object.entries(headerMetricsByCategory).filter(([, series]) => series.length > 0)
+    : []
   const chartTheme = metricChartThemes[theme]
+  // An ESP32's disk (its state partition, as it last reported it) beside its
+  // battery: what it reports is no metric, so it shows with no metrics too.
+  const showsStorage = !!frame && frameSceneStorage(frame) !== null
+  const showsBattery = metricEntries.some(([key]) => key === 'batteryPercent') && latestBatteryPercent !== null
 
-  if (!previewMetricsTimeRange || metricEntries.length === 0) {
+  if (metricEntries.length === 0 && !showsStorage) {
     return null
   }
+
+  const chipClassName = clsx(
+    'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
+    theme === 'dark'
+      ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
+      : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
+  )
+  const storageChip =
+    showsStorage && frame ? (
+      <FrameStorageIndicator key="frameStorage" frame={frame} className={chipClassName}>
+        {(summary) => <StorageIndicator percent={summary.usedPercent} withBar title="" className="min-w-[3.25rem]" />}
+      </FrameStorageIndicator>
+    ) : null
 
   return (
     <div className="frame-header-metrics flex min-w-0 max-w-full flex-none flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:overflow-visible @4xl:gap-1.5">
       {metricEntries.map(([key, series]) => {
-        const chipClassName = clsx(
-          'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',
-          theme === 'dark'
-            ? 'border-white/10 bg-white/[0.06] shadow-black/10 hover:bg-white/[0.09]'
-            : 'border-slate-200/70 bg-white/70 shadow-slate-950/5 hover:bg-white/90'
-        )
         if (key === 'batteryPercent' && latestBatteryPercent !== null && frame) {
           // A battery glyph with the charge and a bar, instead of label +
           // sparkline; the chip opens the battery popup rather than the
-          // metrics page.
+          // metrics page. The disk chip goes right after it.
           return (
-            <FrameBatteryPopover
-              key={key}
-              frame={frame}
-              percent={latestBatteryPercent}
-              variant="chip"
-              className={chipClassName}
-            >
-              <BatteryIndicator percent={latestBatteryPercent} withBar className="min-w-[3.25rem]" />
-            </FrameBatteryPopover>
+            <Fragment key={key}>
+              <FrameBatteryPopover
+                frame={frame}
+                percent={latestBatteryPercent}
+                variant="chip"
+                className={chipClassName}
+              >
+                <BatteryIndicator percent={latestBatteryPercent} withBar className="min-w-[3.25rem]" />
+              </FrameBatteryPopover>
+              {storageChip}
+            </Fragment>
           )
+        }
+        if (!previewMetricsTimeRange) {
+          return null
         }
         return (
           <A
@@ -189,6 +210,7 @@ export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
           </A>
         )
       })}
+      {showsBattery ? null : storageChip}
     </div>
   )
 }

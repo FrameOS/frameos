@@ -6,8 +6,9 @@
 #ifdef ESP_PLATFORM
 #include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
-/* Started and answered on the cloud task (or the render task, for the
- * backend's queue), read by the render task every second: a spinlock
+/* Started and answered on the cloud task (or the render task: the backend's
+ * queue, the frame page's adoption code), answered on the HTTP task too
+ * (POST /api/adopt), read by the render task every second: a spinlock
  * around a few words, statically initialised so there is no init to forget. */
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 #define LAN_LOCK() portENTER_CRITICAL(&s_lock)
@@ -27,6 +28,7 @@ static bool s_pending = false;
 static int64_t s_expires_at = 0;
 static uint8_t s_attempts_left = 0;
 static uint32_t s_generation = 0;
+static uint8_t s_scope = FOS_LAN_ACCESS_SCOPE_LAN;
 
 /* The wrong-code budget. Not initialised at boot (RTC_NOINIT on the device):
  * the magic tells a kept budget from power-on garbage, and from the budget a
@@ -122,7 +124,7 @@ void fos_lan_access_mint(fos_lan_access_rng_t rng, char *out)
     out[FOS_LAN_ACCESS_CODE_LEN] = '\0';
 }
 
-uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng)
+uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng, fos_lan_access_scope_t scope)
 {
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
     fos_lan_access_mint(rng, code); /* outside the lock: rng() may be slow */
@@ -133,6 +135,7 @@ uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng)
         s_pending = true;
         s_expires_at = now_s + FOS_LAN_ACCESS_TTL_SEC;
         s_attempts_left = FOS_LAN_ACCESS_MAX_ATTEMPTS;
+        s_scope = (uint8_t)scope;
         if (++s_generation == 0) s_generation = 1;
         generation = s_generation;
     }
@@ -141,7 +144,7 @@ uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng)
     return generation;
 }
 
-fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s)
+fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s, fos_lan_access_scope_t scope)
 {
     if (code == NULL || code[0] == '\0') return FOS_LAN_ACCESS_CODE_REQUIRED;
     /* The control planes send the six digits with any spaces already
@@ -153,7 +156,7 @@ fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s)
     LAN_LOCK();
     if (budget_spent_locked(now_s)) {
         result = FOS_LAN_ACCESS_RATE_LIMITED; /* before the challenge is even looked at */
-    } else if (!live_locked(now_s)) {
+    } else if (!live_locked(now_s) || s_scope != (uint8_t)scope) {
         result = FOS_LAN_ACCESS_CODE_EXPIRED;
     } else {
         /* Constant time over the six digits: every byte is looked at
@@ -196,11 +199,11 @@ bool fos_lan_access_rate_limited(int64_t now_s)
     return spent;
 }
 
-uint32_t fos_lan_access_panel_code(int64_t now_s, char *code_out)
+uint32_t fos_lan_access_panel_code(int64_t now_s, fos_lan_access_scope_t scope, char *code_out)
 {
     uint32_t generation = 0;
     LAN_LOCK();
-    if (live_locked(now_s)) {
+    if (live_locked(now_s) && s_scope == (uint8_t)scope) {
         generation = s_generation;
         if (code_out != NULL) memcpy(code_out, s_code, sizeof(s_code));
     }

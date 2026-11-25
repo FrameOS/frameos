@@ -9,6 +9,11 @@
  * the token is dead after one use, success or failure — and the state is
  * surfaced as "error" until a fresh token is provisioned.
  *
+ * Flow B: the frame page's link code (fos_cloud_link_start below). The
+ * owner's approval of the device flow gives a Bearer token, the frame
+ * enrolls with it in place of a claim token, and that token is the access
+ * token from then on.
+ *
  * NVS keys (namespace "frameos", all managed here, never printed):
  *   cloud_sk    32-byte Ed25519 seed (blob)
  *   cloud_token opaque bearer access token
@@ -35,6 +40,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 typedef enum {
@@ -154,6 +160,39 @@ void fos_cloud_add_device_report(cJSON *msg);
  * task's frame page included (it runs under the runtime lock, and a state
  * takes a runtime snapshot, so the cloud task sends it). */
 void fos_cloud_request_state(void);
+
+/* The link code (flow B, docs/cloud-frames.md "B. Link code on the device"),
+ * asked for by the frame page's Link to cloud: the cloud task
+ * starts the device flow against cloud_url (else https://cloud.frameos.net),
+ * polls it and enrolls with its Bearer token once the owner approves; a
+ * window that lapses unclaimed just ends. Start and cancel from any task
+ * (cancel never touches an enrolled link). */
+void fos_cloud_link_start(void);
+void fos_cloud_link_cancel(void);
+/* The frame page went away: a code waiting to be entered (or a link that
+ * failed) ends with it; one already approved and enrolling finishes. */
+void fos_cloud_link_leave(void);
+/* The frame page's Unlink on a frame the cloud manages: the cloud task tells
+ * the cloud (POST /api/backends/unlink, best effort) and forgets the link;
+ * the scenes the frame holds stay. */
+void fos_cloud_unlink(void);
+/* True while a link is pending, from the start until it ends, and while one
+ * that failed is on the page; `code` and `uri` get the code to enter and the
+ * page with it in (verification_uri_complete), "" while the provider has not
+ * answered yet, after the approval and after a failure. */
+bool fos_cloud_link_code(char *code, size_t code_len, char *uri, size_t uri_len);
+/* Why the link failed, as the frame page's word for it ("reach",
+ * "address", "refused", "lapsed", "enroll"), with what the network or the
+ * provider said in `detail`; NULL while none failed. A failed link stays
+ * until the next start or a cancel. */
+const char *fos_cloud_link_failure(char *detail, size_t detail_len);
+/* Where a link goes: cloud_url, else https://cloud.frameos.net. */
+const char *fos_cloud_link_server(void);
+/* How long a pending link holds the frame awake, 0 when none (a failed one
+ * included). */
+uint32_t fos_cloud_link_seconds_left(void);
+/* "esp32-s3" | "esp32-c3" | "esp32": the platform a frame reports. */
+const char *fos_platform_name(void);
 
 /* A scene changed here (USB, HTTP): the checksum the cloud knows no longer
  * says what this frame holds, so the next hello must not report it. */

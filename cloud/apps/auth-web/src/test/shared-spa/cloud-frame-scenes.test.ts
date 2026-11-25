@@ -10,6 +10,7 @@ import {
   missingSettingsGroups,
   pendingCloudSceneUpdates,
   scenesFromStoreSceneJson,
+  withheldSettingsGroups,
 } from "../../../../../../frontend/src/utils/cloudFrameScenes";
 
 // Gap: "i don't see the scenes i added on cloud". Cloud frame payloads are
@@ -33,6 +34,26 @@ describe("cloud frame scene hydration helpers", () => {
     ).toEqual([]);
     // No declaration: nothing is missing (a legacy row reads as fully granted on the server).
     expect(missingSettingsGroups({})).toEqual([]);
+  });
+
+  it("names the granted keys a frame that is not allowed the account's keys cannot get", () => {
+    // "Please provide an OpenAI API key in the frame settings" right after an
+    // install that granted the key, on a frame linked from its own screen:
+    // the link holds no settings:services, so the device's pull is refused
+    // whatever the grant says (2026-11-25). The drawer offers delivery.
+    const row = { declared_settings_groups: ["openAI", "unsplash"], granted_settings_groups: ["openAI"] };
+    expect(withheldSettingsGroups(row, false)).toEqual(["openAI"]);
+    expect(withheldSettingsGroups(row, true)).toEqual([]);
+    // Not reported (a broadcast without the link) is never "off".
+    expect(withheldSettingsGroups(row, undefined)).toEqual([]);
+    // Nothing granted: nothing withheld (missingSettingsGroups names that gap).
+    expect(withheldSettingsGroups({ declared_settings_groups: ["unsplash"], granted_settings_groups: [] }, false)).toEqual(
+      [],
+    );
+    // A grant the scene no longer declares is no key it asks for.
+    expect(withheldSettingsGroups({ declared_settings_groups: [], granted_settings_groups: ["openAI"] }, false)).toEqual(
+      [],
+    );
   });
 
   it("uses the scenes.json array verbatim — it carries the runtime scene ids", () => {

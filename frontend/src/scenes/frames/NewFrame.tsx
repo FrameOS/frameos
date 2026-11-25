@@ -52,6 +52,7 @@ import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 import { apiFetch } from '../../utils/apiFetch'
 import { framesModel } from '../../models/framesModel'
 import { useState } from 'react'
+import { AdoptFields, AdoptMethod, adoptCanSubmit, adoptCodeInput, adoptPaste, adoptRequestBody } from './adoptFrame'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -1323,7 +1324,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             <ModeButton
               onClick={() => setNewFrameValues({ mode: 'adopt', install_method: undefined })}
               title="Adopt frame"
-              description="Take over a standalone frame already running FrameOS: import its config and scenes, then manage it from here."
+              description="Take over a standalone frame already running FrameOS, a Pi or an ESP32, with the code on its screen, then manage it from here."
             >
               <ServerStackIcon className="h-4 w-4" />
             </ModeButton>
@@ -1819,14 +1820,18 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   )
 }
 
-// Adopt a running standalone frame: the backend logs into the frame's local
-// admin API, imports its config and scenes, and writes its own server
-// credentials back (POST /api/frames/adopt). Local state on purpose — the
-// pane is self-contained and the shared form machinery gains nothing here.
+// Adopt a running standalone frame: the backend imports a Pi's config and scenes
+// over its admin API, or tells an ESP32 this backend, and the frame reports in
+// here (POST /api/frames/adopt). The code the frame draws on its screen gets a
+// Pi's admin login or an ESP32's consent; a Pi's admin login works too. Local
+// state on purpose — the pane is self-contained and the shared form machinery
+// gains nothing here; what it sends is ./adoptFrame.ts.
 function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
   const { frameCreated, hideForm } = useActions(newFrameForm)
+  const [method, setMethod] = useState<AdoptMethod>('code')
   const [host, setHost] = useState('')
-  const [port, setPort] = useState('8787')
+  const [port, setPort] = useState('')
+  const [code, setCode] = useState('')
   const [adminUser, setAdminUser] = useState('')
   const [adminPass, setAdminPass] = useState('')
   // The same default the SSH form offers: the backend address saved under
@@ -1839,6 +1844,7 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
   const serverHostIsLoopback = /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(:\d+)?\/?$/i.test(
     serverHost.trim()
   )
+  const fields: AdoptFields = { method, host, port, code, adminUser, adminPass, serverHost, name }
 
   async function adopt(): Promise<void> {
     setSubmitting(true)
@@ -1847,14 +1853,7 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
       const response = await apiFetch('/api/frames/adopt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          frame_host: host.trim(),
-          frame_port: parseInt(port, 10) || 8787,
-          admin_username: adminUser.trim(),
-          admin_password: adminPass,
-          server_host: serverHost.trim(),
-          ...(name.trim() ? { name: name.trim() } : {}),
-        }),
+        body: JSON.stringify(adoptRequestBody(fields)),
       })
       if (!response.ok) {
         const detail = (await response.json().catch(() => ({}))) as { detail?: string }
@@ -1877,14 +1876,40 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
   const inputClass =
     'frameos-input h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
   const labelClass = 'frameos-strong mb-1 block text-xs font-semibold text-slate-700'
-  const canSubmit = host.trim() !== '' && adminUser.trim() !== '' && adminPass !== '' && serverHost.trim() !== ''
+  const methodButtonClass = (active: boolean): string =>
+    `h-9 flex-1 rounded-lg px-3 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+      active
+        ? 'frameos-primary-action text-white shadow-sm'
+        : 'frameos-secondary-button bg-slate-100 text-slate-700 hover:bg-slate-200'
+    }`
+  const canSubmit = adoptCanSubmit(fields)
 
   return (
     <div className="space-y-4">
       <p className="frameos-muted text-xs text-slate-500">
-        The frame keeps everything it is showing: its config and scenes are imported here, and the backend's address is
-        written back so the frame reports in. It needs the admin login you set on the frame's local admin page.
+        A Pi keeps what it is showing: its config and scenes are imported here. An ESP32 keeps its board settings and
+        its scenes, imported here once it has restarted. Either reports here from then on.
       </p>
+      <div className="flex gap-2" role="radiogroup" aria-label="How to adopt">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={method === 'code'}
+          className={methodButtonClass(method === 'code')}
+          onClick={() => setMethod('code')}
+        >
+          Code on the frame's screen
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={method === 'login'}
+          className={methodButtonClass(method === 'login')}
+          onClick={() => setMethod('login')}
+        >
+          Admin login
+        </button>
+      </div>
       {error ? (
         <p className="flex items-start gap-1.5 text-xs font-medium text-red-600" role="alert">
           <ExclamationCircleIcon className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1893,37 +1918,80 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
       ) : null}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="sm:col-span-1">
-          <label className={labelClass}>Frame host</label>
+          <label className={labelClass}>Frame address</label>
           <input
             className={inputClass}
             placeholder="frame.local or 10.0.0.42"
             value={host}
-            onChange={(e) => setHost(e.target.value)}
+            onChange={(e) => {
+              // What the frame's QR code says: its address, port and code at once.
+              const pasted = adoptPaste(e.target.value)
+              if (pasted) {
+                setMethod('code')
+                setPort(pasted.port)
+                setCode(pasted.code)
+              }
+              setHost(pasted ? pasted.host : e.target.value)
+            }}
           />
         </div>
         <div className="sm:col-span-1">
           <label className={labelClass}>Frame port</label>
-          <input className={inputClass} inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} />
-        </div>
-        <div className="sm:col-span-1">
-          <label className={labelClass}>Frame admin username</label>
           <input
             className={inputClass}
-            autoComplete="off"
-            value={adminUser}
-            onChange={(e) => setAdminUser(e.target.value)}
+            inputMode="numeric"
+            placeholder="8787"
+            value={port}
+            onChange={(e) => setPort(e.target.value)}
           />
+          {method === 'code' ? (
+            <p className="frameos-muted mt-1 text-xs text-slate-500">Empty: 8787, then 80 for an ESP32.</p>
+          ) : null}
         </div>
-        <div className="sm:col-span-1">
-          <label className={labelClass}>Frame admin password</label>
-          <input
-            className={inputClass}
-            type="password"
-            autoComplete="off"
-            value={adminPass}
-            onChange={(e) => setAdminPass(e.target.value)}
-          />
-        </div>
+        {method === 'code' ? (
+          <div className="sm:col-span-2">
+            <label className={labelClass}>Adoption code</label>
+            <input
+              className={`${inputClass} font-mono tracking-[0.3em]`}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]*"
+              maxLength={6}
+              placeholder="123456"
+              value={code}
+              onChange={(e) => setCode(adoptCodeInput(e.target.value))}
+            />
+            <p className="frameos-muted mt-1 text-xs text-slate-500">
+              On the frame: Settings → gear → Link to backend. It shows its address and a six-digit
+              code; what its QR code says, pasted into the address, fills both.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="sm:col-span-1">
+              <label className={labelClass}>Frame admin username</label>
+              <input
+                className={inputClass}
+                autoComplete="off"
+                value={adminUser}
+                onChange={(e) => setAdminUser(e.target.value)}
+              />
+            </div>
+            <div className="sm:col-span-1">
+              <label className={labelClass}>Frame admin password</label>
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="off"
+                value={adminPass}
+                onChange={(e) => setAdminPass(e.target.value)}
+              />
+            </div>
+            <p className="frameos-muted text-xs text-slate-500 sm:col-span-2">
+              The admin login you set on a Pi's local admin page.
+            </p>
+          </>
+        )}
         <div className="sm:col-span-1">
           <label className={labelClass}>This backend's address, as seen from the frame</label>
           <input

@@ -132,6 +132,10 @@ suite "frameos.frame":
       check sent() == @[(event, eoPanel)]
     let unknown = call(%*["frame"], "frameos.frame('format', '/')")
     check unknown["error"].getStr() == "frameos.frame: no such operation: format"
+    # Leaving the plane is the panel's alone: no app takes it.
+    let unlink = call(%*["frame"], "frameos.frame('action', 'unlink')")
+    check unlink["error"].getStr() == "frameos.frame: unlink is the frame page's alone"
+    check actions == @["scan"]
 
   test "changes nothing while the frame's settings are off its screen":
     offered = false

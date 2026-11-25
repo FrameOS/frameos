@@ -1063,6 +1063,113 @@ async def test_a_long_stage_is_told_again_until_the_answer():
     assert lines == [{"ok": False, "error": "chat_failed", "detail": "the model went away"}]
 
 
+@pytest.mark.asyncio
+async def test_a_first_turn_holds_no_write_lock_while_openai_answers(async_client, no_auth_client, db, redis, monkeypatch):
+    """A frame's first turn wrote its voice chat before the transcription and
+    held SQLite's write lock through it and the model. Every other writer (the
+    frame's own log lines, `UPDATE frame SET last_log_at`) then waited out the
+    busy timeout ON the event loop, which froze the turn that held the lock:
+    the panel sat at "Transcribing" and the logs said "database is locked"
+    (2026-11-25, a freshly adopted reTerminal Sticky). While OpenAI answers,
+    another connection writes at once; the chat is made with the exchange."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.pool import NullPool
+
+    from app.config import config
+
+    frame = await voice_frame(async_client, db)
+    assert db.query(Chat).filter(Chat.project_id == frame.project_id).count() == 0
+    # A writer that gives up after 0.2 s instead of the app's 30 s.
+    other = create_engine(config.DATABASE_URL, poolclass=NullPool, connect_args={"timeout": 0.2})
+    writes: list[str] = []
+
+    def write(stage: str) -> None:
+        try:
+            with other.begin() as connection:
+                connection.execute(
+                    text("UPDATE frame SET last_log_at = CURRENT_TIMESTAMP WHERE id = :id"), {"id": int(frame.id)}
+                )
+            writes.append(f"{stage}: written")
+        except OperationalError as error:
+            writes.append(f"{stage}: {error.orig}")
+
+    async def transcribe(pcm, *, api_key, prompt=None, http_client=None):
+        write("transcribing")
+        return "switch to the calendar please"
+
+    scripted = ScriptedOpenAi([
+        ("", [call("activate_scene", {"scene_id": "cal-2"}, "c1")]),
+        ("Switched to Calendar.", []),
+    ])
+
+    async def openai(**kwargs):
+        write("thinking")
+        return await scripted(**kwargs)
+
+    monkeypatch.setattr(voice_chat, "transcribe_pcm", transcribe)
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    try:
+        response = await no_auth_client.post(
+            url(frame, 0, done=1),
+            content=SECOND_OF_SPEECH,
+            headers={**auth(frame), **PCM_HEADERS, "Accept": "application/x-ndjson"},
+        )
+    finally:
+        other.dispose()
+    lines = [json.loads(line) for line in response.text.splitlines()]
+    assert lines[-1]["ok"] is True, lines
+    assert writes == ["transcribing: written", "thinking: written", "thinking: written"]
+    chat = db.query(Chat).filter(Chat.project_id == frame.project_id).one()
+    assert db.query(ChatMessage).filter(ChatMessage.chat_id == chat.id).count() == 3
+
+
+@pytest.mark.asyncio
+async def test_a_failed_first_turn_leaves_no_empty_chat(async_client, no_auth_client, db, redis, heard, monkeypatch):
+    """The chat is the exchange's: a turn that fails stores none (it used to
+    leave the frame an empty voice chat, committed by the failure's log line)."""
+    frame = await voice_frame(async_client, db)
+    heard["text"]["value"] = ""
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.json()["error"] == "nothing_heard"
+    assert db.query(Chat).filter(Chat.project_id == frame.project_id).count() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_never_answers_still_ends_the_stream():
+    """The stream ends with an answer line whatever became of the turn: a
+    cancelled turn (a server going down) used to leave it saying the stage
+    again every few seconds until the frame gave up, and an error without a
+    message (an httpx timeout) is named by its kind, not an empty detail."""
+    import asyncio
+
+    import httpx
+
+    from app.utils.voice_chat import _progress_turns, voice_progress_stream
+
+    async def forever(progress):
+        progress("transcribing")
+        await asyncio.Event().wait()
+        return {"ok": True}
+
+    async def collect(stream):
+        return [json.loads(line) async for line in stream]
+
+    stream = voice_progress_stream(forever, every_seconds=0.05)
+    assert json.loads(await stream.__anext__()) == {"progress": "transcribing", "text": "Transcribing…"}
+    for task in list(_progress_turns):
+        task.cancel()
+    rest = await asyncio.wait_for(collect(stream), timeout=2)
+    assert rest[-1] == {"ok": False, "error": "chat_failed", "detail": "the turn was cancelled"}
+    assert all(line.get("progress") == "still" for line in rest[:-1]), rest
+
+    async def timed_out(progress):
+        raise httpx.ConnectTimeout("")
+
+    lines = await asyncio.wait_for(collect(voice_progress_stream(timed_out, every_seconds=0.05)), timeout=2)
+    assert lines == [{"ok": False, "error": "chat_failed", "detail": "ConnectTimeout"}]
+
+
 def test_the_progress_text_cuts_the_transcript_and_counts_the_seconds():
     from app.utils.voice_chat import voice_progress_text, wants_voice_progress
 
