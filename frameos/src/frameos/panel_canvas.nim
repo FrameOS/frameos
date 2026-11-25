@@ -82,6 +82,22 @@ proc panelCanvasFor*(frameWidth, frameHeight, renderWidth, renderHeight, rotate:
 proc isPanelCanvas*(image: Image): bool =
   not image.isNil and not canvas.isNil and image == canvas
 
+proc panelCanvasSize*(): tuple[width, height: int] =
+  ## The panel canvas's size, (0, 0) while there is none.
+  if canvas.isNil: (0, 0) else: (canvas.width, canvas.height)
+
+proc onPanelCanvas*(image: Image): tuple[ok: bool, x, y: int] =
+  ## Whether `image` is the panel canvas or a view into it (a scene drawn in
+  ## a layout's hole, a desktop's window: interpreter.drawIntoHole), and
+  ## where its corner is on the panel: what a video on a display plane is
+  ## placed by (js_video.nim videoSpots).
+  if image.isNil or canvas.isNil or image.bufferPointer != canvas.bufferPointer or
+      image.stride != canvas.stride or image.stride <= 0:
+    return
+  if image == canvas:
+    return (true, 0, 0)
+  (true, image.origin mod image.stride, image.origin div image.stride)
+
 proc notePanelCanvasWritten*() =
   ## Something other than the scene's render drew into the canvas (an
   ## overlay, a color correction): it no longer holds the frame svg_frames

@@ -24,6 +24,7 @@
 
 import std/[locks, monotimes, os]
 import ./loading_mark
+import ./video/planes
 when defined(linux):
   import posix
   import linuxfb
@@ -137,6 +138,8 @@ proc markStep*(s: var MarkState, nowMs: int64): int =
   if t < 0:
     return int(LoadingMarkDelayMs - elapsed)
   if not s.drawn:
+    # A video on a display plane would cover it: off until the next pass.
+    hidePlanes()
     # What the panel shows under the mark, read back from the panel itself:
     # the last frame pushed, whatever the driver did to it on the way.
     if not s.transfer(s.saved, write = false):

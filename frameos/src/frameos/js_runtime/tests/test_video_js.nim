@@ -308,16 +308,19 @@ export function get(app) {
         settlePlanes(true)
         context.nextSleep
       let ui = newUi(player, "tests/video-plane")
-      var renders = 0
+      var renders = 0 # once the plane shows: about one a second
+      var showsAtFirst = -1
       var deadline = epochTime() + 30
       while epochTime() < deadline and ui.videoState{"state"}.getStr() != "ended":
         let wait = ui.renderPanel()
-        inc renders
+        if showsSoFar() > 0:
+          if showsAtFirst < 0: showsAtFirst = showsSoFar()
+          inc renders
         sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 1.0) * 1000))
       check ui.videoState{"state"}.getStr() == "ended"
-      checkpoint "shows " & $showsSoFar() & ", renders " & $renders
+      checkpoint "shows " & $showsSoFar() & ", renders on the plane " & $renders
       check showsSoFar() >= 15 # its frames on the plane
-      check renders < showsSoFar() # and not a render each
+      check renders * 3 < showsSoFar() - showsAtFirst # and not a render each
       # The <img>'s box, 100x56 at (10, 12): the 16:9 clip fills it.
       let at = shownAt(-1)
       check at.rect.x == 10 and at.rect.y == 12 and at.rect.w == 100 and at.rect.h == 56
@@ -347,5 +350,45 @@ export function get(app) {
       check drawn
       check showsSoFar() == 0
       check canvas.color(50, 35).r > 200 and canvas.color(50, 35).g > 200 # the white box over it
+
+  test "the mouse cursor over a video keeps it in the canvas, and the plane when it goes":
+    if not haveFfmpeg:
+      skip()
+    else:
+      useSink()
+      reportPanelCanvas(W, H, PanelCanvasRgb565)
+      let canvas = panelCanvasFor(W, H, W, H, 0, "")
+      defer:
+        discard planesCursor(false, 0, 0, 0, 0)
+        noSink()
+        reportPanelCanvas(0, 0, 0)
+        discard panelCanvasFor(W, H, W, H, 0, "")
+      proc renderPanel(ui: Ui): float =
+        let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{}, image: canvas,
+          hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1, decodeTargetImage: canvas,
+          decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch", wholeFrame: true)
+        discard ui.runtime.get(ui.owner, %*{}, context)
+        settlePlanes(true)
+        context.nextSleep
+      # The cursor (drawn into /dev/fb0, under a plane) on the video's box.
+      discard planesCursor(true, 50, 30, 12, 19)
+      let ui = newUi(player, "tests/video-cursor")
+      ui.scene.state["loop"] = %*true
+      var playing = false
+      var deadline = epochTime() + 30
+      while epochTime() < deadline and not playing:
+        let wait = ui.renderPanel()
+        let c = canvas.color(30, 40)
+        playing = ui.videoState{"state"}.getStr() == "playing" and (c.r > 200 or c.b > 200)
+        sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 0.2) * 1000))
+      check playing # in the canvas
+      check showsSoFar() == 0
+      # It goes: on the plane.
+      discard planesCursor(false, 0, 0, 0, 0)
+      deadline = epochTime() + 30
+      while epochTime() < deadline and showsSoFar() < 3:
+        let wait = ui.renderPanel()
+        sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.01, 0.2) * 1000))
+      check showsSoFar() >= 3
 
 removeDir(assets)
