@@ -17,10 +17,12 @@ credentials; if it does not answer in time, the board's next check-in
 a minute. It reads the board's list (`GET /api/frames/<id>/scenes`) and each
 scene (`GET /api/frames/<id>/scenes/<sceneId>`) with the server API key the
 board was given, adds every scene the row does not hold by id (one saved here
-meanwhile stays), records them as what the board holds in the deploy
-baseline, so the workspace shows nothing pending for them, and drops the
-marker. A Pi's adoption imports its scenes from its frame.json the same way
-(`adopt_standalone_frame`).
+meanwhile stays), grants the frame the service keys its store scenes declare
+(as installing them from the store would: `grant_store_scene_setting_groups`),
+records them as what the board holds in the deploy baseline, with the keys
+its settings pull now brings, so the workspace shows nothing pending for
+them, and drops the marker. A Pi's adoption imports its scenes from its
+frame.json the same way, grant included (`adopt_standalone_frame`).
 """
 from __future__ import annotations
 
@@ -34,8 +36,16 @@ from urllib.parse import quote
 from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
-from app.models.frame import Frame, update_frame
+from app.models.frame import (
+    Frame,
+    cached_app_configs,
+    grant_store_scene_setting_groups,
+    shipped_frame_settings,
+    update_frame,
+)
 from app.models.log import new_log
+from app.models.settings import get_settings_dict
+from app.utils.frame_secrets import SETTINGS_FINGERPRINTS_KEY, shipped_settings_fingerprints
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.retired_apps import retire_apps_in_scenes
 from app.utils.scene_execution import normalize_scenes_execution
@@ -163,11 +173,22 @@ async def import_embedded_frame_scenes(
     held_ids = {scene.get("id") for scene in held}
     added = [scene for scene in scenes if scene["id"] not in held_ids]
     frame.scenes = held + copy.deepcopy(added)
+    # The service keys they use come with them, as a store install grants
+    # what its scene declares: a store scene the board installed by itself
+    # would otherwise say "Add an OpenAI API key" with the key right here.
+    granted = grant_store_scene_setting_groups(frame, added)
     frame.embedded = {key: value for key, value in (frame.embedded or {}).items() if key != SCENE_IMPORT_KEY}
     baseline = frame.last_successful_deploy
     if isinstance(baseline, dict):
-        # What the board holds is what was deployed to it.
-        baseline = {**baseline, "scenes": scenes}
+        # What the board holds is what was deployed to it, and the keys its
+        # settings pull now brings (it pulls them by itself on its next pass).
+        baseline = {
+            **baseline,
+            "scenes": scenes,
+            SETTINGS_FINGERPRINTS_KEY: shipped_settings_fingerprints(
+                shipped_frame_settings(frame, get_settings_dict(db, project_id=frame.project_id), cached_app_configs())
+            ),
+        }
         if isinstance(baseline.get("embedded"), dict):
             baseline["embedded"] = {
                 key: value for key, value in baseline["embedded"].items() if key != SCENE_IMPORT_KEY
@@ -177,7 +198,8 @@ async def import_embedded_frame_scenes(
     await new_log(
         db, redis, int(frame.id), "stdinfo",
         f"Read {len(scenes)} scene{'' if len(scenes) == 1 else 's'} from the frame"
-        + (f", {len(added)} new here" if len(added) != len(scenes) else ""),
+        + (f", {len(added)} new here" if len(added) != len(scenes) else "")
+        + (f"; granted their service keys: {', '.join(granted)}" if granted else ""),
     )
     return len(added)
 

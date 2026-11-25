@@ -190,6 +190,62 @@ async def test_frame_json_is_uploaded_private(monkeypatch: pytest.MonkeyPatch):
     assert uploads == [("/srv/frameos/releases/x/frame.json", {"transport": "auto", "mode": 0o600})]
 
 
+@pytest.mark.asyncio
+async def test_frame_json_keeps_the_service_keys_the_frame_holds_of_its_own(monkeypatch: pytest.MonkeyPatch):
+    """frame.json is written whole: a key the frame held before a backend
+    adopted it (or set on its own admin page) stays unless this backend ships
+    that group or shipped it before, as on the admin-API deploy."""
+    import json
+
+    device_settings = {
+        "openAI": {"apiKey": "the-frames-own"},  # never shipped here, none to ship: stays
+        "unsplash": {"accessKey": "shipped-then-revoked"},  # shipped last time, not now: goes
+        "homeAssistant": {"url": "http://device", "accessToken": "device"},  # shipped now: the backend's
+        "posthog": {"apiKey": "not-a-service-group"},  # not one of the six: not copied
+    }
+    commands: list[tuple[str, dict]] = []
+    uploads: list[dict] = []
+
+    async def fake_run_command(_db, _redis, _frame, command, **kwargs):
+        commands.append((command, kwargs))
+        return 0, json.dumps({"name": "Kitchen", "settings": device_settings}), ""
+
+    async def fake_upload_file(_db, _redis, _frame, _path, data, **_kwargs):
+        uploads.append(json.loads(data))
+
+    async def fake_log(*_args, **_kwargs):
+        return None
+
+    backend_settings = {"openAI": None, "homeAssistant": {"url": "http://backend", "accessToken": "backend"}}
+    monkeypatch.setattr(
+        frame_deployer_module, "get_frame_json", lambda _db, _frame: {"settings": dict(backend_settings)}
+    )
+    monkeypatch.setattr(frame_deployer_module, "run_command", fake_run_command)
+    monkeypatch.setattr(frame_deployer_module, "upload_file", fake_upload_file)
+    monkeypatch.setattr(frame_deployer_module, "log", fake_log)
+    frame = SimpleNamespace(id=1, last_successful_deploy={"settings_fingerprints": {"unsplash": "f1", "homeAssistant": "f2"}})
+    deployer = frame_deployer_module.FrameDeployer(db=None, redis=None, frame=frame, nim_path="", temp_dir="")
+
+    await deployer._upload_frame_json("/srv/frameos/releases/x/frame.json")
+
+    assert uploads[0]["settings"] == {
+        "openAI": {"apiKey": "the-frames-own"},
+        "homeAssistant": {"url": "http://backend", "accessToken": "backend"},
+    }
+    # Read from the running release, and neither the command nor the keys logged.
+    assert commands == [("cat /srv/frameos/current/frame.json", {
+        "timeout": 60, "log_output": False, "log_command": False, "transport": "auto",
+    })]
+
+    # A baseline that does not say what was shipped: frame.json is the backend's, read nothing.
+    commands.clear()
+    uploads.clear()
+    frame.last_successful_deploy = {"scenes": []}
+    await deployer._upload_frame_json("/srv/frameos/releases/x/frame.json")
+    assert commands == []
+    assert uploads[0]["settings"] == backend_settings
+
+
 def test_gpio_button_labels_cannot_split_the_console_spec(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(embedded_firmware, "embedded_hardware_preset_for_frame", lambda _frame: None)
     frame = SimpleNamespace(

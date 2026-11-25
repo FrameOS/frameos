@@ -12,6 +12,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.frame import Frame
+from app.models.log import Log
+from app.models.settings import Settings
 from app.tasks.embedded_firmware import embedded_device_for_panel, embedded_panel_for_device
 from app.utils import embedded_scene_import
 
@@ -52,15 +54,19 @@ class FakeFrame:
     (`board_scenes`, read with the key it was given once it is back up,
     `scene_reads_refused` reads later). `ports` are where it answers."""
 
-    def __init__(self, adopt_info, *, ports=(8787,), claim=None, board_scenes=(), scene_reads_refused=0):
+    def __init__(self, adopt_info, *, ports=(8787,), claim=None, board_scenes=(), scene_reads_refused=0,
+                 linux_payload=None, settings_status=200):
         self.adopt_info = adopt_info
         self.ports = set(ports)
         self.claim = claim or (lambda body: (200, {'username': 'admin', 'password': 'minted-pass'}))
         self.board_scenes = list(board_scenes)
         self.scene_reads_refused = scene_reads_refused
+        self.linux_payload = linux_payload or _linux_device_payload()
+        self.settings_status = settings_status
         self.calls = []  # (method, port, path, body)
         self.logins = []
         self.posted = []
+        self.settings_posted = []
 
     async def fetch(self, frame_obj, redis_obj, *, path, method='GET', body=None, headers=None, **kwargs):
         port = frame_obj.frame_port
@@ -99,11 +105,15 @@ class FakeFrame:
             return 200, b'{"status":"ok"}', {'set-cookie': 'frame_admin_session=s; Path=/'}
         if path == '/event/restart':
             return 200, b'{"status":"ok"}', {}
+        if path == '/api/settings' and method == 'POST':
+            # The Pi's service-key route (admin_api_routes.nim).
+            self.settings_posted.append(parsed)
+            return self.settings_status, b'{}', {}
         if path.startswith('/api/frames/1'):
             if method == 'POST':
                 self.posted.append(parsed)
                 return 200, b'{"message":"ok"}', {}
-            return 200, json.dumps({'frame': _linux_device_payload()}).encode(), {}
+            return 200, json.dumps({'frame': self.linux_payload}).encode(), {}
         raise AssertionError(f'unexpected {method} {path}')
 
 
@@ -200,6 +210,8 @@ async def test_adopt_by_code_creates_an_embedded_row_and_tells_the_board_this_ba
         'backend': 'http://10.0.0.5:8989',
         'apiKey': frame.server_api_key,
         'frameId': frame.id,
+        # It sends this backend its logs, as one provisioned over USB does.
+        'sendLogs': True,
     }]
     # The baseline a finished USB provisioning records, on the board's release.
     assert frame.last_successful_deploy['frameos_version'] == '2026.11.11'
@@ -262,6 +274,106 @@ async def test_adopt_by_code_reads_the_boards_own_scenes_into_the_row_and_the_ba
     )
     assert pulled.status_code == 200
     assert [scene['id'] for scene in pulled.json()] == ['clock', 'pixel toys', 'layout-reterminal-sticky']
+
+
+def _scene_using(scene_id, name, groups, *, store=False):
+    """A scene whose one app declares the settings `groups`; from the store
+    when `store` (origin.storeSceneId, as the store stamps every scene)."""
+    scene = {
+        'id': scene_id,
+        'name': name,
+        'nodes': [{'id': 'n1', 'type': 'app', 'data': {'keyword': 'keyApp'}}],
+        'edges': [],
+        'apps': {'keyApp': {'sources': {
+            'app.ts': 'export function get() {}',
+            'config.json': json.dumps({'name': 'Key app', 'settings': groups}),
+        }}},
+        'settings': {'execution': 'interpreted'},
+    }
+    if store:
+        scene['origin'] = {'storeSceneId': '0b1f6a4e-2c3d-4e5f-8a9b-0c1d2e3f4a5b', 'version': 3}
+    return scene
+
+
+@pytest.mark.asyncio
+async def test_an_adopted_boards_scenes_get_the_keys_they_use(async_client, no_auth_client, db, redis, project):
+    """A store scene the board installed by itself said "Add an OpenAI API
+    key" with the key on this backend: an import granted nothing."""
+    db.add_all([
+        Settings(project_id=project.id, key='openAI', value={'apiKey': 'sk-backend'}),
+        Settings(project_id=project.id, key='unsplash', value={'accessKey': 'unsplash-backend'}),
+        Settings(project_id=project.id, key='buildHost', value={'host': 'build.local'}),
+    ])
+    db.commit()
+    board_scenes = [
+        _scene_using('word', 'Word of the day', ['openAI', 'buildHost'], store=True),
+        _scene_using('photos', 'Photos', ['unsplash']),
+    ]
+    fake = FakeFrame(ESP32_INFO, ports=(80,), claim=lambda body: (200, {'ok': True}), board_scenes=board_scenes)
+    with _patched(fake):
+        response = await async_client.post('/api/frames/adopt', json=_body())
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+
+    # Granted as installing it from the store grants it; the owner's own
+    # scene needs no grant, and nothing but a service group is granted.
+    assert frame.service_setting_groups == ['openAI']
+    pulled = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers={'Authorization': f'Bearer {frame.server_api_key}'}
+    )
+    assert pulled.status_code == 200, pulled.text
+    keys = pulled.json()
+    assert keys['openAI'] == {'apiKey': 'sk-backend'}
+    assert keys['unsplash'] == {'accessKey': 'unsplash-backend'}
+    assert 'buildHost' not in keys
+    # The board pulls them by itself: the baseline says it has them, so
+    # nothing is pending.
+    fingerprints = frame.last_successful_deploy['settings_fingerprints']
+    assert set(fingerprints) == {'openAI', 'unsplash'}
+    assert fingerprints == frame.to_dict()['settings_fingerprints']
+
+
+@pytest.mark.asyncio
+async def test_an_adopted_pi_gets_the_keys_its_scenes_use(async_client, db, redis, project):
+    db.add(Settings(project_id=project.id, key='openAI', value={'apiKey': 'sk-backend'}))
+    db.commit()
+    device = {**_linux_device_payload(), 'scenes': [_scene_using('word', 'Word of the day', ['openAI'], store=True)]}
+    fake = FakeFrame(LINUX_INFO, linux_payload=device)
+    with _patched(fake):
+        response = await async_client.post('/api/frames/adopt', json=_body())
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+
+    assert frame.service_setting_groups == ['openAI']
+    # Written as the admin-API deploy writes them, before the write-back
+    # reloads the runtime; the route merges, so the frame's other keys stay.
+    assert fake.settings_posted == [{'openAI': {'apiKey': 'sk-backend'}}]
+    writes = [path for method, _, path, _ in fake.calls if method == 'POST' and path != '/api/admin/login']
+    assert writes.index('/api/settings') < writes.index('/api/frames/1')
+    fingerprints = frame.last_successful_deploy['settings_fingerprints']
+    assert set(fingerprints) == {'openAI'}
+    assert fingerprints == frame.to_dict()['settings_fingerprints']
+
+
+@pytest.mark.asyncio
+async def test_an_adopted_pi_whose_keys_could_not_be_written_is_offered_them(async_client, db, redis, project):
+    db.add(Settings(project_id=project.id, key='openAI', value={'apiKey': 'sk-backend'}))
+    db.commit()
+    device = {**_linux_device_payload(), 'scenes': [_scene_using('word', 'Word of the day', ['openAI'], store=True)]}
+    fake = FakeFrame(LINUX_INFO, linux_payload=device, settings_status=500)
+    with _patched(fake):
+        response = await async_client.post('/api/frames/adopt', json=_body())
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    frame = db.get(Frame, response.json()['frame']['id'])
+
+    # Adopted all the same; the workspace shows the keys as a change to deploy.
+    assert frame.last_successful_deploy['settings_fingerprints'] == {}
+    assert set(frame.to_dict()['settings_fingerprints']) == {'openAI'}
+    lines = [log.line for log in db.query(Log).filter_by(frame_id=frame.id, type='stderr')]
+    assert any('service keys could not be written' in line for line in lines), lines
 
 
 @pytest.mark.asyncio

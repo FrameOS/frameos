@@ -16,13 +16,14 @@ from arq import ArqRedis as Redis
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.utils.frame_secrets import deployed_frame_snapshot
+from app.utils.frame_secrets import SETTINGS_FINGERPRINTS_KEY, deployed_frame_snapshot
 from app.models.frame import (
     frame_has_shell_access,  # noqa: F401 — re-exported for app.api.frames
     Frame,
     cached_app_configs,
     compact_timezone_updater,
     delete_frame,
+    grant_store_scene_setting_groups,
     new_frame,
     normalize_frame_admin_auth,
     normalize_error_behavior,
@@ -1993,6 +1994,10 @@ async def _adopt_embedded_frame(
                 "backend": embedded_backend_url_for_frame(frame),
                 "apiKey": frame.server_api_key,
                 "frameId": frame.id,
+                # As USB provisioning's `set server_send_logs`: a board that
+                # had them off would otherwise stay silent here, since its
+                # settings pull never carries the switch (fos_http.c adopt_post).
+                "sendLogs": frame.server_send_logs is not False,
             },
             redis,
             fetch_frame_http_bytes,
@@ -2282,11 +2287,23 @@ async def adopt_standalone_frame(
             retire_apps_in_scenes(remote_scenes)
             normalize_scenes_execution(remote_scenes)
             frame.scenes = remote_scenes
+            # The service keys its store scenes use come with them, as a
+            # store install grants what its scene declares (an adopted
+            # ESP32's the same: app/utils/embedded_scene_import.py).
+            grant_store_scene_setting_groups(frame, remote_scenes)
         frame.frame_admin_auth = admin_auth
         # The frame is demonstrably running FrameOS — it just answered.
         frame.status = "ready"
         await update_frame(db, redis, frame)
         db.refresh(frame)
+
+        # The keys this backend ships for those scenes go to the device now,
+        # before the write-back reloads it: the baseline recorded below says
+        # they are there, so nothing would offer a deploy for them, and its
+        # scenes would ask for a key the backend holds. The route merges field
+        # by field: a key of the device's own that this backend does not ship
+        # stays (service_settings_push_payload).
+        service_keys_written = await _write_adopted_frame_service_keys(frame, db, redis, fetch_frame_http_bytes)
 
         # The write-back is what makes this an adoption: a non-empty
         # serverHost marks the device backend-managed (and blocks cloud
@@ -2323,6 +2340,9 @@ async def adopt_standalone_frame(
     # so the sync panel opens clean. The metadata echo to the device is best
     # effort — the adoption itself is already complete.
     _mark_frame_sync_baseline(frame)
+    if not service_keys_written and isinstance(frame.last_successful_deploy, dict):
+        # Not on the device: the workspace offers them as a change to deploy.
+        frame.last_successful_deploy = {**frame.last_successful_deploy, SETTINGS_FINGERPRINTS_KEY: {}}
     await update_frame(db, redis, frame)
     db.refresh(frame)
     try:
@@ -2331,6 +2351,38 @@ async def adopt_standalone_frame(
         logger.warning("adopt: metadata echo to %s failed", host, exc_info=True)
     await _restart_adopted_runtime(frame, db, redis, fetch_frame_http_bytes, remote_frame.get("version"))
     return frame
+
+
+async def _write_adopted_frame_service_keys(
+    frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
+) -> bool:
+    """The service keys this backend ships for an adopted Pi's scenes,
+    through its settings route, as the admin-API deploy writes them. Best
+    effort: False when they could not be written (the adoption goes on, and
+    the frame's log says to deploy); True when they were, or there were none."""
+    try:
+        written = await push_service_settings_to_device(frame, db, redis, fetch_frame_http_bytes)
+    except Exception as exc:  # noqa: BLE001 - the adoption does not hang on its keys
+        logger.warning("adopt: service keys for %s not written", frame.frame_host, exc_info=True)
+        detail = str(getattr(exc, "detail", None) or exc)
+        try:
+            await new_log(
+                db, redis, frame.id, "stderr",
+                f"Adopted, but this backend's service keys could not be written to the frame ({detail}). "
+                "Deploy the frame to send them.",
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("adopt: could not log the key failure for %s", frame.id, exc_info=True)
+        return False
+    if written:
+        try:
+            await new_log(
+                db, redis, frame.id, "stdout",
+                "Service keys written to the frame: " + ", ".join(sorted(written.keys())),
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("adopt: could not log the keys written to %s", frame.id, exc_info=True)
+    return True
 
 
 # From this release on the runtime's log shipper takes a reloaded config's

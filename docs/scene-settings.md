@@ -323,19 +323,31 @@ which has no page, keeps its marker and its start budget.)
   - a Pi answers with its admin login (minting one, `admin` and a random
     password saved to frame.json, when it has none), and the backend goes on
     as an adoption by password does: reads `GET /api/frames/1`, imports the
-    scenes and writes its address and key back (`adopt_standalone_frame`,
+    scenes, writes the service keys they use through `POST /api/settings`
+    and its address and key back (`adopt_standalone_frame`,
     `backend/app/api/frame_sync.py`);
-  - an ESP32 is sent `{code, backend, apiKey, frameId}` for a row the backend
-    made from what `GET /api/adopt` said (platform, panel, preset, size),
-    writes them to NVS and restarts, and from then on is a backend frame like
-    a USB-provisioned one. It keeps its board settings and its scenes: the
-    backend reads them over the board's HTTP API with the key it was just
-    given (`GET /api/frames/<id>/scenes`, then each scene) as soon as it
-    answers again, into the row and the deploy baseline
+  - an ESP32 is sent `{code, backend, apiKey, frameId, sendLogs}` for a row
+    the backend made from what `GET /api/adopt` said (platform, panel,
+    preset, size), writes them to NVS and restarts, and from then on is a
+    backend frame like a USB-provisioned one (`sendLogs` is that
+    provisioning's `server_send_logs`, which no settings pull carries). It
+    keeps its board settings and its scenes: the backend reads them over the
+    board's HTTP API with the key it was just given
+    (`GET /api/frames/<id>/scenes`, then each scene) as soon as it answers
+    again, into the row and the deploy baseline
     (`backend/app/utils/embedded_scene_import.py`). Until they are read the
     row says so (`embedded.sceneImport`) and the board is sent no scenes: its
     scene pull answers 503 and the board keeps what it holds, and its next
     check-in reads them.
+
+  Either way the scenes come with the service keys they use: the frame is
+  granted the groups its store scenes declare (`service_setting_groups`), as
+  installing them from the store grants them, and a scene of the owner's own
+  gets what it declares without a grant. A key the frame held of its own
+  stays where this backend has none to send: an ESP32 holds none (its keys
+  are a plane's, pulled every boot), and a Pi's frame.json keeps a group
+  this backend never shipped, through the admin route and an SSH deploy
+  alike.
 
   `GET /api/adopt` says nothing but `{"adopting": false}` while no code shows;
   `POST /api/adopt` answers the ceremony's tokens (`code_required` 400,

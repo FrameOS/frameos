@@ -974,6 +974,31 @@ def scene_declared_setting_groups(scene: Any, app_configs: dict) -> set[str]:
     return declared
 
 
+# The service settings groups a scene's apps can be granted: the six every
+# runtime knows (CloudServiceSettingsGroups in frameos/src/frameos/apps.nim,
+# the SPA's settingsDetails, which its install grants from).
+SERVICE_SETTING_GROUPS = ("frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash")
+
+
+def grant_store_scene_setting_groups(frame: "Frame", scenes: list, app_configs: Optional[dict] = None) -> list[str]:
+    """Grant the frame (``service_setting_groups``) the service groups the
+    store-origin scenes among ``scenes`` declare, as installing them from the
+    store does; returns the groups newly granted. For the scenes an adoption
+    takes over with the frame: the owner adopted it, at the frame, with the
+    code it showed, and a scene of the owner's own gets what it declares
+    without a grant. Only the six service groups, whatever a scene declares."""
+    app_configs = app_configs if app_configs is not None else cached_app_configs()
+    declared: set[str] = set()
+    for scene in scenes or []:
+        if scene_is_from_store(scene):
+            declared |= scene_declared_setting_groups(scene, app_configs)
+    granted = [str(group) for group in (frame.service_setting_groups or []) if isinstance(group, str) and group]
+    granting = [group for group in SERVICE_SETTING_GROUPS if group in declared and group not in granted]
+    if granting:
+        frame.service_setting_groups = granted + granting
+    return granting
+
+
 def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None) -> dict:
     """The service settings groups frame.json carries for this frame, by
     provenance: what the owner's scenes declare, plus what store-origin

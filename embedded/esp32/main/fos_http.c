@@ -2068,9 +2068,11 @@ static esp_err_t restart_post_handler(httpd_req_t *req)
  * credential, single use, five tries, under the wrong-code budget it shares
  * with the local network access code (fos_lan_access.c). GET says whether a
  * code is showing and, only then, what the backend needs for the frame's
- * row; POST {code, backend, apiKey, frameId} gives the frame its backend and
- * restarts it, after which it talks to the backend like a frame provisioned
- * over USB. A refusal is its token alone: the backend has the words. */
+ * row; POST {code, backend, apiKey, frameId, sendLogs?} gives the frame its
+ * backend (and, as USB provisioning's `set server_send_logs`, whether to send
+ * it logs: the settings pull never carries that switch) and restarts it,
+ * after which it talks to the backend like a frame provisioned over USB. A
+ * refusal is its token alone: the backend has the words. */
 static esp_err_t adopt_answer(httpd_req_t *req, const char *status, const char *error)
 {
     char body[64];
@@ -2114,6 +2116,7 @@ static esp_err_t adopt_post(httpd_req_t *req)
     const cJSON *code = cJSON_GetObjectItem(root, "code");
     const cJSON *backend = cJSON_GetObjectItem(root, "backend");
     const cJSON *api_key = cJSON_GetObjectItem(root, "apiKey");
+    const cJSON *send_logs = cJSON_GetObjectItem(root, "sendLogs");
     uint32_t frame_id = 0;
     char origin[FOS_URL_LEN];
     const char *status = "400 Bad Request";
@@ -2146,14 +2149,17 @@ static esp_err_t adopt_post(httpd_req_t *req)
     }
     char old_key[sizeof(config->api_key)];
     strlcpy(old_key, config->api_key, sizeof(old_key));
+    const bool old_send_logs = config->server_send_logs;
     strlcpy(config->backend_url, origin, sizeof(config->backend_url));
     strlcpy(config->api_key, api_key->valuestring, sizeof(config->api_key));
     config->frame_id = frame_id;
+    if (cJSON_IsBool(send_logs)) config->server_send_logs = cJSON_IsTrue(send_logs);
     cJSON_Delete(root);
     if (fos_config_save() != ESP_OK) {
         config->backend_url[0] = '\0';
         strlcpy(config->api_key, old_key, sizeof(config->api_key));
         config->frame_id = 0;
+        config->server_send_logs = old_send_logs;
         return adopt_answer(req, "500 Internal Server Error", "persist_failed");
     }
     frameos_nim_log_hook("{\"event\":\"settings:adopted\",\"source\":\"esp32\"}");
