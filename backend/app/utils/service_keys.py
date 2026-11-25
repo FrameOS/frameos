@@ -102,7 +102,8 @@ def app_service_definitions(app_config: Any) -> dict[str, dict[str, Any]]:
         if not is_service_id(service_id) or registered_service(service_id) or not isinstance(spec, dict):
             continue
         fields: list[dict[str, Any]] = []
-        for raw in spec.get("fields") if isinstance(spec.get("fields"), list) else []:
+        raw_fields = spec.get("fields")
+        for raw in raw_fields if isinstance(raw_fields, list) else []:
             field = _read_field(raw)
             if field and not any(f["name"] == field["name"] for f in fields):
                 fields.append(field)
@@ -322,12 +323,13 @@ def build_service_keys_wire(
 
     legacy: dict[str, dict[str, str]] = {}
     for service in sorted(bound_key_ids):
-        if service in uses_default and service in wire["keys"]:
-            key_id: Optional[str] = service
-        else:
-            key_id = next((k for k in sorted(bound_key_ids[service]) if k in wire["keys"]), None)
-        if key_id:
-            legacy[service] = dict(wire["keys"][key_id]["values"])
+        legacy_id: Optional[str] = (
+            service
+            if service in uses_default and service in wire["keys"]
+            else next((k for k in sorted(bound_key_ids[service]) if k in wire["keys"]), None)
+        )
+        if legacy_id:
+            legacy[service] = dict(wire["keys"][legacy_id]["values"])
 
     return {"serviceKeys": wire, "settings": legacy}
 

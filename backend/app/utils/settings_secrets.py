@@ -149,13 +149,12 @@ def _resolve_service_credentials(posted: Any, stored: Any) -> Any:
             resolved[credential_id] = entry
             continue
         previous = stored_group.get(credential_id)
-        previous_values = (
+        previous_raw = (
             previous.get("values")
-            if isinstance(previous, dict)
-            and previous.get("service") == entry.get("service")
-            and isinstance(previous.get("values"), dict)
-            else {}
+            if isinstance(previous, dict) and previous.get("service") == entry.get("service")
+            else None
         )
+        previous_values: dict[str, Any] = previous_raw if isinstance(previous_raw, dict) else {}
         values: dict[str, Any] = {}
         for field, value in entry["values"].items():
             if is_masked_setting_value(value):
@@ -199,7 +198,8 @@ def resolve_masked_settings(payload: dict[str, Any], stored: dict[str, Any]) -> 
         value = resolved.get(group)
         if not isinstance(value, dict):
             continue
-        current_group = stored.get(group) if isinstance(stored.get(group), dict) else {}
+        stored_value = stored.get(group)
+        current_group: dict[str, Any] = stored_value if isinstance(stored_value, dict) else {}
         for field in list(value):
             if not is_secret_setting_field(group, field) or not is_masked_setting_value(value.get(field)):
                 continue

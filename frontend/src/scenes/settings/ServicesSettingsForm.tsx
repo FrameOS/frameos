@@ -296,76 +296,84 @@ function ServiceKeysCards(): JSX.Element {
         scenes a different one (Keys, in the scene&apos;s menu). A scene from the scene store gets a key only when you
         give it one.
       </p>
-      {cards.map(({ definition, anchor, credentials }) => (
-        <div key={definition.id} id={anchor} className="pt-2">
-          <Box className="p-2 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="frameos-strong font-semibold">{definition.title}</span>
-              {definition.optional ? <Tag>Optional</Tag> : null}
-              {!definition.registered ? <Tag>Defined by an app</Tag> : null}
-            </div>
-            {definition.description || definition.help ? (
-              <p className="frameos-muted text-sm">
-                {definition.description}
-                {definition.help ? (
-                  <>
-                    {definition.description ? ' ' : null}
-                    <a className="frameos-link hover:underline" target="_blank" rel="noreferrer" href={definition.help}>
-                      Get a key
-                    </a>
-                  </>
-                ) : null}
-              </p>
-            ) : null}
-            <Group name={definition.id}>
-              {definition.fields.map((field) => (
-                <Field
-                  key={field.name}
-                  name={field.name}
-                  label={credentials.length > 0 ? `${field.label} (default)` : field.label}
-                  hint={field.hint}
-                  secret={field.secret && !!savedSettings?.[definition.id]?.[field.name]}
-                >
-                  <TextInput placeholder={field.placeholder} />
-                </Field>
-              ))}
-            </Group>
-            {credentials.map(({ id, credential }) => (
-              <div key={id} className="space-y-2 border-t border-slate-500/20 pt-3">
-                <Group name={[SERVICE_CREDENTIALS_GROUP, id]}>
-                  <Field name="name" label="Name of this key">
-                    <TextInput />
-                  </Field>
-                  <Group name="values">
-                    {definition.fields.map((field) => (
-                      <Field
-                        key={field.name}
-                        name={field.name}
-                        label={field.label}
-                        secret={
-                          field.secret && !!savedSettings?.[SERVICE_CREDENTIALS_GROUP]?.[id]?.values?.[field.name]
-                        }
-                      >
-                        <TextInput placeholder={field.placeholder} />
-                      </Field>
-                    ))}
-                  </Group>
-                </Group>
-                <div className="flex justify-end">
-                  <Button size="small" color="secondary" onClick={() => removeServiceCredential(id)}>
-                    Remove {credential.name}
-                  </Button>
-                </div>
+      {/* One container after the heading: the page's section card (index.css `form > h6 + p + div`). */}
+      <div className="space-y-3">
+        {cards.map(({ definition, anchor, credentials }) => (
+          <div key={definition.id} id={anchor}>
+            <Box className="p-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="frameos-strong font-semibold">{definition.title}</span>
+                {definition.optional ? <Tag>Optional</Tag> : null}
+                {!definition.registered ? <Tag>Custom</Tag> : null}
               </div>
-            ))}
-            <div className="pt-1">
-              <Button size="small" color="secondary" onClick={() => addServiceCredential(definition.id)}>
-                Add another key
-              </Button>
-            </div>
-          </Box>
-        </div>
-      ))}
+              {definition.description || definition.help ? (
+                <p className="frameos-muted text-sm">
+                  {definition.description}
+                  {definition.help ? (
+                    <>
+                      {definition.description ? ' ' : null}
+                      <a
+                        className="frameos-link hover:underline"
+                        target="_blank"
+                        rel="noreferrer"
+                        href={definition.help}
+                      >
+                        Get a key
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+              <Group name={definition.id}>
+                {definition.fields.map((field) => (
+                  <Field
+                    key={field.name}
+                    name={field.name}
+                    label={credentials.length > 0 ? `${field.label} (default)` : field.label}
+                    hint={field.hint}
+                    secret={field.secret && !!savedSettings?.[definition.id]?.[field.name]}
+                  >
+                    <TextInput placeholder={field.placeholder} />
+                  </Field>
+                ))}
+              </Group>
+              {credentials.map(({ id, credential }) => (
+                <div key={id} className="space-y-2 border-t border-slate-500/20 pt-3">
+                  <Group name={[SERVICE_CREDENTIALS_GROUP, id]}>
+                    <Field name="name" label="Name of this key">
+                      <TextInput />
+                    </Field>
+                    <Group name="values">
+                      {definition.fields.map((field) => (
+                        <Field
+                          key={field.name}
+                          name={field.name}
+                          label={field.label}
+                          secret={
+                            field.secret && !!savedSettings?.[SERVICE_CREDENTIALS_GROUP]?.[id]?.values?.[field.name]
+                          }
+                        >
+                          <TextInput placeholder={field.placeholder} />
+                        </Field>
+                      ))}
+                    </Group>
+                  </Group>
+                  <div className="flex justify-end">
+                    <Button size="small" color="secondary" onClick={() => removeServiceCredential(id)}>
+                      Remove {credential.name}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <div className="pt-1">
+                <Button size="small" color="secondary" onClick={() => addServiceCredential(definition.id)}>
+                  Add another key
+                </Button>
+              </div>
+            </Box>
+          </div>
+        ))}
+      </div>
     </>
   )
 }

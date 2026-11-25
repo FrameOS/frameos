@@ -1022,7 +1022,8 @@ def grant_store_scene_setting_groups(frame: "Frame", scenes: list, app_configs: 
         if not isinstance(entry, dict) or entry.get("id") not in store_ids:
             updated.append(entry)
             continue
-        keys = dict(entry.get("keys")) if isinstance(entry.get("keys"), dict) else {}
+        raw_keys = entry.get("keys")
+        keys = dict(raw_keys) if isinstance(raw_keys, dict) else {}
         adding = [
             service for service in sorted(scene_declared_setting_groups(entry, app_configs))
             if is_service_id(service) and service not in keys

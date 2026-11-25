@@ -65,7 +65,6 @@ from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import (
     Frame,
-    get_frame_json,
     normalize_event_map,
     normalize_frame_admin_auth,
     normalize_https_proxy,
