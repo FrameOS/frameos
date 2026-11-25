@@ -543,6 +543,9 @@ void app_main(void)
     /* An LCD's boot mark is drawn the way up the frame's pictures are. */
     fos_lcd_splash_set_rotation(config->rotate);
     fos_display_set_i2c_lender(lend_i2c_bus);
+    /* An RGB data line on the USB pads (the Guition's GPIO20) is claimed by
+     * the LCD driver as the panel comes up, before touch and the console. */
+    fos_lcd_st7701s_set_pad_claimer(fos_usb_pads_claim);
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }

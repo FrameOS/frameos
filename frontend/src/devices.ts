@@ -161,7 +161,7 @@ export const devices: OptionGroup<Option>[] = [
   {
     label: 'LCD',
     options: [
-      { value: 'lcd.st7701s_480x480', label: 'ST7701S 4.0" IPS LCD 480x480 (ESP32 RGB, SenseCAP Indicator, Guition ESP32-4848S040)' },
+      { value: 'lcd.st7701s_480x480', label: 'ST7701S 4.0" IPS LCD 480x480 (ESP32 RGB, SenseCAP Indicator)' },
       { value: 'lcd.ek9716_800x480', label: 'EK9716 7.0" IPS LCD 800x480 (ESP32 RGB, Sunton ESP32-8048S070)' },
       {
         value: 'amoled.co5300_466x466',
