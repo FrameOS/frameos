@@ -7,9 +7,11 @@ import {
   maskSettingValue,
   maxAccountSettingValueLength,
   openSettingValue,
+  isStorableServiceField,
+  maxServiceCredentials,
   sealSettingValue,
-  storableAccountSettingsFields,
 } from "./account-settings";
+import { SERVICE_REGISTRY } from "../../../../../frontend/src/generated/services.gen";
 
 // secrets.ts reads the deployment key from the environment; the unit setup
 // (src/test/setup-env.ts) does not set one, and these tests only need a key
@@ -19,10 +21,17 @@ process.env.FRAMEOS_CLOUD_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString(
 );
 
 describe("secret setting fields", () => {
-  it("seals every storable field except the URLs and the model tuning", () => {
+  it("seals every registered service field except the URLs and the model tuning", () => {
     const secret: string[] = [];
     const plain: string[] = [];
-    for (const [group, fields] of storableAccountSettingsFields) {
+    const storable: [string, string[]][] = Object.entries(SERVICE_REGISTRY).map(([group, service]) => [
+      group,
+      [
+        ...service.fields.map((field) => field.name),
+        ...(group === "openAI" ? ["backendApiKey", "chatModel", "chatReasoningEffort"] : []),
+      ],
+    ]);
+    for (const [group, fields] of storable) {
       for (const field of fields) {
         (isSecretSettingField(group, field) ? secret : plain).push(
           `${group}.${field}`,
@@ -44,9 +53,13 @@ describe("secret setting fields", () => {
       "openAI.chatModel",
       "openAI.chatReasoningEffort",
     ]);
-    // Unknown groups and fields are not secrets — they are not storable.
+    // Groups that are no service, and fields a registered service does not
+    // have, are not secrets — they are not storable.
     expect(isSecretSettingField("ssh_keys", "keys")).toBe(false);
     expect(isSecretSettingField("openAI", "nope")).toBe(false);
+    // Every field of a service the registry does not know is a secret.
+    expect(isSecretSettingField("acmeWeather", "apiKey")).toBe(true);
+    expect(isSecretSettingField("acmeWeather", "baseUrl")).toBe(true);
   });
 
   it("seals and opens a value, and passes legacy plaintext through", () => {
@@ -73,29 +86,28 @@ describe("secret setting fields", () => {
   });
 });
 
-describe("storableAccountSettingsFields", () => {
-  it("is exactly the service groups the preview settings define", () => {
-    // Derived from preview-settings.ts on purpose: what the wasm preview can
-    // consume is what an account may persist. If this list changes, the
-    // settings page (allowedGlobalSettingsSections) probably needs the
-    // matching section too.
-    const fields = Object.fromEntries(
-      [...storableAccountSettingsFields.entries()].map(([group, names]) => [
-        group,
-        [...names].sort(),
-      ]),
-    );
-    expect(fields).toEqual({
-      frameOS: ["apiKey"],
-      github: ["api_key"],
-      homeAssistant: ["accessToken", "url"],
-      immich: ["apiKey", "url"],
-      // backendApiKey / chatModel / chatReasoningEffort: the account's own
-      // AI-chat key + tuning — storable, not preview fields, never
-      // device-deliverable.
-      openAI: ["apiKey", "backendApiKey", "chatModel", "chatReasoningEffort"],
-      unsplash: ["accessKey"],
-    });
+describe("isStorableServiceField", () => {
+  it("is a registered service's registry fields, plus the plane's own OpenAI fields", () => {
+    expect(isStorableServiceField("homeAssistant", "url")).toBe(true);
+    expect(isStorableServiceField("homeAssistant", "accessToken")).toBe(true);
+    // The backend's MQTT link is not the cloud's to store.
+    expect(isStorableServiceField("homeAssistant", "mqttPassword")).toBe(false);
+    expect(isStorableServiceField("openAI", "backendApiKey")).toBe(true);
+    expect(isStorableServiceField("openAI", "chatModel")).toBe(true);
+    expect(isStorableServiceField("unsplash", "apiKey")).toBe(false);
+  });
+
+  it("is any field of a service the registry does not know", () => {
+    expect(isStorableServiceField("acmeWeather", "apiKey")).toBe(true);
+    expect(isStorableServiceField("acmeWeather", "region")).toBe(true);
+    expect(isStorableServiceField("acmeWeather", "bad-name")).toBe(false);
+  });
+
+  it("is never a plane's own group or a name Object.prototype has", () => {
+    expect(isStorableServiceField("defaults", "wifiPassword")).toBe(false);
+    expect(isStorableServiceField("serviceCredentials", "x")).toBe(false);
+    expect(isStorableServiceField("constructor", "x")).toBe(false);
+    expect(isStorableServiceField("acmeWeather", "toString")).toBe(false);
   });
 });
 
@@ -141,6 +153,54 @@ describe("filterAccountSettings", () => {
       homeAssistant: { accessToken: "token", url: "http://ha.local:8123" },
       openAI: { apiKey: "sk", backendApiKey: "sk-backend", chatModel: "gpt-5.5" },
     });
+  });
+
+  it("keeps a service the registry does not know, every field of it", () => {
+    const { error, settings } = filterAccountSettings({
+      acmeWeather: { apiKey: "acme-1", region: "eu" },
+    });
+    expect(error).toBeUndefined();
+    expect(settings).toEqual({ acmeWeather: { apiKey: "acme-1", region: "eu" } });
+    // Not an object: some form's own bookkeeping, skipped; a registered
+    // service the same way is bad data.
+    expect(filterAccountSettings({ acmeWeather: "x" }).settings).toEqual({});
+  });
+
+  it("keeps the named keys, each a service's registry fields", () => {
+    const { error, settings } = filterAccountSettings({
+      serviceCredentials: {
+        k_work00000001: { name: " Work ", service: "openAI", values: { apiKey: "sk-work", backendApiKey: "no" } },
+        k_acme00000001: { service: "acmeWeather", values: { apiKey: "a" } },
+      },
+    });
+    expect(error).toBeUndefined();
+    expect(settings).toEqual({
+      serviceCredentials: {
+        // A named key is for frames: never the plane's own fields.
+        k_work00000001: { name: "Work", service: "openAI", values: { apiKey: "sk-work" } },
+        k_acme00000001: { name: "k_acme00000001", service: "acmeWeather", values: { apiKey: "a" } },
+      },
+    });
+  });
+
+  it("refuses named keys that are not one", () => {
+    for (const bad of [
+      { "not-an-id": { service: "openAI", values: {} } },
+      { k_work00000001: { service: "defaults", values: {} } },
+      { k_work00000001: { service: "openAI", values: { apiKey: 42 } } },
+      { k_work00000001: { service: "openAI", values: "sk" } },
+      { k_work00000001: "sk" },
+      "nope",
+    ]) {
+      expect(filterAccountSettings({ serviceCredentials: bad }).error, JSON.stringify(bad)).toBe("invalid_settings");
+    }
+    const many = Object.fromEntries(
+      Array.from({ length: maxServiceCredentials + 1 }, (_, index) => [
+        `k_${String(index).padStart(10, "0")}`,
+        { service: "openAI", values: {} },
+      ]),
+    );
+    expect(filterAccountSettings({ serviceCredentials: many }).error).toBe("invalid_settings");
   });
 
   it("keeps an explicitly empty group (replace-wholesale clears its fields)", () => {

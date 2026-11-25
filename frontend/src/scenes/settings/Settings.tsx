@@ -9,7 +9,7 @@ import { Spinner } from '../../components/Spinner'
 import { H6 } from '../../components/H6'
 import { TextInput } from '../../components/TextInput'
 import { Button } from '../../components/Button'
-import { settingsDetails } from '../frame/panels/secretSettings'
+import { settingsDetailsFor } from '../frame/panels/secretSettings'
 import { forgetPreviewKeyDecisions, readRememberedPreviewKeyDecisions } from '../frame/panels/Scenes/previewKeyConsent'
 import { Field } from '../../components/Field'
 import { TextArea } from '../../components/TextArea'
@@ -68,13 +68,10 @@ const allSettingsNavSections: readonly SettingsNavSection[] = [
   {
     label: 'Services',
     items: [
-      ['FrameOS Gallery', '#settings-gallery'],
-      ['OpenAI', '#settings-openai'],
+      ['Service keys', '#settings-service-keys'],
+      ['OpenAI for AI features', '#settings-openai'],
       ['PostHog', '#settings-posthog'],
-      ['Home Assistant', '#settings-home-assistant'],
-      ['GitHub', '#settings-github'],
-      ['Immich', '#settings-immich'],
-      ['Unsplash API', '#settings-unsplash'],
+      ['Home Assistant sync', '#settings-home-assistant'],
     ],
   },
   {
@@ -1031,8 +1028,7 @@ function PreviewKeyDecisions(): JSX.Element {
         <ul className="text-sm">
           {entries.map(([group, decision]) => (
             <li key={group}>
-              {settingsDetails[group]?.title ?? group}:{' '}
-              {decision === 'allow' ? 'preview with keys' : 'preview without keys'}
+              {settingsDetailsFor(group).title}: {decision === 'allow' ? 'preview with keys' : 'preview without keys'}
             </li>
           ))}
         </ul>

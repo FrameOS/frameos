@@ -316,9 +316,11 @@ async def test_an_adopted_boards_scenes_get_the_keys_they_use(async_client, no_a
     db.expire_all()
     frame = db.get(Frame, response.json()['frame']['id'])
 
-    # Granted as installing it from the store grants it; the owner's own
-    # scene needs no grant, and nothing but a service group is granted.
-    assert frame.service_setting_groups == ['openAI']
+    # Bound as installing it from the store binds it (that scene's own keys,
+    # docs/service-keys.md); the owner's own scene needs no binding, and
+    # nothing but a service is bound.
+    assert not frame.service_setting_groups
+    assert {scene['id']: scene.get('keys') for scene in frame.scenes} == {'word': {'openAI': 'default'}, 'photos': None}
     pulled = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/settings', headers={'Authorization': f'Bearer {frame.server_api_key}'}
     )
@@ -330,7 +332,7 @@ async def test_an_adopted_boards_scenes_get_the_keys_they_use(async_client, no_a
     # The board pulls them by itself: the baseline says it has them, so
     # nothing is pending.
     fingerprints = frame.last_successful_deploy['settings_fingerprints']
-    assert set(fingerprints) == {'openAI', 'unsplash'}
+    assert set(fingerprints) == {'openAI', 'unsplash', 'serviceKeys'}
     assert fingerprints == frame.to_dict()['settings_fingerprints']
 
 
@@ -346,14 +348,18 @@ async def test_an_adopted_pi_gets_the_keys_its_scenes_use(async_client, db, redi
     db.expire_all()
     frame = db.get(Frame, response.json()['frame']['id'])
 
-    assert frame.service_setting_groups == ['openAI']
+    assert frame.scenes[0]['keys'] == {'openAI': 'default'}
     # Written as the admin-API deploy writes them, before the write-back
     # reloads the runtime; the route merges, so the frame's other keys stay.
-    assert fake.settings_posted == [{'openAI': {'apiKey': 'sk-backend'}}]
+    assert len(fake.settings_posted) == 1
+    posted = fake.settings_posted[0]
+    assert posted['openAI'] == {'apiKey': 'sk-backend'}
+    assert posted['serviceKeys']['scenes'] == {'word': {'openAI': 'openAI'}}
+    assert set(posted) == {'openAI', 'serviceKeys'}
     writes = [path for method, _, path, _ in fake.calls if method == 'POST' and path != '/api/admin/login']
     assert writes.index('/api/settings') < writes.index('/api/frames/1')
     fingerprints = frame.last_successful_deploy['settings_fingerprints']
-    assert set(fingerprints) == {'openAI'}
+    assert set(fingerprints) == {'openAI', 'serviceKeys'}
     assert fingerprints == frame.to_dict()['settings_fingerprints']
 
 
@@ -371,7 +377,7 @@ async def test_an_adopted_pi_whose_keys_could_not_be_written_is_offered_them(asy
 
     # Adopted all the same; the workspace shows the keys as a change to deploy.
     assert frame.last_successful_deploy['settings_fingerprints'] == {}
-    assert set(frame.to_dict()['settings_fingerprints']) == {'openAI'}
+    assert set(frame.to_dict()['settings_fingerprints']) == {'openAI', 'serviceKeys'}
     lines = [log.line for log in db.query(Log).filter_by(frame_id=frame.id, type='stderr')]
     assert any('service keys could not be written' in line for line in lines), lines
 

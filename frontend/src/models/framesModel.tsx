@@ -236,10 +236,12 @@ async function fetchCloudFrameScenes(frameId: FrameId): Promise<{
     const rowScenes = (sceneJson ?? [cloudSceneStub(row)]).map((scene) => {
       const eventMap = row.event_maps?.[scene.id]
       const layout = row.layouts?.[scene.id]
+      const keys = row.service_keys?.[scene.id]
       return {
         ...scene,
         ...(eventMap && eventMap.length > 0 ? { eventMap } : {}),
         ...(layout ? { layout } : {}),
+        ...(keys && Object.keys(keys).length > 0 ? { keys } : {}),
       }
     })
     for (const scene of rowScenes) {

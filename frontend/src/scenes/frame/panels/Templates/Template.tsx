@@ -32,7 +32,7 @@ import { settingsLogic } from '../../../settings/settingsLogic'
 import { cloudLogic } from '../../../settings/cloudLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { imageElementIsBlank } from '../../../../utils/blankImage'
-import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetails } from '../secretSettings'
+import { collectSecretSettingsFromScenes, getMissingSecretSettingKeys, settingsDetailsFor } from '../secretSettings'
 import { SecretSettingsModal } from '../SecretSettingsModal'
 import { templateRowLogic } from './templateRowLogic'
 import { cloudDriveLogic } from './cloudDriveLogic'
@@ -529,7 +529,7 @@ export function TemplateRow({
                     onClick={() => setActiveSettingsKey(settingKey)}
                   >
                     <ExclamationTriangleIcon className="mr-1 h-3 w-3 text-yellow-300" />
-                    {settingsDetails[settingKey].tagLabel}
+                    {settingsDetailsFor(settingKey).tagLabel}
                   </button>
                 ))}
             </div>

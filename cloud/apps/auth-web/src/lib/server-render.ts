@@ -14,7 +14,7 @@ import { frameCommands, frameServerRenders, frames, linkedClients, type createDb
 import { revealedServiceSettings } from "./account-settings";
 import { linkedClientScopes } from "./backend-auth";
 import { cloudRenderedMinIntervalSeconds, frameIsCloudRendered } from "./cloud-rendered";
-import { buildServiceSettingsPayload } from "./frame-service-settings";
+import { buildServiceSettingsPayload, frameServiceKeysScenes } from "./frame-service-settings";
 import {
   buildScenesPayloadForFrame,
   carriedScenePreview,
@@ -22,7 +22,6 @@ import {
   frameServiceSettingsScope,
   frameTelemetryLogsScope,
   readFrameSettings,
-  readServiceSettingGroups,
   storeFrameLogs,
 } from "./frames";
 import { pressMapOf } from "./fosb";
@@ -486,26 +485,33 @@ async function loadRenderRow(db: Database, frameId: string): Promise<RenderRow> 
   return row;
 }
 
-// The keys the owner granted this frame's scenes, when the frame may have
+// The keys the owner bound this frame's scenes to, when the frame may have
 // them at all: the same answer the virtual device and the device's own
-// service-settings pull get.
-async function serviceSettings(db: Database, frame: FrameRow, linkedClient: LinkedClientRow): Promise<Record<string, unknown>> {
+// service-settings pull get — the older `settings` and each scene's own
+// `serviceKeys` (docs/service-keys.md), which goes to the runtime with the
+// frame's configuration.
+async function serviceSettings(
+  db: Database,
+  frame: FrameRow,
+  linkedClient: LinkedClientRow,
+): Promise<{ settings: Record<string, unknown>; serviceKeys?: unknown }> {
   if (!linkedClientScopes(linkedClient).includes(frameServiceSettingsScope)) {
-    return {};
-  }
-  const groups = readServiceSettingGroups(frame.serviceSettingGroups) ?? [];
-  if (groups.length === 0) {
-    return {};
+    return { settings: {} };
   }
   if (!process.env.FRAMEOS_CLOUD_ENCRYPTION_KEY) {
     logWarn("server_render.service_settings_unavailable", { frameId: frame.id });
-    return {};
+    return { settings: {} };
   }
   try {
-    return buildServiceSettingsPayload(groups, await revealedServiceSettings(db, frame.accountId)).settings;
+    const scenes = await frameServiceKeysScenes(db, frame);
+    if (scenes.length === 0) {
+      return { settings: {} };
+    }
+    const payload = buildServiceSettingsPayload(scenes, await revealedServiceSettings(db, frame.accountId));
+    return { serviceKeys: payload.serviceKeys, settings: payload.settings };
   } catch (error) {
     logError("server_render.service_settings_failed", { error: String(error), frameId: frame.id });
-    return {};
+    return { settings: {} };
   }
 }
 
@@ -653,6 +659,7 @@ async function draw(
   const states = foldedStates(row, scenes);
   const canvas = sceneCanvasSize(input.panel.width, input.panel.height, input.panel.rotate);
   const settings = readFrameSettings(frame.settings);
+  const keys = await serviceSettings(db, frame, linkedClient);
   const render = input.render ?? rendererOverride ?? renderScenes;
   let result: SceneRenderResult;
   try {
@@ -669,7 +676,8 @@ async function draw(
       renderScale: frameRenderScale(frame),
       sceneId: active,
       scenes,
-      settings: await serviceSettings(db, frame, linkedClient),
+      ...(keys.serviceKeys ? { serviceKeys: keys.serviceKeys } : {}),
+      settings: keys.settings,
       states,
       ...(typeof settings.timezone === "string" ? { timeZone: settings.timezone } : {}),
       ...(input.withKeptState && row.keptState ? { keptState: row.keptState } : {}),

@@ -1108,11 +1108,15 @@ async def test_settings_returns_scene_required_service_settings(async_client, no
     payload = response.json()
     frame_object = payload.pop('frame')
     payload.pop('schedule')  # covered by test_settings_includes_schedule_and_utc_offset
-    assert payload == {
+    assert set(payload.pop('serviceKeys')['scenes']['scene-1']) == {'homeAssistant', 'openAI', 'unsplash'}
+    # The registry's fields only: the plane's own `backendApiKey` never ships
+    # (docs/service-keys.md "What a frame may get").
+    groups = {
         'homeAssistant': {'accessToken': 'not-for-esp'},
-        'openAI': {'apiKey': 'sk-frame', 'backendApiKey': 'sk-backend'},
+        'openAI': {'apiKey': 'sk-frame'},
         'unsplash': {'accessKey': 'unsplash-key'},
     }
+    assert payload == {**groups, 'serviceSettings': groups}
     assert frame_object['name'] == 'ESP32 Frame'
 
 
@@ -1156,7 +1160,12 @@ async def test_settings_pull_follows_the_granted_set(async_client, no_auth_clien
     payload = response.json()
     payload.pop('frame')
     payload.pop('schedule')
-    assert payload == {'frameOS': {'apiKey': 'gallery-key'}}
+    service_keys = payload.pop('serviceKeys')
+    # The groups by name for firmware that reads them, and at the top level
+    # for firmware that knows six (docs/service-keys.md "On the wire").
+    assert payload == {'frameOS': {'apiKey': 'gallery-key'}, 'serviceSettings': {'frameOS': {'apiKey': 'gallery-key'}}}
+    assert service_keys['scenes'] == {'own-scene': {'frameOS': 'frameOS'}, 'store-unsplash': {'unsplash': None}}
+    assert service_keys['keys'] == {'frameOS': {'service': 'frameOS', 'values': {'apiKey': 'gallery-key'}}}
 
     frame.service_setting_groups = ['unsplash']
     db.add(frame)
@@ -1166,7 +1175,39 @@ async def test_settings_pull_follows_the_granted_set(async_client, no_auth_clien
     payload = response.json()
     payload.pop('frame')
     payload.pop('schedule')
-    assert payload == {'frameOS': {'apiKey': 'gallery-key'}, 'unsplash': {'accessKey': 'unsplash-key'}}
+    service_keys = payload.pop('serviceKeys')
+    groups = {'frameOS': {'apiKey': 'gallery-key'}, 'unsplash': {'accessKey': 'unsplash-key'}}
+    assert payload == {**groups, 'serviceSettings': groups}
+    assert service_keys['scenes']['store-unsplash'] == {'unsplash': 'unsplash'}
+
+
+@pytest.mark.asyncio
+async def test_settings_pull_sends_any_service_by_name(async_client, no_auth_client, db):
+    """A service the registry does not know reaches the board in
+    `serviceSettings` and `serviceKeys`; one named like a key of the document
+    stays out of the top level, where old firmware reads its six."""
+    frame = await device_frame(async_client, db)
+    frame.scenes = [{
+        'id': 'weather',
+        'nodes': [{'type': 'app', 'data': {'keyword': 'acme'}}],
+        'edges': [],
+        'apps': {'acme': {'sources': {
+            'app.ts': 'export function get() {}',
+            'config.json': json.dumps({'name': 'Acme', 'settings': ['acmeWeather', 'frame']}),
+        }}},
+    }]
+    db.add_all([
+        frame,
+        Settings(project_id=frame.project_id, key='acmeWeather', value={'apiKey': 'acme-1'}),
+        Settings(project_id=frame.project_id, key='frame', value={'apiKey': 'odd-1'}),
+    ])
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    payload = response.json()
+    assert payload['serviceSettings'] == {'acmeWeather': {'apiKey': 'acme-1'}, 'frame': {'apiKey': 'odd-1'}}
+    assert payload['acmeWeather'] == {'apiKey': 'acme-1'}
+    assert 'apiKey' not in payload['frame']  # the frame settings, not the service
+    assert payload['serviceKeys']['scenes'] == {'weather': {'acmeWeather': 'acmeWeather', 'frame': 'frame'}}
 
 
 @pytest.mark.asyncio

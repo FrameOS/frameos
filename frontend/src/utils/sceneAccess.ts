@@ -31,9 +31,10 @@
  * predate the lists (cloud/apps/auth-web/src/lib/store.ts, scene-origin.ts).
  * docs/scene-access-fixtures.json is the corpus it is tested against.
  *
- * Plain TypeScript on unknown input, no imports: the cloud server compiles it
- * under its stricter tsconfig.
+ * Plain TypeScript on unknown input, importing only the generated services
+ * registry (data): the cloud server compiles it under its stricter tsconfig.
  */
+import { SERVICE_REGISTRY } from '../generated/services.gen'
 
 /**
  * What an app may ask for. A write only ever lands inside the assets folder, so "files" covers reading the assets folder
@@ -81,15 +82,10 @@ const permissionDescriptions: Record<ScenePermission, string> = {
     "This scene can install, preview, update and remove scenes from the scene store on the frame, and choose the frame's layout, as the Scene store does.",
 }
 
-/** The services behind the settings namespaces apps declare (secretSettings.ts takes its titles from here). */
-export const SETTINGS_KEY_TITLES: Readonly<Record<string, string>> = {
-  openAI: 'OpenAI',
-  unsplash: 'Unsplash',
-  homeAssistant: 'Home Assistant',
-  immich: 'Immich',
-  github: 'GitHub',
-  frameOS: 'FrameOS Gallery',
-}
+/** The titles of the services the registry knows (repo/services.json, docs/service-keys.md). */
+export const SETTINGS_KEY_TITLES: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(SERVICE_REGISTRY).map(([id, service]) => [id, service.title])
+)
 
 export function settingsKeyTitle(namespace: string): string {
   return SETTINGS_KEY_TITLES[namespace] ?? namespace
@@ -877,4 +873,137 @@ export function withAppPermissions<T>(
 /** `withAppPermissions` over a scenes.json array. */
 export function withScenesAppPermissions<T>(scenes: readonly T[], options: { onlyMissing?: boolean } = {}): T[] {
   return scenes.map((scene) => withAppPermissions(scene, options))
+}
+
+// ---------------------------------------------------------------------------
+// The services an app reads keys of, from its code (docs/service-keys.md "A
+// service the registry does not know"): `frameos.getSetting('x', 'field')`
+// and `frameos.secret('x', 'field')` with a literal first argument. A save
+// ADDS what the code names to config.json `settings` (never removes: a name
+// read through a variable cannot be seen), and a `services` stub for an id
+// the registry does not know and the app does not define yet.
+// ---------------------------------------------------------------------------
+
+const settingCallPattern =
+  /\bframeos\s*\.\s*(?:getSetting|secret)\s*\(\s*(['"`])([A-Za-z][A-Za-z0-9_]{0,40})\1(?:\s*,\s*(['"`])([A-Za-z][A-Za-z0-9_]{0,40})\3)?/g
+
+/** Service id → the field names the code reads of it (literal second arguments). */
+export function detectServiceReads(sources: unknown): Record<string, string[]> {
+  const found: Record<string, string[]> = {}
+  for (const [name, text] of Object.entries(stringSources(sources) ?? {})) {
+    if (!javascriptSourcePattern.test(name) || /\.test\.[cm]?[jt]sx?$/.test(name)) {
+      continue
+    }
+    for (const match of text.matchAll(settingCallPattern)) {
+      const service = match[2]
+      if (!service) {
+        continue
+      }
+      const fields = (found[service] ??= [])
+      const field = match[4]
+      if (field && !fields.includes(field)) {
+        fields.push(field)
+      }
+    }
+  }
+  return found
+}
+
+function configWithServiceReads(text: string | undefined, reads: Record<string, string[]>): string | null {
+  const ids = Object.keys(reads).sort()
+  if (ids.length === 0) {
+    return null
+  }
+  const config = text === undefined ? {} : parseConfig(text)
+  if (!config) {
+    return null
+  }
+  const current = stringList(config['settings'])
+  const missing = ids.filter((id) => !current.includes(id))
+  const services = record(config['services']) ?? {}
+  const stubs: Record<string, unknown> = {}
+  for (const id of ids) {
+    if (Object.prototype.hasOwnProperty.call(SERVICE_REGISTRY, id) || services[id] !== undefined) {
+      continue
+    }
+    stubs[id] = { title: id, fields: (reads[id] ?? []).map((field) => ({ name: field, label: field })) }
+  }
+  if (missing.length === 0 && Object.keys(stubs).length === 0) {
+    return null
+  }
+  const entries = Object.entries(config)
+  const settings = [...current, ...missing]
+  const settingsAt = entries.findIndex(([key]) => key === 'settings')
+  if (settingsAt >= 0) {
+    entries[settingsAt] = ['settings', settings]
+  } else {
+    const permissionsAt = entries.findIndex(([key]) => key === 'permissions')
+    entries.splice(permissionsAt >= 0 ? permissionsAt : entries.length, 0, ['settings', settings])
+  }
+  if (Object.keys(stubs).length > 0) {
+    const servicesAt = entries.findIndex(([key]) => key === 'services')
+    if (servicesAt >= 0) {
+      entries[servicesAt] = ['services', { ...services, ...stubs }]
+    } else {
+      const at = entries.findIndex(([key]) => key === 'settings')
+      entries.splice(at + 1, 0, ['services', stubs])
+    }
+  }
+  if (text === undefined) {
+    return `${JSON.stringify(Object.fromEntries(entries), null, 2)}\n`
+  }
+  const indent = /\n( +)"/.exec(text)?.[1]?.length ?? 2
+  return `${JSON.stringify(Object.fromEntries(entries), null, indent)}${text.endsWith('\n') ? '\n' : ''}`
+}
+
+function withSourcesServiceReads(sources: unknown): Record<string, unknown> | null {
+  const strings = stringSources(sources)
+  if (!hasJavaScriptSource(strings)) {
+    return null
+  }
+  const next = configWithServiceReads(strings['config.json'], detectServiceReads(strings))
+  return next === null ? null : { ...(record(sources) ?? {}), 'config.json': next }
+}
+
+/**
+ * The scene with every JavaScript app's config.json `settings` holding the
+ * services its code reads keys of (and a `services` stub for one the
+ * registry does not know), the way a save leaves it. Only adds; a
+ * config.json that does not parse is left alone. Returns the same object
+ * when nothing changes.
+ */
+export function withAppServiceReads<T>(scene: T): T {
+  const sceneRecord = record(scene)
+  if (!sceneRecord) {
+    return scene
+  }
+  const apps = record(sceneRecord['apps'])
+  let nextApps: Record<string, unknown> | null = null
+  for (const [keyword, app] of Object.entries(apps ?? {})) {
+    const appRecord = record(app)
+    const sources = withSourcesServiceReads(appRecord?.['sources'])
+    if (appRecord && sources) {
+      nextApps = nextApps ?? { ...apps }
+      nextApps[keyword] = { ...appRecord, sources }
+    }
+  }
+  const nodes = Array.isArray(sceneRecord['nodes']) ? (sceneRecord['nodes'] as unknown[]) : []
+  let nextNodes: unknown[] | null = null
+  for (let index = 0; index < nodes.length; index += 1) {
+    const nodeRecord = record(nodes[index])
+    const data = record(nodeRecord?.['data'])
+    const sources = nodeRecord?.['type'] === 'app' && data ? withSourcesServiceReads(data['sources']) : null
+    if (nodeRecord && data && sources) {
+      nextNodes = nextNodes ?? [...nodes]
+      nextNodes[index] = { ...nodeRecord, data: { ...data, sources } }
+    }
+  }
+  if (!nextApps && !nextNodes) {
+    return scene
+  }
+  return {
+    ...sceneRecord,
+    ...(nextApps ? { apps: nextApps } : {}),
+    ...(nextNodes ? { nodes: nextNodes } : {}),
+  } as T
 }

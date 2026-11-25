@@ -1226,6 +1226,27 @@
   is stepped by `tls_handshake_resuming`: a new way to offer one goes through
   it, never `mbedtls_ssl_set_session` alone. No connection is kept open.
 
+## Service keys: `docs/service-keys.md` is the contract
+
+- Third-party keys (OpenAI, Unsplash, Home Assistant, …) are **services**
+  named in `repo/services.json` (data only, never in a frame; run
+  `python3 frameos/tools/generate_services.py`, whose `--check` is in the
+  backend suite). **No code names a vendor**: a new one is a registry entry,
+  an app's own `services` definition for one the registry lacks. The rules
+  are `frontend/src/utils/serviceKeys.ts` (SPA + cloud server) and
+  `backend/app/utils/service_keys.py`, pinned by
+  `docs/service-keys-fixtures.json` with the frame's half (`runtime`,
+  `inject`) in `test_service_keys.nim`: change them and the corpus together.
+- A service's default key is the settings group of its name; more keys live
+  in `serviceCredentials`. Which key a scene gets is **the install's**
+  (`keys` beside `eventMap`: the backend's `frame.scenes` entry, the cloud's
+  `frame_scene_assignments.service_keys`), never the scene's, and a frame
+  gets per-scene bindings (`serviceKeys`) beside the older `settings`.
+  `frameos.getSetting` answers for the app's own scene; `frameos.secret`
+  hands out a placeholder the runtime fills only on the way to an allowed
+  origin. Keys typed on the frame (`state/local_keys.json`) stay there.
+  Never put a key in a state field, scene JSON, a log or a command.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →

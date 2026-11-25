@@ -103,6 +103,7 @@ function withInstallBookkeeping(scene: FrameScene, installed: FrameScene | undef
     ...scene,
     ...(installed.eventMap ? { eventMap: installed.eventMap } : {}),
     ...(installed.layout ? { layout: installed.layout } : {}),
+    ...(installed.keys ? { keys: installed.keys } : {}),
   }
 }
 

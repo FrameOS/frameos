@@ -69,7 +69,9 @@ from app.models.frame import (
     normalize_event_map,
     normalize_frame_admin_auth,
     normalize_https_proxy,
-    shipped_frame_settings,
+    cached_app_configs,
+    service_keys_for_frame_json,
+    shipped_service_keys,
 )
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
@@ -944,6 +946,7 @@ class _ThinClientPlan:
     scene_id: str | None
     scene_states: dict
     settings: dict
+    service_keys: dict | None
     frame_json: dict
     fingerprint: str
 
@@ -1009,13 +1012,15 @@ async def _thin_client_plan(db: Session, redis, frame: Frame, device_scene: str 
     scenes_override, scene_id, scene_states = await _thin_client_scenes(
         db, redis, frame, scene_states, device_scene
     )
-    settings = embedded_settings_payload(db, frame)
+    shipped_keys = embedded_shipped_service_keys(db, frame)
+    settings = {k: v for k, v in shipped_keys["settings"].items() if isinstance(v, dict)}
+    service_keys = service_keys_for_frame_json(shipped_keys)
     frame_json = thin_client_frame_json(frame, pixel_format)
     fingerprint = render_fingerprint(
         scenes_override if scenes_override is not None else (frame.scenes or []),
         # The packer's palette and the render's event map and colours are
         # what the picture was drawn from too.
-        {"settings": settings, "frame": frame_json},
+        {"settings": settings, **({"serviceKeys": service_keys} if service_keys else {}), "frame": frame_json},
         scene_id,
         width,
         height,
@@ -1032,6 +1037,7 @@ async def _thin_client_plan(db: Session, redis, frame: Frame, device_scene: str 
         scene_id=scene_id,
         scene_states=scene_states,
         settings=settings,
+        service_keys=service_keys,
         frame_json=frame_json,
         fingerprint=fingerprint,
     )
@@ -1232,6 +1238,7 @@ async def _render_thin_client_now(
             plan.scene_height,
             scene_id=plan.scene_id,
             settings=plan.settings,
+            service_keys=plan.service_keys,
             scenes_override=plan.scenes_override,
             scene_states=plan.scene_states,
             control_events=control_events or None,
@@ -1454,6 +1461,7 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
             plan.scene_height,
             scene_id=plan.scene_id,
             settings=plan.settings,
+            service_keys=plan.service_keys,
             scenes_override=plan.scenes_override,
             scene_states=plan.scene_states,
             now_ms=as_of_ms,
@@ -1622,36 +1630,37 @@ async def _remember_served_scenes(redis, frame: Frame, payload: bytes, etag: str
         return
 
 
-def embedded_settings_payload(db: Session, frame: Frame) -> dict:
-    """The service-settings groups this frame is granted, as frame.json
-    carries them: what the owner's scenes declare plus what store-origin
-    scenes declare AND the owner granted (shipped_frame_settings, via
-    get_frame_json). A hard-coded list of four groups used to sit here, so a
-    newly granted group never reached an ESP32; the granted set is the one
-    source now. Groups without a configured value are left out."""
-    frame_settings = get_frame_json(db, frame).get("settings") or {}
-    # A preview in place of the saved scenes (the editor's, the voice chat's
-    # show_image): what ITS apps declare rides along too, else the device
-    # draws "please provide an API key" for a scene the owner just asked for.
-    # Owner-authored, so declared is granted, as for the saved scenes.
+def embedded_shipped_service_keys(db: Session, frame: Frame) -> dict:
+    """What this frame is sent about keys (`shipped_service_keys`:
+    `{"serviceKeys", "settings"}`, docs/service-keys.md), the standing
+    preview included: a preview in place of the saved scenes (the editor's,
+    the voice chat's show_image) is bound like a scene the owner made (its
+    defaults; a store scene nothing), else the device draws "please provide
+    an API key" for a scene the owner just asked for."""
     preview = previewed_scenes(db, frame)
-    if preview and isinstance(frame_settings, dict):
-        from types import SimpleNamespace
-        from typing import cast
+    return shipped_service_keys(
+        frame,
+        get_settings_dict(db, project_id=frame.project_id),
+        cached_app_configs(),
+        extra_scenes=[s for s in (preview or []) if isinstance(s, dict)],
+    )
 
-        # Only the two attributes shipped_frame_settings reads; typed as a
-        # Frame for its signature.
-        stand_in = cast(Frame, SimpleNamespace(scenes=[s for s in preview if isinstance(s, dict)],
-                                               service_setting_groups=frame.service_setting_groups))
-        for key, value in shipped_frame_settings(stand_in, get_settings_dict(db, project_id=frame.project_id)).items():
-            frame_settings.setdefault(key, value)
+
+def embedded_settings_payload(db: Session, frame: Frame) -> dict:
+    """The older service-settings groups this frame is sent (one set of
+    values per service its scenes are bound to), as frame.json carries
+    them. Groups without a configured value are left out."""
     payload: dict = {}
-    if not isinstance(frame_settings, dict):
-        return payload
-    for key, value in frame_settings.items():
+    for key, value in embedded_shipped_service_keys(db, frame)["settings"].items():
         if isinstance(key, str) and key and isinstance(value, dict):
             payload[key] = value
     return payload
+
+
+def embedded_service_keys_payload(db: Session, frame: Frame) -> dict | None:
+    """`serviceKeys` for this frame (docs/service-keys.md "On the wire"),
+    None when no scene declares a service."""
+    return service_keys_for_frame_json(embedded_shipped_service_keys(db, frame))
 
 
 @api_public.get("/frames/{id:int}/embedded/scenes")
@@ -1708,8 +1717,24 @@ def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:
     render on the server lets go of the keys it held."""
     from app.tasks.embedded_firmware import is_thin_client_frame
 
+    service_groups: dict = {}
+    service_keys: dict | None = None
+    if not is_thin_client_frame(frame):
+        shipped = embedded_shipped_service_keys(db, frame)
+        service_groups = {
+            key: value for key, value in shipped["settings"].items() if isinstance(key, str) and isinstance(value, dict)
+        }
+        service_keys = service_keys_for_frame_json(shipped)
     payload_dict = {
-        **({} if is_thin_client_frame(frame) else embedded_settings_payload(db, frame)),
+        # Firmware before serviceKeys reads the groups at the top level, by
+        # its own list of six; a group named like a key of this document is
+        # only in `serviceSettings`.
+        **{key: value for key, value in service_groups.items() if key not in EMBEDDED_SETTINGS_DOCUMENT_KEYS},
+        # The groups by name (docs/service-keys.md "On the wire"): firmware
+        # that reads them needs no list of services. Absent on a board
+        # rendered here, which deletes what it held.
+        **({"serviceSettings": service_groups} if service_groups else {}),
+        **({"serviceKeys": service_keys} if service_keys is not None else {}),
         "frame": embedded_frame_settings(frame),
         # The scene schedule ({"events": [...]}) — the device evaluates it
         # on-device (fos_schedule.c), same event model as the Pi scheduler.
@@ -1717,6 +1742,10 @@ def embedded_settings_document(db: Session, frame: Frame) -> tuple[bytes, str]:
     }
     payload = json.dumps(payload_dict, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return payload, embedded_payload_etag(payload)
+
+
+# The keys of the `/embedded/settings` document that are not service groups.
+EMBEDDED_SETTINGS_DOCUMENT_KEYS = frozenset({"frame", "schedule", "serviceSettings", "serviceKeys", "settings", "groups"})
 
 
 def embedded_settings_etag(db: Session, frame: Frame) -> str:

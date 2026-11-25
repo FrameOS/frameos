@@ -9,7 +9,8 @@ function errorReply(error) {
 export function get(app) {
   const url = frameos.getSetting('homeAssistant', 'url')
   if (!url) return errorReply('Please provide a Home Assistant URL in the settings.')
-  const token = frameos.getSetting('homeAssistant', 'accessToken')
+  // A placeholder the frame fills towards that URL alone (docs/service-keys.md); the token on older frames.
+  const token = (frameos.secret ?? frameos.getSetting)('homeAssistant', 'accessToken')
   if (!token) return errorReply('Please provide a Home Assistant access token in the settings.')
   if (lastReply.body && lastReply.at + 1000 > Date.now()) return JSON.parse(lastReply.body)
 

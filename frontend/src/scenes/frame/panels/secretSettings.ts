@@ -1,60 +1,64 @@
 import { AppConfig, FrameOSSettings, FrameScene } from '../../../types'
 import { sceneAppToAppConfig } from '../../../utils/sceneApps'
-// Titles shared with the scene tags ("uses OpenAI key"), so the two cannot drift.
-import { settingsKeyTitle } from '../../../utils/sceneAccess'
+import { SERVICE_REGISTRY } from '../../../generated/services.gen'
+import {
+  type ServiceDefinition,
+  appServiceDefinitions,
+  isServiceId,
+  serviceDefinition,
+} from '../../../utils/serviceKeys'
 
-export const settingsDetails: Record<
-  string,
-  {
-    title: string
-    tagLabel: string
-    description?: string
-    freeLimitedUsage?: boolean
-    fields: { label: string; secret?: boolean; path: (keyof FrameOSSettings | string)[] }[]
+/** How the SPA draws one service's default key: from the registry (repo/services.json, docs/service-keys.md). */
+export interface ServiceSettingsDetails {
+  title: string
+  tagLabel: string
+  description?: string
+  help?: string
+  freeLimitedUsage?: boolean
+  fields: {
+    label: string
+    secret?: boolean
+    path: (keyof FrameOSSettings | string)[]
+    placeholder?: string
+    hint?: string
+  }[]
+  registered: boolean
+}
+
+function detailsOf(definition: ServiceDefinition): ServiceSettingsDetails {
+  return {
+    title: definition.title,
+    tagLabel: `${definition.title} key missing`,
+    ...(definition.description ? { description: definition.description } : {}),
+    ...(definition.help ? { help: definition.help } : {}),
+    ...(definition.optional ? { freeLimitedUsage: true } : {}),
+    fields: definition.fields.map((field) => ({
+      label: field.label,
+      secret: field.secret,
+      path: [definition.id, field.name],
+      ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+      ...(field.hint ? { hint: field.hint } : {}),
+    })),
+    registered: definition.registered,
   }
-> = {
-  openAI: {
-    title: settingsKeyTitle('openAI'),
-    tagLabel: 'OpenAI API key missing',
-    description: 'The OpenAI API key is used within OpenAI apps on frames.',
-    fields: [{ label: 'API key for frames', secret: true, path: ['openAI', 'apiKey'] }],
-  },
-  unsplash: {
-    title: settingsKeyTitle('unsplash'),
-    tagLabel: 'Unsplash access key missing',
-    fields: [{ label: 'Access key', secret: true, path: ['unsplash', 'accessKey'] }],
-  },
-  homeAssistant: {
-    title: settingsKeyTitle('homeAssistant'),
-    tagLabel: 'Home Assistant access token missing',
-    fields: [
-      { label: 'Home assistant URL', path: ['homeAssistant', 'url'] },
-      {
-        label: 'Access token (Profile → Long-Lived Access Tokens)',
-        secret: true,
-        path: ['homeAssistant', 'accessToken'],
-      },
-    ],
-  },
-  immich: {
-    title: settingsKeyTitle('immich'),
-    tagLabel: 'Immich API key missing',
-    fields: [
-      { label: 'Server URL', path: ['immich', 'url'] },
-      { label: 'API key (Account Settings → API Keys)', secret: true, path: ['immich', 'apiKey'] },
-    ],
-  },
-  github: {
-    title: settingsKeyTitle('github'),
-    tagLabel: 'GitHub personal access token missing',
-    freeLimitedUsage: true,
-    fields: [{ label: 'API key', secret: true, path: ['github', 'api_key'] }],
-  },
-  frameOS: {
-    title: settingsKeyTitle('frameOS'),
-    tagLabel: 'FrameOS Gallery API key missing',
-    fields: [{ label: 'API key', secret: true, path: ['frameOS', 'apiKey'] }],
-  },
+}
+
+/** Every registered service, by id. A service the registry lacks: settingsDetailsFor. */
+export const settingsDetails: Readonly<Record<string, ServiceSettingsDetails>> = Object.fromEntries(
+  Object.keys(SERVICE_REGISTRY).map((id) => [id, detailsOf(serviceDefinition(id))])
+)
+
+/**
+ * Any service's details: the registry's, else what an app defines for it
+ * (`appDefinitions`, appServiceDefinitionsFromScenes), else the bare id with
+ * the fields a stored value has (`storedValues`).
+ */
+export function settingsDetailsFor(
+  service: string,
+  appDefinitions?: Record<string, ServiceDefinition> | null,
+  storedValues?: unknown
+): ServiceSettingsDetails {
+  return settingsDetails[service] ?? detailsOf(serviceDefinition(service, appDefinitions, storedValues))
 }
 
 export function resolveAppConfig(apps: Record<string, AppConfig>, keyword?: string): AppConfig | undefined {
@@ -84,26 +88,51 @@ function hasValue(value: unknown) {
   return value !== undefined && value !== null && (typeof value === 'string' ? value.trim() !== '' : true)
 }
 
-export function collectSecretSettingsFromScenes(
-  scenes: FrameScene[] | undefined,
-  apps: Record<string, AppConfig>
-): string[] {
-  const settingsKeys = new Set<string>()
+function sceneAppConfigs(scenes: FrameScene[] | undefined, apps: Record<string, AppConfig>): AppConfig[] {
+  const configs: AppConfig[] = []
   for (const scene of scenes ?? []) {
     for (const node of scene.nodes ?? []) {
       if (node.type === 'app') {
         const keyword = (node.data as { keyword?: string } | undefined)?.keyword
         const sceneApp = keyword ? scene.apps?.[keyword] : undefined
         const appConfig = sceneApp ? sceneAppToAppConfig(sceneApp) : resolveAppConfig(apps, keyword)
-        for (const setting of appConfig?.settings ?? []) {
-          if (settingsDetails[setting]) {
-            settingsKeys.add(setting)
-          }
+        if (appConfig) {
+          configs.push(appConfig)
         }
       }
     }
   }
+  return configs
+}
+
+/** The services the scenes' apps declare (their config.json `settings`), registered or not. */
+export function collectSecretSettingsFromScenes(
+  scenes: FrameScene[] | undefined,
+  apps: Record<string, AppConfig>
+): string[] {
+  const settingsKeys = new Set<string>()
+  for (const appConfig of sceneAppConfigs(scenes, apps)) {
+    for (const setting of appConfig?.settings ?? []) {
+      if (isServiceId(setting)) {
+        settingsKeys.add(setting)
+      }
+    }
+  }
   return Array.from(settingsKeys)
+}
+
+/** The services the scenes' apps define for themselves (config.json `services`), for the forms' labels. */
+export function appServiceDefinitionsFromScenes(
+  scenes: FrameScene[] | undefined,
+  apps: Record<string, AppConfig>
+): Record<string, ServiceDefinition> {
+  const definitions: Record<string, ServiceDefinition> = {}
+  for (const appConfig of sceneAppConfigs(scenes, apps)) {
+    for (const [id, definition] of Object.entries(appServiceDefinitions(appConfig))) {
+      definitions[id] ??= definition
+    }
+  }
+  return definitions
 }
 
 export function getMissingSecretSettingKeys(
@@ -112,10 +141,7 @@ export function getMissingSecretSettingKeys(
 ): Set<string> {
   const missing = new Set<string>()
   for (const settingKey of settingKeys) {
-    const details = settingsDetails[settingKey]
-    if (!details) {
-      continue
-    }
+    const details = settingsDetailsFor(settingKey, null, settings?.[settingKey])
     const secretFields = details.fields.filter((field) => field.secret)
     if (!secretFields.length) {
       continue

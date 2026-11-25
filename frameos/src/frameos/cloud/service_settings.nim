@@ -41,8 +41,9 @@ const
     ## provider's `403 insufficient_scope` — not the local list — is what a
     ## revocation actually means (see applyServiceSettingsFetch).
   ServiceSettingsMaxBytes* = 16 * 1024
-    ## The whole deliverable set is six groups of at most two short string
-    ## fields, so 16 KiB is orders of magnitude more than the contract needs.
+    ## The keys a frame's scenes are bound to, their labels and the map of
+    ## which scene gets which (docs/service-keys.md): a few KB for a frame
+    ## with many scenes and services.
     ## Enforced twice: once by the bounded transport, once on the body below,
     ## so an injected/edge-case reader cannot slip past the transport cap.
   ServiceSettingsTimeoutMs* = 10_000
@@ -58,10 +59,10 @@ type
     error*: string     ## provider error code, or a transport error label
 
   ServiceSettingsApply* = proc(settings: JsonNode): bool {.gcsafe.}
-    ## Applies the `settings` object (group → field → value) to the device,
-    ## deleting every cloud-owned group absent from it. `nil` means "delete all
-    ## of them" — what a revocation looks like. Returns whether anything
-    ## actually changed.
+    ## Applies the pull's body (`settings`: group → field → value, beside it
+    ## `serviceKeys` and `groups`) to the device, deleting every cloud-owned
+    ## group absent from it. `nil` means "delete all of them" — what a
+    ## revocation looks like. Returns whether anything actually changed.
 
   ServiceSettingsFetcher* = proc(providerUrl, frameId, accessToken,
                                  etag: string): ServiceSettingsFetch {.gcsafe.}
@@ -86,10 +87,10 @@ proc serviceSettingsUrl*(providerUrl, frameId: string): string =
     "/service-settings"
 
 proc parseServiceSettingsBody*(body: string): tuple[settings: JsonNode, error: string] =
-  ## Validates one 200 body. Returns the `settings` object (never nil on
-  ## success — an empty object is a legitimate "nothing configured", which
-  ## deletes every group) and an error label otherwise. The body itself is
-  ## never echoed into the error.
+  ## Validates one 200 body. Returns the body itself (`{settings,
+  ## serviceKeys, groups}`: never nil on success — an empty `settings` is a
+  ## legitimate "nothing configured", which deletes every group) and an
+  ## error label otherwise. The body itself is never echoed into the error.
   if body.len > ServiceSettingsMaxBytes:
     return (nil, "too_large")
   var parsed: JsonNode = nil
@@ -102,7 +103,7 @@ proc parseServiceSettingsBody*(body: string): tuple[settings: JsonNode, error: s
   let settings = parsed{"settings"}
   if settings == nil or settings.kind != JObject:
     return (nil, "invalid_body")
-  (settings, "")
+  (parsed, "")
 
 proc fetchServiceSettings*(providerUrl, frameId, accessToken,
                            etag: string): ServiceSettingsFetch {.gcsafe.} =

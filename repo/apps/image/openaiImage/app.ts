@@ -12,7 +12,8 @@ const SIZES = {
 export function get(app, context) {
   const { prompt, model, size: wanted, style, quality, metadataStateKey, saveAssets } = app.config
   if (!prompt) throw new Error('No prompt provided in app config.')
-  const apiKey = frameos.getSetting('openAI', 'apiKey')
+  // A placeholder the frame fills towards OpenAI alone (docs/service-keys.md); the key on older frames.
+  const apiKey = (frameos.secret ?? frameos.getSetting)('openAI', 'apiKey')
   if (!apiKey) throw new Error('Please provide an OpenAI API key in the settings.')
 
   const { embedded } = app.frame

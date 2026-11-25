@@ -7,7 +7,7 @@ import { TextInput } from '../../../components/TextInput'
 import clsx from 'clsx'
 import { FrameOSSettings } from '../../../types'
 import { urls } from '../../../urls'
-import { getSettingsValue, settingsDetails } from './secretSettings'
+import { getSettingsValue, settingsDetailsFor } from './secretSettings'
 
 interface SecretSettingsModalProps {
   activeSettingsKey: string | null
@@ -28,7 +28,9 @@ export function SecretSettingsModal({
   setSettingsValue,
   submitSettings,
 }: SecretSettingsModalProps): JSX.Element | null {
-  const activeSettings = activeSettingsKey ? settingsDetails[activeSettingsKey] : null
+  const activeSettings = activeSettingsKey
+    ? settingsDetailsFor(activeSettingsKey, null, savedSettings?.[activeSettingsKey])
+    : null
 
   if (!activeSettings) {
     return null

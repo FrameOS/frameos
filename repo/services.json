@@ -1,0 +1,57 @@
+{
+  "$comment": "The services whose keys scenes may use (docs/service-keys.md). Data only: never compiled into a frame. Add a vendor with one entry here and run python3 frameos/tools/generate_services.py. An id is a settings namespace apps name in their config.json `settings` list; a field is secret unless it says \"secret\": false. `hosts` (and `hostsFrom`, a field holding a URL) are where frameos.secret placeholders may be sent.",
+  "services": {
+    "openAI": {
+      "title": "OpenAI",
+      "description": "Image and text generation in the OpenAI apps.",
+      "help": "https://platform.openai.com/api-keys",
+      "fields": [
+        { "name": "apiKey", "label": "API key", "placeholder": "sk-…" }
+      ],
+      "hosts": ["api.openai.com"]
+    },
+    "unsplash": {
+      "title": "Unsplash",
+      "description": "Photos from Unsplash.",
+      "help": "https://unsplash.com/oauth/applications",
+      "fields": [
+        { "name": "accessKey", "label": "Access key" }
+      ],
+      "hosts": ["api.unsplash.com"]
+    },
+    "homeAssistant": {
+      "title": "Home Assistant",
+      "description": "Sensors and states from your Home Assistant.",
+      "fields": [
+        { "name": "url", "label": "Home Assistant URL", "secret": false, "placeholder": "http://homeassistant.local:8123" },
+        { "name": "accessToken", "label": "Access token", "hint": "Profile → Long-Lived Access Tokens" }
+      ],
+      "hostsFrom": "url"
+    },
+    "immich": {
+      "title": "Immich",
+      "description": "Photos from your Immich server.",
+      "fields": [
+        { "name": "url", "label": "Server URL", "secret": false, "placeholder": "https://photos.example.com" },
+        { "name": "apiKey", "label": "API key", "hint": "Account Settings → API Keys" }
+      ],
+      "hostsFrom": "url"
+    },
+    "github": {
+      "title": "GitHub",
+      "description": "Raises GitHub's rate limits for apps that read from it.",
+      "help": "https://github.com/settings/tokens",
+      "optional": true,
+      "fields": [
+        { "name": "api_key", "label": "Personal access token" }
+      ],
+      "hosts": ["api.github.com"]
+    },
+    "frameOS": {
+      "title": "FrameOS Gallery",
+      "fields": [
+        { "name": "apiKey", "label": "API key" }
+      ]
+    }
+  }
+}

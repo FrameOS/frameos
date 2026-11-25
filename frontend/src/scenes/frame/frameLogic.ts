@@ -62,8 +62,10 @@ import {
 import { persistAndPushCloudFrameScenes, type CloudScenePersistOptions } from '../../utils/cloudFrameScenesSave'
 import { clearCloudSceneJsonCache, rehydrateCloudFrameScenes } from '../../models/framesModel'
 import { appsModel } from '../../models/appsModel'
-import { collectSecretSettingsFromScenes, settingsDetails } from './panels/secretSettings'
-import { withAppPermissions } from '../../utils/sceneAccess'
+import { collectSecretSettingsFromScenes, settingsDetailsFor } from './panels/secretSettings'
+import { withAppPermissions, withAppServiceReads } from '../../utils/sceneAccess'
+import { defaultKeyBindings, isStoreScene } from '../../utils/sceneKeyBindings'
+import { withSceneKeys } from '../../utils/serviceKeys'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
 import { longRunningTasksModel, reportTaskOutcome } from '../../models/longRunningTasksModel'
@@ -971,7 +973,7 @@ export function serviceKeysChangeSummary(
     return null
   }
   const parts: string[] = []
-  const labelOf = (group: string): string => settingsDetails[group]?.title ?? group
+  const labelOf = (group: string): string => settingsDetailsFor(group).title
   for (const group of Object.keys(after).sort()) {
     if (!(group in before)) {
       parts.push(`${labelOf(group)} added`)
@@ -2054,7 +2056,7 @@ async function offerServiceKeyDelivery(
   if (groups.length === 0) {
     return
   }
-  const names = groups.map((group) => settingsDetails[group]?.title ?? group)
+  const names = groups.map((group) => settingsDetailsFor(group).title)
   const keys =
     names.length === 1 ? `${names[0]} key` : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} keys`
   const [only] = scenes
@@ -2264,33 +2266,36 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
   const arranged = shouldArrange ? arrangeSceneGraph(normalizedNodes, edges) : { nodes: normalizedNodes, edges }
   // Every JS app's config.json `permissions` follows its code
   // (utils/sceneAccess.ts): what the frame enforces and the tags show. Every
-  // save goes through here.
-  return withAppPermissions({
-    ...scene,
-    id: scene.id ?? uuidv4(),
-    name: scene.name || 'Untitled scene',
-    nodes: arranged.nodes,
-    edges: arranged.edges,
-    apps: normalizeSceneAppFieldOptions(normalizeSceneApps(scene.apps)),
-    // Names are validated after trim() (frameFormSceneErrors); store them the same way.
-    fields: (scene.fields ?? []).map((field) => trimFieldName(normalizeFieldOptions(field))),
-    customEvents: (scene.customEvents ?? []).map((event) => {
-      const normalized = normalizeCustomEvent(event)
-      return {
-        ...normalized,
-        name: typeof normalized.name === 'string' ? normalized.name.trim() : normalized.name,
-        ...(normalized.fields ? { fields: normalized.fields.map((field) => trimFieldName(field)) } : {}),
-      }
-    }),
-    settings: {
-      ...settings,
-      // Always materialized: templates, imports and chat scenes arrive
-      // without it, and "absent" used to be read as compiled downstream.
-      execution: frameRunsInterpreted ? ('interpreted' as const) : normalizeSceneExecution(scene),
-      refreshInterval: settings.refreshInterval || DEFAULT_REFRESH_INTERVAL_SECONDS,
-      backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
-    },
-  } satisfies FrameScene)
+  // save goes through here. So does `settings`: the services its code reads
+  // keys of are added (docs/service-keys.md), never removed.
+  return withAppServiceReads(
+    withAppPermissions({
+      ...scene,
+      id: scene.id ?? uuidv4(),
+      name: scene.name || 'Untitled scene',
+      nodes: arranged.nodes,
+      edges: arranged.edges,
+      apps: normalizeSceneAppFieldOptions(normalizeSceneApps(scene.apps)),
+      // Names are validated after trim() (frameFormSceneErrors); store them the same way.
+      fields: (scene.fields ?? []).map((field) => trimFieldName(normalizeFieldOptions(field))),
+      customEvents: (scene.customEvents ?? []).map((event) => {
+        const normalized = normalizeCustomEvent(event)
+        return {
+          ...normalized,
+          name: typeof normalized.name === 'string' ? normalized.name.trim() : normalized.name,
+          ...(normalized.fields ? { fields: normalized.fields.map((field) => trimFieldName(field)) } : {}),
+        }
+      }),
+      settings: {
+        ...settings,
+        // Always materialized: templates, imports and chat scenes arrive
+        // without it, and "absent" used to be read as compiled downstream.
+        execution: frameRunsInterpreted ? ('interpreted' as const) : normalizeSceneExecution(scene),
+        refreshInterval: settings.refreshInterval || DEFAULT_REFRESH_INTERVAL_SECONDS,
+        backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
+      },
+    } satisfies FrameScene)
+  )
 }
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
@@ -3695,22 +3700,21 @@ export const frameLogic = kea<frameLogicType>([
       }
 
       // Installing is the owner's consent, on both planes: a store scene is
-      // granted the service keys its apps declare (the cloud does this in its
-      // assignment call; here the backend ships a store-declared group only
-      // when it is in frame.service_setting_groups). Adjustable afterwards
-      // under Settings → Service keys for store scenes.
-      const storeDeclaredGroups = isCloudMode()
-        ? []
-        : collectSecretSettingsFromScenes(
-            newScenes.filter((scene) => typeof scene.origin?.storeSceneId === 'string'),
-            appsModel.findMounted()?.values.apps ?? {}
+      // given the default key of each service its apps declare (the cloud
+      // does this in its assignment call; here the install's own `keys`,
+      // docs/service-keys.md — never the frame-wide grant, which would hand
+      // the keys to every other store scene on the frame). Adjustable
+      // afterwards under Keys in the scene's menu.
+      const apps = appsModel.findMounted()?.values.apps ?? {}
+      const installedScenes = isCloudMode()
+        ? newScenes
+        : newScenes.map((scene) =>
+            isStoreScene(scene) && !scene.keys
+              ? withSceneKeys(scene, defaultKeyBindings(collectSecretSettingsFromScenes([scene], apps)))
+              : scene
           )
-      const grantedGroups = storeDeclaredGroups.length
-        ? Array.from(new Set([...(frameForm.service_setting_groups ?? []), ...storeDeclaredGroups]))
-        : null
       actions.setFrameFormValues({
-        scenes: [...oldScenes, ...newScenes],
-        ...(grantedGroups ? { service_setting_groups: grantedGroups } : {}),
+        scenes: [...oldScenes, ...installedScenes],
       })
       if (openDrawer) {
         openSceneControlDrawer(props.frameId, newScenes[0].id)

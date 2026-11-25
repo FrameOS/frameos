@@ -23,6 +23,7 @@ from app.utils.build_host import BuildHostConfig
 from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.posthog import initialize_posthog
+from app.utils.service_keys import is_service_id
 from app.utils.settings_secrets import mask_settings, resolve_masked_settings
 from . import api_project
 from .auth import request_api_token
@@ -31,8 +32,23 @@ def _form_settings(settings: dict) -> dict:
     """Only the groups POST accepts. The settings table also holds internal
     rows (`@system/...` markers from repositories.py, legacy keys), and the
     form posts back everything it was given — so one of those in the GET made
-    every later save a 422."""
-    return {key: value for key, value in settings.items() if key in SettingsUpdateRequest.model_fields}
+    every later save a 422. A service's default key is any group named after
+    a service id (docs/service-keys.md)."""
+    return {
+        key: value
+        for key, value in settings.items()
+        if key in SettingsUpdateRequest.model_fields or _is_service_group(key, value)
+    }
+
+
+def _is_service_group(key: str, value: object) -> bool:
+    """A stored row that is a service's default key: a service id whose
+    value maps field names to strings (what POST accepts for one)."""
+    return (
+        is_service_id(key)
+        and isinstance(value, dict)
+        and all(isinstance(name, str) and (v is None or isinstance(v, str)) for name, v in value.items())
+    )
 
 
 @api_project.get("/settings", response_model=SettingsResponse)

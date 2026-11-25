@@ -519,6 +519,27 @@ suite "frame api route behavior":
       check savedConfig["settings"]["posthog"]["backendApiKey"].getStr() == "hidden-posthog"
       check savedConfig["settings"]["buildHost"]["sshKey"].getStr() == "hidden-build-host"
       check globalFrameConfig.settings["openAI"]["apiKey"].getStr() == "new-openai"
+
+      # docs/service-keys.md: any service, a null group deleted, serviceKeys
+      # replaced by an object and taken away by null (the backend's push).
+      let keys = %*{"v": 1, "keys": {}, "scenes": {"art": {"acmeWeather": "acmeWeather"}}, "services": {}}
+      let pushed = httpRequest(server.port, "POST", "/api/settings",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = $(%*{"github": nil, "acmeWeather": {"apiKey": "acme"}, "serviceKeys": keys}))
+      check pushed.status == 200
+      var saved = parseFile(configPath)
+      check not saved["settings"].hasKey("github")
+      check saved["settings"]["acmeWeather"]["apiKey"].getStr() == "acme"
+      check saved["serviceKeys"] == keys
+      check globalFrameConfig.serviceKeys == keys
+      let cleared = httpRequest(server.port, "POST", "/api/settings",
+        headers = [("Cookie", adminCookie), ("Content-Type", "application/json")],
+        body = $(%*{"serviceKeys": nil}))
+      check cleared.status == 200
+      saved = parseFile(configPath)
+      check not saved.hasKey("serviceKeys")
+      check globalFrameConfig.serviceKeys.isNil
+      check saved["settings"]["acmeWeather"]["apiKey"].getStr() == "acme"
     finally:
       if hadConfigEnv:
         putEnv("FRAMEOS_CONFIG", oldConfigEnv)

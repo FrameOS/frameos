@@ -925,17 +925,27 @@ Response `200`:
     "unsplash": { "accessKey": "…" },
     "homeAssistant": { "url": "https://ha.local", "accessToken": "…" }
   },
-  "groups": ["homeAssistant", "immich", "unsplash"]
+  "groups": ["homeAssistant", "immich", "unsplash"],
+  "serviceKeys": { "v": 1, "keys": { … }, "scenes": { … }, "services": { … } }
 }
 ```
 
-- `settings` — group → field → value, for every group that has a usable
-  value. Deliverable groups and fields are exactly:
-  `frameOS{apiKey}`, `github{api_key}`, `homeAssistant{url,accessToken}`,
-  `immich{url,apiKey}`, `openAI{apiKey}`, `unsplash{accessKey}`. An empty
-  string counts as "not configured" and is omitted.
-- `groups` — every group the owner has **granted** the frame's assigned
-  scenes, whether or not the owner has filled it in. A group in `groups` but
+- `serviceKeys` — each runtime scene's own keys, the shape and the rules in
+  `docs/service-keys.md` ("On the wire"): what a runtime that reads it uses.
+  A scene gets the key its install was bound to (`service_keys` on the
+  assignment; `POST /api/frames/{id}/scenes` and `…/scenes/add` take
+  `service_keys: {[runtime scene id]: {service: "default" | key id | null}}`
+  per scene, and `GET …/scenes` lists it), else the account's default key of
+  each service its grant covers, else nothing — never what another scene on
+  the frame was granted.
+- `settings` — group → field → value, one set of values per service bound
+  to some scene, for runtimes that read `settings` alone. Any service is a
+  group (the registry's, `repo/services.json`, or one an app names); a
+  registered service ships its registry fields only (never the cloud's own
+  `openAI.backendApiKey` or chat tuning), an unregistered one every string
+  field. An empty string counts as "not configured" and is omitted.
+- `groups` — every service bound to some scene (granted, or picked a key
+  for), whether or not the owner has filled it in. A group in `groups` but
   not in `settings` is one the frame needs and the account has not set; the
   device may surface that ("this frame needs an Unsplash key") but must not
   invent a value for it.
@@ -955,9 +965,11 @@ service settings; `POST /api/frames/{id}/scenes` and `…/scenes/add` take a
 both lists per scene. A grant is always a subset of the declaration; a
 version that starts declaring a new group does **not** get it until the
 owner says so; an install that names no groups (an agent's, a script's) gets
-none. What the device is served is the union of the grants across the
-frame's assignments, and *only* that — a declared-but-ungranted group
-appears neither in `settings` nor in `groups`. Assignments made before this
+none. What a scene is served is its own grant (or the key its install was
+bound to), and *only* that — a declared-but-ungranted group appears in
+neither `settings` nor `groups` unless another scene was granted it, and
+`serviceKeys` names it `null` for that scene. The older `settings` are the
+union for runtimes from before `serviceKeys`. Assignments made before this
 existed carry no grant and are served everything they declare until the
 owner next saves the frame's scene list, which makes the grant explicit.
 
@@ -980,14 +992,17 @@ when it can). The workspace asks the owner to deliver keys when a scene that
 uses them is added to such a frame, and the scene drawer says so with a
 **Deliver keys** button; both turn the switch on, never by themselves.
 
-**The six groups are cloud-owned on a managed frame.** A group absent from
-`settings` is **deleted** on the device — not left at its previous value.
+**The groups the cloud sends are cloud-owned on a managed frame** (the six
+it always owned, every group in `groups`, and every group it sent last
+time). A group absent from `settings` is **deleted** on the device — not
+left at its previous value.
 That is the whole point: revoking a key in the provider account, or removing
 the last scene that used it, must actually take the key off the device.
-Settings groups *outside* the six are untouched by this route and stay under
-local control. So are the keys typed on the frame itself (its frame page's
-**Service keys**, `docs/scene-settings.md`): kept apart on the device, never
-told to the provider, and used over this copy, field by field.
+Settings groups the cloud never sent are untouched by this route and stay
+under local control. So are the keys typed on the frame itself (its frame
+page's **Service keys**, `docs/scene-settings.md`): kept apart on the device,
+never told to the provider, and used over this copy
+(`docs/service-keys.md` "Typing a key on the frame").
 
 Both the response and a `304` carry `Cache-Control: no-store`: this body is
 the account's credentials and no proxy, CDN or on-device HTTP cache may keep

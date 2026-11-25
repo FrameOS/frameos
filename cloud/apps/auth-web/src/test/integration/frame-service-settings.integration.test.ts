@@ -250,6 +250,14 @@ async function saveSettings(settings: Record<string, unknown>) {
   expect(response.status).toBe(200);
 }
 
+// The part of a pull every runtime reads: `groups` and the older `settings`
+// (docs/service-keys.md "On the wire"). `serviceKeys`, each scene's own, is
+// asserted where a test is about it.
+function legacyOf(body: unknown): { groups: unknown; settings: unknown } {
+  const { groups, settings } = body as { groups: unknown; settings: unknown };
+  return { groups, settings };
+}
+
 function pull(frameId: string, accessToken: string, headers: Record<string, string> = {}) {
   return pullServiceSettings(
     getRequest(`/api/frames/${frameId}/service-settings`, {
@@ -288,7 +296,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     expect(response.headers.get("etag")).toMatch(/^"[0-9a-f]{64}"$/);
     // openAI is stored on the account but not declared by this frame's
     // scenes: it never leaves the cloud.
-    await expect(response.json()).resolves.toEqual({
+    expect(legacyOf(await response.json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
@@ -310,12 +318,12 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     const remote = await pull(frame.frame_id, frame.access_token);
     expect(remote.status).toBe(200);
     const body = await remote.text();
-    expect(JSON.parse(body)).toEqual({ groups: ["unsplash"], settings: {} });
+    expect(legacyOf(JSON.parse(body))).toEqual({ groups: ["unsplash"], settings: {} });
     expect(body).not.toContain(unsplashKey);
 
     await db.update(frames).set({ settings: { render_mode: "local" } }).where(eq(frames.id, frame.frame_id));
     const local = await pull(frame.frame_id, frame.access_token);
-    await expect(local.json()).resolves.toEqual({
+    expect(legacyOf(await local.json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
@@ -341,7 +349,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     expect(response.status).toBe(200);
     // Not even the group NAME leaks: the device would otherwise treat it as
     // cloud-owned and the UI would say "needs an Unsplash key".
-    await expect(response.json()).resolves.toEqual({ groups: [], settings: {} });
+    expect(legacyOf(await response.json())).toEqual({ groups: [], settings: {} });
 
     // The scene list tells the owner what the scene asked for vs got.
     const listed = await listFrameScenes(
@@ -356,7 +364,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
 
     // Granting it on a later save — the same POST with the list — serves it.
     await assignScene(frame.frame_id, scene.id, ["unsplash"]);
-    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+    expect(legacyOf(await (await pull(frame.frame_id, frame.access_token)).json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
@@ -380,7 +388,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
 
     const revoked = await assignScene(frame.frame_id, scene.id, []);
     expect(revoked.granted_settings_groups).toEqual({ [scene.id]: [] });
-    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+    expect(legacyOf(await (await pull(frame.frame_id, frame.access_token)).json())).toEqual({
       groups: [],
       settings: {},
     });
@@ -404,7 +412,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
 
     // The backfill computes the declaration and reads the NULL grant as
     // "all of it" — no frame that renders today goes dark overnight.
-    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+    expect(legacyOf(await (await pull(frame.frame_id, frame.access_token)).json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
@@ -501,7 +509,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       .where(eq(frameSceneAssignments.frameId, frame.frame_id));
     expect(row?.declaredSettingsGroups).toEqual(["openAI", "unsplash"]);
     expect(row?.grantedSettingsGroups).toEqual(["unsplash"]);
-    await expect((await pull(frame.frame_id, frame.access_token)).json()).resolves.toEqual({
+    expect(legacyOf(await (await pull(frame.frame_id, frame.access_token)).json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
@@ -605,9 +613,7 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       routeParams(frame.frame_id),
     );
     expect(enable.status).toBe(200);
-    await expect(
-      (await pull(frame.frame_id, frame.access_token)).json(),
-    ).resolves.toEqual({
+    expect(legacyOf(await (await pull(frame.frame_id, frame.access_token)).json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: unsplashKey } },
     });
@@ -637,18 +643,22 @@ describe("service-settings delivery to a cloud-managed frame", () => {
       "if-none-match": etag,
     });
     expect(rotated.status).toBe(200);
-    await expect(rotated.json()).resolves.toEqual({
+    expect(legacyOf(await rotated.json())).toEqual({
       groups: ["unsplash"],
       settings: { unsplash: { accessKey: "rotated-unsplash-key" } },
     });
   });
 
-  it("backfills the declared groups for a frame assigned scenes before the column existed", async () => {
+  it("settles what each runtime scene declares for an assignment from before scene_services", async () => {
     const frame = await activeFrame();
     const scene = await createStoreScene(frame.accountId, "data/openaiImage");
     await assignScene(frame.frame_id, scene.id);
     await saveSettings({ openAI: { apiKey: openAiKey } });
-    // Simulate the pre-migration state.
+    // Simulate the state before migration 0086.
+    await db
+      .update(frameSceneAssignments)
+      .set({ sceneServices: null })
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
     await db
       .update(frames)
       .set({ serviceSettingGroups: null })
@@ -657,15 +667,207 @@ describe("service-settings delivery to a cloud-managed frame", () => {
     const response = await pull(frame.frame_id, frame.access_token);
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    const body = (await response.json()) as { serviceKeys: { scenes: unknown } };
+    expect(legacyOf(body)).toEqual({
       groups: ["openAI"],
       settings: { openAI: { apiKey: openAiKey } },
     });
+    expect(body.serviceKeys.scenes).toEqual({ [scene.id]: { openAI: "openAI" } });
+    const [assignment] = await db
+      .select({ sceneServices: frameSceneAssignments.sceneServices })
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, frame.frame_id));
+    expect(assignment?.sceneServices).toEqual({ [scene.id]: ["openAI"] });
     const [row] = await db
       .select({ groups: frames.serviceSettingGroups })
       .from(frames)
       .where(eq(frames.id, frame.frame_id));
     expect(row?.groups).toEqual(["openAI"]);
+  });
+
+  it("refuses a scene that was not granted the key another scene on the frame uses", async () => {
+    // The hole per-scene keys close (docs/service-keys.md): the frame used to
+    // be sent the union, and every scene whose app declared openAI read it.
+    const frame = await activeFrame();
+    const own = await createStoreScene(frame.accountId, "data/openaiImage");
+    const other = await createStoreScene(frame.accountId, "data/openaiText");
+    await saveSettings({ openAI: { apiKey: openAiKey } });
+    const response = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes`,
+        {
+          scenes: [
+            { scene_id: own.id, settings_groups: ["openAI"] },
+            { scene_id: other.id, settings_groups: [] },
+          ],
+        },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(response.status).toBe(200);
+
+    const body = (await (await pull(frame.frame_id, frame.access_token)).json()) as {
+      serviceKeys: { keys: Record<string, unknown>; scenes: Record<string, unknown> };
+    };
+
+    expect(body.serviceKeys.scenes).toEqual({ [own.id]: { openAI: "openAI" }, [other.id]: { openAI: null } });
+    expect(body.serviceKeys.keys).toEqual({ openAI: { service: "openAI", values: { apiKey: openAiKey } } });
+    // An older runtime still reads the one frame-wide copy.
+    expect(legacyOf(body)).toEqual({ groups: ["openAI"], settings: { openAI: { apiKey: openAiKey } } });
+  });
+
+  it("sends a named key to the one install bound to it, sealed at rest and masked when read", async () => {
+    const frame = await activeFrame();
+    const art = await createStoreScene(frame.accountId, "data/openaiImage");
+    const work = await createStoreScene(frame.accountId, "data/openaiText");
+    const workKey = "openai-work-key-do-not-queue";
+    await saveSettings({
+      openAI: { apiKey: openAiKey },
+      serviceCredentials: { k_work00000001: { name: "Work", service: "openAI", values: { apiKey: workKey } } },
+    });
+    const response = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes`,
+        {
+          scenes: [
+            { scene_id: art.id, settings_groups: ["openAI"] },
+            { scene_id: work.id, service_keys: { [work.id]: { openAI: "k_work00000001" } } },
+          ],
+        },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(response.status).toBe(200);
+
+    const body = (await (await pull(frame.frame_id, frame.access_token)).json()) as {
+      serviceKeys: { keys: Record<string, unknown>; scenes: Record<string, unknown> };
+    };
+    expect(body.serviceKeys.scenes).toEqual({
+      [art.id]: { openAI: "openAI" },
+      [work.id]: { openAI: "k_work00000001" },
+    });
+    expect(body.serviceKeys.keys.k_work00000001).toEqual({ service: "openAI", values: { apiKey: workKey } });
+
+    // The install keeps the choice, and lists it back for the workspace.
+    const listed = (await (
+      await listFrameScenes(getRequest(`/api/frames/${frame.frame_id}/scenes`), routeParams(frame.frame_id))
+    ).json()) as { scenes: { scene_id: string; service_keys?: unknown }[] };
+    expect(listed.scenes.find((entry) => entry.scene_id === work.id)?.service_keys).toEqual({
+      [work.id]: { openAI: "k_work00000001" },
+    });
+
+    // Sealed in the database, masked on the settings page's read.
+    const [stored] = await db.execute<{ value: Record<string, { values: { apiKey: string } }> }>(
+      sql`select value from account_settings where key = 'serviceCredentials'`,
+    );
+    expect(stored?.value.k_work00000001?.values.apiKey).toMatch(/^enc:/);
+    const read = (await (
+      await saveAccountSettings(postJson("/api/settings", {}, { origin: baseUrl }))
+    ).json()) as { serviceCredentials: Record<string, { values: { apiKey: string } }> };
+    expect(read.serviceCredentials.k_work00000001?.values.apiKey).toBe(`••••••••${workKey.slice(-4)}`);
+
+    // A change of binding alone (the grant and the scenes as they were)
+    // changes the pull's answer, so it wakes the frame to re-pull.
+    await db.delete(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    const rebound = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes`,
+        {
+          scenes: [
+            { scene_id: art.id },
+            { scene_id: work.id, service_keys: { [work.id]: { openAI: "default" } } },
+          ],
+        },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+    expect(rebound.status).toBe(200);
+    const nudged = await db
+      .select({ payload: frameCommands.payload })
+      .from(frameCommands)
+      .where(eq(frameCommands.type, "refresh_service_settings"));
+    expect(nudged).toEqual([{ payload: {} }]);
+    const reboundBody = (await (await pull(frame.frame_id, frame.access_token)).json()) as {
+      serviceKeys: { scenes: Record<string, unknown> };
+    };
+    expect(reboundBody.serviceKeys.scenes[work.id]).toEqual({ openAI: "openAI" });
+    await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame.frame_id}/scenes`,
+        {
+          scenes: [
+            { scene_id: art.id },
+            { scene_id: work.id, service_keys: { [work.id]: { openAI: "k_work00000001" } } },
+          ],
+        },
+        { origin: baseUrl },
+      ),
+      routeParams(frame.frame_id),
+    );
+
+    // A save that posts the mask back keeps the key.
+    await saveSettings({
+      serviceCredentials: {
+        k_work00000001: { name: "Work", service: "openAI", values: { apiKey: `••••••••${workKey.slice(-4)}` } },
+      },
+    });
+    const again = (await (await pull(frame.frame_id, frame.access_token)).json()) as {
+      serviceKeys: { keys: Record<string, unknown> };
+    };
+    expect(again.serviceKeys.keys.k_work00000001).toEqual({ service: "openAI", values: { apiKey: workKey } });
+  });
+
+  it("stores, seals and delivers a service the registry does not know", async () => {
+    const frame = await activeFrame();
+    const acmeKey = "acme-weather-key-do-not-queue";
+    const config = JSON.stringify({ name: "Acme", services: { acmeWeather: { title: "Acme Weather" } }, settings: ["acmeWeather"] });
+    const scenes = [
+      {
+        apps: { acme: { sources: { "app.ts": "export function get() {}", "config.json": config } } },
+        edges: [],
+        id: "acme-scene",
+        name: "Acme",
+        nodes: [{ data: { keyword: "acme" }, id: "node-1", type: "app" }],
+      },
+    ];
+    const [scene] = await db
+      .insert(storeScenes)
+      .values({
+        accountId: frame.accountId,
+        latestVersion: 1,
+        name: "Acme weather",
+        riskFlags: [],
+        slug: "acme-weather",
+        status: "active",
+        visibility: "private",
+      })
+      .returning();
+    await db.insert(storeSceneVersions).values({
+      content: Buffer.from(zipSync({ "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)) })),
+      contentType: "application/zip",
+      riskFlags: [],
+      sceneId: scene!.id,
+      sha256: "test",
+      sizeBytes: 1000,
+      version: 1,
+    });
+    await saveSettings({ acmeWeather: { apiKey: acmeKey } });
+    await assignScene(frame.frame_id, scene!.id, ["acmeWeather"]);
+
+    const [stored] = await db.execute<{ value: { apiKey: string } }>(
+      sql`select value from account_settings where key = 'acmeWeather'`,
+    );
+    expect(stored?.value.apiKey).toMatch(/^enc:/);
+
+    const body = (await (await pull(frame.frame_id, frame.access_token)).json()) as {
+      serviceKeys: { keys: Record<string, unknown>; scenes: Record<string, unknown> };
+    };
+    expect(legacyOf(body)).toEqual({ groups: ["acmeWeather"], settings: { acmeWeather: { apiKey: acmeKey } } });
+    expect(body.serviceKeys.scenes).toEqual({ "acme-scene": { acmeWeather: "acmeWeather" } });
+    expect(body.serviceKeys.keys.acmeWeather).toEqual({ service: "acmeWeather", values: { apiKey: acmeKey } });
   });
 
   it("403s the moment the owner revokes the switch, and serves again when re-enabled", async () => {

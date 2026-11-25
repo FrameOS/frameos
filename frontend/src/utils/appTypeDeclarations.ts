@@ -797,7 +797,15 @@ declare const frameos: {
   /** A time zone's canonical name and its UTC offsets: changes is [start, offset, start, offset, ...] in seconds,
    * empty on a frame without that zone's data (FrameOS 2026.11.6+). */
   timeZone(name: string): { name: string; changes: number[] };
+  /** The scene's key for a service the app's config.json settings list names (docs/service-keys.md): its own
+   * scene's, which the owner picks per installed scene, or one typed on the frame. With no field, the service's fields. */
   getSetting(...path: string[]): any;
+  /** A placeholder for the scene's key, never the key: {{key:service.field}} in a request's URL path or query or
+   * in its Authorization, Proxy-Authorization, Cookie or X-Api-Key header is filled on the way out, only towards
+   * the service's own host (repo/services.json). undefined when the app does not declare the service or the scene
+   * has no such key. Older frames
+   * have none (FrameOS 2026.11.15+): check typeof frameos.secret === "function" first, else use getSetting. */
+  secret(service: string, field: string): string | undefined;
   setState(key: string, value: FrameOSJson): void;
   /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
   remember(key: string, value: FrameOSJson): boolean;
@@ -856,7 +864,7 @@ interface FrameOSMockFn<T extends (...args: any[]) => any = (...args: any[]) => 
 }
 
 interface FrameOSTestApp extends FrameOSApp {
-  /** What frameos.getSetting reads in a test. */
+  /** What frameos.getSetting reads in a test (and frameos.secret, filled as the frame fills it). */
   settings: Record<string, any>;
   /** What frameos.remember / recall keep in a test. */
   memory: Map<string, string>;
@@ -952,6 +960,7 @@ declare const mock: {
   fetchJson(impl?: (typeof frameos)["fetchJson"]): FrameOSMockFn<(typeof frameos)["fetchJson"]>;
   fetchImage(impl?: (typeof frameos)["fetchImage"]): FrameOSMockFn<(typeof frameos)["fetchImage"]>;
   getSetting(impl?: (typeof frameos)["getSetting"]): FrameOSMockFn<(typeof frameos)["getSetting"]>;
+  secret(impl?: (typeof frameos)["secret"]): FrameOSMockFn<(typeof frameos)["secret"]>;
   setState(impl?: (typeof frameos)["setState"]): FrameOSMockFn<(typeof frameos)["setState"]>;
   remember(impl?: (typeof frameos)["remember"]): FrameOSMockFn<(typeof frameos)["remember"]>;
   recall(impl?: (typeof frameos)["recall"]): FrameOSMockFn<(typeof frameos)["recall"]>;

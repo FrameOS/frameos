@@ -1,16 +1,26 @@
-// Which account-level service settings the cloud persists (the
-// account_settings table), and with which fields. Derived from the preview
-// settings groups so the two lists cannot drift: what the wasm preview can
-// consume is exactly what an account may store — frameOS{apiKey},
-// github{api_key}, homeAssistant{url,accessToken}, immich{url,apiKey},
-// openAI{apiKey}, unsplash{accessKey}. Everything else the shared settings
-// form knows (SSH keys, build environment, deploy defaults, PostHog, ...) is
-// backend-only and never reaches the database here.
+// Which account-level settings the cloud persists (the account_settings
+// table), and with which fields (docs/service-keys.md "Keys on the control
+// plane"). Any SERVICE is storable: the default key of a service is the
+// group named after it (openAI{apiKey}, …, or any id an app gives a service
+// the registry does not know), and every further key lives in the one
+// `serviceCredentials` group. A registered service stores its registry
+// fields (repo/services.json) plus the plane's own extras (openAI's chat
+// model and backend key); an unregistered one any field. Everything else the
+// shared settings form knows (build environment, deploy defaults, PostHog,
+// ...) is backend-only and never reaches the database here; SSH keys keep
+// their own shape.
 
 import { and, eq, sql } from "drizzle-orm";
 import { accountSettings, type createDb } from "@frameos-cloud/db";
 import { reportError } from "./log";
-import { previewSettingsGroups } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
+import {
+  CREDENTIAL_ID_PATTERN,
+  isServiceId,
+  registeredService,
+  SERVICE_CREDENTIALS_GROUP,
+  SERVICE_FIELD_PATTERN,
+  serviceFieldSecrecy,
+} from "../../../../../frontend/src/utils/serviceKeys";
 import { decryptSecret, encryptSecret } from "./secrets";
 import { isMaskedSettingValue, maskSettingValue } from "./setting-mask";
 
@@ -35,23 +45,66 @@ export { isMaskedSettingValue, maskSettingValue } from "./setting-mask";
 // migration could do that: the key is not in Postgres.
 // ---------------------------------------------------------------------------
 
-// Which storable fields are NOT secrets: server URLs and model tuning. Every
-// other storable field is a credential and is sealed. Listing the exceptions
-// rather than the secrets means a new key added to a group is sealed unless
-// somebody says otherwise (a test pins the resulting list).
-const plainAccountSettingsFields: ReadonlyMap<string, ReadonlySet<string>> =
-  new Map([
-    ["homeAssistant", new Set(["url"])],
-    ["immich", new Set(["url"])],
-    ["openAI", new Set(["chatModel", "chatReasoningEffort"])],
-  ]);
+// The plane's own fields inside a service's group: storable on the account,
+// never sent to a frame (deliverableServiceValues keeps a registered
+// service's registry fields alone). The account's OpenAI key and model
+// tuning for the workspace's AI chat.
+const planeServiceFields: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["openAI", new Set(["backendApiKey", "chatModel", "chatReasoningEffort"])],
+]);
 
-export function isSecretSettingField(group: string, field: string): boolean {
-  const allowed = storableAccountSettingsFields.get(group);
-  if (!allowed?.has(field)) {
+// Which of the plane's own fields are NOT secrets: model tuning. A field the
+// registry describes says so itself (serviceFieldSecrecy); every other
+// storable field is a credential and is sealed, so a new key added to a group
+// is sealed unless somebody says otherwise (a test pins the resulting list).
+const plainPlaneServiceFields: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["openAI", new Set(["chatModel", "chatReasoningEffort"])],
+]);
+
+/** Whether `group.field` is something an account stores: a service's field
+ * (a registered one's registry fields and the plane's own, any field of an
+ * unregistered one). */
+// A name Object.prototype already has (toString, constructor, …) is never a
+// group or a field here: such a key would read as something truthy from any
+// plain object that lacks it (the trap allowedFrameSettings in frames.ts
+// documents).
+function isPrototypeName(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(Object.prototype, name);
+}
+
+/** A group an account may keep a service's default key in. */
+export function isStorableServiceGroup(group: string): boolean {
+  return isServiceId(group) && !isPrototypeName(group);
+}
+
+export function isStorableServiceField(group: string, field: string): boolean {
+  if (!isStorableServiceGroup(group) || !SERVICE_FIELD_PATTERN.test(field) || isPrototypeName(field)) {
     return false;
   }
-  return !plainAccountSettingsFields.get(group)?.has(field);
+  const registered = registeredService(group);
+  if (!registered) {
+    return true;
+  }
+  return (
+    registered.fields.some((known) => known.name === field) ||
+    planeServiceFields.get(group)?.has(field) === true
+  );
+}
+
+export function isSecretSettingField(group: string, field: string): boolean {
+  if (!isStorableServiceField(group, field)) {
+    return false;
+  }
+  return serviceFieldSecrecy(group, field) ?? !plainPlaneServiceFields.get(group)?.has(field);
+}
+
+// A named key's values: a registered service's registry fields, any field
+// of an unregistered one — never the plane's own (a named key is for frames).
+function isCredentialField(service: string, field: string): boolean {
+  if (!isStorableServiceField(service, field)) {
+    return false;
+  }
+  return registeredService(service) ? planeServiceFields.get(service)?.has(field) !== true : true;
 }
 
 const sealedPrefix = "enc:";
@@ -121,20 +174,29 @@ export async function storedAccountSettings(
 }
 
 /**
- * The account's service settings with their secrets opened, narrowed to
- * {group: {field: string}}. For the two consumers the keys are for: a frame's
- * service-settings pull, and the hub rendering a virtual frame (which is that
- * frame's device). buildServiceSettingsPayload filters it again against what
- * a device may receive and what the frame's scenes were granted.
+ * The account's service keys with their secrets opened: every service group
+ * narrowed to {field: string}, and `serviceCredentials` (the named keys) as
+ * stored. For the consumers the keys are for: a frame's service-settings
+ * pull, the hub rendering a virtual frame (which is that frame's device), a
+ * server render, the voice chat's show_image. buildServiceSettingsPayload
+ * filters it again against what a device may receive and what each scene
+ * was bound to.
  */
 export async function revealedServiceSettings(
   db: ReturnType<typeof createDb>,
   accountId: string,
-): Promise<Record<string, Record<string, string>>> {
+): Promise<Record<string, unknown>> {
   const revealed = await storedAccountSettings(db, accountId, { reveal: true });
-  const stored: Record<string, Record<string, string>> = {};
+  const stored: Record<string, unknown> = {};
   for (const [group, value] of Object.entries(revealed)) {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    if (group === SERVICE_CREDENTIALS_GROUP) {
+      stored[group] = value;
+      continue;
+    }
+    if (!isStorableServiceGroup(group)) {
       continue;
     }
     const fields: Record<string, string> = {};
@@ -193,14 +255,60 @@ function openStoredGroup(
   value: unknown,
   accountId: string,
 ): { masked: unknown; revealed: unknown; reseal?: Record<string, unknown> } {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    !storableAccountSettingsFields.has(group)
-  ) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { masked: value, revealed: value };
   }
+  if (group === SERVICE_CREDENTIALS_GROUP) {
+    return openStoredCredentials(value as Record<string, unknown>, accountId);
+  }
+  if (!isStorableServiceGroup(group)) {
+    return { masked: value, revealed: value };
+  }
+  return openStoredFields(group, value as Record<string, unknown>, accountId);
+}
+
+// `serviceCredentials`: each named key's values opened by the rule of its
+// service, the rest of the entry (service, name) as it is.
+function openStoredCredentials(
+  value: Record<string, unknown>,
+  accountId: string,
+): { masked: unknown; revealed: unknown; reseal?: Record<string, unknown> } {
+  const masked: Record<string, unknown> = {};
+  const revealed: Record<string, unknown> = {};
+  let reseal: Record<string, unknown> | undefined;
+  for (const [id, entry] of Object.entries(value)) {
+    const record =
+      entry && typeof entry === "object" && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>)
+        : undefined;
+    const values = record?.values;
+    if (
+      !record ||
+      typeof record.service !== "string" ||
+      !values ||
+      typeof values !== "object" ||
+      Array.isArray(values)
+    ) {
+      masked[id] = entry;
+      revealed[id] = entry;
+      continue;
+    }
+    const opened = openStoredFields(record.service, values as Record<string, unknown>, accountId);
+    masked[id] = { ...record, values: opened.masked };
+    revealed[id] = { ...record, values: opened.revealed };
+    if (opened.reseal) {
+      reseal ??= { ...value };
+      reseal[id] = { ...record, values: opened.reseal };
+    }
+  }
+  return { masked, revealed, ...(reseal ? { reseal } : {}) };
+}
+
+function openStoredFields(
+  group: string,
+  value: Record<string, unknown>,
+  accountId: string,
+): { masked: unknown; revealed: unknown; reseal?: Record<string, unknown> } {
   const masked: Record<string, unknown> = {};
   const revealed: Record<string, unknown> = {};
   let reseal: Record<string, unknown> | undefined;
@@ -262,32 +370,62 @@ export async function sealAccountSettingsForWrite(
   const stored = await storedRawGroups(db, accountId);
   const sealed: FilteredAccountSettings = {};
   for (const [group, value] of Object.entries(settings)) {
-    if (group === "ssh_keys" || !storableAccountSettingsFields.has(group)) {
+    if (group === SERVICE_CREDENTIALS_GROUP) {
+      const credentials: Record<string, StoredServiceCredential> = {};
+      const storedCredentials = stored[group] ?? {};
+      for (const [id, credential] of Object.entries(value as Record<string, StoredServiceCredential>)) {
+        const current = storedCredentials[id];
+        const currentValues =
+          current && typeof current === "object" && !Array.isArray(current) &&
+          (current as Record<string, unknown>).service === credential.service
+            ? (current as Record<string, unknown>).values
+            : undefined;
+        credentials[id] = {
+          ...credential,
+          values: sealFields(
+            credential.service,
+            credential.values,
+            currentValues && typeof currentValues === "object" && !Array.isArray(currentValues)
+              ? (currentValues as Record<string, unknown>)
+              : {},
+          ),
+        };
+      }
+      sealed[group] = credentials;
+      continue;
+    }
+    if (group === "ssh_keys" || !isStorableServiceGroup(group)) {
       sealed[group] = value;
       continue;
     }
-    const fields: Record<string, string> = {};
-    for (const [field, fieldValue] of Object.entries(
-      value as Record<string, string>,
-    )) {
-      if (!isSecretSettingField(group, field)) {
-        fields[field] = fieldValue;
-        continue;
-      }
-      if (isMaskedSettingValue(fieldValue)) {
-        const current = stored[group]?.[field];
-        if (typeof current === "string" && current !== "") {
-          fields[field] = isSealedSettingValue(current)
-            ? current
-            : sealSettingValue(current);
-        }
-        continue;
-      }
-      fields[field] = sealSettingValue(fieldValue);
-    }
-    sealed[group] = fields;
+    sealed[group] = sealFields(group, value as Record<string, string>, stored[group] ?? {});
   }
   return sealed;
+}
+
+// One group's (or one named key's) fields for writing: secrets sealed, a
+// posted mask resolved to what `current` holds for that field (or dropped).
+function sealFields(
+  group: string,
+  value: Record<string, string>,
+  current: Record<string, unknown>,
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const [field, fieldValue] of Object.entries(value)) {
+    if (!isSecretSettingField(group, field)) {
+      fields[field] = fieldValue;
+      continue;
+    }
+    if (isMaskedSettingValue(fieldValue)) {
+      const kept = current[field];
+      if (typeof kept === "string" && kept !== "") {
+        fields[field] = isSealedSettingValue(kept) ? kept : sealSettingValue(kept);
+      }
+      continue;
+    }
+    fields[field] = sealSettingValue(fieldValue);
+  }
+  return fields;
 }
 
 // Generous for API tokens and URLs; anything longer is not a credential.
@@ -356,51 +494,112 @@ export function filterAccountSshKeys(
   return { keys };
 }
 
-// group -> allowed field names. A Map (not a plain object) so prototype keys
-// like "toString" or "__proto__" can never resolve to something truthy — the
-// same trap allowedFrameSettings (frames.ts) documents.
-export const storableAccountSettingsFields: ReadonlyMap<
-  string,
-  ReadonlySet<string>
-> = new Map(
-  Object.values(previewSettingsGroups)
-    .map((group): [string, Set<string>] => [
-      group.key,
-      new Set(group.fields.map((field) => field.path[1])),
-    ])
-    .map(([key, fields]) => {
-      // The account's own OpenAI key + model tuning for AI chat in the
-      // workspace. Storable but deliberately NOT in previewSettingsGroups
-      // (the wasm preview has no use for them) and NOT device-deliverable
-      // (frame-service-settings.ts) — they must never reach a frame.
-      if (key === "openAI") {
-        fields.add("backendApiKey");
-        fields.add("chatModel");
-        fields.add("chatReasoningEffort");
-      }
-      return [key, fields];
-    }),
-);
+// Bounds that stop a body from carrying a novel: services an account keeps
+// keys for, fields in one, named keys in all.
+export const maxAccountServiceGroups = 100;
+export const maxServiceFields = 32;
+export const maxServiceCredentials = 100;
+const maxCredentialNameLength = 120;
+
+export interface StoredServiceCredential {
+  service: string;
+  name: string;
+  values: Record<string, string>;
+}
 
 export type FilteredAccountSettings = Record<
   string,
-  Record<string, string> | { keys: StoredSshKey[] }
+  | Record<string, string>
+  | { keys: StoredSshKey[] }
+  | Record<string, StoredServiceCredential>
 >;
+
+// One service's fields from a body: storable ones only, each a bounded
+// string; anything else in a storable field is refused whole.
+function filterServiceFields(
+  group: string,
+  value: Record<string, unknown>,
+  allowed: (group: string, field: string) => boolean,
+): { error?: undefined; fields: Record<string, string> } | { error: string; fields?: undefined } {
+  const fields: Record<string, string> = {};
+  for (const [field, fieldValue] of Object.entries(value)) {
+    if (!allowed(group, field)) {
+      continue;
+    }
+    if (typeof fieldValue !== "string") {
+      return { error: "invalid_settings" };
+    }
+    if (fieldValue.length > maxAccountSettingValueLength) {
+      return { error: "settings_value_too_large" };
+    }
+    fields[field] = fieldValue;
+  }
+  if (Object.keys(fields).length > maxServiceFields) {
+    return { error: "invalid_settings" };
+  }
+  return { fields };
+}
+
+// The `serviceCredentials` group from a body: id → {service, name, values},
+// ids as the SPA makes them (k_…), a name, a service id, its values.
+export function filterServiceCredentials(
+  value: unknown,
+):
+  | { error?: undefined; credentials: Record<string, StoredServiceCredential> }
+  | { error: string; credentials?: undefined } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "invalid_settings" };
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > maxServiceCredentials) {
+    return { error: "invalid_settings" };
+  }
+  const credentials: Record<string, StoredServiceCredential> = {};
+  for (const [id, entry] of entries) {
+    if (!CREDENTIAL_ID_PATTERN.test(id) || !entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return { error: "invalid_settings" };
+    }
+    const { name, service, values } = entry as Record<string, unknown>;
+    if (
+      typeof service !== "string" ||
+      !isStorableServiceGroup(service) ||
+      (name !== undefined && typeof name !== "string")
+    ) {
+      return { error: "invalid_settings" };
+    }
+    if (values !== undefined && (!values || typeof values !== "object" || Array.isArray(values))) {
+      return { error: "invalid_settings" };
+    }
+    const filtered = filterServiceFields(service, (values ?? {}) as Record<string, unknown>, isCredentialField);
+    if (filtered.fields === undefined) {
+      return { error: filtered.error };
+    }
+    credentials[id] = {
+      name: (typeof name === "string" && name.trim() ? name.trim() : id).slice(0, maxCredentialNameLength),
+      service,
+      values: filtered.fields,
+    };
+  }
+  return { credentials };
+}
 
 // Reduce a settings POST body to what the account may store.
 //
-// Unknown GROUPS are filtered, not refused: the shared settings form submits
-// its whole form object — backend-only groups (defaults, ssh_keys,
+// Groups that are no service are filtered, not refused: the shared settings
+// form submits its whole form object — backend-only groups (defaults,
 // buildEnvironment, posthog, personal, ...) included — so refusing the
-// payload over them would break Save on the cloud outright. Unknown FIELDS
-// inside a storable group are filtered for the same reason. Actual bad data
-// in a storable field (a non-string, an oversized value) is refused whole —
-// a partial apply would leave the form and the database disagreeing about
-// what was saved.
+// payload over them would break Save on the cloud outright. Fields a
+// registered service does not have are filtered for the same reason. Actual
+// bad data in a storable field (a non-string, an oversized value) is refused
+// whole — a partial apply would leave the form and the database disagreeing
+// about what was saved. A group named like a service but not an object is
+// only an error for a registered service: anything else may be some form's
+// own bookkeeping.
 export function filterAccountSettings(payload: Record<string, unknown>):
   | { error?: undefined; settings: FilteredAccountSettings }
   | { error: string; settings?: undefined } {
   const settings: FilteredAccountSettings = {};
+  let serviceGroups = 0;
   for (const [group, value] of Object.entries(payload)) {
     if (group === "ssh_keys") {
       const filtered = filterAccountSshKeys(value);
@@ -410,29 +609,34 @@ export function filterAccountSettings(payload: Record<string, unknown>):
       settings.ssh_keys = { keys: filtered.keys };
       continue;
     }
-    const allowedFields = storableAccountSettingsFields.get(group);
-    if (!allowedFields) {
+    if (group === SERVICE_CREDENTIALS_GROUP) {
+      const filtered = filterServiceCredentials(value);
+      if (filtered.credentials === undefined) {
+        return { error: filtered.error };
+      }
+      settings[group] = filtered.credentials;
+      continue;
+    }
+    if (!isStorableServiceGroup(group)) {
       continue;
     }
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return { error: "invalid_settings" };
-    }
-    const filtered: Record<string, string> = {};
-    for (const [field, fieldValue] of Object.entries(value)) {
-      if (!allowedFields.has(field)) {
-        continue;
-      }
-      if (typeof fieldValue !== "string") {
+      if (registeredService(group)) {
         return { error: "invalid_settings" };
       }
-      if (fieldValue.length > maxAccountSettingValueLength) {
-        return { error: "settings_value_too_large" };
-      }
-      filtered[field] = fieldValue;
+      continue;
+    }
+    const filtered = filterServiceFields(group, value as Record<string, unknown>, isStorableServiceField);
+    if (filtered.fields === undefined) {
+      return { error: filtered.error };
     }
     // Present means "replace this group wholesale" (the backend's POST
     // /api/settings semantics) — an empty object clears the group's fields.
-    settings[group] = filtered;
+    settings[group] = filtered.fields;
+    serviceGroups += 1;
+    if (serviceGroups > maxAccountServiceGroups) {
+      return { error: "invalid_settings" };
+    }
   }
   return { settings };
 }

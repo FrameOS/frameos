@@ -17,8 +17,9 @@ credentials; if it does not answer in time, the board's next check-in
 a minute. It reads the board's list (`GET /api/frames/<id>/scenes`) and each
 scene (`GET /api/frames/<id>/scenes/<sceneId>`) with the server API key the
 board was given, adds every scene the row does not hold by id (one saved here
-meanwhile stays), grants the frame the service keys its store scenes declare
-(as installing them from the store would: `grant_store_scene_setting_groups`),
+meanwhile stays), binds its store scenes to the default key of each service
+they declare (as installing them from the store would:
+`grant_store_scene_setting_groups`, docs/service-keys.md),
 records them as what the board holds in the deploy baseline, with the keys
 its settings pull now brings, so the workspace shows nothing pending for
 them, and drops the marker. A Pi's adoption imports its scenes from its
@@ -40,7 +41,7 @@ from app.models.frame import (
     Frame,
     cached_app_configs,
     grant_store_scene_setting_groups,
-    shipped_frame_settings,
+    shipped_settings_fingerprint_source,
     update_frame,
 )
 from app.models.log import new_log
@@ -186,7 +187,9 @@ async def import_embedded_frame_scenes(
             **baseline,
             "scenes": scenes,
             SETTINGS_FINGERPRINTS_KEY: shipped_settings_fingerprints(
-                shipped_frame_settings(frame, get_settings_dict(db, project_id=frame.project_id), cached_app_configs())
+                shipped_settings_fingerprint_source(
+                    frame, get_settings_dict(db, project_id=frame.project_id), cached_app_configs()
+                )
             ),
         }
         if isinstance(baseline.get("embedded"), dict):

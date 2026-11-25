@@ -33,9 +33,11 @@ from app.models.frame import (
     refresh_tls_certificate_validity_dates,
     record_successful_deploy,
     server_scheme_for_frame,
-    shipped_frame_settings,
+    service_keys_for_frame_json,
+    shipped_service_keys,
     update_frame,
 )
+from app.utils.service_keys import is_service_id, registered_service
 from app.models.log import new_log
 from app.models.settings import get_settings_dict
 from app.schemas.frames import FrameAdoptRequest, FrameSyncApplyRequest, FrameUpdateRequest
@@ -1514,43 +1516,47 @@ def _sync_frame_push_off_value(key: str, value: Any) -> Any:
     return None
 
 
-# The service-key fields the runtime's POST /api/settings accepts (api.nim
-# frameAdminEditableSettingsFields). Anything else in a settings group has
-# no admin route and can only reach a device through an SSH frame.json write.
-FRAME_ADMIN_EDITABLE_SETTINGS_FIELDS: tuple[tuple[str, str], ...] = (
-    ("frameOS", "apiKey"),
-    ("openAI", "apiKey"),
-    ("homeAssistant", "url"),
-    ("homeAssistant", "accessToken"),
-    ("github", "api_key"),
-    ("immich", "url"),
-    ("immich", "apiKey"),
-    ("unsplash", "accessKey"),
-)
-
-
-def service_settings_push_payload(frame: Frame, db: Session) -> dict[str, dict[str, Any]]:
+def service_settings_push_payload(frame: Frame, db: Session) -> dict[str, Any]:
     """What `POST /api/settings` on the device should receive so its service
-    keys match what an SSH deploy would have written into frame.json: every
-    editable field of a group the frame's scenes are granted
-    (`shipped_frame_settings`), and a blank for each field of a group the
-    last deploy shipped but this one does not — the owner revoked the grant,
-    or the scene that declared it is gone — so the key leaves the device.
-    Groups the device may hold that this backend never shipped are left
-    alone; the device merges field by field."""
-    shipped = shipped_frame_settings(frame, get_settings_dict(db, project_id=frame.project_id), cached_app_configs())
+    keys match what an SSH deploy would have written into frame.json
+    (docs/service-keys.md): every field of each service group the frame is
+    sent (`shipped_service_keys`), each scene's own keys (`serviceKeys`), and
+    for a group the last deploy shipped but this one does not — a key no
+    scene is bound to any more — a blank for each of its registry fields (a
+    runtime from before serviceKeys knows those), or `null` for a service
+    the registry does not know (a runtime that reads serviceKeys deletes the
+    group). Groups the device may hold that this backend never shipped are
+    left alone; the device merges field by field. A runtime from before
+    serviceKeys takes the six groups it always knew and ignores the rest."""
+    shipped = shipped_service_keys(frame, get_settings_dict(db, project_id=frame.project_id), cached_app_configs())
+    groups = shipped["settings"]
+    service_keys = service_keys_for_frame_json(shipped)
     baseline = frame.last_successful_deploy
     previous: dict[str, Any] = baseline if isinstance(baseline, dict) else {}
     fingerprints = previous.get("settings_fingerprints")
     previously_shipped = set(fingerprints.keys()) if isinstance(fingerprints, dict) else set()
-    payload: dict[str, dict[str, Any]] = {}
-    for section, field in FRAME_ADMIN_EDITABLE_SETTINGS_FIELDS:
-        group = shipped.get(section)
-        if isinstance(group, dict) and group.get(field) not in (None, ""):
-            payload.setdefault(section, {})[field] = group[field]
-        elif section in previously_shipped and not (isinstance(group, dict) and group):
-            payload.setdefault(section, {})[field] = ""
+    payload: dict[str, Any] = {}
+    for section, values in groups.items():
+        if isinstance(values, dict) and values:
+            payload[section] = dict(values)
+    for section in sorted(previously_shipped):
+        if section in payload or not is_service_id(section):
+            continue
+        registered = registered_service(section)
+        payload[section] = {field["name"]: "" for field in registered["fields"]} if registered else None
+    if service_keys is not None:
+        payload["serviceKeys"] = service_keys
+    elif "serviceKeys" in previously_shipped:
+        payload["serviceKeys"] = None
     return payload
+
+
+def _written_services(payload: dict[str, Any]) -> str:
+    """The services a push wrote, for its log line (names only, never a value)."""
+    names = ", ".join(sorted(key for key in payload if key != "serviceKeys"))
+    if "serviceKeys" in payload:
+        names = f"{names} (and each scene's own keys)" if names else "each scene's own keys"
+    return names
 
 
 async def push_service_settings_to_device(
@@ -1723,7 +1729,7 @@ async def push_backend_state_to_device(
     if settings_payload:
         await new_log(
             db, redis, frame.id, "stdout",
-            "Service keys written to the frame: " + ", ".join(sorted(settings_payload.keys())),
+            "Service keys written to the frame: " + _written_services(settings_payload),
         )
     if activate_scene and activate_scene.get("sceneId"):
         scene_id = str(activate_scene["sceneId"])
@@ -2388,7 +2394,7 @@ async def _write_adopted_frame_service_keys(
         try:
             await new_log(
                 db, redis, frame.id, "stdout",
-                "Service keys written to the frame: " + ", ".join(sorted(written.keys())),
+                "Service keys written to the frame: " + _written_services(written),
             )
         except Exception:  # noqa: BLE001
             logger.warning("adopt: could not log the keys written to %s", frame.id, exc_info=True)

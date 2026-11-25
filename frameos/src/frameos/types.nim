@@ -130,6 +130,13 @@ type
     ## own unlock.
     frameSettingsOnScreen*: bool
     settings*: JsonNode
+    ## Which key each scene gets (docs/service-keys.md "On the wire"): a
+    ## plane's `{v, keys, scenes, services}`; nil without one, and then an
+    ## app reads `settings` as before (service_keys.nim).
+    serviceKeys*: JsonNode
+    ## The settings groups the frame's plane sent last (its service-settings
+    ## pull), so the next pull can take away the ones it no longer sends.
+    serviceSettingsOwned*: seq[string]
     assetsPath*: string
     saveAssets*: JsonNode
     logToFile*: string
@@ -758,6 +765,7 @@ type
     nodes*: Table[NodeId, DiagramNode]
     apps*: JsonNode
     eventApps*: seq[NodeId]                                                    # JS app nodes with `events` in their config.json
+    declaredServices*: seq[string] ## the services its apps' config.json `settings` name (docs/service-keys.md)
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
     appInputs*: seq[AppInput] # the edges into app, dispatch and scene node fields (the planner reads them)
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes

@@ -28,6 +28,7 @@ import {
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readEventMapsField, sceneEventMapsOf } from "../../../../../src/lib/scene-event-map";
 import { readLayoutsField, sceneLayoutsOf } from "../../../../../src/lib/scene-layouts";
+import { readServiceKeysField, sceneServiceKeysOf } from "../../../../../src/lib/scene-services";
 import { readSession } from "../../../../../src/lib/session";
 import { frameosVersionSatisfies } from "../../../../../src/lib/store-versions";
 
@@ -63,6 +64,7 @@ export async function GET(
       eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       layouts: frameSceneAssignments.layouts,
+      serviceKeys: frameSceneAssignments.serviceKeys,
       // The newest version's declared minimum FrameOS (the row is the
       // latest version's listing).
       latestFrameosVersion: storeScenes.frameosVersion,
@@ -137,6 +139,10 @@ export async function GET(
         // The layout each runtime scene wears (docs/scene-layouts.md), the
         // same way: each scene's `layout`. Absent when there is none.
         ...(sceneLayoutsOf(row.layouts) ? { layouts: sceneLayoutsOf(row.layouts) } : {}),
+        // The key each runtime scene gets per service it declares
+        // (docs/service-keys.md): "default", a named key's id, or null
+        // (refused); each scene's `keys`. Absent when none was chosen.
+        ...(sceneServiceKeysOf(row.serviceKeys) ? { service_keys: sceneServiceKeysOf(row.serviceKeys) } : {}),
         slug: row.sceneSlug,
         // POST /scenes/update takes the frame there.
         update_available: installable && newer && runsOnFrame,
@@ -152,7 +158,8 @@ export async function GET(
 
 // Replace the frame's scene assignments and enqueue a set_scenes push.
 // Body: {"scenes": [{"scene_id": "...", "scene_version"?: N, "latest"?: true,
-// "settings_groups"?: ["unsplash", …]}, …]} in render order.
+// "settings_groups"?: ["unsplash", …], "service_keys"?: {[runtime scene id]:
+// {service: "default" | key id | null}}}, …]} in render order.
 // An unpinned scene (no scene_version) the frame already has is pushed again
 // at the version the frame HOLDS: replacing the list never updates a scene as
 // a side effect. `latest: true` moves that one scene to the newest version
@@ -266,6 +273,11 @@ export async function POST(
     if (layouts === false) {
       return jsonError("invalid_scenes", 400);
     }
+    // Per-install key choices (docs/service-keys.md), the same way.
+    const serviceKeys = readServiceKeysField((entry as Record<string, unknown>).service_keys);
+    if (serviceKeys === false) {
+      return jsonError("invalid_scenes", 400);
+    }
     requested.push({
       sceneId,
       sceneVersion: typeof sceneVersion === "number" ? sceneVersion : null,
@@ -273,6 +285,7 @@ export async function POST(
       ...(settingsGroups ? { settingsGroups } : {}),
       ...(eventMaps !== undefined ? { eventMaps } : {}),
       ...(layouts !== undefined ? { layouts } : {}),
+      ...(serviceKeys !== undefined ? { serviceKeys } : {}),
     });
   }
 

@@ -66,7 +66,7 @@ describe("SceneInstallDialog", () => {
     );
   });
 
-  it("offers the scene's declared service keys as pre-ticked grants and sends only the ticked ones", async () => {
+  it("offers each declared service the default key or none, and sends the choice per runtime scene", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ already_assigned: false, connected: true, status: "queued" }), {
         headers: { "content-type": "application/json" },
@@ -80,21 +80,73 @@ describe("SceneInstallDialog", () => {
           { key: "unsplash", title: "Unsplash" },
           { key: "openAI", title: "OpenAI" },
         ]}
+        sceneServices={{ clock: ["openAI", "unsplash"], other: [] }}
       />,
     );
-    const unsplash = within(dialog()).getByRole("checkbox", { name: "Unsplash" }) as HTMLInputElement;
-    const openAi = within(dialog()).getByRole("checkbox", { name: "OpenAI" }) as HTMLInputElement;
-    expect(unsplash.checked).toBe(true);
-    expect(openAi.checked).toBe(true);
-    fireEvent.click(openAi);
-    expect(openAi.checked).toBe(false);
+    const unsplash = within(dialog()).getByRole("combobox", { name: "Unsplash" }) as HTMLSelectElement;
+    const openAi = within(dialog()).getByRole("combobox", { name: "OpenAI" }) as HTMLSelectElement;
+    expect(unsplash.value).toBe("default");
+    expect(openAi.value).toBe("default");
+    fireEvent.change(openAi, { target: { value: "" } });
+    expect(openAi.value).toBe("");
 
     fireEvent.click(within(dialog()).getByRole("button", { name: "Install" }));
     await screen.findByRole("status");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/frames/f1/scenes/add",
       expect.objectContaining({
-        body: JSON.stringify({ scene_id: "scene-1", scene_version: null, settings_groups: ["unsplash"] }),
+        body: JSON.stringify({
+          scene_id: "scene-1",
+          scene_version: null,
+          settings_groups: ["unsplash"],
+          service_keys: { clock: { openAI: null, unsplash: "default" } },
+        }),
+      }),
+    );
+  });
+
+  it("offers the account's named keys of a service and sends the one picked", async () => {
+    fetchMock.mockImplementation((input) =>
+      Promise.resolve(
+        String(input) === "/api/settings"
+          ? Response.json({
+              serviceCredentials: {
+                k_home00000001: { name: "Home", service: "unsplash", values: { accessKey: "••••••••" } },
+                k_work00000001: { name: "Work", service: "openAI", values: { apiKey: "••••••••" } },
+              },
+            })
+          : Response.json({ already_assigned: false, connected: true, status: "queued" }),
+      ),
+    );
+    render(
+      <SceneInstallDialog
+        {...props}
+        declaredSettingsGroups={[{ key: "openAI", title: "OpenAI" }]}
+        sceneServices={{ clock: ["openAI"] }}
+      />,
+    );
+    const openAi = within(dialog()).getByRole("combobox", { name: "OpenAI" }) as HTMLSelectElement;
+    await within(openAi).findByRole("option", { name: "Work" });
+    // Only that service's keys.
+    expect(within(openAi).queryByRole("option", { name: "Home" })).toBeNull();
+    expect(within(openAi).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Default key",
+      "Work",
+      "Don't give a key",
+    ]);
+    fireEvent.change(openAi, { target: { value: "k_work00000001" } });
+
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Install" }));
+    await screen.findByRole("status");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/frames/f1/scenes/add",
+      expect.objectContaining({
+        body: JSON.stringify({
+          scene_id: "scene-1",
+          scene_version: null,
+          settings_groups: ["openAI"],
+          service_keys: { clock: { openAI: "k_work00000001" } },
+        }),
       }),
     );
   });

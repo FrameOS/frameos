@@ -13,6 +13,7 @@ import {
   CursorArrowRippleIcon,
   DocumentDuplicateIcon,
   FolderPlusIcon,
+  KeyIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { ArrowsRightLeftIcon, FlagIcon, PencilSquareIcon, PlayIcon, TrashIcon } from '@heroicons/react/24/solid'
@@ -24,6 +25,8 @@ import type { FrameScene, FrameType } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
 import { ButtonMapModal } from '../frame/panels/Scenes/ButtonMapModal'
 import { buttonMapLogic } from '../frame/panels/Scenes/buttonMapLogic'
+import { SceneKeysModal } from '../frame/panels/Scenes/SceneKeysModal'
+import { sceneKeysLogic } from '../frame/panels/Scenes/sceneKeysLogic'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
@@ -64,6 +67,8 @@ export function WorkspaceSceneDropDown({
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
   const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId: frame.id, sceneId: scene.id }))
   const { openButtonMap } = useActions(buttonMapLogic({ frameId: frame.id, sceneId: scene.id }))
+  const { isOpen: sceneKeysOpen, rows: keyRows } = useValues(sceneKeysLogic({ frameId: frame.id, sceneId: scene.id }))
+  const { openSceneKeys } = useActions(sceneKeysLogic({ frameId: frame.id, sceneId: scene.id }))
   const { current: currentLayout, settingsOpen: layoutSettingsOpen } = useValues(
     sceneLayoutLogic({ frameId: frame.id, sceneId: scene.id })
   )
@@ -126,6 +131,16 @@ export function WorkspaceSceneDropDown({
             onClick: () => openButtonMap(),
             icon: <CursorArrowRippleIcon className="h-5 w-5" />,
           },
+          ...(keyRows.length > 0
+            ? [
+                {
+                  // Which key of each service this install gets (docs/service-keys.md).
+                  label: 'Keys',
+                  onClick: () => openSceneKeys(),
+                  icon: <KeyIcon className="h-5 w-5" />,
+                },
+              ]
+            : []),
           ...(currentLayout
             ? [
                 {
@@ -265,6 +280,7 @@ export function WorkspaceSceneDropDown({
         </Modal>
       ) : null}
       {buttonMapOpen ? <ButtonMapModal frameId={frame.id} sceneId={scene.id} /> : null}
+      {sceneKeysOpen ? <SceneKeysModal frameId={frame.id} sceneId={scene.id} /> : null}
       {templateModalMounted ? (
         <BindLogic logic={frameLogic} props={{ frameId: frame.id }}>
           <EditTemplateModal />

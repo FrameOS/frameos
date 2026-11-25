@@ -45,6 +45,10 @@ export interface CloudFrameSceneRow {
   event_maps?: Record<string, EventMapRule[]>
   /** The layout each runtime scene of this install wears (docs/scene-layouts.md). */
   layouts?: Record<string, SceneLayoutRef>
+  /** Which key each runtime scene of this install gets per service it declares
+   * (docs/service-keys.md): runtime scene id → service → `"default"`, a named
+   * key's id, or null (refused). Each becomes that scene's `keys`. */
+  service_keys?: Record<string, Record<string, string | null>>
 }
 
 /**

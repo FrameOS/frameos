@@ -438,6 +438,98 @@ async def test_get_frame_json_ships_store_scene_settings_only_when_granted(_mock
     frame.scenes.append({"id": "own-2", "nodes": [declare("openAI")]})
     data = get_frame_json(db, frame)
     assert set(data["settings"]) == {"unsplash", "openAI"}
+    # ...and the store scene still gets nothing of it: its key is its own
+    # (docs/service-keys.md), where the older `settings` reached every scene.
+    assert data["serviceKeys"]["scenes"]["from-store"] == {"openAI": None}
+    assert data["serviceKeys"]["scenes"]["own-2"] == {"openAI": "openAI"}
+
+
+def _declaring(*groups: str, services: dict | None = None) -> dict:
+    config: dict = {"settings": list(groups)}
+    if services:
+        config["services"] = services
+    return {"type": "app", "data": {"sources": {"config.json": json.dumps(config)}}}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_refuses_a_store_scene_the_key_an_own_scene_uses(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJsonPerScene", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="openAI", value={"apiKey": "sk-owner", "backendApiKey": "sk-plane"}))
+    db.commit()
+    frame.scenes = [
+        {"id": "own", "nodes": [_declaring("openAI")]},
+        {"id": "store", "origin": {"storeSceneId": "11111111-2222-3333-4444-555555555555"}, "nodes": [_declaring("openAI")]},
+        {"id": "clock", "nodes": []},
+    ]
+    data = get_frame_json(db, frame)
+    # Older runtimes still get the one frame-wide copy; never the plane's own field.
+    assert data["settings"] == {"openAI": {"apiKey": "sk-owner"}}
+    assert data["serviceKeys"] == {
+        "v": 1,
+        "keys": {"openAI": {"service": "openAI", "values": {"apiKey": "sk-owner"}}},
+        "scenes": {"own": {"openAI": "openAI"}, "store": {"openAI": None}},
+        "services": {"openAI": {"title": "OpenAI", "fields": [{"name": "apiKey", "label": "API key"}], "hosts": ["api.openai.com"]}},
+    }
+    # The install binds the store scene to the default: now it has one.
+    frame.scenes = [{**frame.scenes[1], "keys": {"openAI": "default"}}, frame.scenes[0]]
+    assert get_frame_json(db, frame)["serviceKeys"]["scenes"]["store"] == {"openAI": "openAI"}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_ships_a_named_key_to_the_one_scene_bound_to_it(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJsonNamedKey", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="openAI", value={"apiKey": "sk-owner"}))
+    db.add(Settings(project_id=frame.project_id, key="serviceCredentials", value={
+        "k_work00000001": {"service": "openAI", "name": "Work", "values": {"apiKey": "sk-work"}},
+    }))
+    db.commit()
+    frame.scenes = [
+        {"id": "home", "nodes": [_declaring("openAI")]},
+        {"id": "office", "nodes": [_declaring("openAI")], "keys": {"openAI": "k_work00000001"}},
+    ]
+    data = get_frame_json(db, frame)
+    assert data["serviceKeys"]["scenes"] == {"home": {"openAI": "openAI"}, "office": {"openAI": "k_work00000001"}}
+    assert data["serviceKeys"]["keys"]["k_work00000001"] == {"service": "openAI", "values": {"apiKey": "sk-work"}}
+    assert data["settings"] == {"openAI": {"apiKey": "sk-owner"}}
+
+    # Only the office scene left: the older settings carry the key it uses.
+    frame.scenes = [frame.scenes[1]]
+    data = get_frame_json(db, frame)
+    assert set(data["serviceKeys"]["keys"]) == {"k_work00000001"}
+    assert data["settings"] == {"openAI": {"apiKey": "sk-work"}}
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_ships_a_service_the_registry_does_not_know(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJsonAcme", "host", "server_host.com")
+    db.add(Settings(project_id=frame.project_id, key="acmeWeather", value={"apiKey": "acme-1", "region": "eu"}))
+    db.commit()
+    frame.scenes = [{
+        "id": "weather",
+        "nodes": [_declaring("acmeWeather", services={
+            "acmeWeather": {"title": "Acme Weather", "fields": [{"name": "apiKey", "label": "API key"}], "hosts": ["evil.example.com"]},
+        })],
+    }]
+    data = get_frame_json(db, frame)
+    assert data["settings"] == {"acmeWeather": {"apiKey": "acme-1", "region": "eu"}}
+    assert data["serviceKeys"]["scenes"] == {"weather": {"acmeWeather": "acmeWeather"}}
+    # An app names its fields, never where its key may go.
+    assert data["serviceKeys"]["services"]["acmeWeather"] == {
+        "title": "Acme Weather", "fields": [{"name": "apiKey", "label": "API key"}, {"name": "region", "label": "region"}],
+    }
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_has_no_service_keys_when_no_scene_uses_one(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJsonNoKeys", "host", "server_host.com")
+    frame.scenes = [{"id": "clock", "nodes": []}]
+    data = get_frame_json(db, frame)
+    assert "serviceKeys" not in data
+    assert data["settings"] == {}
 
 
 @pytest.mark.asyncio
@@ -813,7 +905,8 @@ async def test_to_dict_fingerprints_the_service_keys_frame_json_would_ship(_mock
     before = frame.to_dict()
     # Only the group that would ship: unsplash (owner-declared, has a value);
     # openAI is declared by a store scene and not granted, and has no value.
-    assert set(before["settings_fingerprints"]) == {"unsplash"}
+    # `serviceKeys` (each scene's own keys, docs/service-keys.md) is one more.
+    assert set(before["settings_fingerprints"]) == {"unsplash", "serviceKeys"}
     assert "u-1" not in json.dumps(before["settings_fingerprints"])  # a hash, never the value
     record_successful_deploy(frame, before)
     assert frame.last_successful_deploy["settings_fingerprints"] == before["settings_fingerprints"]
@@ -824,6 +917,7 @@ async def test_to_dict_fingerprints_the_service_keys_frame_json_would_ship(_mock
     db.commit()
     after = frame.to_dict()
     assert after["settings_fingerprints"]["unsplash"] != before["settings_fingerprints"]["unsplash"]
+    assert after["settings_fingerprints"]["serviceKeys"] != before["settings_fingerprints"]["serviceKeys"]
     assert frame.to_dict()["last_successful_deploy"]["settings_fingerprints"] == before["settings_fingerprints"]
 
     # Granting the store scene's group (with a value) adds a fingerprint for it.
@@ -831,4 +925,4 @@ async def test_to_dict_fingerprints_the_service_keys_frame_json_would_ship(_mock
     frame.service_setting_groups = ["openAI"]
     db.add(frame)
     db.commit()
-    assert set(frame.to_dict()["settings_fingerprints"]) == {"unsplash", "openAI"}
+    assert set(frame.to_dict()["settings_fingerprints"]) == {"unsplash", "openAI", "serviceKeys"}

@@ -16,6 +16,7 @@ import frameos/scene_store_hooks
 import frameos/frame_service_keys
 from frameos/apps import CloudServiceSettingsFields
 import frameos/ui/theme
+import frameos/service_keys
 from frameos/events import settingsWindowId
 
 # The scene settings (docs/scene-settings.md): the form it builds of a
@@ -493,6 +494,55 @@ block a_round_panel_has_the_frame_page_inside_its_circle:
   discard form.draw()
   doAssert form.state["page"].getStr() == "frame", "the round form's gear opens the frame page"
   allOnTheGlass("the frame page from the form")
+  frameSettingsRead = nil
+
+block the_keys:
+  # docs/service-keys.md "Typing a key on the frame": the scene's keys under
+  # its fields while the frame offers its page; a typed one is kept on the
+  # frame for that scene, never sent to it as state.
+  var stored = ""
+  localKeysLoadHook = proc (): string {.nimcall, gcsafe.} =
+    {.cast(gcsafe).}: stored
+  localKeysSaveHook = proc (text: string): bool {.nimcall, gcsafe.} =
+    {.cast(gcsafe).}: stored = text
+    true
+  forgetLocalKeysCache()
+  let keys = %*[{"service": "openAI", "title": "OpenAI", "typed": false, "fields": [
+      {"name": "apiKey", "label": "API key", "secret": true, "value": "\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2\x80\xa23456", "typed": false}]},
+    {"service": "immich", "title": "Immich", "typed": true, "fields": [
+      {"name": "url", "label": "Server URL", "secret": false, "value": "https://p.example.com", "typed": true}]}]
+  # Without the frame page: no keys on the form.
+  frameSettingsRead = nil
+  let hidden = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  hidden.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}, "keys": keys}})
+  doAssert hidden.state["fields"].len == 1
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": []}
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}, "keys": keys}})
+  scene.send("open", %*{"sceneId": SceneSettingsId})
+  let fields = scene.state["fields"]
+  doAssert fields.len == 4, $fields # city, the OpenAI key, the Immich URL, forget Immich
+  doAssert fields[1]["name"].getStr() == "\1openAI.apiKey" and fields[1]["secret"].getBool()
+  doAssert fields[1]["placeholder"].getStr().endsWith("3456")
+  doAssert scene.state["values"]["\1immich.url"].getStr() == "https://p.example.com"
+  doAssert fields[3]["type"].getStr() == "boolean"
+  doAssert scene.state{"page"}.getStr() != "frame"
+  let keysImage = scene.draw()
+  if previews.len > 0: keysImage.writeFile(previews / "settings-keys.png")
+  # A key typed, and the Immich one forgotten: kept here, never the scene's state.
+  scene.state["values"]["\1openAI.apiKey"] = %"sk-typed"
+  scene.state["edited"] = %*{"\1openAI.apiKey": true}
+  scene.state["values"]["\2immich"] = %true
+  discard setLocalKey("scenes/weather", "immich", "url", "https://typed.example.com")
+  sent.setLen(0)
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
+  doAssert sent[0][1]["state"] == %*{"city": "Oslo"}, $sent[0][1]["state"]
+  doAssert localKeys() == %*{"scenes/weather": {"openAI": {"apiKey": "sk-typed"}}}, $localKeys()
   frameSettingsRead = nil
 
 block it_opens_on_the_frame_page_with_no_scene_showing:

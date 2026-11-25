@@ -65,9 +65,9 @@ import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { fleetUpdateLogic } from './fleetUpdateLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
-import { SceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
+import { InstalledSceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
-import { settingsDetails } from '../frame/panels/secretSettings'
+import { settingsDetailsFor } from '../frame/panels/secretSettings'
 import { missingSettingsGroups, withheldSettingsGroups } from '../../utils/cloudFrameScenes'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
@@ -1445,7 +1445,7 @@ function SceneKeysNotice({
     return null
   }
   if (missing.length === 0) {
-    const withheldNames = withheld.map((group) => settingsDetails[group]?.title ?? group)
+    const withheldNames = withheld.map((group) => settingsDetailsFor(group).title)
     return (
       <div className="mb-4 rounded-lg border border-amber-300/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
         <div className="font-semibold">
@@ -1475,7 +1475,7 @@ function SceneKeysNotice({
       </div>
     )
   }
-  const names = missing.map((group) => settingsDetails[group]?.title ?? group)
+  const names = missing.map((group) => settingsDetailsFor(group).title)
   const granting = grantingSettingsSceneId === source.scene_id
   return (
     <div className="mb-4 rounded-lg border border-amber-300/70 bg-amber-50/80 px-3 py-2 text-xs text-amber-900">
@@ -1704,7 +1704,12 @@ function SceneControlPanelContent({
                 </div>
               ) : null}
               {scene.origin ? <SceneOriginLine origin={scene.origin} /> : null}
-              <SceneAccessTags flags={sceneAccessFlagsById[scene.id] ?? []} className="mb-4" />
+              <InstalledSceneAccessTags
+                frameId={frame.id}
+                sceneId={scene.id}
+                flags={sceneAccessFlagsById[scene.id] ?? []}
+                className="mb-4"
+              />
               {isCloudMode() ? (
                 <SceneKeysNotice frame={frame} scene={scene} sceneIsActive={selectedSceneIsActive} />
               ) : null}

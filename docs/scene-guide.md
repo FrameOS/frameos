@@ -361,9 +361,9 @@ calls, and it calls no other:
 - `frameos`: everything the app can do: fetch (`fetchJson`, `fetchText`,
   `httpRequest`, `fetchImage`), make images (JSX; `svg` only for markup
   fetched or read from an asset, never markup the app builds), log (`log`,
-  `error`), keep values (`setState`, `remember`, `recall`), read the account's
-  keys (`getSetting`, only for namespaces the app's `config.json` lists under
-  `settings`), set the next sleep (`setNextSleep`, this render only), and
+  `error`), keep values (`setState`, `remember`, `recall`), use the owner's
+  keys (`secret`, `getSetting`: see **Keys** below), set the next sleep
+  (`setNextSleep`, this render only), and
   read and write frame assets and streams. The exact signatures are in the
   [JS API reference](#js-api-reference).
 - `Date` reads local time in the frame's time zone. There are no `format`,
@@ -506,6 +506,32 @@ and no more.
 `fetchImage({ saveAsset })` is the frame caching a download, not the app
 using the folder: it needs no permission. (Frames before FrameOS 2026.10.16
 ignore the lists.)
+
+**Keys.** An app that calls a vendor's API (OpenAI, Unsplash, Home
+Assistant, …) never asks for its key in a field: it names the service in its
+config.json `"settings"` list (`["openAI"]`), and the owner's key for it
+reaches the app's scene. The owner types each key once and picks, per
+installed scene, which of their keys it gets; a store scene gets none until
+they say so, and someone at the frame can type one in the scene's settings.
+
+- Send a key with `frameos.secret(service, field)`, a placeholder the frame
+  fills on the way out, only towards that service's own host, in the URL's
+  path or query or in an `Authorization`, `Proxy-Authorization`, `Cookie` or
+  `X-Api-Key` header:
+  `{ headers: { Authorization: 'Bearer ' + frameos.secret('openAI', 'apiKey') } }`.
+  Older frames have no `secret`: check `typeof frameos.secret === 'function'`
+  and fall back to `getSetting`.
+- `frameos.getSetting(service, field)` hands the key itself to the app, for
+  an app that must compute with it (a signature). `undefined` when the scene
+  has none: say in the picture which key is missing.
+- The services the planes know (their titles, fields and hosts) are
+  `repo/services.json`. A service it does not list is still one: define it
+  in the app's config.json so the owner sees a proper form, title and fields
+  only (`"services": {"acmeWeather": {"title": "Acme Weather", "fields":
+  [{"name": "apiKey", "label": "API key"}]}}`); such a key is sent with
+  `getSetting` alone, since only the registry says where it may go.
+- Saving the scene fills `"settings"` from the code (a literal first
+  argument of `getSetting` or `secret`).
 
 **Files and text.** `writeAsset(path, data)` and `appendAsset` take base64;
 with `{ text: true }` they write the string itself as UTF-8, so text needs no
@@ -1886,7 +1912,15 @@ declare const frameos: {
   /** A time zone's canonical name and its UTC offsets: changes is [start, offset, start, offset, ...] in seconds,
    * empty on a frame without that zone's data (FrameOS 2026.11.6+). */
   timeZone(name: string): { name: string; changes: number[] };
+  /** The scene's key for a service the app's config.json settings list names (docs/service-keys.md): its own
+   * scene's, which the owner picks per installed scene, or one typed on the frame. With no field, the service's fields. */
   getSetting(...path: string[]): any;
+  /** A placeholder for the scene's key, never the key: {{key:service.field}} in a request's URL path or query or
+   * in its Authorization, Proxy-Authorization, Cookie or X-Api-Key header is filled on the way out, only towards
+   * the service's own host (repo/services.json). undefined when the app does not declare the service or the scene
+   * has no such key. Older frames
+   * have none (FrameOS 2026.11.15+): check typeof frameos.secret === "function" first, else use getSetting. */
+  secret(service: string, field: string): string | undefined;
   setState(key: string, value: FrameOSJson): void;
   /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
   remember(key: string, value: FrameOSJson): boolean;

@@ -27,14 +27,32 @@ type FrameSummary = Record<string, unknown> & {
 
 const frameId = uuid().describe("Frame id (uuid) from frames_list.");
 // The owner's grant of service-key groups to one scene on one frame. The
-// names are the account settings groups a device can be served; anything
-// the scene does not declare is dropped server-side.
+// names are services (docs/service-keys.md: any id the registry or an app
+// gives one); anything the scene does not declare is dropped server-side.
 const settingsGroups = z
   .array(z.string().regex(/^[A-Za-z0-9_-]{1,64}$/))
-  .max(16)
+  .max(32)
   .optional()
   .describe(
     "Service-settings groups to GRANT this scene (e.g. [\"unsplash\", \"openAI\"]). Only groups the scene declares take effect. Omit to keep an installed scene's grant, or to grant a new one nothing.",
+  );
+
+// Which key each runtime scene of an install gets per service it declares
+// (docs/service-keys.md): "default" (the account's key of that service),
+// a named key's id (k_…, from the account's serviceCredentials), or null
+// (refused). The server validates the shape and drops what no app declares.
+const serviceKeys = z
+  .record(
+    z.string().min(1).max(256),
+    z.record(
+      z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,40}$/),
+      z.union([z.literal("default"), z.string().regex(/^k_[a-z0-9]{8,24}$/), z.null()]),
+    ),
+  )
+  .nullable()
+  .optional()
+  .describe(
+    "Which key each runtime scene of this install gets, per service it declares: { [runtime scene id]: { [service]: \"default\" | named key id | null } }. \"default\" is the account's key of that service, a named key id (k_…) one of its other keys, null refuses the key. Omit to keep what the install has; null clears it (settings_groups then decides: the default key for what it grants).",
   );
 
 // The owner's per-install button maps (docs/events.md "Event map"): runtime
@@ -117,9 +135,10 @@ export async function installSceneOnFrame(
     frame_id: string;
     scene_version?: number | null | undefined;
     settings_groups?: string[] | undefined;
+    service_keys?: Record<string, Record<string, string | null>> | null | undefined;
   },
 ) {
-  const { activate, frame_id, scene_version, settings_groups, ...source } = input;
+  const { activate, frame_id, scene_version, service_keys, settings_groups, ...source } = input;
   const resolved = await resolveSceneSource(ctx, source);
   if ("error" in resolved) {
     return failure(resolved.error);
@@ -135,6 +154,7 @@ export async function installSceneOnFrame(
         scene_id: resolved.sceneId,
         ...(scene_version !== undefined ? { scene_version } : {}),
         ...(settings_groups !== undefined ? { settings_groups } : {}),
+        ...(service_keys !== undefined ? { service_keys } : {}),
         ...(activate ? { activate: true } : {}),
       },
     },
@@ -316,7 +336,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { idempotentHint: true },
       description:
-        "Replace a frame's whole scene list (order = display order, max 20). Requires confirm=true (it deploys to the device). Omitting a scene removes it; scene_version pins a version. An unpinned scene the frame already has is pushed again at the version the frame holds — replacing the list never updates a scene as a side effect; latest=true moves that one scene to the newest published version (what frame_scene_update does for a single scene), and a scene new to the frame starts at the newest version. active_scene_id (a store scene id or runtime scene id) chooses which scene shows after the deploy. Per scene, settings_groups GRANTS it the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS): a scene's own declaration is only a request, and a store scene is only delivered the groups the owner granted. Omitted: an already-assigned scene keeps its grant, a newly added one gets none. Deploys to the device as one set_scenes command.",
+        "Replace a frame's whole scene list (order = display order, max 20). Requires confirm=true (it deploys to the device). Omitting a scene removes it; scene_version pins a version. An unpinned scene the frame already has is pushed again at the version the frame holds — replacing the list never updates a scene as a side effect; latest=true moves that one scene to the newest published version (what frame_scene_update does for a single scene), and a scene new to the frame starts at the newest version. active_scene_id (a store scene id or runtime scene id) chooses which scene shows after the deploy. Per scene, settings_groups GRANTS it the account's service API keys it declares (any service its apps name: unsplash, openAI, homeAssistant, …), the account's default key of each, and service_keys picks another of the account's keys (or none) per runtime scene: a scene's own declaration is only a request, and a store scene is only delivered what the owner granted it. Keys reach each scene alone, never the whole frame. Omitted: an already-assigned scene keeps its grant and keys, a newly added one gets none. Deploys to the device as one set_scenes command.",
       inputSchema: {
         active_scene_id: z.string().max(256).optional(),
         confirm: z
@@ -337,6 +357,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
                   "Move this unpinned scene to the newest published version on this push. Omitted: it stays at the version the frame holds.",
                 ),
               settings_groups: settingsGroups,
+              service_keys: serviceKeys,
               event_maps: eventMaps,
               layouts: sceneLayouts,
             }),
@@ -358,7 +379,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_scene_install",
     {
       description:
-        "Install a scene on a frame. Requires confirm=true (it changes what the physical frame shows). The scene comes from exactly one of: scene_id (a store scene — public, or one of the account's own — from scenes_list / store_browse), url (a scene page on the store, a scene zip, or a scenes.json), or scenes (raw scene JSON, saved first as a new private scene). Re-installing an already-installed scene re-pins it (or, unpinned, moves it to the newest published version) and pushes it again; the frame's other scenes stay at the versions they hold. activate=true switches the frame to it right away. settings_groups GRANTS the scene the account's service API keys it declares (unsplash, openAI, homeAssistant, immich, github, frameOS) — a scene's own declaration is only a request, and without a grant it is delivered none of them; the answer's declared_settings_groups / granted_settings_groups say what it asked for and got, so the user can be told what it still needs. keys_withheld lists granted keys the frame cannot get because it is not allowed the account's keys at all (frame_get: service_settings_enabled false, common on a frame linked from its own screen): tell the user, and only with their go-ahead call frame_service_settings_enable.",
+        "Install a scene on a frame. Requires confirm=true (it changes what the physical frame shows). The scene comes from exactly one of: scene_id (a store scene — public, or one of the account's own — from scenes_list / store_browse), url (a scene page on the store, a scene zip, or a scenes.json), or scenes (raw scene JSON, saved first as a new private scene). Re-installing an already-installed scene re-pins it (or, unpinned, moves it to the newest published version) and pushes it again; the frame's other scenes stay at the versions they hold. activate=true switches the frame to it right away. settings_groups GRANTS the scene the account's service API keys it declares (any service its apps name: unsplash, openAI, homeAssistant, …), the default key of each, and service_keys picks another of the account's keys (or none) per runtime scene — a scene's own declaration is only a request, and without a grant it is delivered none of them; the answer's declared_settings_groups / granted_settings_groups say what it asked for and got, so the user can be told what it still needs. keys_withheld lists granted keys the frame cannot get because it is not allowed the account's keys at all (frame_get: service_settings_enabled false, common on a frame linked from its own screen): tell the user, and only with their go-ahead call frame_service_settings_enable.",
       inputSchema: {
         activate: z.boolean().optional(),
         confirm: z
@@ -370,6 +391,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         name: z.string().max(128).optional().describe("Name for a scene created from `scenes`."),
         scene_version: z.number().int().min(1).nullable().optional(),
         settings_groups: settingsGroups,
+        service_keys: serviceKeys,
         ...sceneSourceSchema,
       },
     },

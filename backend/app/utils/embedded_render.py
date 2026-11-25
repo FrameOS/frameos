@@ -213,6 +213,7 @@ async def render_scene(
     *,
     scene_id: str | None = None,
     settings: dict | None = None,
+    service_keys: dict | None = None,
     scenes_override: list | None = None,
     scene_states: dict | None = None,
     assets_dir: str | None = None,
@@ -241,6 +242,9 @@ async def render_scene(
     config forwarded to the runtime. The returned state is
     {"sceneId": ..., "state": {...}} and the saved-assets report is
     {"files": [...], "skippedOverBudget": n}; either is None when unavailable.
+    ``service_keys`` is the frame's `serviceKeys` (docs/service-keys.md): each
+    scene's own keys, handed to a runtime that takes them
+    (`frameos_wasm_set_service_keys`); ``settings`` stays for one that does not.
     ``device_limits`` (device_limits.esp32_device_limits) renders under a
     device's memory ceiling and as that device. ``control_events``
     ([{"name", "payload", "origin"}]) are the events a control plane sent a
@@ -274,6 +278,7 @@ async def render_scene(
         "name": frame.name or f"frame {frame.id}",
         "timeZone": frame_timezone(frame.timezone),
         "settingsJson": json.dumps(settings or {}),
+        **({"serviceKeysJson": json.dumps(service_keys, separators=(",", ":"))} if service_keys else {}),
         "scenesJson": json.dumps(scenes, separators=(",", ":")),
         # What the scene's HTTP may reach (scene_network_policy). The renderer
         # runs on the backend's network, so this is what keeps a published
@@ -386,6 +391,7 @@ async def render_scene_rgba_and_state(
     *,
     scene_id: str | None = None,
     settings: dict | None = None,
+    service_keys: dict | None = None,
     scenes_override: list | None = None,
     scene_states: dict | None = None,
     assets_dir: str | None = None,
@@ -409,6 +415,7 @@ async def render_scene_rgba_and_state(
         height,
         scene_id=scene_id,
         settings=settings,
+        service_keys=service_keys,
         scenes_override=scenes_override,
         scene_states=scene_states,
         assets_dir=assets_dir,

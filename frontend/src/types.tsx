@@ -1128,8 +1128,13 @@ export interface AppConfig {
   version?: string
   /** A built-in app the scene's program runs itself, as JavaScript (frameos/scene_compiler.nim `ProgramApps`): no Nim app on a frame */
   program?: boolean
-  /** List of top level settings exported for this app */
+  /** The services (settings namespaces) this app reads keys of: docs/service-keys.md */
   settings?: string[]
+  /** Services the registry (repo/services.json) does not know, defined by the app: title and fields. */
+  services?: Record<
+    string,
+    { title?: string; description?: string; fields?: { name: string; label?: string; secret?: boolean }[] }
+  >
   /**
    * What the app may do on the frame (utils/sceneAccess.ts): "shell", "files" (read any file),
    * "assets" (read the assets folder), "assets-write" (write it), "frame" (frameos.frame: the
@@ -1456,6 +1461,11 @@ export interface FrameScene {
   /** The layout this installed copy wears, beside the scene like `eventMap`
    * (docs/scene-layouts.md): the cloud's assignment row keeps it as `layouts`. */
   layout?: SceneLayoutRef | null
+  /** Which key of each service its apps declare this installed copy gets
+   * (docs/service-keys.md): `"default"`, a named key's id, or null = refused.
+   * The install's like `eventMap`: the cloud's assignment row keeps it as
+   * `service_keys`, and templates, zips and store versions never carry it. */
+  keys?: Record<string, string | null>
 }
 
 export interface FrameSceneIndexed {
@@ -1514,6 +1524,10 @@ export interface FrameEvent {
 }
 
 export interface FrameOSSettings {
+  /** Any service's default key is the group named after it (docs/service-keys.md). */
+  [serviceGroup: string]: any
+  /** The named keys beyond each service's default: id → {service, name, values}. */
+  serviceCredentials?: Record<string, { service: string; name: string; values: Record<string, string> }>
   defaults?: {
     timezone?: string
     wifiSSID?: string

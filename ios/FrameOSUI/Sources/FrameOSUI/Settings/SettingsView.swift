@@ -112,9 +112,18 @@ struct ServiceKeysView: View {
     @State private var edits: [String: [String: String]] = [:]
     @State private var loading = false
 
+    /// The settings groups that are the planes' own, never a service (docs/service-keys.md).
+    static let planeGroups: Set<String> = [
+        "defaults", "posthog", "repositories", "personal", "ssh_keys",
+        "buildEnvironment", "buildHost", "modalSandbox", "serviceCredentials",
+    ]
+
     /// The SPA's ServicesSettingsForm groups; a backend's AI chat has a key of its own.
+    /// Then any other service the settings hold (a service is any name: repo/services.json
+    /// and the apps' own), its fields named as they are stored. Named keys beyond a
+    /// service's default (`serviceCredentials`) are edited in the web app and kept as they are.
     var groups: [(key: String, title: String, fields: [(String, String)])] {
-        [
+        let known: [(key: String, title: String, fields: [(String, String)])] = [
         ("openAI", "OpenAI", app.current?.kind == .backend
             ? [("apiKey", "API key for frames"), ("backendApiKey", "API key for AI chat")]
             : [("apiKey", "API key for frames")]),
@@ -123,6 +132,15 @@ struct ServiceKeysView: View {
         ("immich", "Immich", [("url", "URL"), ("apiKey", "API key")]),
         ("github", "GitHub", [("api_key", "API key")]),
         ]
+        let knownKeys = Set(known.map(\.key) + ["frameOS"])
+        let others = settings.keys.sorted().compactMap { key -> (key: String, title: String, fields: [(String, String)])? in
+            guard !knownKeys.contains(key), !Self.planeGroups.contains(key),
+                  let values = settings[key]?.objectValue else { return nil }
+            let fields = values.keys.sorted().filter { values[$0]?.stringValue != nil }.map { ($0, $0) }
+            if fields.isEmpty { return nil }
+            return (key: key, title: key, fields: fields)
+        }
+        return known + others
     }
 
     var body: some View {

@@ -362,8 +362,9 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   ## Safe to call repeatedly; every call resets scenes and state.
   ##
   ## settingsJson carries the frame's assembled settings (app API keys etc.),
-  ## the same object the device receives in frame.json; apps read secrets from
-  ## frameConfig.settings{"openAI"}{"apiKey"} and the like.
+  ## the same object the device receives in frame.json, and beside the groups
+  ## the plane's `serviceKeys` when it sends one; apps read their scene's keys
+  ## through service_keys.nim.
   try:
     host.dropScene()
     # One scene at a time, no frame page and every picture in the render,
@@ -391,12 +392,20 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     clearRenderPaletteOverride()
 
     var settings = %*{}
+    var serviceKeys: JsonNode = nil
     let settingsText = $settingsJson
     if settingsText.len > 0:
       try:
         let parsed = parseJson(settingsText)
         if parsed.kind == JObject:
           settings = parsed
+          # The plane's `serviceKeys` rides in the same object
+          # (docs/service-keys.md "On the wire"): which scene gets which key.
+          let keys = settings{"serviceKeys"}
+          if not keys.isNil:
+            settings.delete("serviceKeys")
+            if keys.kind == JObject:
+              serviceKeys = keys
       except CatchableError:
         setLastError("init: could not parse settings JSON; running without secrets")
 
@@ -418,6 +427,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
       flip: "",
       scalingMode: "cover",
       settings: settings,
+      serviceKeys: serviceKeys,
       assetsPath: "/srv/assets",
       saveAssets: %*false,
       logToFile: "",
@@ -711,6 +721,21 @@ proc panelTable(pixelFormat: int): seq[(int, int, int)] =
   of 7: spectra6ColorPalette
   else: @[]
 
+proc frameos_wasm_set_service_keys(json: cstring): bool {.exportc, cdecl.} =
+  ## The plane's `serviceKeys` (docs/service-keys.md "On the wire"), after
+  ## init: which key each scene's apps read. `null` (or anything not an
+  ## object) takes them away, and the apps read `settings` as before.
+  if frameConfig.isNil:
+    setLastError("setServiceKeys: init not called")
+    return false
+  try:
+    let node = parseJson($json)
+    frameConfig.serviceKeys = if node.kind == JObject: node else: nil
+    true
+  except CatchableError:
+    setLastError("setServiceKeys: not JSON")
+    false
+
 proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
   ## What else of frame.json the frame's own runtime keeps, for a control
   ## plane rendering for a frame (docs/server-rendering.md):
@@ -738,6 +763,10 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
     if node.hasKey("eventMap"):
       let rules = node["eventMap"]
       frameConfig.eventMap = if rules.kind == JArray: rules else: nil
+    if node.hasKey("serviceKeys"):
+      # Which scene gets which key (docs/service-keys.md "On the wire").
+      let keys = node["serviceKeys"]
+      frameConfig.serviceKeys = if keys.kind == JObject: keys else: nil
     if node.hasKey("palette"):
       var list = node["palette"]
       if list.kind == JObject:

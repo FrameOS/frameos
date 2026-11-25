@@ -1190,6 +1190,14 @@ export const frameSceneAssignments = pgTable(
     // { [runtime scene id]: {sceneId, state?} }, written onto each pushed
     // scene as `layout`. Kept like event_maps. NULL = none.
     layouts: jsonb("layouts"),
+    // Service keys per runtime scene (migration 0086, docs/service-keys.md):
+    // what each runtime scene of the assigned version declares, settled at
+    // each push like is_layout ({ [runtime scene id]: [service, …] }; NULL =
+    // never settled), and the owner's key for each service, the install's
+    // own and kept like event_maps ({ [runtime scene id]: {service: "default"
+    // | credential id | null} }; NULL = none chosen, the grant decides).
+    sceneServices: jsonb("scene_services"),
+    serviceKeys: jsonb("service_keys"),
     // Every runtime scene of the assigned version is a layout (settings.
     // isLayout), so a voice turn does not offer it as a scene. Settled with
     // the grants, while the push has the version open.

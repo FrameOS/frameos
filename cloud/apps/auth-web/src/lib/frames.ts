@@ -29,13 +29,13 @@ import {
   readBlob,
   storeBlob,
 } from "./blobs";
-import { deviceDeliverableFields } from "./frame-service-settings";
 import { frameLanAccess } from "./frame-lan-access";
 import { frameOwningBackend } from "./frame-backend-owner";
 import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
-import { requiredSettingsForScenes } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
+import { isServiceId } from "../../../../../frontend/src/utils/serviceKeys";
+import { sceneServicesOf, type SceneServices } from "./scene-services";
 import { scenesForFrame } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
@@ -1731,8 +1731,9 @@ export async function frameTakesServiceSettings(
 // "never computed" (a NULL column, or garbage from a hand-edited row) and,
 // on the frame row, tells the pull route to compute and backfill it; an
 // empty array means "computed, nothing" and is NOT recomputed. Screened
-// through deviceDeliverableFields so a group retired from the deliverable
-// list can never reappear from an old row, and de-duplicated.
+// to service ids (docs/service-keys.md: any name the registry or an app
+// gives a service, never a plane's own settings group nor a name
+// Object.prototype has) and de-duplicated.
 export function readServiceSettingGroups(
   value: unknown,
 ): string[] | undefined {
@@ -1743,7 +1744,9 @@ export function readServiceSettingGroups(
     ...new Set(
       value.filter(
         (entry): entry is string =>
-          typeof entry === "string" && deviceDeliverableFields.has(entry),
+          typeof entry === "string" &&
+          isServiceId(entry) &&
+          !Object.prototype.hasOwnProperty.call(Object.prototype, entry),
       ),
     ),
   ];
@@ -1755,9 +1758,7 @@ export function readServiceSettingGroups(
 // A declaration is a REQUEST — the owner's per-assignment grant decides
 // what the device receives (grantedSettingsGroupsForAssignment).
 export function declaredServiceSettingGroups(scenes: unknown[]): string[] {
-  return requiredSettingsForScenes(scenes as Record<string, unknown>[])
-    .map((group) => group.key)
-    .filter((key) => deviceDeliverableFields.has(key));
+  return [...new Set(Object.values(sceneServicesOf(scenes)).flat())].sort();
 }
 
 // What ONE assignment's scene may actually receive: the owner's grant,
@@ -1831,6 +1832,7 @@ export async function storeDeclaredSettingsGroups(
       .update(frameSceneAssignments)
       .set({
         declaredSettingsGroups: assignment.declaredSettingsGroups,
+        sceneServices: assignment.sceneServices,
         updatedAt: new Date(),
       })
       .where(eq(frameSceneAssignments.id, assignment.id));
@@ -1957,6 +1959,10 @@ export type AssignmentSettingsGroups = {
   declaredSettingsGroups: string[];
   isLayout: boolean;
   grantedSettingsGroups: unknown;
+  // What each runtime scene of the assembled version declares
+  // (scene-services.ts), and the owner's key per runtime scene (raw jsonb).
+  sceneServices: SceneServices;
+  serviceKeys: unknown;
 };
 
 // Build the interpreted-scene payload for a frame from its assignments. The
@@ -2019,6 +2025,7 @@ export async function buildScenesPayloadForFrame(
       sceneStatus: storeScenes.status,
       sceneVersion: frameSceneAssignments.sceneVersion,
       sceneVisibility: storeScenes.visibility,
+      serviceKeys: frameSceneAssignments.serviceKeys,
     })
     .from(frameSceneAssignments)
     .innerJoin(storeScenes, eq(storeScenes.id, frameSceneAssignments.sceneId))
@@ -2156,12 +2163,15 @@ export async function buildScenesPayloadForFrame(
     );
     scenes.push(...stamped);
     sceneNames.push(assignment.sceneName);
+    const sceneServices = sceneServicesOf(stamped);
     assignmentGroups.push({
-      declaredSettingsGroups: declaredServiceSettingGroups(stamped),
+      declaredSettingsGroups: [...new Set(Object.values(sceneServices).flat())].sort(),
       grantedSettingsGroups: assignment.grantedSettingsGroups,
       id: assignment.id,
       isLayout: versionIsLayout(stamped),
       sceneId: assignment.sceneId,
+      sceneServices,
+      serviceKeys: assignment.serviceKeys,
     });
     // The digest of just this assignment's slice of the payload. Comparing
     // it against the copy stored at the last device-acked push is what lets

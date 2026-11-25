@@ -364,12 +364,10 @@ export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly strin
   backend: null,
   frameAdmin: null,
   cloud: [
-    'settings-gallery',
+    // Every service's keys (docs/service-keys.md), one card each.
+    'settings-service-keys',
+    // The account's own OpenAI key and model for the workspace's AI chat.
     'settings-openai',
-    'settings-home-assistant',
-    'settings-github',
-    'settings-immich',
-    'settings-unsplash',
     // Public keys for the SD card builder (the cloud stores no private keys).
     'settings-ssh',
   ],

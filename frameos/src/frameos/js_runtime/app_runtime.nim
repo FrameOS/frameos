@@ -53,6 +53,7 @@ import frameos/ui/events
 import frameos/render_scale
 import frameos/panel_shape
 import frameos/scene_store_hooks
+import frameos/service_keys
 import frameos/scene_code_hooks
 import frameos/frame_settings_hooks
 when not defined(frameosEmbedded):
@@ -540,6 +541,29 @@ proc env(ctx: ptr JSContext): JsAppEvalEnv =
   ## scene's realm, run at this call's checkpoint, gets nothing).
   if not currentEnv.isNil and currentEnv.ctx == ctx: currentEnv else: nil
 
+proc appSceneId(e: JsAppEvalEnv): string =
+  ## The scene the app's node belongs to: whose keys it gets (a split's
+  ## panel is its own scene, not the split's).
+  if e == nil or e.owner.scene.isNil: "" else: e.owner.scene.id.string
+
+proc keysFilled(e: JsAppEvalEnv, url: var string, headers: var seq[SimpleHttpHeader]): string =
+  ## A request's `frameos.secret` placeholders filled for the app's scene
+  ## (docs/service-keys.md): "" when it may go, else the error its call
+  ## answers, naming the origin only. Nothing to do costs a search.
+  if not hasPlaceholder(url, headers):
+    return ""
+  if e == nil or e.runtime.isNil:
+    return "key not allowed: undeclared"
+  let config = e.owner.frameConfig
+  let filled = fillKeys(config.settings, config.serviceKeys, localKeys(), appSceneId(e),
+    e.runtime.settingsKeys, url, headers)
+  if filled.refused.len > 0:
+    result = "key not allowed: " & filled.refused & " (" & originText(url) & ")"
+    frameos_apps.logError(e.owner, result)
+    return
+  url = filled.url
+  headers = filled.headers
+
 proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
   let obj = JS_NewObject(ctx)
   discard JS_SetPropertyStr(ctx, obj, "__frameosUndef", nimBoolToJS(ctx, true))
@@ -823,8 +847,11 @@ proc jsRecall(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
 
 proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
-  let urlStr = toNimString(ctx, url)
+  var urlStr = toNimString(ctx, url)
   if urlStr.len == 0:
+    return nimStringToJS(ctx, "")
+  var noHeaders: seq[SimpleHttpHeader]
+  if keysFilled(e, urlStr, noHeaders).len > 0:
     return nimStringToJS(ctx, "")
 
   try:
@@ -851,9 +878,12 @@ proc jsFetchJson(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
   ## logged, as `fetchText` answers ""; text that is not JSON throws, as
   ## JSON.parse did.
   let e = env(ctx)
-  let urlStr = toNimString(ctx, url)
+  var urlStr = toNimString(ctx, url)
   var parsed = jsNull(ctx)
   if urlStr.len == 0:
+    return parsed
+  var noHeaders: seq[SimpleHttpHeader]
+  if keysFilled(e, urlStr, noHeaders).len > 0:
     return parsed
   proc parse(text: cstring, len: int) =
     if len > 0:
@@ -1049,7 +1079,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
   var resBody = ""
   var hasBody = false
 
-  let urlStr = toNimString(ctx, url)
+  var urlStr = toNimString(ctx, url)
   var options = optionsArg(ctx, optionsJson)
 
   try:
@@ -1072,6 +1102,9 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     if not headersNode.isNil and headersNode.kind == JObject:
       for name, value in headersNode.pairs:
         headers.add((name, value.getStr($value)))
+    let refused = keysFilled(e, urlStr, headers)
+    if refused.len > 0:
+      raise newException(ValueError, refused)
     # The scene's own ceiling for this request, then the run's wall-clock
     # deadline (run_budget.nim): a 600 s tarpit used to hold the render
     # thread until the systemd watchdog fired.
@@ -1274,7 +1307,7 @@ proc keptTargetFor*(runtime: JsAppRuntime, owner: AppRoot, like: Image,
     runtime.keptPictureTarget(owner, like, width, height,
       keptDecodeSize(width, height, sourceWidth, sourceHeight, fit))
 
-proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKeep = false): JsonNode
+proc fetchImageJson(e: JsAppEvalEnv, urlText: string, options: JsonNode, forceKeep = false): JsonNode
 
 proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Downloads and decodes an image natively, so the bytes never enter the JS
@@ -1327,7 +1360,7 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
     return nimStringToJS(ctx, """{"image":null,"error":"no app context"}""")
   nimStringToJS(ctx, $fetchImageJson(e, toNimString(ctx, url), optionsArg(ctx, optionsJson)))
 
-proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKeep = false): JsonNode =
+proc fetchImageJson(e: JsAppEvalEnv, urlText: string, options: JsonNode, forceKeep = false): JsonNode =
   ## fetchImage's work (jsFetchImage above), also for an `<img src>` fetched
   ## in the render (js_async.nim urlImage): `keep` as the
   ## option (`forceKeep`). The answer as JSON.
@@ -1338,6 +1371,11 @@ proc fetchImageJson(e: JsAppEvalEnv, urlStr: string, options: JsonNode, forceKee
     if not headersNode.isNil and headersNode.kind == JObject:
       for name, value in headersNode.pairs:
         headers.add((name, value.getStr($value)))
+    var urlStr = urlText
+    let refused = keysFilled(e, urlStr, headers)
+    if refused.len > 0:
+      response["error"] = %refused
+      return response
 
     let owner = e.owner
     let context = e.context
@@ -2299,35 +2337,42 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
     return jsNull(ctx)
 
 proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
-  ## Read a value from frameConfig.settings, e.g. getSetting("openAI", "apiKey"),
-  ## with the keys typed on the frame over it.
-  ## Only namespaces the app declares in its config.json "settings" list are
-  ## accessible; the declaration travels with the scene so access is auditable.
+  ## `frameos.getSetting(service, field)`: the app's own scene's key
+  ## (docs/service-keys.md "On the frame", service_keys.nim). Only services
+  ## the app declares in its config.json "settings" list are answered; the
+  ## declaration travels with the scene so access is auditable.
+  ## `frameos.secret(service, field)` comes here too, its path led by
+  ## `{{key:`: the placeholder a request fills on its way out, never the key.
   let e = env(ctx)
   if e == nil:
     return jsUndefSentinel(ctx)
 
-  var path: JsonNode
+  var path: seq[string]
   try:
-    path = parseJson(toNimString(ctx, pathJson))
+    let parsed = parseJson(toNimString(ctx, pathJson))
+    if parsed.kind == JArray:
+      for part in parsed.elems:
+        path.add part.getStr()
   except CatchableError:
     return jsUndefSentinel(ctx)
-  if path.isNil or path.kind != JArray or path.len == 0:
-    return jsUndefSentinel(ctx)
-
-  let namespace = path[0].getStr()
+  let asSecret = path.len == 3 and path[0] == "{{key:"
+  let namespace = if asSecret: path[1] else: (if path.len > 0: path[0] else: "")
   if namespace.len == 0 or namespace notin e.runtime.settingsKeys:
     frameos_apps.logError(e.owner,
       "JS app getSetting: settings namespace \"" & namespace &
       "\" is not declared in the app config's \"settings\" list")
     return jsUndefSentinel(ctx)
-
-  # A key typed on the frame wins over the one a plane sent (frame_service_keys.nim).
-  var node = withServiceKeys(e.owner.frameConfig.settings, namespace)
-  for part in path.items:
-    if node.isNil:
+  let config = e.owner.frameConfig
+  if asSecret:
+    # undefined, too, when the scene has no such key: the app can say which
+    # key is missing, and that is all it learns of it.
+    if not isFieldName(path[2]) or serviceValue(config.settings, config.serviceKeys, localKeys(),
+        appSceneId(e), namespace, path[2]).len == 0:
       return jsUndefSentinel(ctx)
-    node = node{part.getStr()}
+    return nimStringToJS(ctx, placeholder(namespace, path[2]))
+
+  let node = settingValue(config.settings, config.serviceKeys, localKeys(), appSceneId(e),
+    e.runtime.settingsKeys, path)
   if node.isNil:
     return jsUndefSentinel(ctx)
   return jsonToJS(ctx, node)
@@ -3679,6 +3724,7 @@ const appJsPrelude* = compactJs("""
     getSetting: (...path) => __frameosUnwrap(jsGetSetting(
       JSON.stringify(path.flat().map((p) => String(p)))
     )),
+    secret: (service, field) => __frameosUnwrap(jsGetSetting(JSON.stringify(["{{key:", String(service), String(field)]))),
     setState: (key, value) => jsSetState(
       String(key || ""),
       JSON.stringify(value === undefined ? null : value, __appReplacer)
@@ -5188,6 +5234,13 @@ proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
             min(drawn.height, context.image.height), drawn)
   finally:
     runtime.clearTransientImages()
+
+proc dynamicJsAppServices*(app: AppRoot): seq[string] =
+  ## The services a JS app's config.json declares (its `settings` list).
+  if app.isDynamicJsApp() and not DynamicJsApp(app).runtime.isNil:
+    DynamicJsApp(app).runtime.settingsKeys
+  else:
+    @[]
 
 proc dynamicJsAppSubscribes*(app: AppRoot): bool =
   app.isDynamicJsApp() and not DynamicJsApp(app).events.isNil and DynamicJsApp(app).events.kind == JArray

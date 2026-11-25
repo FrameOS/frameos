@@ -415,6 +415,12 @@ export interface CloudSceneAssignmentInput {
   /** The layout each runtime scene wears (docs/scene-layouts.md), the same way: omitted keeps, null clears. */
   layouts?: Record<string, SceneLayoutRef> | null | undefined
   /**
+   * Which key each runtime scene gets per service it declares
+   * (docs/service-keys.md): runtime scene id → service → `"default"`, a named
+   * key's id, or null (refused). Omitted keeps, null clears.
+   */
+  service_keys?: Record<string, Record<string, string | null>> | null | undefined
+  /**
    * Move this UNPINNED scene to the store's newest version on this push.
    * Without it a scene the frame already has is pushed again at the version
    * the frame holds: replacing the list never updates a scene as a side
@@ -431,6 +437,7 @@ function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<str
     ...(scene.settings_groups ? { settings_groups: scene.settings_groups } : {}),
     ...(scene.event_maps !== undefined ? { event_maps: scene.event_maps } : {}),
     ...(scene.layouts !== undefined ? { layouts: scene.layouts } : {}),
+    ...(scene.service_keys !== undefined ? { service_keys: scene.service_keys } : {}),
   }
 }
 
@@ -450,6 +457,8 @@ export async function addCloudFrameStoreScene(
     sceneVersion?: number | null
     settingsGroups?: readonly string[]
     layouts?: Record<string, SceneLayoutRef>
+    /** The key each runtime scene gets per service (docs/service-keys.md), as the owner chose installing it. */
+    serviceKeys?: Record<string, Record<string, string | null>>
     activate?: boolean
   } = {}
 ): Promise<{ alreadyAssigned: boolean }> {
@@ -461,6 +470,9 @@ export async function addCloudFrameStoreScene(
       ...(options.sceneVersion ? { scene_version: options.sceneVersion } : {}),
       ...(options.settingsGroups ? { settings_groups: [...options.settingsGroups] } : {}),
       ...(options.layouts && Object.keys(options.layouts).length > 0 ? { layouts: options.layouts } : {}),
+      ...(options.serviceKeys && Object.keys(options.serviceKeys).length > 0
+        ? { service_keys: options.serviceKeys }
+        : {}),
       ...(options.activate ? { activate: true } : {}),
     }),
   })

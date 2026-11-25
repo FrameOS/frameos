@@ -12,7 +12,8 @@ const fail = (message) => (frameos.error(message), '')
 export function get(app) {
   const { system, user, model } = app.config
   if (!system && !user) return fail('No system or user prompt provided in app config.')
-  const apiKey = frameos.getSetting('openAI', 'apiKey')
+  // A placeholder the frame fills towards OpenAI alone (docs/service-keys.md); the key on older frames.
+  const apiKey = (frameos.secret ?? frameos.getSetting)('openAI', 'apiKey')
   if (!apiKey) return fail('Please provide an OpenAI API key in the settings.')
 
   frameos.log({ model, systemPromptChars: bytes(system), userPromptChars: bytes(user) })

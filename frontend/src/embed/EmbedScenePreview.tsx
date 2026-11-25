@@ -19,7 +19,7 @@ import { Tooltip } from '../components/Tooltip'
 import { visiblePublicStateFields } from '../utils/showIf'
 import { locatedValues, locationFieldPair } from '../utils/geolocation'
 import { appsModel } from '../models/appsModel'
-import { collectSecretSettingsFromScenes, settingsDetails } from '../scenes/frame/panels/secretSettings'
+import { collectSecretSettingsFromScenes, settingsDetailsFor } from '../scenes/frame/panels/secretSettings'
 import { collectScenePreviewPayloadScenes } from '../scenes/frame/panels/Scenes/scenesLogic'
 import { livePreviewLogic } from '../scenes/frame/panels/Scenes/livePreviewLogic'
 import { formatTimestamp, logLineColor, renderLogLine } from '../scenes/frame/panels/Scenes/LivePreviewModal'
@@ -106,7 +106,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
   const applySettings = (): void => {
     const nested: Record<string, Record<string, any>> = {}
     for (const settingKey of requiredSettingKeys) {
-      for (const field of settingsDetails[settingKey]?.fields ?? []) {
+      for (const field of settingsDetailsFor(settingKey).fields) {
         const value = settingsForm[field.path.join('.')]?.trim()
         if (value) {
           const [group, key] = field.path as [string, string]
@@ -309,7 +309,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
             Keys stay in this browser tab and are used only by the preview.
           </div>
           {requiredSettingKeys.map((settingKey) => {
-            const details = settingsDetails[settingKey]
+            const details = settingsDetailsFor(settingKey)
             if (!details) {
               return null
             }

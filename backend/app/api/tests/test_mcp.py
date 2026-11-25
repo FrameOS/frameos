@@ -15,6 +15,7 @@ from app.mcp.tools import photos as photo_tools
 from app.mcp.tools.frames import duplicate_scenes
 from app.models import new_frame
 from app.models.frame import Frame
+from app.models.settings import Settings
 from app.utils import photos as photos_utils
 
 # Every tool that changes what a physical frame does, shows or stores, or
@@ -311,7 +312,11 @@ async def test_installing_a_store_scene_grants_what_it_declares(async_client, db
     assert granted["declared_settings_groups"] == ["unsplash"]
     assert granted["granted_settings_groups"] == ["unsplash"]
     db.expire_all()
-    assert frame_row(db, frame.id).service_setting_groups == ["unsplash"]
+    # The grant is that install's (docs/service-keys.md), never the frame's:
+    # the first store scene still gets nothing.
+    row = frame_row(db, frame.id)
+    assert not row.service_setting_groups
+    assert [scene.get("keys") for scene in row.scenes] == [None, {"unsplash": "default"}]
 
     # The owner's own scene declares too, but it needs no grant.
     own = result_json(await call(async_client, "frame_scene_install", {
@@ -320,7 +325,49 @@ async def test_installing_a_store_scene_grants_what_it_declares(async_client, db
     }))
     assert own["declared_settings_groups"] == []
     db.expire_all()
-    assert frame_row(db, frame.id).service_setting_groups == ["unsplash"]
+    assert not frame_row(db, frame.id).service_setting_groups
+
+
+@pytest.mark.asyncio
+async def test_installing_with_keys_binds_them_and_an_update_keeps_them(async_client, db: Session, redis):
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    db.add(Settings(project_id=frame.project_id, key="serviceCredentials", value={
+        "k_work00000001": {"service": "openAI", "name": "Work", "values": {"apiKey": "sk-work"}},
+    }))
+    db.commit()
+    scene = {
+        "id": "art",
+        "name": "Art",
+        "origin": {"storeSceneId": "0b3f7c1e-1111-4222-8333-944455556666", "version": "3"},
+        "nodes": [{
+            "id": "n1", "type": "app", "position": {"x": 0, "y": 0},
+            "data": {"keyword": "art", "sources": {"config.json": json.dumps({"name": "Art", "settings": ["openAI"]})}},
+        }],
+        "edges": [],
+    }
+    missing = await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": scene, "deploy": "none",
+        "keys": {"openAI": "k_gone00000001"},
+    })
+    assert "No such key" in json.dumps(missing)
+
+    installed = result_json(await call(async_client, "frame_scene_install", {
+        "confirm": True, "frame_id": frame.id, "scenes": scene, "deploy": "none", "preserve_ids": True,
+        "keys": {"openAI": "k_work00000001", "unsplash": "default"},
+    }))
+    assert installed["granted_settings_groups"] == ["openAI"]
+    db.expire_all()
+    assert frame_row(db, frame.id).scenes[0]["keys"] == {"openAI": "k_work00000001"}
+    from app.models.frame import get_frame_json
+    data = get_frame_json(db, frame_row(db, frame.id))
+    assert data["serviceKeys"]["scenes"] == {"art": {"openAI": "k_work00000001"}}
+
+    # A new version of the scene keeps the key its install uses.
+    result_json(await call(async_client, "frame_scene_update", {
+        "confirm": True, "frame_id": frame.id, "deploy": "none", "scene": {**scene, "name": "Art 2"},
+    }))
+    db.expire_all()
+    assert frame_row(db, frame.id).scenes[0]["keys"] == {"openAI": "k_work00000001"}
 
 
 @pytest.mark.asyncio

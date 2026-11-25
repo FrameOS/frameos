@@ -29,6 +29,7 @@ import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
 import frameos/scene_code_hooks
 import frameos/scene_icon
+import frameos/service_keys
 from frameos/utils/memory import panelMemoryBytes, waitingTextDrops
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
@@ -62,6 +63,26 @@ proc sceneStateLoad(sceneId: cstring): cstring {.importc: "frameos_nim_scene_sta
   ## JSON this side frees, or nil.
 proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_nim_scene_state_save", cdecl.}
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
+
+const LocalKeysStateId = "__frameos/localKeys"
+  ## The keys typed on the frame (docs/service-keys.md "Typing a key on the
+  ## frame") are kept in the scene-state store under an id no scene has:
+  ## one file on /state, written when they change, no C of their own.
+
+proc loadLocalKeys(): string {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    let raw = sceneStateLoad(LocalKeysStateId.cstring)
+    if raw != nil:
+      result = $raw
+      cFree(raw)
+
+proc saveLocalKeys(text: string): bool {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    sceneStateSave(LocalKeysStateId.cstring, text.cstring)
+
+localKeysLoadHook = loadLocalKeys
+localKeysSaveHook = saveLocalKeys
+
 proc log*(msg: string) =
   espLog(msg.cstring)
 

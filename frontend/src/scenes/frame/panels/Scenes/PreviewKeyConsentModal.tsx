@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '../../../../components/Button'
 import { Checkbox } from '../../../../components/Checkbox'
 import { Modal } from '../../../../components/Modal'
-import { settingsDetails } from '../secretSettings'
+import { settingsDetailsFor } from '../secretSettings'
 import { previewKeyConsentLogic } from './previewKeyConsentLogic'
 
 /**
@@ -31,7 +31,7 @@ export function PreviewKeyConsentModal(): JSX.Element | null {
 
   const remembered = pending.groups.filter((group) => remember[group])
   const sceneList = pending.sceneNames.map((name) => `"${name}"`).join(', ')
-  const groupTitle = (group: string): string => settingsDetails[group]?.title ?? group
+  const groupTitle = (group: string): string => settingsDetailsFor(group).title
 
   return (
     <Modal

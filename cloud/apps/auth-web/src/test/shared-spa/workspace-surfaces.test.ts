@@ -183,13 +183,11 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     // keys for the SD card builder, and nothing else: no local account,
     // deploy defaults, build environment, font store, backend PostHog or
     // backend system info.
+    // Every service's keys are one section (docs/service-keys.md), the
+    // account's own OpenAI key for the AI chat another.
     expect(allowedGlobalSettingsSections.cloud).toEqual([
-      "settings-gallery",
+      "settings-service-keys",
       "settings-openai",
-      "settings-home-assistant",
-      "settings-github",
-      "settings-immich",
-      "settings-unsplash",
       "settings-ssh",
     ]);
     for (const section of [
@@ -203,10 +201,12 @@ describe("cloud mode hides everything the protocol cannot do", () => {
     ]) {
       expect(globalSettingsSectionIsAllowed("cloud", section)).toBe(false);
     }
-    // The storable groups (account-settings.ts) and the visible sections
-    // must describe the same six services.
-    expect(globalSettingsSectionIsAllowed("cloud", "settings-unsplash")).toBe(
+    expect(globalSettingsSectionIsAllowed("cloud", "settings-service-keys")).toBe(
       true,
+    );
+    // The Home Assistant sync is a backend's alone.
+    expect(globalSettingsSectionIsAllowed("cloud", "settings-home-assistant")).toBe(
+      false,
     );
     // The backend keeps everything (null = all); the on-device admin never
     // mounts this page (urls.settings() routes to the frame's own panel),

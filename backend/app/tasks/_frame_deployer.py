@@ -18,7 +18,8 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.models.apps import get_scene_apps_from_scenes
-from app.models.frame import SERVICE_SETTING_GROUPS, Frame, get_frame_json, get_interpreted_scenes_json
+from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
+from app.utils.service_keys import is_service_id
 from app.utils.frame_secrets import SETTINGS_FINGERPRINTS_KEY
 from app.utils.scene_execution import scene_is_interpreted
 from app.models.log import new_log as log
@@ -315,7 +316,7 @@ class FrameDeployer:
         if not isinstance(held, dict):
             return
         kept: list[str] = []
-        for group in SERVICE_SETTING_GROUPS:
+        for group in sorted(g for g in held if is_service_id(g)):
             value = held.get(group)
             if not isinstance(value, dict) or not value or group in shipped_before:
                 continue

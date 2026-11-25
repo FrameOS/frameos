@@ -263,6 +263,12 @@
         }
         return at;
       },
+      // In a test the placeholder is already filled: what the request carries
+      // once the frame has put the scene's key in (docs/service-keys.md).
+      secret: (service, field) => {
+        const group = app().settings[String(service)];
+        return group && typeof group === "object" ? group[String(field)] : undefined;
+      },
       fetchText: (url) => {
         const reply = frameos.httpRequest(String(url || ""), { method: "GET" });
         if (!reply || reply.status < 200 || reply.status >= 300) {

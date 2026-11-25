@@ -6,13 +6,10 @@ import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
 import {
   buildServiceSettingsPayload,
+  frameServiceKeysScenes,
   serviceSettingsResponseBody,
 } from "../../../../../src/lib/frame-service-settings";
-import {
-  computeAndStoreServiceSettingGroups,
-  frameServiceSettingsScope,
-  readServiceSettingGroups,
-} from "../../../../../src/lib/frames";
+import { frameServiceSettingsScope } from "../../../../../src/lib/frames";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
@@ -26,7 +23,8 @@ export const runtime = "nodejs";
 // `Authorization: Bearer …`, not a browser session:
 //
 //   GET /api/frames/{id}/service-settings
-//   -> 200 {"settings": {group: {field: value}}, "groups": [group, …]}
+//   -> 200 {"settings": {group: {field: value}}, "groups": [group, …],
+//           "serviceKeys": {v, keys, scenes, services}}   (docs/service-keys.md)
 //   -> 304 when the device's If-None-Match still matches
 //
 // A PULL, never a push. Keys must not enter the durable command queue:
@@ -97,30 +95,26 @@ export async function GET(
     return identityLimited;
   }
 
-  // Which groups the owner GRANTED this frame's scenes (the union over its
-  // assignments — a scene's own declaration is only a request). Denormalized
-  // on the frame row because recomputing means unzipping every assigned
+  // Which key each runtime scene on the frame gets (docs/service-keys.md):
+  // what it declares and what the owner bound or granted it, all settled on
+  // the assignment rows because recomputing means unzipping every assigned
   // scene (32 MiB each at the store's cap) — far too much for a per-poll
-  // route. NULL means "never computed" (a frame assigned scenes before this
-  // column existed), so compute once here and backfill.
-  let groups = readServiceSettingGroups(auth.frame.serviceSettingGroups);
-  if (!groups) {
-    try {
-      groups = await computeAndStoreServiceSettingGroups(db, auth.frame.id);
-    } catch (error) {
-      reportError("frames.service_settings_backfill_failed", error, {
-        frameId: auth.frame.id,
-      });
-      groups = [];
-    }
+  // route. A row from before that was settled is settled here, once.
+  let scenes: Awaited<ReturnType<typeof frameServiceKeysScenes>> = [];
+  try {
+    scenes = await frameServiceKeysScenes(db, auth.frame);
+  } catch (error) {
+    reportError("frames.service_settings_backfill_failed", error, {
+      frameId: auth.frame.id,
+    });
   }
 
   // A board the cloud renders for runs no scene, so it holds no key
   // (docs/server-rendering.md "Nothing to keep on the board"); the render
-  // here is given them (server-render.ts). Its granted groups still listed
-  // and none filled in, the board deletes the copies it held (fos_settings.c).
+  // here is given them (server-render.ts). Its bound groups still listed and
+  // none filled in, the board deletes the copies it held (fos_settings.c).
   const payload = buildServiceSettingsPayload(
-    groups,
+    scenes,
     planeKeepsSceneState(auth.frame) ? {} : await revealedServiceSettings(db, auth.frame.accountId),
   );
   const { body, etag } = serviceSettingsResponseBody(payload);

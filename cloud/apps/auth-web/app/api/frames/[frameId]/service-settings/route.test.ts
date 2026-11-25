@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { jsonError } from "../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
-import { computeAndStoreServiceSettingGroups } from "../../../../../src/lib/frames";
+import { frameServiceKeysScenes } from "../../../../../src/lib/frame-service-settings";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
@@ -29,9 +29,12 @@ vi.mock("../../../../../src/lib/rate-limit", () => ({
 vi.mock("../../../../../src/lib/frame-device-auth", () => ({
   authenticateFrameDevice: vi.fn(),
 }));
-vi.mock("../../../../../src/lib/frames", async (importOriginal) => ({
+// Which runtime scenes declare what and were bound to which key: read from
+// the assignment rows (frame-service-settings.test.ts and the integration
+// suite pin that), so faked here.
+vi.mock("../../../../../src/lib/frame-service-settings", async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  computeAndStoreServiceSettingGroups: vi.fn(() => Promise.resolve([])),
+  frameServiceKeysScenes: vi.fn(() => Promise.resolve([])),
 }));
 vi.mock("../../../../../src/lib/device-flow", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -41,7 +44,7 @@ vi.mock("../../../../../src/lib/device-flow", async (importOriginal) => ({
 const authMock = vi.mocked(authenticateFrameDevice);
 const rateLimitMock = vi.mocked(rateLimitResponse);
 const identityRateLimitMock = vi.mocked(identityRateLimitResponse);
-const computeGroupsMock = vi.mocked(computeAndStoreServiceSettingGroups);
+const scenesMock = vi.mocked(frameServiceKeysScenes);
 
 const frameId = "11111111-2222-3333-4444-555555555555";
 const accountId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
@@ -101,8 +104,8 @@ beforeEach(() => {
     { key: "openAI", value: { apiKey: openAiKey } },
   ];
   authAs({});
-  computeGroupsMock.mockReset();
-  computeGroupsMock.mockResolvedValue([]);
+  scenesMock.mockReset();
+  scenesMock.mockResolvedValue([{ declared: ["unsplash"], id: "photos", legacyGranted: ["unsplash"] }]);
 });
 
 afterEach(() => {
@@ -116,7 +119,7 @@ describe("GET /api/frames/[frameId]/service-settings", () => {
   const get = (id = frameId, headers: Record<string, string> = {}) =>
     GET(request(headers), routeParams(id));
 
-  it("serves only the groups the frame's scenes declare, with an ETag and no-store", async () => {
+  it("serves only the keys the frame's scenes were granted, with an ETag and no-store", async () => {
     const response = await get();
 
     expect(response.status).toBe(200);
@@ -127,6 +130,18 @@ describe("GET /api/frames/[frameId]/service-settings", () => {
     // scenes, so it never reaches the device.
     await expect(response.json()).resolves.toEqual({
       groups: ["unsplash"],
+      serviceKeys: {
+        keys: { unsplash: { service: "unsplash", values: { accessKey: unsplashKey } } },
+        scenes: { photos: { unsplash: "unsplash" } },
+        services: {
+          unsplash: {
+            fields: [{ label: "Access key", name: "accessKey" }],
+            hosts: ["api.unsplash.com"],
+            title: "Unsplash",
+          },
+        },
+        v: 1,
+      },
       settings: { unsplash: { accessKey: unsplashKey } },
     });
     expect(rateLimitMock.mock.calls[0]?.[1]).toBe("frames:service-settings");
@@ -195,7 +210,7 @@ describe("GET /api/frames/[frameId]/service-settings", () => {
       error: "insufficient_scope",
     });
     // The scope gate is the boundary: nothing was computed or served.
-    expect(computeGroupsMock).not.toHaveBeenCalled();
+    expect(scenesMock).not.toHaveBeenCalled();
   });
 
   it("checks frame_mismatch, then frame_not_active, then the scope", async () => {
@@ -209,37 +224,41 @@ describe("GET /api/frames/[frameId]/service-settings", () => {
     await expect(response.json()).resolves.toEqual({ error: "frame_mismatch" });
   });
 
-  it("computes and backfills the declared groups when the column is null", async () => {
-    authAs({ frame: { serviceSettingGroups: null } });
-    computeGroupsMock.mockResolvedValue(["openAI"]);
+  it("sends a store scene nothing while an own scene on the frame uses the key", async () => {
+    scenesMock.mockResolvedValue([
+      { declared: ["openAI"], id: "art", legacyGranted: ["openAI"] },
+      { declared: ["openAI"], id: "store-art", legacyGranted: [] },
+    ]);
 
-    const response = await get();
+    const body = (await (await get()).json()) as {
+      serviceKeys: { scenes: Record<string, unknown> };
+    };
 
-    expect(computeGroupsMock).toHaveBeenCalledWith(expect.anything(), frameId);
-    await expect(response.json()).resolves.toEqual({
-      groups: ["openAI"],
-      settings: { openAI: { apiKey: openAiKey } },
-    });
+    expect(body.serviceKeys.scenes).toEqual({ art: { openAI: "openAI" }, "store-art": { openAI: null } });
+    expect(scenesMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: frameId }));
   });
 
-  it("does not recompute an empty-but-computed group list", async () => {
-    authAs({ frame: { serviceSettingGroups: [] } });
+  it("sends a board the cloud renders for no key, its bound groups still named", async () => {
+    authAs({ frame: { hardware: { platform: "esp32" }, settings: { render_mode: "remote" } } });
 
-    const response = await get();
+    const body = (await (await get()).json()) as { groups: string[]; settings: unknown };
 
-    expect(computeGroupsMock).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({ groups: [], settings: {} });
+    expect(body.groups).toEqual(["unsplash"]);
+    expect(body.settings).toEqual({});
   });
 
-  it("survives a failed backfill without serving stale or partial keys", async () => {
-    authAs({ frame: { serviceSettingGroups: null } });
-    computeGroupsMock.mockRejectedValue(new Error("scene_pulled"));
+  it("survives a failed scene read without serving stale or partial keys", async () => {
+    scenesMock.mockRejectedValue(new Error("scene_pulled"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const response = await get();
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ groups: [], settings: {} });
+    await expect(response.json()).resolves.toEqual({
+      groups: [],
+      serviceKeys: { keys: {}, scenes: {}, services: {}, v: 1 },
+      settings: {},
+    });
     // The log carries the frame id and a message — never a key.
     expect(JSON.stringify(consoleError.mock.calls)).not.toContain(unsplashKey);
     consoleError.mockRestore();

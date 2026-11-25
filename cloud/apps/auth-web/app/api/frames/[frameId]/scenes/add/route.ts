@@ -20,6 +20,7 @@ import {
 } from "../../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { readLayoutsField } from "../../../../../../src/lib/scene-layouts";
+import { readServiceKeysField } from "../../../../../../src/lib/scene-services";
 import { readSession } from "../../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -30,7 +31,8 @@ export const runtime = "nodejs";
 // add_scene_to_frame tool does (src/lib/ai/tools.ts). Re-adding an assigned
 // scene re-deploys it at the requested version (unpinned: the newest one);
 // the other scenes stay at the versions the frame holds.
-// Body: {"scene_id": "...", "scene_version"?: N, "settings_groups"?: [...]}
+// Body: {"scene_id": "...", "scene_version"?: N, "settings_groups"?: [...],
+// "service_keys"?: {[runtime scene id]: {service: "default" | key id | null}}}
 // `settings_groups` grants the scene the named service-key groups on this
 // frame (∩ what it declares); omitted, a new install is granted none and a
 // re-install keeps what it had. The answer's `granted_settings_groups` /
@@ -97,6 +99,13 @@ export async function POST(
   if (layouts === false) {
     return jsonError("invalid_scene", 400);
   }
+  // Which key each runtime scene of it gets per service it declares
+  // (docs/service-keys.md): the install dialog's choice; omitted keeps an
+  // installed scene's, and a new one goes by `settings_groups`.
+  const serviceKeys = readServiceKeysField(body.service_keys);
+  if (serviceKeys === false) {
+    return jsonError("invalid_scene", 400);
+  }
   // "Install & activate": the same push shows it (its first runtime scene),
   // never a second command racing this one.
   const activate = body.activate;
@@ -113,6 +122,7 @@ export async function POST(
     latest: true,
     ...(settingsGroups ? { settingsGroups } : {}),
     ...(layouts !== undefined ? { layouts } : {}),
+    ...(serviceKeys !== undefined ? { serviceKeys } : {}),
   };
   const requested = alreadyAssigned
     ? existing.map((entry) =>

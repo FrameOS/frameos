@@ -181,11 +181,14 @@ extension FrameOSService {
         }
         let eventMaps = row["event_maps"]?.objectValue ?? [:]
         let layouts = row["layouts"]?.objectValue ?? [:]
+        // Which key each runtime scene gets (docs/service-keys.md): the install's, like its button map.
+        let serviceKeys = row["service_keys"]?.objectValue ?? [:]
         return scenes.map { scene in
             var object = scene.objectValue ?? [:]
             let id = object["id"]?.stringValue ?? ""
             if let map = eventMaps[id] { object["eventMap"] = map }
             if let layout = layouts[id] { object["layout"] = layout }
+            if let keys = serviceKeys[id], !(keys.objectValue ?? [:]).isEmpty { object["keys"] = keys }
             return InstalledScene(scene: .object(object), storeSceneId: storeId, heldVersion: held, latestVersion: latest,
                                   updateAvailable: updateAvailable, packSize: scenes.count,
                                   declaredSettingsGroups: declared, grantedSettingsGroups: granted)
@@ -258,19 +261,24 @@ extension FrameOSService {
     /// frame holds it (the SPA's pushCloudFrameSceneList). `layouts`: new
     /// `layouts` for the rows it names by store scene id (`.null` clears).
     func pushCloudRows(_ frame: Frame, _ rows: [JSONValue], activeSceneId: String? = nil,
-                       layouts: [String: JSONValue] = [:]) async throws
+                       layouts: [String: JSONValue] = [:], serviceKeys: [String: JSONValue] = [:]) async throws
     {
         let list: [JSONValue] = rows.map { row in
             var entry: [String: JSONValue] = ["scene_id": row["scene_id"] ?? .null]
             if let version = row["scene_version"], !version.isNull { entry["scene_version"] = version }
             entry["settings_groups"] = row["granted_settings_groups"] ?? []
-            // Omitted, the cloud keeps a row's button maps and layouts; a new row brings its own.
+            // Omitted, the cloud keeps a row's button maps, layouts and key
+            // choices; a new row brings its own.
             if row["position"] == nil {
                 if let maps = row["event_maps"] { entry["event_maps"] = maps }
                 if let layouts = row["layouts"] { entry["layouts"] = layouts }
+                if let keys = row["service_keys"] { entry["service_keys"] = keys }
             }
             if let storeId = row["scene_id"]?.stringValue, let changed = layouts[storeId] {
                 entry["layouts"] = changed
+            }
+            if let storeId = row["scene_id"]?.stringValue, let changed = serviceKeys[storeId] {
+                entry["service_keys"] = changed
             }
             return .object(entry)
         }
@@ -290,15 +298,40 @@ extension FrameOSService {
         return ActionOutcome(kind: .queued, message: "Updated. The frame gets it when it next checks in.")
     }
 
-    /// Grant a cloud scene the account's API keys it asks for.
+    /// Grant a cloud scene the account's API keys it asks for. The row's key
+    /// choices follow (docs/service-keys.md; the SPA's serviceKeysFollowingGrant):
+    /// a service taken away is refused, one given back that a choice refused
+    /// gets the default key.
     public func grantSettings(_ frame: Frame, storeSceneId: String, groups: [String]) async throws {
         let answer = try await client.get(Self.framePath(frame.id, "/scenes"))
+        var followed: [String: JSONValue] = [:]
         let rows = (answer["scenes"]?.arrayValue ?? []).map { row -> JSONValue in
             guard row["scene_id"]?.stringValue == storeSceneId, var object = row.objectValue else { return row }
             object["granted_settings_groups"] = .array(groups.map { .string($0) })
+            if let keys = Self.serviceKeysFollowingGrant(row["service_keys"], groups) { followed[storeSceneId] = keys }
             return .object(object)
         }
-        try await pushCloudRows(frame, rows, activeSceneId: activeSceneId(frame))
+        try await pushCloudRows(frame, rows, activeSceneId: activeSceneId(frame), serviceKeys: followed)
+    }
+
+    /// A row's `service_keys` after its grant changed; nil when it has none.
+    static func serviceKeysFollowingGrant(_ serviceKeys: JSONValue?, _ granted: [String]) -> JSONValue? {
+        guard let byScene = serviceKeys?.objectValue, !byScene.isEmpty else { return nil }
+        var result: [String: JSONValue] = [:]
+        for (runtimeId, bindings) in byScene {
+            var next: [String: JSONValue] = [:]
+            for (service, ref) in bindings.objectValue ?? [:] {
+                if !granted.contains(service) {
+                    next[service] = .null
+                } else if ref.isNull {
+                    next[service] = .string("default")
+                } else {
+                    next[service] = ref
+                }
+            }
+            result[runtimeId] = .object(next)
+        }
+        return .object(result)
     }
 
     // MARK: the preview row
@@ -349,6 +382,7 @@ extension FrameOSService {
             var content = scene.objectValue ?? [:]
             let eventMap = content.removeValue(forKey: "eventMap")
             let layout = content.removeValue(forKey: "layout")
+            let keys = content.removeValue(forKey: "keys")
             content["origin"] = nil
             let name = content["name"]?.stringValue ?? "Preview"
             let created = try await client.call("POST", "/api/account/scenes", body: .json([
@@ -362,10 +396,11 @@ extension FrameOSService {
             var rows = list["scenes"]?.arrayValue ?? []
             var row: [String: JSONValue] = [
                 "scene_id": .string(storeId),
-                "granted_settings_groups": .array(Self.serviceSettingGroups.map { .string($0) }),
+                "granted_settings_groups": .array(Self.declaredServiceSettingGroups(.array([scene])).map { .string($0) }),
             ]
             if let eventMap, !eventMap.isNull { row["event_maps"] = .object([sceneId: eventMap]) }
             if let layout, !layout.isNull { row["layouts"] = .object([sceneId: layout]) }
+            if let keys, !keys.isNull { row["service_keys"] = .object([sceneId: keys]) }
             rows.append(.object(row))
             try await pushCloudRows(frame, rows, activeSceneId: sceneId)
             return ActionOutcome(kind: .queued, message: "Installed. It stays on the frame's list.")

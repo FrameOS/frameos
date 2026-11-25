@@ -111,6 +111,13 @@ export type SceneRenderOptions = {
   /** Frame settings the runtime reads (service keys etc.). */
   settings?: Record<string, unknown> | undefined;
   /**
+   * Each scene's own keys (docs/service-keys.md "On the wire"), beside the
+   * older `settings`: handed to the runtime with `frameos_wasm_set_service_keys`
+   * after init, what `getSetting` then answers each scene from. A runtime
+   * bundle that predates the export reads `settings` alone.
+   */
+  serviceKeys?: unknown;
+  /**
    * The frame's own configuration the device's runtime is handed besides
    * its scenes (docs/server-rendering.md "Packing", "Keys, touch and the
    * schedule"): its event map (frame.json `eventMap`, the rules that run
@@ -497,6 +504,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         sceneId: options.sceneId ?? "",
         scenesJson: JSON.stringify(options.scenes),
         settingsJson: JSON.stringify(options.settings ?? {}),
+        serviceKeysJson: options.serviceKeys ? JSON.stringify(options.serviceKeys) : "",
         settleMs,
         statesJson: JSON.stringify(options.states ?? {}),
         timeZone: options.timeZone || "UTC",
@@ -912,6 +920,17 @@ async function main() {
   );
   if (!ok) {
     return fail("init failed: " + lastError());
+  }
+  // Each scene's own keys (docs/service-keys.md), when the plane has them and
+  // the bundle reads them; an older bundle serves the settings alone.
+  if (workerData.serviceKeysJson) {
+    try {
+      if (!call("frameos_wasm_set_service_keys", "boolean", ["string"], [workerData.serviceKeysJson])) {
+        pushLog(JSON.stringify({ event: "render:serviceKeys", error: lastError() }));
+      }
+    } catch (error) {
+      pushLog("per-scene service keys unavailable in this runtime build: " + error);
+    }
   }
   // A device's memory ceiling, set after init like the preview worker does:
   // module startup lives in a frame's flash, not in its render budget.
