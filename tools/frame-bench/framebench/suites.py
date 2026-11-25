@@ -145,6 +145,16 @@ def wait_render(con, timeout):
     return con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)), timeout)
 
 
+def wait_for_render_or_start(con, timeout):
+    """The next render's end, or its start when that comes first; returns
+    (t, line, lines), `t` None at a start or when nothing came."""
+    t, line, got = con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)) or
+                                (x.startswith('render #') and ' started: scene ' in x), timeout)
+    if line and ' started: scene ' in line:
+        return None, line, got
+    return t, line, got
+
+
 def wait_scene_render(con, timeout, shows):
     """Wait for a render whose `started: scene ...` line `shows(line)` says is
     the one wanted, to its `done` / `failed`; returns (t, line, lines)."""
@@ -999,27 +1009,43 @@ def _switcher_pages(ctx, frame, rounds=2, pages=3):
     con = ctx.console(frame)
     out, issues = [], []
     t0 = time.time()
+    # A drag on a list that scrolls renders at its lift, a partial update on
+    # e-paper: seconds. One that renders nothing in this long scrolled
+    # nothing: every tile is on the screen (the E1003's 1872x1404 holds 23
+    # scenes and has room to spare), and the round has no pages to turn. It
+    # used to wait out the switcher's own 300 s and say nothing.
+    drag_wait = 20 + 2 * frame.get('refresh_s', 5)
     for r in range(rounds):
         where = f'switcher round {r + 1}'
         con.drain()
         con.send('event sceneSwitcher')
         t_open, _, _ = wait_scene_render(con, render_timeout(frame), lambda x: 'system/sceneSwitcher' in x or '"Scene switcher"' in x)
-        steps = []
+        steps, fits = [], False
         for p in range(pages):
             con.drain()
             t = time.time()
             drag(con, 0.5, 0.8, 0.2)
-            t_done, line, got = wait_render(con, render_timeout(frame))
+            t_done, line, got = wait_for_render_or_start(con, drag_wait)
             started = [x for _, x in got if ' started: scene ' in x]
+            if not t_done and started:
+                # A render that began: its end, however long the panel takes.
+                t_done, line, more = wait_render(con, render_timeout(frame))
+                got += more
             steps.append({'page': p + 2, 'ms': round((t_done - t) * 1000) if t_done else None})
             if not t_done and started:
                 issues.append(issue('crash', 'render_stuck', where, f'page {p + 2}: {started[-1][:160]} and no end in {render_timeout(frame)} s'))
+                break
+            if not t_done:
+                fits = p == 0
+                if not fits:
+                    issues.append(issue('fail', 'switcher_drag', where,
+                                        f'page {p + 2}: a drag drew nothing in {drag_wait} s after page {p + 1} scrolled'))
                 break
             con.idle(1.5)
         con.drain()
         con.send('event sceneSwitcher')  # the same command again goes back
         wait_render(con, render_timeout(frame))
-        out.append({'round': r + 1, 'opened': bool(t_open), 'pages': steps})
+        out.append({'round': r + 1, 'opened': bool(t_open), 'pages': steps, **({'fits': True} if fits else {})})
     alive = any('frame_id' in x for x in con.command('status', 4))
     if not alive:
         issues.append(issue('crash', 'no_answer', 'switcher pages', 'the console stopped answering after the switcher pages'))
@@ -1084,6 +1110,12 @@ def suite_settings(ctx, frame):
             if len(kept) < len(picks):
                 issues.append(issue('note', 'sampled', 'settings', f"slow panel: {len(picks) - len(kept)} layout(s) left for another run's turn"))
             picks = kept
+        # A push of the set the board holds changes nothing, and the board
+        # takes nothing it could be timed by: the E1003's scenes all wore
+        # "Front page" already, and the E1002 and E1004 hold no layout, so
+        # "none" was their set as it was (three 300 s "failures", the
+        # hardware bench, 2026-11-25). Such a step is skipped and said.
+        current = original
         try:
             for lid in picks + [None]:
                 where = f"layout {next((l.get('name') for l in layouts if l['id'] == lid), lid) or 'none'}"
@@ -1096,14 +1128,19 @@ def suite_settings(ctx, frame):
                         else:
                             s.pop('layout', None)
                     scenes.append(s)
+                if scenes == current:
+                    out['layouts'].append({'layout': lid, 'unchanged': True})
+                    continue
                 t0 = time.time()
                 took, line, _ = _push_and_wait(ctx, frame, scenes, catalog_ok=True)
+                current = scenes
                 out['layouts'].append({'layout': lid, 'push_ms': took})
                 if took is None:
                     issues.append(issue('fail', 'layout_push', where, 'the device did not take the pushed scenes: ' + (line or 'timeout')[:200]))
                 issues += incidents_since(con, t0, where)
         finally:
-            _push_and_wait(ctx, frame, original, catalog_ok=True)
+            if current != original:
+                _push_and_wait(ctx, frame, original, catalog_ok=True)
     return {**out, 'issues': issues}
 
 
