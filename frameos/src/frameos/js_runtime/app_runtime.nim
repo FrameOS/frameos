@@ -39,6 +39,7 @@ when not defined(frameosEmbedded):
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   from std/httpcore import pairs # a Pi's response headers
   import frameos/video/player # docs/video.md: ffmpeg on a Linux frame
+  import frameos/panel_canvas # isPanelCanvas: a video may be a display plane there
   import frameos/spawn_guard
 import frameos/js_runtime/jsx
 import frameos/ui/layout
@@ -4598,7 +4599,8 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   # Its videos: the frame due now, at the size each `<img>` got (js_video.nim).
   when not defined(frameosEmbedded) and not defined(frameosWasm):
     if runtime.videos.len > 0 and root.tag != "svg":
-      runtime.fillVideos(owner, context, svg, regionScale)
+      runtime.fillVideos(owner, context, svg, regionScale,
+        runtime.videoSpots(owner, context, target, requestedWidth, requestedHeight, regionScale))
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len
