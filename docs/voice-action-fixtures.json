@@ -660,7 +660,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -906,7 +906,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -1156,7 +1156,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -1402,7 +1402,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -1625,7 +1625,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -1848,7 +1848,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -2093,7 +2093,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -2316,7 +2316,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -2541,7 +2541,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -2749,7 +2749,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -2957,7 +2957,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -3165,7 +3165,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -3373,7 +3373,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -3619,7 +3619,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -3824,7 +3824,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -4029,7 +4029,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -5381,7 +5381,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -5523,7 +5523,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -5672,7 +5672,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }
@@ -5751,7 +5751,7 @@
         "apps": {
           "jsxUi": {
             "sources": {
-              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n"
             }
           }
         }

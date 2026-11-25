@@ -1336,7 +1336,8 @@ async def test_no_fast_path_without_the_use_scenes_switch_or_a_typesafe_key(
     assert response.json()["reply"] == "The owner switched that off." and "events" not in response.json()
     assert jev["asked"] == []
     monkeypatch.delenv("TYPESAFE_API_KEY")
-    frame.device_config = {}
+    # The switch back on; the microphone pins stay, or the voice gate refuses the turn.
+    frame.device_config = {k: v for k, v in (frame.device_config or {}).items() if k != "voiceUseScenes"}
     db.add(frame)
     db.commit()
     monkeypatch.setattr(ai_chat_agent, "stream_response", ScriptedOpenAi([("Done.", [])]))
