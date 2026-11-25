@@ -181,8 +181,11 @@ function request(
     frameosProxyRefusal: library.$frameosProxyRefusal,
   }
   // The hook's `{{{ makeSetValue(...) }}}` lines are Emscripten macros; as
-  // plain JS they are nested blocks calling the stub above.
-  const hook = vm.runInNewContext(`(${library.fos_nim_http_request.toString()})`, context)
+  // plain JS they are nested blocks calling the stub above. The route helper
+  // reads `self`, so it runs in the same context.
+  vm.createContext(context)
+  context.frameosRoute = vm.runInContext(`(${library.$frameosRoute.toString()})`, context)
+  const hook = vm.runInContext(`(${library.fos_nim_http_request.toString()})`, context)
   const ptr = hook(1, 2, 0, 0, 0, 0, 1000, 0, 0, 0, headersPtr)
   const end = headersPtr ? heap.indexOf(0, headersPtr) : 0
   const headers = new TextDecoder().decode(heap.subarray(headersPtr, end))
@@ -362,4 +365,281 @@ test('a tapped link goes to the page when it takes links, else 0 (the QR code)',
   vm.runInNewContext(source, { ...withPage, addToLibrary: (object) => (library = object) })
   assert.equal(library.frameos_wasm_js_open_link('https://frameos.net'), 1)
   assert.deepEqual(opened, ['https://frameos.net'])
+})
+
+// The preview's pictures fetched ahead (fos_wasm_picture, frameosPictureFetch):
+// a runtime whose fetch() the test answers by hand, with the request hook
+// beside it to see what the runtime's own request for a picture is handed.
+function pictureRuntime({ page = 'https://scenes.frameos.net/s/scene-store', proxyUrl = '/api/proxy', proxyFirst, lanAccess, browser = true } = {}) {
+  const library = loadLibrary()
+  const fetches = []
+  const opened = []
+  const logs = []
+  let told = 0
+  const fetch = (url, options) =>
+    new Promise((resolve, reject) => {
+      fetches.push({
+        url,
+        options,
+        answer(status = 200, body = 'picture', headers = { 'content-type': 'image/jpeg' }) {
+          const bytes = new TextEncoder().encode(body)
+          resolve({
+            status,
+            headers: {
+              get: (name) => headers[name] ?? null,
+              forEach: (fn) => Object.entries(headers).forEach(([name, value]) => fn(value, name)),
+            },
+            arrayBuffer: () => Promise.resolve(bytes.buffer),
+          })
+        },
+        fail(error = new TypeError('Failed to fetch')) {
+          reject(error)
+        },
+      })
+    })
+  class FakeXHR {
+    open(method, target) {
+      opened.push(target)
+    }
+    setRequestHeader() {}
+    send() {
+      this.status = 200
+      this.response = new TextEncoder().encode('from the network').buffer
+    }
+    getAllResponseHeaders() {
+      return ''
+    }
+  }
+  const heap = new Uint8Array(1 << 20)
+  let free = 1024
+  const strings = new Map()
+  let nextString = 1
+  const string = (text) => {
+    strings.set(nextString, text)
+    return nextString++
+  }
+  const module = {
+    frameosProxyUrl: proxyUrl,
+    frameosProxyFirst: proxyFirst,
+    frameosLanAccess: lanAccess,
+    onFrameosLog: (message) => logs.push(message),
+    onFrameosPictures: () => told++,
+  }
+  const context = vm.createContext({
+    UTF8ToString: (ptr) => strings.get(ptr) ?? '',
+    HEAPU8: heap,
+    // Fresh, zeroed memory each time, so a body reads to its own end.
+    _malloc: (bytes) => {
+      const ptr = free
+      free += bytes + 1
+      heap.fill(0, ptr, free)
+      return ptr
+    },
+    makeSetValue: () => {},
+    Module: module,
+    XMLHttpRequest: FakeXHR,
+    fetch: browser ? fetch : undefined,
+    TextEncoder,
+    URL,
+    ArrayBuffer,
+    Uint8Array,
+    JSON,
+    btoa,
+    Map,
+    Promise,
+    AbortController,
+    clearTimeout,
+    // A fetch nobody answers must not hold the test run open.
+    setTimeout: (fn, ms) => {
+      const timer = setTimeout(fn, ms)
+      timer.unref?.()
+      return timer
+    },
+    self: browser ? { location: new URL(page) } : undefined,
+  })
+  for (const name of ['$frameosIsPrivateHost', '$frameosLogUrl', '$frameosProxyRefusal', '$frameosRoute', '$frameosPictures', '$frameosPictureFetch']) {
+    context[name.slice(1)] = vm.runInContext(`(${library[name].toString()})`, context)
+  }
+  const picture = vm.runInContext(`(${library.fos_wasm_picture.toString()})`, context)
+  const hook = vm.runInContext(`(${library.fos_nim_http_request.toString()})`, context)
+  return {
+    module,
+    fetches,
+    opened,
+    logs,
+    told: () => told,
+    picture: (url) => picture(string(url)),
+    request(url) {
+      const headersAt = 512
+      heap.fill(0, headersAt, 1024)
+      const ptr = hook(string('GET'), string(url), 0, 0, 0, 0, 1000, 0, 0, 0, headersAt)
+      return {
+        said: ptr ? new TextDecoder().decode(heap.subarray(ptr, heap.indexOf(0, ptr))) : null,
+        headers: new TextDecoder().decode(heap.subarray(headersAt, heap.indexOf(0, headersAt))),
+      }
+    },
+  }
+}
+
+// Every promise the answers set going has run.
+const settled = () => new Promise((resolve) => setImmediate(resolve))
+
+const cover = (i) => `https://cloud-cdn.frameos.net/store/scene-images/${i}.jpg`
+
+test('pictures are fetched ahead six at a time, and the rest as those come in', async () => {
+  const runtime = pictureRuntime()
+  const urls = Array.from({ length: 8 }, (_, i) => cover(i))
+  for (const url of urls) assert.equal(runtime.picture(url), 1, url)
+  assert.deepEqual(runtime.fetches.map((f) => f.url), urls.slice(0, 6))
+  // Asked again while it comes: no second fetch.
+  assert.equal(runtime.picture(urls[0]), 1)
+  assert.equal(runtime.fetches.length, 6)
+  // Straight from the browser, no cookie.
+  assert.equal(runtime.fetches[0].options.credentials, 'omit')
+  runtime.fetches[0].answer(200, 'first')
+  await settled()
+  assert.equal(runtime.told(), 1)
+  assert.deepEqual(runtime.fetches.map((f) => f.url), urls.slice(0, 7))
+  for (const f of runtime.fetches.slice(1)) f.answer()
+  await settled()
+  assert.equal(runtime.fetches.length, 8)
+  runtime.fetches[7].answer()
+  await settled()
+  assert.equal(runtime.told(), 8)
+})
+
+test("a picture that came is the runtime's request's answer, at once and again later", async () => {
+  const runtime = pictureRuntime()
+  const url = cover(1)
+  runtime.picture(url)
+  runtime.fetches[0].answer(200, 'jpeg bytes', { 'content-type': 'image/jpeg', etag: '"abc"' })
+  await settled()
+  assert.equal(runtime.picture(url), 2)
+  const got = runtime.request(url)
+  assert.equal(got.said, 'jpeg bytes')
+  assert.match(got.headers, /content-type: image\/jpeg\r\n/)
+  assert.match(got.headers, /etag: "abc"\r\n/)
+  assert.deepEqual(runtime.opened, [], 'no request left the worker')
+  // Kept: a page seen again draws without the network.
+  assert.equal(runtime.picture(url), 2)
+  assert.equal(runtime.request(url).said, 'jpeg bytes')
+  assert.equal(runtime.fetches.length, 1)
+  // Anything else still goes out.
+  assert.equal(runtime.request(cover(2)).said, 'from the network')
+  assert.deepEqual(runtime.opened, [cover(2)])
+})
+
+test('nothing the browser may not fetch itself is fetched ahead', () => {
+  const runtime = pictureRuntime({ page: 'https://scenes.frameos.net/s/scene-store' })
+  for (const url of ['/api/store/scenes/1/image', 'https://scenes.frameos.net/x.jpg', 'http://192.168.1.20/a.jpg', 'http://nas/a.jpg']) {
+    assert.equal(runtime.picture(url), 0, url)
+  }
+  const lanOff = pictureRuntime({ page: 'http://192.168.1.5:8989/frames/1', lanAccess: false })
+  assert.equal(lanOff.picture('http://192.168.1.20/a.jpg'), 0)
+  // A plane's renderer in Node: its requests go as always.
+  const headless = pictureRuntime({ browser: false })
+  assert.equal(headless.picture(cover(1)), 0)
+  assert.deepEqual([...runtime.fetches, ...lanOff.fetches, ...headless.fetches], [])
+})
+
+test('an origin the browser cannot reach goes through the proxy, from then on', async () => {
+  const runtime = pictureRuntime()
+  const url = 'https://images.example.com/a.jpg?key=secret'
+  runtime.picture(url)
+  runtime.fetches[0].fail()
+  await settled()
+  assert.equal(runtime.fetches.length, 2)
+  assert.equal(runtime.fetches[1].url, '/api/proxy')
+  assert.equal(runtime.fetches[1].options.method, 'POST')
+  assert.equal(runtime.fetches[1].options.credentials, 'include')
+  assert.equal(JSON.parse(runtime.fetches[1].options.body).url, url)
+  runtime.fetches[1].answer(200, 'proxied')
+  await settled()
+  assert.equal(runtime.request(url).said, 'proxied')
+  assert.equal(runtime.module.frameosDirectBlocked['https://images.example.com'], true)
+  runtime.picture('https://images.example.com/b.jpg')
+  assert.equal(runtime.fetches[2].url, '/api/proxy')
+  runtime.fetches[2].answer()
+  await settled()
+  // A page whose proxy goes first sends it there to begin with.
+  const first = pictureRuntime({ page: 'http://192.168.1.5:8989/frames/1', proxyFirst: true })
+  first.picture(cover(1))
+  assert.equal(first.fetches[0].url, '/api/proxy')
+  first.fetches[0].answer()
+  await settled()
+})
+
+test('a picture that did not come is said once, by its origin, and fetched again when asked again', async () => {
+  const runtime = pictureRuntime({ proxyUrl: null })
+  const url = 'https://images.example.com/private/pk_secret.jpg'
+  runtime.picture(url)
+  runtime.fetches[0].fail(new TypeError(`Failed to fetch ${url}`))
+  await settled()
+  assert.equal(runtime.told(), 1)
+  assert.equal(runtime.picture(url), 2)
+  assert.equal(runtime.request(url).said, null)
+  assert.deepEqual(runtime.opened, [])
+  const logged = runtime.logs.join('\n')
+  assert.match(logged, /GET https:\/\/images\.example\.com failed: TypeError: Failed to fetch https:\/\/images\.example\.com/)
+  assert.doesNotMatch(logged, /pk_secret/)
+  assert.equal(runtime.picture(url), 1)
+  assert.equal(runtime.fetches.length, 2)
+  runtime.fetches[1].answer()
+  await settled()
+})
+
+test("the proxy's refusal is the picture's error, in words", async () => {
+  const runtime = pictureRuntime({ page: 'http://192.168.1.5:8989/frames/1', proxyFirst: true })
+  const url = 'https://images.example.com/a.jpg'
+  runtime.picture(url)
+  runtime.fetches[0].answer(403, '{"detail":"no"}', { 'X-FrameOS-Proxy-Refused': 'host' })
+  await settled()
+  assert.match(runtime.request(url).said, /^The preview cannot reach images\.example\.com: its server does not connect to that address\./)
+})
+
+test('the pictures used longest ago go when the kept ones are over their bytes', async () => {
+  const runtime = pictureRuntime()
+  const [a, b, c] = [cover('a'), cover('b'), cover('c')]
+  runtime.picture(a)
+  runtime.module.frameosPictures.keepBytes = 10
+  runtime.picture(b)
+  runtime.fetches[0].answer(200, 'aaaa')
+  runtime.fetches[1].answer(200, 'bbbb')
+  await settled()
+  // `a` drawn again: `b` is the one used longest ago now.
+  assert.equal(runtime.request(a).said, 'aaaa')
+  runtime.picture(c)
+  runtime.fetches[2].answer(200, 'cccc')
+  await settled()
+  assert.equal(runtime.picture(a), 2)
+  assert.equal(runtime.picture(c), 2)
+  assert.equal(runtime.picture(b), 1, 'gone, and fetched again')
+  assert.equal(runtime.module.frameosPictures.bytes, 8)
+  runtime.fetches[3].answer(200, 'bbbb')
+  await settled()
+})
+
+test("a picture too big to keep is left to the runtime's own request, once", async () => {
+  const runtime = pictureRuntime()
+  const url = cover('big')
+  runtime.picture(url)
+  runtime.module.frameosPictures.largest = 3
+  runtime.fetches[0].answer(200, 'too big')
+  await settled()
+  assert.equal(runtime.told(), 1)
+  assert.equal(runtime.picture(url), 0)
+  assert.equal(runtime.picture(url), 0)
+  assert.equal(runtime.fetches.length, 1)
+  assert.equal(runtime.request(url).said, 'from the network')
+})
+
+test('the runtime saying pictures wait tells the page', () => {
+  let told = 0
+  let library = null
+  vm.runInNewContext(source, { Module: { onFrameosPictures: () => told++ }, addToLibrary: (object) => (library = object) })
+  library.fos_wasm_pictures_waiting()
+  assert.equal(told, 1)
+  // A renderer that does not listen: nothing happens.
+  vm.runInNewContext(source, { Module: {}, addToLibrary: (object) => (library = object) })
+  library.fos_wasm_pictures_waiting()
 })

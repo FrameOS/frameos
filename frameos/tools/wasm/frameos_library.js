@@ -167,7 +167,211 @@ addToLibrary({
     return 'The preview cannot reach ' + host + ': its server does not connect to that address.'
   },
 
-  fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost', '$frameosLogUrl', '$frameosProxyRefusal'],
+  // Where a scene's request to `url` may go from here. Scene code is
+  // untrusted (it may come from the public store). This worker shares the
+  // app's origin, so a direct request to the app's own API would carry the
+  // user's session cookie and read the answer — a same-origin target must
+  // only ever go through the server-side proxy, which fetches without cookies
+  // and applies the SSRF guard. The same goes for the viewer's own network
+  // when the app itself is on the public internet: a request from the
+  // viewer's browser to http://192.168.1.1/ cannot read the reply without
+  // CORS, but it still reaches the router (timing, and side effects of a
+  // GET). Chrome's Private Network Access blocks that; Firefox and Safari do
+  // not. A self-hosted app on the LAN (or localhost) keeps direct access to
+  // private hosts, as a frame on that LAN would have. (Under Node — the
+  // headless renderers — there is no origin to protect; the guard only
+  // applies inside a browser context.) `refusedDirect` says why it may not go
+  // straight from the browser, null when it may.
+  $frameosRoute__deps: ['$frameosIsPrivateHost'],
+  $frameosRoute: function (url) {
+    var inBrowser = typeof self !== 'undefined' && self && self.location && typeof self.location.href === 'string'
+    var target = null
+    try {
+      target = inBrowser ? new URL(url, self.location.href) : new URL(url)
+    } catch (e) {}
+    var refusedDirect = null
+    if (inBrowser) {
+      if (!target) {
+        refusedDirect = 'unparseable'
+      } else if (target.origin === self.location.origin || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
+        refusedDirect = 'same-origin'
+      } else if (frameosIsPrivateHost(target.hostname) && !frameosIsPrivateHost(self.location.hostname)) {
+        refusedDirect = 'private-network'
+      }
+    }
+    return { inBrowser: inBrowser, target: target, refusedDirect: refusedDirect }
+  },
+
+  // Pictures fetched ahead, several at once (the browser preview's
+  // `<img src>`, js_async.nim `urlImage`). The runtime's requests are
+  // synchronous, one at a time, so a page of pictures came one a render. The
+  // runtime names each picture it wants (fos_wasm_picture), this worker
+  // fetches them `atOnce` at a time and keeps what came (`keepBytes` of
+  // them, the least recently used let go first), says so as
+  // each comes (Module.onFrameosPictures: the preview worker renders again),
+  // and the runtime's request for one is answered from here, at once. Kept
+  // for this runtime's life: a page seen again draws without the network.
+  // Only where a request may go straight from the browser (frameosRoute);
+  // through the proxy when the page says it goes first, or when the browser
+  // could not reach the origin (CORS), as the request itself would go.
+  $frameosPictures: function () {
+    if (!Module['frameosPictures']) {
+      // `atOnce` fetches in flight, `keepBytes` kept, none over `largest`.
+      Module['frameosPictures'] = {
+        entries: new Map(),
+        bytes: 0,
+        flying: 0,
+        queue: [],
+        atOnce: 6,
+        keepBytes: 64 * 1024 * 1024,
+        largest: 16 * 1024 * 1024,
+      }
+    }
+    return Module['frameosPictures']
+  },
+
+  $frameosPictureFetch__deps: ['$frameosPictures', '$frameosRoute', '$frameosProxyRefusal'],
+  $frameosPictureFetch: function (url, entry) {
+    var TIMEOUT_MS = 15000
+    var pictures = frameosPictures()
+    pictures.flying++
+    entry.state = 'coming'
+    var proxyUrl = Module['frameosProxyUrl']
+    var route = frameosRoute(url)
+    var origin = route.target ? route.target.origin : null
+    var directBlocked = Module['frameosDirectBlocked'] || (Module['frameosDirectBlocked'] = {})
+    var get = function (proxied) {
+      var controller = typeof AbortController === 'function' ? new AbortController() : null
+      var timer = controller ? setTimeout(function () { controller.abort() }, TIMEOUT_MS) : null
+      var options = proxied
+        ? {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method: 'GET', url: url, headers: {}, bodyBase64: '', timeoutMs: TIMEOUT_MS }),
+          }
+        : { credentials: 'omit' }
+      if (controller) options.signal = controller.signal
+      return fetch(proxied ? proxyUrl : url, options)
+        .then(function (response) {
+          var refusedBy = proxied && response.status === 403 ? response.headers.get('X-FrameOS-Proxy-Refused') : null
+          if (refusedBy) {
+            var refused = new Error(frameosProxyRefusal(refusedBy, route.target ? route.target.hostname : ''))
+            refused.frameosRefusal = true
+            throw refused
+          }
+          return response.arrayBuffer().then(function (body) {
+            return { response: response, body: body }
+          })
+        })
+        .then(
+          function (got) {
+            if (timer) clearTimeout(timer)
+            return got
+          },
+          function (error) {
+            if (timer) clearTimeout(timer)
+            throw error
+          }
+        )
+    }
+    var viaProxy = !!proxyUrl && (Module['frameosProxyFirst'] === true || (origin !== null && directBlocked[origin] === true))
+    var attempt = viaProxy
+      ? get(true)
+      : get(false).catch(function (error) {
+          // The browser could not reach it (CORS, mostly): the proxy, from
+          // now on for that origin, as fos_nim_http_request goes.
+          if (!proxyUrl || origin === null) throw error
+          directBlocked[origin] = true
+          return get(true)
+        })
+    var settle = function () {
+      pictures.flying--
+      while (pictures.flying < pictures.atOnce && pictures.queue.length > 0) {
+        var nextUrl = pictures.queue.shift()
+        var next = pictures.entries.get(nextUrl)
+        if (next && next.state === 'queued') frameosPictureFetch(nextUrl, next)
+      }
+      if (Module['onFrameosPictures']) Module['onFrameosPictures']()
+    }
+    attempt.then(
+      function (got) {
+        if (pictures.entries.get(url) !== entry) return settle()
+        var bytes = new Uint8Array(got.body)
+        if (bytes.length > pictures.largest) {
+          // Too big to keep: the runtime's own request fetches it (`skip`),
+          // and says so if it is too big for the runtime too.
+          entry.state = 'skip'
+          return settle()
+        }
+        var head = ''
+        got.response.headers.forEach(function (value, name) {
+          head += name + ': ' + value + '\r\n'
+        })
+        entry.state = 'here'
+        entry.status = got.response.status
+        entry.bytes = bytes
+        entry.head = head
+        pictures.bytes += bytes.length
+        // The least recently used go first, never this one.
+        var keys = pictures.entries.keys()
+        while (pictures.bytes > pictures.keepBytes) {
+          var step = keys.next()
+          if (step.done) break
+          var old = pictures.entries.get(step.value)
+          if (old === entry || old.state !== 'here') continue
+          pictures.bytes -= old.bytes.length
+          pictures.entries.delete(step.value)
+        }
+        settle()
+      },
+      function (error) {
+        if (pictures.entries.get(url) === entry) {
+          entry.state = 'failed'
+          entry.refusal = error && error.frameosRefusal ? error.message : ''
+          entry.error = String(error)
+        }
+        settle()
+      }
+    )
+  },
+
+  // The picture at `url`, fetched ahead (frameosPictureFetch): 0 when it is
+  // not one this worker fetches ahead (outside a browser, the page's own
+  // origin, a private host, one too big to keep: the runtime's request goes
+  // as always), 1 while it
+  // is coming (asked for now if it was not), 2 when it is here and the
+  // runtime's request for it is answered at once.
+  fos_wasm_picture__deps: ['$frameosPictures', '$frameosPictureFetch', '$frameosRoute', '$frameosIsPrivateHost'],
+  fos_wasm_picture: function (urlPtr) {
+    var url = UTF8ToString(urlPtr)
+    if (typeof fetch !== 'function') return 0
+    var route = frameosRoute(url)
+    if (!route.inBrowser || !route.target || route.refusedDirect) return 0
+    if (Module['frameosLanAccess'] === false && frameosIsPrivateHost(route.target.hostname)) return 0
+    var pictures = frameosPictures()
+    var entry = pictures.entries.get(url)
+    if (entry) {
+      if (entry.state === 'skip') return 0
+      return entry.state === 'here' || entry.state === 'failed' ? 2 : 1
+    }
+    entry = { state: 'queued' }
+    pictures.entries.set(url, entry)
+    if (pictures.flying < pictures.atOnce) {
+      frameosPictureFetch(url, entry)
+    } else {
+      pictures.queue.push(url)
+    }
+    return 1
+  },
+
+  // Pictures are here that the render left for the next one
+  // (js_async.nim `urlImage`): the preview worker renders again soon.
+  fos_wasm_pictures_waiting: function () {
+    if (Module['onFrameosPictures']) Module['onFrameosPictures']()
+  },
+
+  fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost', '$frameosLogUrl', '$frameosProxyRefusal', '$frameosRoute'],
   fos_nim_http_request: function (
     methodPtr,
     urlPtr,
@@ -201,6 +405,61 @@ addToLibrary({
       error.frameosRefusal = true
       return error
     }
+    // The bytes into the runtime's heap, with the status and the response's
+    // header lines, as one answer.
+    var answer = function (status, bytes, head) {
+      if (maxBytes > 0 && bytes.length > maxBytes) {
+        if (Module['onFrameosLog']) {
+          Module['onFrameosLog']('http: response for ' + frameosLogUrl(url) + ' exceeded ' + maxBytes + ' bytes')
+        }
+        return 0
+      }
+      var ptr = _malloc(bytes.length > 0 ? bytes.length : 1)
+      if (!ptr) return 0
+      HEAPU8.set(bytes, ptr)
+      if (outHeadersPtr) {
+        // frameos.httpRequest's `headers`: "name: value" lines into the
+        // caller's 2048-byte block (FOS_NIM_HTTP_HEADERS_BYTES, as the ESP32
+        // glue writes it), whole lines only. Through the proxy they are the
+        // proxy's answer's.
+        var lines = new TextEncoder().encode(head || '')
+        var fit = lines.length
+        if (fit > 2047) fit = lines.lastIndexOf(10, 2046) + 1
+        HEAPU8.set(lines.subarray(0, fit), outHeadersPtr)
+        HEAPU8[outHeadersPtr + fit] = 0
+      }
+      {{{ makeSetValue('outStatusPtr', 0, 'status', 'i32') }}}
+      {{{ makeSetValue('outLenPtr', 0, 'bytes.length', 'i32') }}}
+      return ptr
+    }
+    // A refusal's words as the request's error (status 0): they name a host,
+    // never a path or a query.
+    var refusalAnswer = function (message) {
+      var said = new TextEncoder().encode(message)
+      var saidPtr = _malloc(said.length > 0 ? said.length : 1)
+      if (saidPtr) {
+        HEAPU8.set(said, saidPtr)
+        {{{ makeSetValue('outLenPtr', 0, 'said.length', 'i32') }}}
+      }
+      return saidPtr
+    }
+    // A picture fetched ahead (frameosPictureFetch): answered from what came,
+    // and a failure said once, then asked again next time.
+    var pictures = method === 'GET' && bodyLen === 0 ? Module['frameosPictures'] : null
+    var kept = pictures ? pictures.entries.get(url) : null
+    if (kept && kept.state === 'here') {
+      pictures.entries.delete(url)
+      pictures.entries.set(url, kept)
+      return answer(kept.status, kept.bytes, kept.head)
+    }
+    if (kept && kept.state === 'failed') {
+      pictures.entries.delete(url)
+      if (Module['onFrameosLog']) {
+        var failedAt = frameosLogUrl(url)
+        Module['onFrameosLog']('http: GET ' + failedAt + ' failed: ' + (url ? String(kept.error).split(url).join(failedAt) : kept.error))
+      }
+      return kept.refusal ? refusalAnswer(kept.refusal) : 0
+    }
     try {
       var body = null
       if (bodyLen > 0) {
@@ -219,35 +478,12 @@ addToLibrary({
         }
       }
 
-      // Scene code is untrusted (it may come from the public store). This
-      // worker shares the app's origin, so a direct request to the app's own
-      // API would carry the user's session cookie and read the answer — a
-      // same-origin target must only ever go through the server-side proxy,
-      // which fetches without cookies and applies the SSRF guard.
-      // The same goes for the viewer's own network when the app itself is
-      // on the public internet: a request from the viewer's browser to
-      // http://192.168.1.1/ cannot read the reply without CORS, but it still
-      // reaches the router (timing, and side effects of a GET). Chrome's
-      // Private Network Access blocks that; Firefox and Safari do not. A
-      // self-hosted app on the LAN (or localhost) keeps direct access to
-      // private hosts, as a frame on that LAN would have.
-      // (Under Node — the headless renderers — there is no origin to protect;
-      // the guard only applies inside a browser context.)
-      var refusedDirect = null
-      var inBrowser = typeof self !== 'undefined' && self && self.location && typeof self.location.href === 'string'
-      var target = null
-      try {
-        target = inBrowser ? new URL(url, self.location.href) : new URL(url)
-      } catch (e) {}
-      if (inBrowser) {
-        if (!target) {
-          refusedDirect = 'unparseable'
-        } else if (target.origin === self.location.origin || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
-          refusedDirect = 'same-origin'
-        } else if (frameosIsPrivateHost(target.hostname) && !frameosIsPrivateHost(self.location.hostname)) {
-          refusedDirect = 'private-network'
-        }
-      }
+      // Where it may go from here (frameosRoute: never the app's own origin
+      // straight, nor the viewer's network from a public page).
+      var route = frameosRoute(url)
+      var refusedDirect = route.refusedDirect
+      var inBrowser = route.inBrowser
+      var target = route.target
 
       // A cloud frame's local network access (docs/lan-access.md), when the
       // host page says what it is (`frameosLanAccess: false`): a preview of a
@@ -343,30 +579,8 @@ addToLibrary({
       } else {
         bytes = new TextEncoder().encode(xhr.responseText || '')
       }
-      if (maxBytes > 0 && bytes.length > maxBytes) {
-        if (Module['onFrameosLog']) {
-          Module['onFrameosLog']('http: response for ' + frameosLogUrl(url) + ' exceeded ' + maxBytes + ' bytes')
-        }
-        return 0
-      }
-      var ptr = _malloc(bytes.length > 0 ? bytes.length : 1)
-      if (!ptr) return 0
-      HEAPU8.set(bytes, ptr)
-      if (outHeadersPtr) {
-        // frameos.httpRequest's `headers`: "name: value" lines into the
-        // caller's 2048-byte block (FOS_NIM_HTTP_HEADERS_BYTES, as the ESP32
-        // glue writes it), whole lines only. Through the proxy they are the
-        // proxy's answer's.
-        // A Node renderer's XHR shim may have no getAllResponseHeaders.
-        var head = new TextEncoder().encode((xhr.getAllResponseHeaders && xhr.getAllResponseHeaders()) || '')
-        var fit = head.length
-        if (fit > 2047) fit = head.lastIndexOf(10, 2046) + 1
-        HEAPU8.set(head.subarray(0, fit), outHeadersPtr)
-        HEAPU8[outHeadersPtr + fit] = 0
-      }
-      {{{ makeSetValue('outStatusPtr', 0, 'xhr.status', 'i32') }}}
-      {{{ makeSetValue('outLenPtr', 0, 'bytes.length', 'i32') }}}
-      return ptr
+      // A Node renderer's XHR shim may have no getAllResponseHeaders.
+      return answer(xhr.status, bytes, (xhr.getAllResponseHeaders && xhr.getAllResponseHeaders()) || '')
     } catch (e) {
       if (Module['onFrameosLog']) {
         // A browser's network error can quote the URL it failed on, too.
@@ -375,15 +589,8 @@ addToLibrary({
         Module['onFrameosLog']('http: ' + method + ' ' + origin + ' failed: ' + reason)
       }
       if (e && e.frameosRefusal) {
-        // Its words go to the scene as the request's error: they name a host,
-        // never a path or a query.
-        var said = new TextEncoder().encode(e.message)
-        var saidPtr = _malloc(said.length > 0 ? said.length : 1)
-        if (saidPtr) {
-          HEAPU8.set(said, saidPtr)
-          {{{ makeSetValue('outLenPtr', 0, 'said.length', 'i32') }}}
-        }
-        return saidPtr
+        // Its words go to the scene as the request's error.
+        return refusalAnswer(e.message)
       }
       return 0
     }

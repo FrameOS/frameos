@@ -421,18 +421,30 @@ kept.
   render (a Pi's request workers, an ESP32's request task) and the grid is
   drawn again as they land, so a tap is never stuck behind a download. Each
   is kept at its icon's size (`docs/jsx-ui.md` "Photos that stay"), and only
-  tiles near the screen ask for theirs. A board that sleeps between renders,
-  e-paper and the browser preview fetch them in the render (the preview one
-  picture a render).
+  tiles near the screen ask for theirs. A board that sleeps between renders
+  and e-paper fetch them in the render. The browser preview's worker fetches
+  every one asked for at once, six at a time, keeps them (64 MB, so a page
+  seen again draws at once) and renders again as each comes in, a render
+  drawing the ones in (`fos_wasm_picture` in `tools/wasm/frameos_library.js`,
+  `urlImage` in `js_async.nim`). One a render, at the preview's one render a
+  second, took 24 s for a page (2026-11-25).
 - **The desktop's look.** Its header, tabs, buttons, search field and tiles
   name their role (`look="bar"`, `"selected"`, `"button"`, `"primary"`,
   `"field"`, `"option"`, `"page"`), so in a desktop's window it wears that
   desktop's theme, and its own dark (or high contrast) look with none.
+- **Featured** is one page (`featured=1`, `store-device.ts`
+  `featuredForDevice`): the scenes an admin featured, newest first, then the
+  best of each shelf by turns (every shelf's first, then every shelf's
+  second), a shelf's best being what the frame puts first and then the most
+  downloaded. It is scenes, and none of the frame's own apps or the demos
+  (`exclude=desktops,layouts,devices,system,demos`): the layouts are the
+  other side. Until 2026-11-25 it was every scene in the store, the fast ones
+  first, scrolling without end.
 - **What this frame is** decides what it is offered: a panel that animates gets
-  the scenes made for a fast screen first under Featured (`prefer=fast`);
+  the scenes made for a fast screen first (`prefer=fast`: a shelf's best in
+  Featured);
   e-paper is not offered them at all (`without=fast`), an ESP32 nothing that
-  needs Linux (`without=linux`). Featured is scenes (`exclude=desktops,layouts,devices`):
-  the layouts are the other side. E-paper
+  needs Linux (`without=linux`). E-paper
   fetches its own pages (`httpRequest` in the render, so one answer is one
   refresh) and takes a page's covers before its one refresh. A grey or black
   and white panel (`app.frame.color === false`) gets the high-contrast look,

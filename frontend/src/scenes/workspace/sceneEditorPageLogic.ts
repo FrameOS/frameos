@@ -242,7 +242,15 @@ export const sceneEditorPageLogic = kea<sceneEditorPageLogicType>([
       }
     },
   })),
-  subscriptions(({ props }) => ({
+  subscriptions(({ actions, values, props }) => ({
+    // A page opened at its address mounts before the frame is in: the open
+    // preview runs the frame's scenes once they come, not the none there were
+    // ("no scenes loaded: loadScenes: no scenes in payload", 2026-11-25).
+    scenes: (scenes: FrameScene[]) => {
+      if (values.panels.preview && !values.previewScenes?.length && scenes.length > 0) {
+        actions.setPreviewScenes(scenesAsJson(scenes))
+      }
+    },
     // The shown scene's diagram takes the keyboard (Cmd+Z and the rest).
     resolvedSceneId: (sceneId: string | null) => {
       if (sceneId) {
@@ -255,7 +263,7 @@ export const sceneEditorPageLogic = kea<sceneEditorPageLogicType>([
     },
   })),
   afterMount(({ actions, values, props }) => {
-    if (values.panels.preview) {
+    if (values.panels.preview && values.scenes.length > 0) {
       actions.setPreviewScenes(scenesAsJson(values.scenes))
     }
     // The workspace's panels call this plane's routes: the SPA's apiFetch

@@ -4,7 +4,7 @@
 ## request workers' hook (jsIoHook); the covers are data URLs unless a test
 ## asks for network ones. FRAMEOS_STORE_SHOTS=<dir> writes each picture there.
 
-import std/[algorithm, base64, json, locks, monotimes, os, sequtils, strutils, tables, times, unittest, uri]
+import std/[algorithm, base64, json, locks, monotimes, options, os, sequtils, strutils, tables, times, unittest, uri]
 import pixie
 import ../channels
 import ../interpreter
@@ -270,12 +270,14 @@ suite "the Scene store scene":
     check settle() >= 1
     let pages = requested("/api/store/device/scenes?")
     check pages.len == 1
-    # A fast panel puts the scenes made for it first, Featured is scenes (the
-    # layouts have shelves of their own); the shelves come with the first page;
+    # A fast panel puts the scenes made for it first, Featured is the store's
+    # pick of scenes (the layouts have shelves of their own, the frame's own
+    # apps and the demos are no pick); the shelves come with the first page;
     # the page is the grid's; the store is the host's.
     check pages[0].startsWith("https://store.test/") and "version=2026.11.8" in pages[0]
     check "prefer=fast" in pages[0] and "categories=1" in pages[0] and "page=1" in pages[0]
-    check "exclude=desktops,layouts,devices" in pages[0] and "without=" notin pages[0]
+    check "featured=1" in pages[0]
+    check "exclude=desktops,layouts,devices,system,demos" in pages[0] and "without=" notin pages[0]
     # A page while it scrolls is the most the store gives, whatever the window.
     check "limit=24" in pages[0]
     # Data URL covers are there at once; covers from the network are the test
@@ -490,9 +492,18 @@ suite "the Scene store scene":
     scene.state["spot"] = %*{"page": 1, "detail": detail,
       "tried": {"store": detail["id"].getStr(), "before": ""}}
     facts["preview"] = %*{"store": detail["id"], "id": "layout-top-bar", "name": "Top bar"}
+    var sent: seq[string]
+    let sinkBefore = localEventSink
+    localEventSink = proc (target: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+      {.cast(gcsafe).}:
+        sent.add event
     discard draw(scene, config, "layout-tried")
+    localEventSink = sinkBefore
     check chosenLayout() == "layout-top-bar"
     check parseJson(sceneStoreFactsForTests("store")){"layout"}.getStr() == "layout-top-bar"
+    # Put on from inside a render, it is worn from the next pass: the store
+    # asks for one, or it wore it only once something else drew.
+    check "render" in sent
     # Discard drops the preview and gives the frame back what it wore.
     var discarded = false
     for (action, _) in tapAll():

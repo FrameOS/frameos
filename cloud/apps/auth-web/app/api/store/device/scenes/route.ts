@@ -18,8 +18,10 @@ export const runtime = "nodejs";
 // `q`, `category` and `version` (the frame's FrameOS, so it is offered only
 // what runs on it) filter as the store front does, `page` counts from 1,
 // `limit` is the page's size (its grid, 1 to 24, 12 by default), `prefer` a
-// shelf that goes first, `exclude` shelves left out (comma separated), and
-// `categories=1` adds the shelves. A dozen scenes is about 3 KB: an ESP32
+// shelf that goes first, `exclude` shelves left out (comma separated),
+// `featured=1` the app's Featured (one page: what was featured, then each
+// shelf's best by turns; store-device.ts), and `categories=1` adds the
+// shelves. A dozen scenes is about 3 KB: an ESP32
 // parses it beside the scene it is running. Public and cached like the store
 // front's own feed, and readable from any page (the browser preview runs the
 // scene too); a frame asks with no credential, so it is limited per address

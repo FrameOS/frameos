@@ -106,10 +106,13 @@ gets the scene's form, without the layout, instead. A frame with keys alone has 
 pull; there the control plane changes the layout.
 
 **Around the built-in scenes.** The scene list and the settings are drawn in the
-layout of the scene they were opened from, so a taskbar stays up. The dispatcher
-hands the built-in scene that layout (`state.layout`, `event_loop.nim`), and it
-runs through the same pass as any scene wearing one (`FrameScene.ownRun`,
-`builtInRunner`). `app.frame.systemScene` is true in the layout's app meanwhile:
+layout of the scene they were opened from, so a taskbar stays up: the one it
+wears, its own or the one chosen on the frame (`layoutFor`; the scene store's
+Try is a choice). The dispatcher hands the built-in scene that layout
+(`state.layout`, `event_loop.nim`), which goes on once the scene has read it
+(not at the `setCurrentScene` that carries it), and it runs through the same
+pass as any scene wearing one (`FrameScene.ownRun`, `builtInRunner`).
+`app.frame.systemScene` is true in the layout's app meanwhile:
 `if (app.frame.systemScene) return <yield />` gives them the whole panel.
 
 **While a scene types.** The keyboard on the screen of a field in the scene a

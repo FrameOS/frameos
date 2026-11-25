@@ -166,6 +166,9 @@ export const UI_FLUSH_INTERVAL_MS = 200;
 export const LAYOUT_SETTINGS_DEBOUNCE_MS = 400;
 /** Where "Auto apply" is remembered between editor sessions (this browser). */
 const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
+/** Whether the runtime's log shows under the picture (this browser): hidden
+ * until "Show logs". */
+const SHOW_LOGS_STORAGE_KEY = "frameos.preview.showLogs";
 /** Where the panel simulation is remembered (this browser). Empty means off;
  * anything else is a panelPalettes key. */
 const PANEL_STORAGE_KEY = "frameos.preview.panel";
@@ -524,6 +527,9 @@ export function SceneLivePreviewPanel({
 
   // Bumped by the Restart button; recreates the whole wasm runtime.
   const [restartCount, setRestartCount] = useState(0);
+  // The render scale set on the preview's frame page (0: automatic), for the
+  // runtime a Restart starts: the running one has it already.
+  const frameRenderScaleRef = useRef(0);
 
   // Render pacing. The runtime throttles every scene to one render per
   // second; a scene asking for more (a 24 fps slideshow) gets to ask the
@@ -633,6 +639,32 @@ export function SceneLivePreviewPanel({
     }
     try {
       window.localStorage.setItem(AUTO_APPLY_STORAGE_KEY, checked ? "1" : "0");
+    } catch {
+      // See above.
+    }
+  }
+
+  // The runtime's log under the picture: hidden until asked for ("Show
+  // logs"), so the picture and what it asks of you are what the panel shows.
+  // Remembered per browser, like Auto apply.
+  const [showLogs, setShowLogs] = useState(false);
+  useEffect(() => {
+    if (!rememberSettings) {
+      return;
+    }
+    try {
+      setShowLogs(window.localStorage.getItem(SHOW_LOGS_STORAGE_KEY) === "1");
+    } catch {
+      // Storage blocked: the button still works for this session.
+    }
+  }, []);
+  function chooseShowLogs(shown: boolean) {
+    setShowLogs(shown);
+    if (!rememberSettings) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(SHOW_LOGS_STORAGE_KEY, shown ? "1" : "0");
     } catch {
       // See above.
     }
@@ -965,6 +997,11 @@ export function SceneLivePreviewPanel({
         fastMode,
         drawnCursor,
         windowed,
+        // The frame's own page in the scene settings (the gear by Save, a
+        // layout's Control Panel or tray), as on a frame: its layout and that
+        // layout's settings, its scale, Restart.
+        framePage: true,
+        renderScale: frameRenderScaleRef.current,
         round: roundRef.current,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,
@@ -1080,8 +1117,20 @@ export function SceneLivePreviewPanel({
           setCurrentSceneId(info.currentSceneId || null);
         },
         onLog: appendLog,
-        onSceneEvent: (name, payload) =>
-          appendLog(`event: ${name} ${JSON.stringify(payload)}`),
+        onSceneEvent: (name, payload) => {
+          appendLog(`event: ${name} ${JSON.stringify(payload)}`);
+          if (cancelled) {
+            return;
+          }
+          // The frame page's Restart (and a Reboot) start the runtime again,
+          // as the Restart button does; a scale set there outlives it.
+          if (name === "restart" || name === "reboot") {
+            setError(null);
+            setRestartCount((count) => count + 1);
+          } else if (name === "frameSettings" && typeof payload.renderScale === "number") {
+            frameRenderScaleRef.current = payload.renderScale;
+          }
+        },
         onError: (message) => {
           if (cancelled) {
             return;
@@ -1665,6 +1714,34 @@ export function SceneLivePreviewPanel({
         {/* The picture is pinned with the rows above it, so it stays in view
             while the log, the settings and the form scroll underneath; its
             handle drags it taller or shorter. */}
+        {/* Over the picture, not under it: below, the picture took the eye
+            and this went unread. */}
+        {fastRenderRequest && !fastRenderRequest.answered ? (
+          <div className="notice live-preview__fast" role="status">
+            <Zap aria-hidden className="live-preview__fast-icon" size={18} />
+            <span className="live-preview__fast-copy">
+              This scene wants to render {describeRenderRate(fastRenderRequest.intervalMs)}. The
+              preview is holding it to one render per second — let it go at full speed? It keeps your
+              browser busy while the editor is open.
+            </span>
+            <span className="button-row">
+              <button
+                className="button button-primary button--small"
+                onClick={() => answerFastRender(true)}
+                type="button"
+              >
+                Run at full speed
+              </button>
+              <button
+                className="button button--subtle button--small"
+                onClick={() => answerFastRender(false)}
+                type="button"
+              >
+                Keep 1 fps
+              </button>
+            </span>
+          </div>
+        ) : null}
         <div className="live-preview-panel__picture">
           {previewGated ? (
             <div className="live-preview__gate" role="status">
@@ -1758,32 +1835,6 @@ export function SceneLivePreviewPanel({
           </span>
         </div>
       ) : null}
-      {fastRenderRequest && !fastRenderRequest.answered ? (
-        <div className="notice live-preview__fast" role="status">
-          <Zap aria-hidden className="live-preview__fast-icon" size={18} />
-          <span className="live-preview__fast-copy">
-            This scene wants to render {describeRenderRate(fastRenderRequest.intervalMs)}. The
-            preview is holding it to one render per second — let it go at full speed? It keeps your
-            browser busy while the editor is open.
-          </span>
-          <span className="button-row">
-            <button
-              className="button button-primary button--small"
-              onClick={() => answerFastRender(true)}
-              type="button"
-            >
-              Run at full speed
-            </button>
-            <button
-              className="button button--subtle button--small"
-              onClick={() => answerFastRender(false)}
-              type="button"
-            >
-              Keep 1 fps
-            </button>
-          </span>
-        </div>
-      ) : null}
       {fastRenderRequest?.answered ? (
         <label
           className="live-preview-panel__auto-apply live-preview__fast-toggle"
@@ -1800,22 +1851,33 @@ export function SceneLivePreviewPanel({
             : ` (the scene asks for ~${formatFps(1000 / Math.max(1, fastRenderRequest.intervalMs))} fps)`}
         </label>
       ) : null}
-      {pointerInput && cursorKnown ? (
-        <label
-          className="live-preview-panel__auto-apply live-preview__cursor-toggle"
-          title="Draw the frame's own mouse cursor over the picture, as a frame with a mouse shows it, instead of the browser's"
+      {/* The log's button, and the frame's cursor beside it where there is room. */}
+      <div className="live-preview__toggles">
+        <button
+          aria-expanded={showLogs}
+          className="button button--subtle button--small"
+          onClick={() => chooseShowLogs(!showLogs)}
+          type="button"
         >
-          <input
-            checked={drawnCursor}
-            onChange={(event) => chooseDrawnCursor(event.target.checked)}
-            type="checkbox"
-          />
-          The frame's mouse cursor
-        </label>
-      ) : null}
+          {showLogs ? "Hide logs" : "Show logs"}
+        </button>
+        {pointerInput && cursorKnown ? (
+          <label
+            className="live-preview-panel__auto-apply live-preview__cursor-toggle"
+            title="Draw the frame's own mouse cursor over the picture, as a frame with a mouse shows it, instead of the browser's"
+          >
+            <input
+              checked={drawnCursor}
+              onChange={(event) => chooseDrawnCursor(event.target.checked)}
+              type="checkbox"
+            />
+            The frame's mouse cursor
+          </label>
+        ) : null}
+      </div>
       <div className="live-preview">
-        {/* Right under the picture: what the runtime says about it. */}
-        <PreviewLog lines={logs} />
+        {/* Right under the picture: what the runtime says about it, when asked. */}
+        {showLogs ? <PreviewLog lines={logs} /> : null}
         <div
           className={`live-preview__status${error ? " live-preview__status--error" : ""}`}
         >

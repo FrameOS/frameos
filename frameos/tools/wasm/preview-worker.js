@@ -89,6 +89,22 @@ const FAST_MIN_MS = 10
 const MAX_DELAY_MS = 15 * 60 * 1000
 let fastMode = false
 let fastRequestSent = false
+// When the timer set goes off (Date.now()), so a sooner render can take its
+// place and a later one cannot.
+let renderDueAt = 0
+
+// A render the runtime asked for while it rendered (a layout the Scene store
+// put on from inside a render), or for pictures that came in (`<img src>`
+// pictures this worker fetches ahead, frameos_library.js frameosPictureFetch,
+// and those a render left for the next): the next pass in SOON_MS, whatever
+// the scene's interval and the 1 fps throttle. Loading what a scene shows is
+// no animation. A scene's own `frameos.dispatch('render')` from a render is
+// dropped by the runtime; still, past SOON_RUNS asked-for passes in a row the
+// throttle holds again.
+const SOON_MS = 30
+const SOON_RUNS = 20
+let soonRuns = 0
+let picturesWaiting = false
 
 const ASSETS_ROOT = '/srv/assets'
 // Ceiling for the browser folder; a write past it fails instead of filling
@@ -1014,7 +1030,45 @@ function scheduleNextRender() {
     fastRequestSent = true
     post({ type: 'fastRenderRequest', intervalMs: Math.max(Math.round(seconds * 1000), FAST_MIN_MS) })
   }
-  renderTimer = setTimeout(renderNow, renderDelayMs(seconds, fastMode))
+  let delay = renderDelayMs(seconds, fastMode)
+  let asked = false
+  try {
+    asked = call('frameos_wasm_render_requested', 'boolean', [], [])
+  } catch (e) {}
+  if (picturesWaiting) {
+    picturesWaiting = false
+    delay = Math.min(delay, SOON_MS)
+  } else if (asked && soonRuns < SOON_RUNS) {
+    soonRuns++
+    delay = Math.min(delay, SOON_MS)
+  } else if (!asked) {
+    soonRuns = 0
+  }
+  setRenderTimer(delay)
+}
+
+function setRenderTimer(delay) {
+  if (renderTimer) {
+    clearTimeout(renderTimer)
+  }
+  renderDueAt = Date.now() + delay
+  renderTimer = setTimeout(renderNow, delay)
+}
+
+// Pictures came in (Module.onFrameosPictures): drawn in a moment, with any
+// others that come meanwhile; after the render going on, if one is.
+function picturesArrived() {
+  if (!Module || outOfMemory) {
+    return
+  }
+  if (rendering) {
+    picturesWaiting = true
+    return
+  }
+  if (renderTimer && renderDueAt <= Date.now() + SOON_MS) {
+    return
+  }
+  setRenderTimer(SOON_MS)
 }
 
 function renderSoonIfRequested() {
@@ -1054,6 +1108,8 @@ async function init(msg) {
       onFrameosOpenLink: (url) => post({ type: 'openLink', url: String(url) }),
       // Upload / Download in the Files scene: handed to the page (below).
       onFrameosFileRequest: (text) => onFileRequest(text),
+      // A picture this worker fetched ahead came in, or a render left some.
+      onFrameosPictures: () => picturesArrived(),
       onFrameosEvent: (name, payload) => {
         let parsed = {}
         try {
@@ -1106,9 +1162,10 @@ async function init(msg) {
     } catch (e) {
       // older bundle without the export: the app browses on its own
     }
-    // Every frame is shown as it comes, so an <img src> page's pictures come
-    // one a render, the next soon, rather than a first frame that waits for
-    // all of them (a plane's render waits: it is the one picture a board gets).
+    // Every frame is shown as it comes, so an <img src> page's pictures are
+    // fetched ahead, all at once, and drawn as they land (picturesArrived),
+    // rather than a first frame that waits for all of them (a plane's render
+    // waits: it is the one picture a board gets).
     try {
       call('frameos_wasm_set_pictures_one_a_render', null, ['boolean'], [true])
     } catch (e) {
@@ -1123,10 +1180,10 @@ async function init(msg) {
         post({ type: 'log', message: 'windows are unavailable in this runtime build' })
       }
     }
-    // The frame's own page in the scene settings (a layout's Control Panel), for
-    // a page that is a frame of its own rather than an editor's preview. Its
-    // Restart and Reboot reach the page as `sceneEvent`s, a new scale as a
-    // `frameSettings` one.
+    // The frame's own page in the scene settings (a layout's Control Panel, its
+    // settings), as a frame shows it: the playground and the scene workspace's
+    // preview ask for it. Its Restart and Reboot reach the page as
+    // `sceneEvent`s, a new scale as a `frameSettings` one.
     if (msg.framePage) {
       try {
         call('frameos_wasm_set_frame_page', null, ['boolean'], [true])

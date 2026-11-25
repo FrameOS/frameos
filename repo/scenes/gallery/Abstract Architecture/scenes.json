@@ -51,7 +51,7 @@
         "data": {
           "keyword": "frameOSGallery",
           "config": { "category": "building-art-styles" },
-          "cache": { "duration": "60", "durationEnabled": true, "enabled": true, "inputEnabled": true }
+          "cache": { "duration": "60", "durationEnabled": true, "enabled": false, "inputEnabled": true }
         },
         "type": "app",
         "width": 333,
@@ -84,6 +84,14 @@
       }
     ],
     "edges": [
+      {
+        "id": "frameos-gallery-hold",
+        "source": "5cf5e8b8-5b81-4fd3-993f-1461741c67ef",
+        "sourceHandle": "fieldOutput",
+        "target": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
+        "targetHandle": "fieldInput/hold",
+        "type": "codeNodeEdge"
+      },
       {
         "id": "f9671947-579c-4b67-be4d-c346b2757c82",
         "source": "9eb12a2c-9606-4663-80c5-b8a61fd23fa7",
@@ -122,9 +130,11 @@
         "name": "FrameOS Gallery",
         "description": "Random image from the FrameOS gallery",
         "category": "data",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "fields": [
-          { "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries." },
+          {
+            "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
+          },
           {
             "name": "category",
             "type": "select",
@@ -148,7 +158,13 @@
             "value": "",
             "required": false,
             "label": "Category (if other)",
-            "showIf": [{ "field": "category", "operator": "eq", "value": "other" }]
+            "showIf": [
+              {
+                "field": "category",
+                "operator": "eq",
+                "value": "other"
+              }
+            ]
           },
           {
             "name": "format",
@@ -167,15 +183,40 @@
             "required": false,
             "label": "Scale to the target",
             "hint": "The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
-            "showIf": [{ "field": "format", "operator": "ne", "value": "original" }]
+            "showIf": [
+              {
+                "field": "format",
+                "operator": "ne",
+                "value": "original"
+              }
+            ]
+          },
+          {
+            "name": "hold",
+            "type": "float",
+            "value": "0",
+            "required": false,
+            "label": "Show each picture for (seconds)",
+            "hint": "0: a new picture every render. Otherwise one picture for this long (connect the scene's interval), the same one drawn again in between (a window moved, resized or uncovered), and the next one at once when the scene is tapped or swiped with a finger, a frame's button pressed, or a key: right or down arrow, Page Down, Space, Enter or N. Turn the node's cache off with it. Not on an ESP32, whose memory is the picture's size: there a new picture every render, as with 0."
           }
         ],
-        "output": [{ "name": "image", "type": "image" }],
-        "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" },
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "events": ["tap", "keyDown", "button", "swipe", "forward", "back"],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "900"
+        },
         "origin": "repo/apps/image/frameOSGallery",
         "sources": {
-          "app.ts": "// A random image from a FrameOS gallery, scaled on the gallery server to the\n// size it will be drawn at: the frame then downloads and decodes only the\n// pixels it shows (an 800x480 JPEG is ~125 KB where the original PNG is 1.5 to\n// 4.7 MB), which on a battery-powered ESP32 is most of what a render costs.\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const { category, categoryOther, format, fit } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  let url = `https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`\n  if (format !== 'original') {\n    // The size the image will be drawn at: the target the interpreter\n    // addressed to this node (an image node's box, a split cell), else the\n    // canvas this run draws on. Both are in scene pixels, already turned with\n    // the frame; the app never looks at the panel itself.\n    const width = context.targetWidth || context.imageWidth || 0\n    const height = context.targetHeight || context.imageHeight || 0\n    if (width > 0 && height > 0) {\n      // \"auto\" follows the consumer's placement: only contain keeps the\n      // whole picture; cover, stretch, center and the rest want it filled.\n      const placement = fit === 'auto' || !fit ? context.targetFit : fit\n      const encoding = format === 'png' ? 'png' : 'jpg'\n      url += `&width=${width}&height=${height}&fit=${placement === 'contain' ? 'contain' : 'cover'}&format=${encoding}`\n    }\n  }\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(url)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
-          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    },\n    {\n      \"name\": \"format\",\n      \"type\": \"select\",\n      \"options\": [\"jpg\", \"png\", \"original\"],\n      \"value\": \"jpg\",\n      \"required\": false,\n      \"label\": \"Image format\",\n      \"hint\": \"jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame.\"\n    },\n    {\n      \"name\": \"fit\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"cover\", \"contain\"],\n      \"value\": \"auto\",\n      \"required\": false,\n      \"label\": \"Scale to the target\",\n      \"hint\": \"The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.\",\n      \"showIf\": [{ \"field\": \"format\", \"operator\": \"ne\", \"value\": \"original\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+          "app.ts": "// A random image from a FrameOS gallery, scaled on the gallery server to the\n// size it will be drawn at: the frame then downloads and decodes only the\n// pixels it shows (an 800x480 JPEG is ~125 KB where the original PNG is 1.5 to\n// 4.7 MB), which on a battery-powered ESP32 is most of what a render costs.\n//\n// `hold` keeps a picture for that many seconds (the scene's interval): a render\n// in between draws the same one again, whatever asked for it and at whatever\n// size it is drawn at by then: a window moved, resized or uncovered on a\n// desktop, another window changing. A tap, a key that turns a page, a frame's\n// button or a finger's swipe asks for the next one at once. The gallery picks at\n// random every time, so a picture is kept here, never asked for again. 0\n// (the default) is a new picture every render, as before 1.2.0. Not on an\n// ESP32: a picture kept is one more the size of the panel beside its canvas\n// (a 13.3\" e-paper's would not fit), and one that sleeps starts afresh at\n// every wake anyway. There each render decodes its picture straight into\n// where it is drawn, as before, and the keys and taps still turn it.\n\ntype Held = { key: string; image: FrameOSImageRef; at: number; asks: number }\n\n// The pictures held, by node (a scene may show two galleries), and how many\n// times the next one was asked for: every gallery in the scene turns.\nconst held = new Map<number, Held>()\nlet asks = 0\n\n// A render this close to the hold's end is the scene's own interval come\n// round: the next picture.\nconst SLACK_MS = 2000\n\n// The keys that turn a page. One with Alt, Ctrl or Cmd is the desktop's\n// (Alt+Tab), and a held key repeats nothing.\nconst NEXT_KEYS = ['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter', 'n', 'N']\nconst NEXT_CODES = ['ArrowRight', 'ArrowDown', 'PageDown', 'Space', 'Enter', 'NumpadEnter', 'KeyN']\n\nexport function onEvent(app: FrameOSApp, context: FrameOSContext): boolean {\n  const payload = (context.payload || {}) as Record<string, any>\n  if (context.event === 'keyDown') {\n    if (payload.alt || payload.ctrl || payload.meta || payload.repeat) return false\n    if (!NEXT_KEYS.includes(payload.key) && !NEXT_CODES.includes(payload.code)) return false\n  } else if (context.event === 'button') {\n    // A long press is the frame's own (its event map: the scene switcher, voice).\n    if (payload.action && payload.action !== 'press' && payload.action !== 'doublePress') return false\n  } else if (context.event === 'swipe') {\n    // A finger's swipe turns the page; a mouse dragged over a window's picture\n    // on a desktop is no ask for another.\n    if (payload.pointerType === 'mouse') return false\n  } else if (!['tap', 'forward', 'back'].includes(context.event)) {\n    return false\n  }\n  asks += 1\n  return true\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const { category, categoryOther, format, fit } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  const hold = app.frame.embedded === true ? 0 : Math.max(0, Number(app.config.hold) || 0)\n  const key = `${name}|${format}|${fit}`\n  const kept = held.get(app.nodeId)\n  if (hold > 0 && kept && kept.key === key && kept.asks === asks && Date.now() - kept.at < hold * 1000 - SLACK_MS) {\n    return kept.image\n  }\n  let url = `https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`\n  if (format !== 'original') {\n    // The size the image will be drawn at: the target the interpreter\n    // addressed to this node (an image node's box, a split cell), else the\n    // canvas this run draws on. Both are in scene pixels, already turned with\n    // the frame; the app never looks at the panel itself.\n    let width = context.targetWidth || context.imageWidth || 0\n    let height = context.targetHeight || context.imageHeight || 0\n    if (width > 0 && height > 0) {\n      // A picture held in a desktop's window may be drawn bigger before the\n      // next one: asked for as big as the desktop's longer side, its window's\n      // shape kept, so a window made bigger shows it sharp.\n      const desktop = Math.max(app.frame.width || 0, app.frame.height || 0)\n      const longer = Math.max(width, height)\n      if (hold > 0 && Array.isArray(app.frame.scenes) && desktop > longer) {\n        width = Math.round((width * desktop) / longer)\n        height = Math.round((height * desktop) / longer)\n      }\n      // \"auto\" follows the consumer's placement: only contain keeps the\n      // whole picture; cover, stretch, center and the rest want it filled.\n      const placement = fit === 'auto' || !fit ? context.targetFit : fit\n      const encoding = format === 'png' ? 'png' : 'jpg'\n      url += `&width=${width}&height=${height}&fit=${placement === 'contain' ? 'contain' : 'cover'}&format=${encoding}`\n    }\n  }\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  // Held, the picture is kept for later renders; otherwise each render's own.\n  const photo = hold > 0 ? frameos.fetchImage(url, { keep: true }) : frameos.fetchImage(url)\n  if (!photo.image) {\n    const error = `An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`\n    // The picture held stays up, and the next render asks again.\n    if (hold > 0 && kept) {\n      frameos.log(error)\n      return kept.image\n    }\n    throw new Error(error)\n  }\n  if (kept && typeof frameos.releaseImage === 'function') frameos.releaseImage(kept.image)\n  if (hold > 0) held.set(app.nodeId, { key, image: photo.image, at: Date.now(), asks })\n  else held.delete(app.nodeId)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.2.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    },\n    {\n      \"name\": \"format\",\n      \"type\": \"select\",\n      \"options\": [\"jpg\", \"png\", \"original\"],\n      \"value\": \"jpg\",\n      \"required\": false,\n      \"label\": \"Image format\",\n      \"hint\": \"jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame.\"\n    },\n    {\n      \"name\": \"fit\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"cover\", \"contain\"],\n      \"value\": \"auto\",\n      \"required\": false,\n      \"label\": \"Scale to the target\",\n      \"hint\": \"The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.\",\n      \"showIf\": [{ \"field\": \"format\", \"operator\": \"ne\", \"value\": \"original\" }]\n    },\n    {\n      \"name\": \"hold\",\n      \"type\": \"float\",\n      \"value\": \"0\",\n      \"required\": false,\n      \"label\": \"Show each picture for (seconds)\",\n      \"hint\": \"0: a new picture every render. Otherwise one picture for this long (connect the scene's interval), the same one drawn again in between (a window moved, resized or uncovered), and the next one at once when the scene is tapped or swiped with a finger, a frame's button pressed, or a key: right or down arrow, Page Down, Space, Enter or N. Turn the node's cache off with it. Not on an ESP32, whose memory is the picture's size: there a new picture every render, as with 0.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"events\": [\"tap\", \"keyDown\", \"button\", \"swipe\", \"forward\", \"back\"],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
         }
       }
     }
