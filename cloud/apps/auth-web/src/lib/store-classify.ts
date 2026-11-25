@@ -57,13 +57,17 @@ export function isClassificationConfigured() {
   return Boolean(process.env.OPENAI_API_KEY?.trim());
 }
 
+// What the model may pick: every scene shelf but those a scene has to name
+// itself (System: the frame's own apps).
+const classifiable = sceneCategories.filter((category) => !category.statedOnly);
+
 const systemPrompt = [
   "You label scenes for the FrameOS scene store. Scenes run on smart picture",
   "frames — e-ink and LCD displays that show one full-screen view, refreshed",
   "on a schedule.",
   "",
   "Pick exactly one category slug that best describes what the scene shows:",
-  ...sceneCategories.map(
+  ...classifiable.map(
     (category) => `- ${category.slug}: ${category.hint}`,
   ),
   "",
@@ -110,7 +114,7 @@ export async function classifyStoreScene(input: {
           additionalProperties: false,
           properties: {
             category: {
-              enum: sceneCategories.map((category) => category.slug),
+              enum: classifiable.map((category) => category.slug),
               type: "string",
             },
             tags: {
@@ -158,7 +162,7 @@ export async function classifyStoreScene(input: {
       };
       const category =
         typeof parsed.category === "string" &&
-        sceneCategories.some((entry) => entry.slug === parsed.category)
+        classifiable.some((entry) => entry.slug === parsed.category)
           ? parsed.category
           : undefined;
       if (!category) {

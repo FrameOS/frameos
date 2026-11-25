@@ -154,7 +154,8 @@ copy `frontend/src/utils/storeCategories.ts`, the iOS app's
 never a category it states. The scenes' shelves say what a scene is about:
 Photos, Art & galleries, Clocks & time, Calendars & agendas, Weather, Home &
 dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
-examples. The layouts' are Multi app layouts, Single app layouts and Device
+examples, System (the frame's own apps, only for a scene that names it: the
+classifier never picks it). The layouts' are Multi app layouts, Single app layouts and Device
 layouts (one made for a device: `settings.devices` names it, docs/scene-layouts.md),
 and a layout is always on its kind's (`validateSceneZip`), a scene never.
 

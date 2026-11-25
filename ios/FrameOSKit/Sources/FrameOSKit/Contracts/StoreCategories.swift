@@ -17,6 +17,7 @@ public enum StoreCategories {
         ("utilities", "Notes & tools"),
         ("ai", "AI & generative"),
         ("demos", "Demos & examples"),
+        ("system", "System"),
         ("desktops", "Multi app layouts"),
         ("layouts", "Single app layouts"),
         ("devices", "Device layouts"),

@@ -3313,6 +3313,10 @@ suite "a long list of scenes, by category (each desktop's grouped)":
     # No scene with a category (an older runtime lists none): one group, no
     # title, the frame's order.
     check groupedBy("[{id: 'x'}, {id: 'y', category: ''}]") == %*[[nil, "x", "y"]]
+    # System first, in any case (the frame's own apps), as the scene switcher's.
+    check groupedBy("[{id: 'w', category: 'Weather'}, {id: 's', category: 'System'}, {id: 'a', category: 'apps'}, " &
+      "{id: 'o'}, {id: 't', category: ' system '}]") ==
+      %*[["System", "s"], ["system", "t"], ["apps", "a"], ["Weather", "w"], ["Other", "o"]]
 
   # Forty scenes, longer than the screen in every list: the sixteen numbered ones
   # take turns at Weather, Fun & comics, none and Art & galleries, so the art

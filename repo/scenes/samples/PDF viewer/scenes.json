@@ -3,7 +3,7 @@
     "id": "pdf-viewer",
     "name": "PDF viewer",
     "settings": {
-      "category": "Notes & tools",
+      "category": "System",
       "opens": "pdf",
       "execution": "interpreted",
       "refreshInterval": 86400,

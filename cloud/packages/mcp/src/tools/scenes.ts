@@ -43,6 +43,7 @@ const storeCategories = [
   "utilities",
   "ai",
   "demos",
+  "system",
   "desktops",
   "layouts",
   "devices",
