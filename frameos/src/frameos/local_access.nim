@@ -52,7 +52,7 @@ const
   ## chromiumScreenshot run Chromium unsandboxed where FrameOS runs as root.
   LocalAccessScopeLocalNetwork* = "localNetwork"
   LocalAccessScopeShellApps* = "shellApps"
-  ## Not a fact but a handover: the frame page's Managed by → Your backend shows a code for a
+  ## Not a fact but a handover: the frame page's Link to backend shows a code for a
   ## backend, and `POST /api/adopt` takes it (server/routes/adopt_routes.nim,
   ## docs/scene-settings.md "Connecting the frame"). Only the frame page
   ## starts one and only the page draws it, never a control plane's

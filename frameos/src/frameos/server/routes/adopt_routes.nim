@@ -1,6 +1,6 @@
 ## A backend adopts this frame with the code its frame page shows
 ## (docs/scene-settings.md "Connecting the frame", docs/api-triality.md):
-## Managed by → Your backend puts six digits on the frame page
+## Link to backend puts six digits on the frame page
 ## (local_access.nim, scope `adopt`; no picture is kept while they show, so
 ## no image the frame serves carries them), and the backend's Adopt form
 ## sends them here. A right code

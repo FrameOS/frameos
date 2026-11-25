@@ -121,11 +121,16 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
 
+proc str(node: JsonNode, key: string): string {.noinline.} =
+  ## `node{key}.getStr()`, "" for a node or key that is not there: one call
+  ## where the page reads a text, not two and a reference let go (flash).
+  node{key}.getStr()
+
 # ------------------------------------------------------------------ values
 
 proc form(self: SceneSettingsScene): JsonNode =
   ## What the page's fields live in: the layout's on its page, else the scene's.
-  result = if self.state{"page"}.getStr() == "layout": self.state{"layoutForm"} else: self.state
+  result = if self.state.str("page") == "layout": self.state{"layoutForm"} else: self.state
 
 proc fieldList(self: SceneSettingsScene): JsonNode =
   result = self.form(){"fields"}
@@ -159,10 +164,10 @@ proc frameInfo(): JsonNode =
       result = nil
 
 proc onFrame(self: SceneSettingsScene): bool =
-  self.state{"page"}.getStr() == "frame"
+  self.state.str("page") == "frame"
 
 proc onLayoutPage(self: SceneSettingsScene): bool =
-  self.state{"page"}.getStr() == "layout"
+  self.state.str("page") == "layout"
 
 proc showName(self: SceneSettingsScene, name: string) =
   ## What a layout around it calls this page.
@@ -174,7 +179,7 @@ proc showName(self: SceneSettingsScene, name: string) =
 proc openedOnFrame(self: SceneSettingsScene): bool =
   ## Opened straight on the frame page (`sceneSettings {page: "frame"}`): Back
   ## goes to the scene, not by way of its form.
-  self.state{"opened"}.getStr() == "frame"
+  self.state.str("opened") == "frame"
 
 proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
@@ -193,7 +198,7 @@ proc sceneUpdates(asker: string): tuple[listed, movable: int, busy: bool] =
     let
       facts = parseJson(read(asker))
       updates = facts{"updates"}
-    result.busy = facts{"busy"}.getStr() == "updateAll"
+    result.busy = facts.str("busy") == "updateAll"
     if not updates.isNil and updates.kind == JArray:
       result.listed = updates.len
       for row in updates.elems:
@@ -256,7 +261,7 @@ proc saved(field, value: JsonNode): JsonNode =
   ## that one is not saved.
   if value.isNil:
     return nil
-  let kind = field{"type"}.getStr()
+  let kind = field.str("type")
   let text = value.text.strip()
   var
     whole: int
@@ -275,10 +280,10 @@ proc quoted(name: string): string =
 
 proc wifiLine(wifi: JsonNode): string =
   ## How the frame is doing on Wi-Fi, in words.
-  let i = WifiStates.find(wifi{"state"}.getStr())
+  let i = WifiStates.find(wifi.str("state"))
   if i < 0: "Not connected"
   elif i == WifiBefore.len: "Not set up"
-  else: WifiBefore[i] & quoted(wifi{if i == 1: "hotspot" else: "ssid"}.getStr()) & WifiAfter[i]
+  else: WifiBefore[i] & quoted(wifi.str(if i == 1: "hotspot" else: "ssid")) & WifiAfter[i]
 
 proc field(name, label, kind: string): JsonNode =
   result = newJObject()
@@ -375,7 +380,7 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
   let wifi = info{"wifi"}
   if not wifi.isNil and wifi.kind == JObject:
     let
-      saved = wifi{"ssid"}.getStr()
+      saved = wifi.str("ssid")
       networks = arrayOf(wifi{"networks"})
       network = field("wifiSsid", "Wi-Fi network", "string")
       options = newJArray()
@@ -449,7 +454,7 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
     result.elems.add clock
 
 proc opener(self: SceneSettingsScene): string =
-  self.state{"from"}.getStr()
+  self.state.str("from")
 
 var wentBack {.threadvar.}: bool
   ## It went back by itself (Save, Cancel, its timeout), not merely lost the
@@ -501,7 +506,7 @@ proc collect(fields, values: JsonNode): JsonNode =
   result = newJObject()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    let name = field{"name"}.getStr()
+    let name = field.str("name")
     let value = field.saved(values{name})
     if not value.isNil:
       result.put(name, value)
@@ -647,27 +652,27 @@ proc acting(self: SceneSettingsScene) =
     # A secret field's eye: what is typed in it shown, or hidden again.
     let index = handler - HShow
     if index < fields.elems.len:
-      let name = fields.elems[index]{"name"}.getStr()
-      self.state.put("shown", newJString(if self.state{"shown"}.getStr() == name: "" else: name))
+      let name = fields.elems[index].str("name")
+      self.state.put("shown", newJString(if self.state.str("shown") == name: "" else: name))
   elif handler >= HSelect:
     let index = handler - HSelect
     if index < fields.elems.len and actedText != HeadingValue:
       let
         field = fields.elems[index]
         other = actedText == OtherValue
-      values.put(field{"name"}.getStr(), newJString(if other: "" else: actedText))
+      values.put(field.str("name"), newJString(if other: "" else: actedText))
       if not frame:
-        self.formObject("edited").put(field{"name"}.getStr(), newJBool(true))
+        self.formObject("edited").put(field.str("name"), newJBool(true))
       # Beside the values, on a field that has an `other`: the frame page's,
       # whose names it knows, never a scene's, which could be called anything.
-      if field{"other"}.getStr().len > 0:
+      if field.str("other").len > 0:
         values.put("typing", newJBool(other))
   else:
     let
       index = if handler >= HToggle: handler - HToggle else: handler - HText
     if index >= 0 and index < fields.elems.len:
       let field = fields.elems[index]
-      let name = field{"name"}.getStr()
+      let name = field.str("name")
       if handler >= HToggle:
         values.put(name, newJBool(not values{name}.isOn))
       else:
@@ -680,7 +685,7 @@ proc onHandler(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises
   ## The form's one handler, run by the hit test (ui/events.nim): what it
   ## was and a field's text, for `acting` once the hit test is done.
   acted = handler
-  actedText = event{"value"}.getStr()
+  actedText = event.str("value")
 
 # --------------------------------------------------------------- the picture
 #
@@ -695,7 +700,6 @@ proc on(node: sink SvgNode, attr: string, handler: int): SvgNode =
 
 type Look = object
   paper: bool
-  color: bool ## the panel shows colors (utils/asset_colors.panelShowsColor): an accent for a code
   size, pad, gap, line: int
 
 proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
@@ -772,17 +776,17 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
   c.px("h", look.line)
   result = el("select", move c)
   result.attrs.add(("value", held))
-  result.attrs.add(("placeholder", field{"placeholder"}.getStr()))
+  result.attrs.add(("placeholder", field.str("placeholder")))
   discard result.on("on-change", HSelect + index)
   for j in 0 ..< options.elems.len:
     let option = options.elems[j]
     let name = if option.kind == JObject: option{"value"}.text else: option.text
-    let label = option{"label"}.getStr()
+    let label = option.str("label")
     if option{"heading"}.getBool():
       result.children.add look.headingRow(label)
     else:
       result.children.add look.optionRow(name, if label.len > 0: label else: name, name == held)
-  let other = field{"other"}.getStr()
+  let other = field.str("other")
   if other.len > 0:
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)
   result = result.role("field")
@@ -792,11 +796,11 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   ## `other` option is picked, and its own value is typed under it. `shown`:
   ## a secret field's text in the clear (its eye, beside it, is lit).
   let
-    kind = field{"type"}.getStr()
+    kind = field.str("type")
     options = field{"options"}
-  var label = field{"label"}.getStr()
+  var label = field.str("label")
   if label.len == 0:
-    label = field{"name"}.getStr()
+    label = field.str("name")
   var c = "flex flex-col"
   c.px("gap", look.gap div 3)
   result = el("div", move c)
@@ -847,7 +851,7 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
     c.px("h", look.line)
   let input = el(if lines: "textarea" else: "input", move c)
   input.attrs.add(("value", value.text))
-  input.attrs.add(("placeholder", field{if typing: "otherPlaceholder" else: "placeholder"}.getStr()))
+  input.attrs.add(("placeholder", field.str(if typing: "otherPlaceholder" else: "placeholder")))
   let secret = field{"secret"}.getBool()
   if secret and not shown: input.attrs.add(("type", "password"))
   elif kind in ["integer", "float"]: input.attrs.add(("type", "number"))
@@ -873,9 +877,9 @@ proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
     values = self.valueMap()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    if field.kind == JObject and field{"type"}.getStr() notin Unedited:
-      let name = field{"name"}.getStr()
-      result.children.add look.row(field, values{name}, i, shown = self.state{"shown"}.getStr() == name)
+    if field.kind == JObject and field.str("type") notin Unedited:
+      let name = field.str("name")
+      result.children.add look.row(field, values{name}, i, shown = self.state.str("shown") == name)
   if result.children.len == 0:
     c = "text-center"
     if not look.paper: c.add " text-zinc-400"
@@ -910,14 +914,13 @@ var
   linkQrText {.threadvar.}: string ## ... and what it says
 
 const LinkHints = [
-  "Open the page above on your phone or computer and enter the code.",
-  "Scan the QR code with your phone, or open the page above and enter the code.",
-  "In your FrameOS backend, add a frame with Adopt frame and enter the address and code above.",
-  "In your FrameOS backend, add a frame with Adopt frame and enter the address and code above, or paste " &
-    "what the QR code says into its address."]
+  "Open the page above and enter the code.",
+  "Scan the QR code, or open the page above and enter the code.",
+  "In your FrameOS backend, Adopt frame with the address and code above.",
+  "In your FrameOS backend, Adopt frame with the address and code above, or paste what the QR code says."]
   ## What to do, by plane (cloud, backend) and whether a QR code shows.
 
-proc linkPage(look: Look, link: JsonNode, width, height: int): SvgNode =
+proc linkPage(look: Look, link: JsonNode, width, height: int, color: bool): SvgNode =
   ## A control plane being connected (docs/scene-settings.md "Connecting the
   ## frame"): the same page for the cloud and a backend, a QR code of what
   ## the person has to share beside its code, where it goes and Cancel. The
@@ -925,10 +928,10 @@ proc linkPage(look: Look, link: JsonNode, width, height: int): SvgNode =
   ## shows. The QR code is black on white, as a camera reads it best, on
   ## every panel, and left out where there is no room for one that scans.
   let
-    backend = link{"to"}.getStr() == "backend"
-    code = link{"code"}.getStr()
+    backend = link.str("to") == "backend"
+    code = link.str("code")
     side = min(height * 45 div 100, width * 2 div 5)
-    text = link{"qr"}.getStr()
+    text = link.str("qr")
   if code.len == 0 or side < 96 or text.len == 0:
     linkQr = nil
   elif linkQr.isNil or linkQrText != text or linkQr.width != side:
@@ -959,9 +962,9 @@ proc linkPage(look: Look, link: JsonNode, width, height: int): SvgNode =
     # shows colors (red is an ink of every color e-paper).
     var k = "font-bold"
     k.px("text", look.size * 2)
-    if look.color: k.add(if look.paper: " text-red-600" else: " text-sky-400")
+    if color: k.add(if look.paper: " text-red-600" else: " text-sky-400")
     words.children.add el("div", move k, SvgNode(text: code))
-    words.children.add el("div", look.grey, SvgNode(text: link{"where"}.getStr())).role("muted")
+    words.children.add el("div", look.grey, SvgNode(text: link.str("where"))).role("muted")
     words.note(look, LinkHints[ord(backend) * 2 + ord(not linkQr.isNil)])
   words.children.add el("div", "flex", look.pressButton("Cancel", ACancelLink))
 
@@ -974,7 +977,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     actions = arrayOf(info{"actions"}).elems
     link = info{"link"}
   if not link.isNil and link.kind == JObject:
-    return look.linkPage(link, width, height)
+    # Whether the panel shows colors (utils/asset_colors): an accent for the code.
+    return look.linkPage(link, width, height, panelShowsColor(self.frameConfig.device))
   linkQr = nil
   var c = "flex flex-col"
   c.px("p", look.pad)
@@ -991,34 +995,27 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   let wifi = info{"wifi"}
   if not wifi.isNil and wifi.kind == JObject:
     card.line(look, "Wi-Fi", wifiLine(wifi))
-    if wifi{"state"}.getStr() == "connected":
+    if wifi.str("state") == "connected":
       let rssi = wifi{"rssi"}
       if not rssi.isNil and rssi.kind == JInt:
         card.line(look, "Signal", $rssi.getInt() & " dBm")
-      card.line(look, "Address", wifi{"ip"}.getStr())
+      card.line(look, "Address", wifi.str("ip"))
   let battery = info{"battery", "percent"}
   if not battery.isNil and battery.kind == JInt:
     card.line(look, "Battery", $battery.getInt() & "%")
-  card.line(look, "Not saved", info{"note"}.getStr())
+  card.line(look, "Not saved", info.str("note"))
   if self.state{"restarting"}.getBool():
     card.line(look, "Rotation", "Restarting to turn the screen")
-  # Who manages it; where nobody does and the host offers a plane, the way to
-  # one right under it, each opening the same page (linkPage).
+  # Who manages it: nobody, where the host offers a plane to link to (the
+  # buttons below, each opening the same page: linkPage).
   let
     cloud = actions.offers("linkCloud")
     backend = actions.offers("adopt")
-  card.line(look, "Managed by", if cloud or backend: "Nobody" else: info{"managedBy"}.getStr())
-  if cloud or backend:
-    c = "flex flex-wrap justify-end"
-    c.px("gap", look.gap div 2)
-    let connect = el("div", move c)
-    if cloud: connect.children.add look.pressButton("FrameOS Cloud", ALinkCloud)
-    if backend: connect.children.add look.pressButton("Your backend", AAdopt)
-    card.children.add connect
-  card.line(look, "Version", info{"version"}.getStr())
+  card.line(look, "Managed by", if cloud or backend: "Nobody" else: info.str("managedBy"))
+  card.line(look, "Version", info.str("version"))
   let update = info{"updateState"}.getInt(-1)
   if update == UpdateAvailable:
-    card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
+    card.line(look, "Update", info.str("updateVersion") & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
   # The store scenes with a newer version, where the control plane says.
@@ -1046,6 +1043,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   if actions.offers("restart"):
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
+  if cloud: buttons.children.add look.pressButton("Link to cloud", ALinkCloud)
+  if backend: buttons.children.add look.pressButton("Link to backend", AAdopt)
   result.children.add buttons
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -1053,9 +1052,9 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     typing = edits{"typing"}.getBool()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    let name = field{"name"}.getStr()
+    let name = field.str("name")
     result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid",
-      self.state{"shown"}.getStr() == name)
+      self.state.str("shown") == name)
     # A turned LCD copies every frame to its place (embedded_main.nim
     # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
     let note =
@@ -1129,8 +1128,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   ## what its sizes are a share of, the panel's shorter edge for a UI laid out
   ## at its render scale (sceneSwitcher's uiRoom); the canvas's without it.
   let unit = if sizeUnit > 0: sizeUnit else: min(width, height)
-  var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28),
-    color: panelShowsColor(if self.frameConfig.isNil: "" else: self.frameConfig.device))
+  var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
   look.gap = look.size
   look.line = look.size * 23 div 10
@@ -1314,7 +1312,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     # walk the form, the green key presses what is ringed. Back (and menu)
     # goes back, once a list, the keyboard or the ring is gone.
     acted = -1
-    let goesBack = payload{"role"}.getStr() in ["back", "menu"] and payload{"action"}.getStr() == "press"
+    let goesBack = payload.str("role") in ["back", "menu"] and payload.str("action") == "press"
     if (if goesBack: not uiKeys([self.uiId], "Escape") else: not uiButtonKeys([self.uiId], payload)):
       if goesBack:
         self.back()

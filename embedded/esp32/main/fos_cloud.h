@@ -162,7 +162,7 @@ void fos_cloud_add_device_report(cJSON *msg);
 void fos_cloud_request_state(void);
 
 /* The link code (flow B, docs/cloud-frames.md "B. Link code on the device"),
- * asked for by the frame page's Managed by → FrameOS Cloud: the cloud task
+ * asked for by the frame page's Link to cloud: the cloud task
  * starts the device flow against cloud_url (else https://cloud.frameos.net),
  * polls it and enrolls with its Bearer token once the owner approves; a
  * window that lapses unclaimed just ends. Start and cancel from any task

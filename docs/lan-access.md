@@ -165,7 +165,7 @@ The Pi's own admin API, with an admin session: `GET /api/network/local-access`,
 `POST /api/network/local-access/challenge` `{scope?}`,
 `POST /api/network/local-access` `{enabled, code?, scope?}`. `scope:
 "shellApps"` is the same ceremony for running Chromium unsandboxed as root.
-The frame page's **Managed by → Your backend** shows the same kind of
+The frame page's **Link to backend** shows the same kind of
 code with the scope `adopt`, which only the frame page starts, only the frame
 page draws (never the overlay) and only `POST /api/adopt` takes
 (`docs/scene-settings.md` "Connecting the frame"); neither the admin API's

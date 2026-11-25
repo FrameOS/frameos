@@ -847,7 +847,7 @@ use — and `status` shows `cloud: error` plus a `cloud_error:` detail line
 until a fresh token is set. Transient failures retry with exponential backoff
 (10 s → 15 min).
 
-Flow B, the link code, is the frame page's Managed by → FrameOS Cloud: the
+Flow B, the link code, is the frame page's Link to cloud: the
 cloud task POSTs `{provider}/api/device/start` (`cloud_url`, else
 `https://cloud.frameos.net`; `client_kind: "frame"`, scopes `frame:link` and
 `frame:managed`), the page shows the code and where to enter it, the task

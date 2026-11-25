@@ -1747,7 +1747,7 @@ ADOPT_DEFAULT_FRAME_PORT = 8787
 ADOPT_EMBEDDED_FRAME_PORT = 80
 ADOPT_CODE_DIGITS = 6
 ADOPT_NO_CODE_SHOWING = (
-    "No adoption code is showing on the frame. On the frame, open Settings → the gear → Managed by → Your backend."
+    "No adoption code is showing on the frame. On the frame, open Settings → the gear → Link to backend."
 )
 # The frame's refusals of POST /api/adopt (the LAN access ceremony's tokens,
 # docs/scene-settings.md "The frame page"), as the form shows them.
@@ -1756,11 +1756,11 @@ ADOPT_REFUSALS = {
     "invalid_code": "That is not the code the frame shows. Check it and try again.",
     "too_many_attempts": (
         "Too many wrong codes: the frame no longer takes this one. On the frame, open Settings → the gear → "
-        "Managed by → Your backend for a new code."
+        "Link to backend for a new code."
     ),
     "code_expired": (
         "The code ran out, or the frame is not showing one any more. On the frame, open Settings → the gear → "
-        "Managed by → Your backend for a new code."
+        "Link to backend for a new code."
     ),
     "rate_limited": "The frame is taking no more tries for a moment. Wait a minute and try again.",
     "managed": (

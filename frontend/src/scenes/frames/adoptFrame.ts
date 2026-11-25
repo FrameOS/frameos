@@ -1,6 +1,6 @@
 // What the Adopt frame pane sends to POST /api/frames/adopt (docs/api-triality.md).
 // Two ways in: the six-digit code the frame shows on its own screen (Settings →
-// the gear → Managed by → Your backend), which works for a Pi and an ESP32
+// the gear → Link to backend), which works for a Pi and an ESP32
 // alike, or a Pi's admin login.
 
 export type AdoptMethod = 'code' | 'login'

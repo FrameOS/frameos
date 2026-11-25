@@ -2114,7 +2114,7 @@ static esp_err_t adopt_post(httpd_req_t *req)
     const cJSON *code = cJSON_GetObjectItem(root, "code");
     const cJSON *backend = cJSON_GetObjectItem(root, "backend");
     const cJSON *api_key = cJSON_GetObjectItem(root, "apiKey");
-    const cJSON *frame_id = cJSON_GetObjectItem(root, "frameId");
+    uint32_t frame_id = 0;
     char origin[FOS_URL_LEN];
     const char *status = "400 Bad Request";
     const char *error = NULL;
@@ -2122,8 +2122,8 @@ static esp_err_t adopt_post(httpd_req_t *req)
     if (!cJSON_IsString(backend) || strncasecmp(backend->valuestring, "http", 4) != 0 ||
         !fos_url_origin(backend->valuestring, origin, sizeof(origin)) ||
         origin[strcspn(origin, " \"\\")] != '\0' || !cJSON_IsString(api_key) || !api_key->valuestring[0] ||
-        strlen(api_key->valuestring) >= sizeof(config->api_key) || !cJSON_IsNumber(frame_id) ||
-        frame_id->valuedouble < 1 || frame_id->valuedouble > 4294967295.0) {
+        strlen(api_key->valuestring) >= sizeof(config->api_key) || !json_u32_item(root, "frameId", &frame_id) ||
+        frame_id == 0) {
         error = "invalid_request";
     } else if (config->backend_url[0] || fos_cloud_state() == FOS_CLOUD_ENROLLED) {
         status = "409 Conflict";
@@ -2148,7 +2148,7 @@ static esp_err_t adopt_post(httpd_req_t *req)
     strlcpy(old_key, config->api_key, sizeof(old_key));
     strlcpy(config->backend_url, origin, sizeof(config->backend_url));
     strlcpy(config->api_key, api_key->valuestring, sizeof(config->api_key));
-    config->frame_id = (uint32_t)frame_id->valuedouble;
+    config->frame_id = frame_id;
     cJSON_Delete(root);
     if (fos_config_save() != ESP_OK) {
         config->backend_url[0] = '\0';

@@ -789,9 +789,9 @@ proc texts(node: SvgNode): string =
 
 block the_frame_page_links_a_control_plane:
   # One way to a control plane (docs/scene-settings.md "Connecting the
-  # frame"): under "Managed by: Nobody", where the host offers one, a button
-  # for each plane, and for either the same page: its code, a QR code of what
-  # to share, where it goes, Cancel.
+  # frame"): "Managed by: Nobody" and, where the host offers one, a button
+  # for each plane beside the others, and for either the same page: its code,
+  # a QR code of what to share, where it goes, Cancel.
   var
     actions: seq[string]
     facts = %*{"wifi": {"state": "connected", "ssid": "Home", "ip": "192.168.1.20", "rssi": -52, "networks": [], "scanning": false, "password": true}, "rotate": 0, "renderScale": 0, "version": "2026.11.5",
@@ -814,7 +814,7 @@ block the_frame_page_links_a_control_plane:
   let page = SceneSettingsScene(scene)
   var words = texts(page.tree(480, 480, false, "", info = facts))
   doAssert "Nobody" in words, words
-  doAssert "FrameOS Cloud" in words and "Your backend" in words, words
+  doAssert "Link to cloud" in words and "Link to backend" in words, words
   scene.tap(regionWith(20000 + 8))
   doAssert actions[^1] == "linkCloud", $actions
   discard scene.draw()
@@ -823,11 +823,11 @@ block the_frame_page_links_a_control_plane:
   # Only the plane the host offers; none, and the card says who manages it.
   facts["actions"] = %*["adopt"]
   words = texts(page.tree(480, 480, false, "", info = facts))
-  doAssert "Your backend" in words and "FrameOS Cloud" notin words, words
+  doAssert "Link to backend" in words and "Link to cloud" notin words, words
   facts["actions"] = %*[]
   facts["managedBy"] = %"FrameOS Cloud"
   words = texts(page.tree(480, 480, false, "", info = facts))
-  doAssert "Nobody" notin words and "Your backend" notin words and "FrameOS Cloud" in words, words
+  doAssert "Nobody" notin words and "Link to backend" notin words and "FrameOS Cloud" in words, words
   # The cloud, asked and not answered yet.
   facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "cloud", "code": ""}}
   words = texts(page.tree(480, 480, false, "", info = facts))

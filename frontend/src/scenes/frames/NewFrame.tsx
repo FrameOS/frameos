@@ -1962,7 +1962,7 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
               onChange={(e) => setCode(adoptCodeInput(e.target.value))}
             />
             <p className="frameos-muted mt-1 text-xs text-slate-500">
-              On the frame: Settings → gear → Managed by → Your backend. It shows its address and a six-digit
+              On the frame: Settings → gear → Link to backend. It shows its address and a six-digit
               code; what its QR code says, pasted into the address, fills both.
             </p>
           </div>

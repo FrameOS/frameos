@@ -261,7 +261,7 @@ closes, and the code comes down the moment the flow resolves or its window
 lapses.
 
 **From the frame's own screen.** The settings panel's frame page offers
-**Managed by → FrameOS Cloud** on a frame no control plane holds
+**Link to cloud** on a frame no control plane holds
 (`docs/scene-settings.md` "Connecting the frame"): a Pi queues the same panel
 link code as the portal below, and an ESP32 runs the flow on its cloud task
 (`fos_cloud.c`, scopes `frame:link` + `frame:managed`, then

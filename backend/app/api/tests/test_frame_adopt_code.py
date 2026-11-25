@@ -230,7 +230,7 @@ async def test_adopt_by_code_when_no_code_is_showing(async_client, db, redis):
         response = await async_client.post('/api/frames/adopt', json=_body())
     assert response.status_code == 400
     assert 'No adoption code is showing on the frame' in response.json()['detail']
-    assert 'Managed by → Your backend' in response.json()['detail']
+    assert 'Link to backend' in response.json()['detail']
     # Nothing was posted, so no try was spent.
     assert [m for m, _, _, _ in fake.calls] == ['GET']
     assert db.query(Frame).count() == frames_before

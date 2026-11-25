@@ -141,14 +141,15 @@ What the page holds, top to bottom:
 - **A card**: Wi-Fi (connected to what, can't find it, wrong password?,
   connecting, the setup hotspot), signal, address, the battery on a frame
   that has one, what the last Save could not do, who manages the frame
-  ("Nobody", and under it a button per plane where one can be connected:
-  below, "Connecting the frame"), the version.
+  ("Nobody" where a plane can be connected: below, "Connecting the
+  frame"), the version.
 - **The buttons**, right under the card, above the fields (which can run
   longer than the panel): **Render again**, **Check for updates** / **Install
   update** (below), **Update scenes** (below), **Restart FrameOS** (where the
-  host lists it) and **Reboot**. Restart, Reboot, Install and Update scenes
-  ask for a second tap ("Tap again", red); anything else in between asks
-  again. Render, Restart and Reboot send
+  host lists it), **Reboot**, and **Link to cloud** and **Link to backend**
+  where a plane can be connected (below, "Connecting the frame"). Restart,
+  Reboot, Install and Update scenes ask for a second tap ("Tap again",
+  red); anything else in between asks again. Render, Restart and Reboot send
   the contract's device commands from the origin `panel`
   (`docs/events-contract.json`), so every host runs the restart and reboot it
   runs for a schedule.
@@ -248,8 +249,8 @@ was off can still be fixed at the frame, the device has the last word:
 
 A frame that no control plane holds (no cloud link of any kind, no backend
 with its key, no claim token queued) and that has a panel to show a code on
-says **Managed by: Nobody** on its card, and right under it the buttons
-**FrameOS Cloud** and **Your backend**. The host decides what is offered (`actions`:
+says **Managed by: Nobody** on its card, and its buttons end with **Link
+to cloud** and **Link to backend**. The host decides what is offered (`actions`:
 `linkCloud`, `adopt`); the words are the page's. Either button then shows the
 same page:
 
