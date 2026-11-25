@@ -1017,10 +1017,17 @@ proc fos_nim_render_alloc_impl(
     outLen = packedLen.csize_t
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
-    let phases = probeLine(cacheAtStart)
-    log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
-        &"dither+pack {(packed - renderedAt).inMilliseconds} ms" &
-        (if phases.len > 0: " [" & phases & "]" else: ""))
+    # Quiet frames (an animation's, a burst's, a fast loop's: fos_animation.h)
+    # write no line here either, as in the panel-buffer path above: a 1-bit
+    # e-paper (the reTerminal Sticky) packs through this one, and its fast
+    # loop sent this line to the backend every second.
+    if not quietRenders:
+      let phases = probeLine(cacheAtStart) & probeQuietLine()
+      log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
+          &"dither+pack {(packed - renderedAt).inMilliseconds} ms" &
+          (if phases.len > 0: " [" & phases & "]" else: ""))
+    else:
+      probeKeepQuiet()
     recoverEmergencyReserve("render")
     discard takeRenderRequested()
     result = 0

@@ -1133,3 +1133,124 @@ export function voiceContextBlock(
   lines.push("The user spoke this into the frame's microphone; the message is the transcript.");
   return lines.join("\n");
 }
+
+// ------------------------------------------------------------- progress
+
+// What the frame's panel says while a turn runs (docs/voice-chat.md
+// "Progress on the panel"): what was heard, in quotes, over the stage's
+// words. A frame asks for it with `Accept: application/x-ndjson` on its
+// closing chunk; the answer is then one JSON line per stage,
+// `{"progress": stage, "text": …}`, and last the same object the plain
+// answer is. The words are the planes', never the firmware's: the backend's
+// voice_chat.py has the same table, pinned by both planes' parity tests.
+export const VOICE_PROGRESS_WORDS: Readonly<Record<string, string>> = {
+  transcribing: "Transcribing…",
+  heard: "Thinking…",
+  activate_scene: "Switching the scene…",
+  set_scene_state: "Changing the scene's settings…",
+  render_now: "Drawing it again…",
+  show_image: "Getting the picture…",
+  create_scene: "Building the scene…",
+  change_scene: "Changing the scene…",
+  rotate_frame: "Turning the frame…",
+  list_albums: "Looking through the albums…",
+  show_album: "Putting the album on…",
+};
+// Without news for this long, a line says the turn still runs: the same
+// words and the seconds so far. It also keeps a proxy from closing a quiet
+// connection while the scene AI builds (Cloudflare's 100 s).
+export const VOICE_PROGRESS_EVERY_MS = 15_000;
+// What of the transcript the panel shows over the words.
+export const VOICE_PROGRESS_TRANSCRIPT_CHARS = 160;
+
+/** The panel's text for a stage: the transcript in quotes (cut to
+ * VOICE_PROGRESS_TRANSCRIPT_CHARS) over the words, with the seconds the turn
+ * has taken once they are ten or more. */
+export function voiceProgressText(transcript: string, words: string, seconds = 0): string {
+  const heard =
+    transcript.length > VOICE_PROGRESS_TRANSCRIPT_CHARS
+      ? `${transcript.slice(0, VOICE_PROGRESS_TRANSCRIPT_CHARS - 1).trimEnd()}…`
+      : transcript;
+  const timed = seconds >= 10 ? `${words} ${seconds} s` : words;
+  return heard ? `"${heard}"\n${timed}` : timed;
+}
+
+/** A stage of the turn, as it starts: `transcribing`, `heard` (with the
+ * transcript) or a tool's name. One without words is no news. */
+export type VoiceProgress = (stage: string, transcript?: string) => void;
+
+/** The closing chunk's answer for a frame that asked for progress: a line
+ * per stage `run` reports, one every VOICE_PROGRESS_EVERY_MS without news,
+ * and last `run`'s answer (a throw is `chat_failed`). The turn runs to its
+ * end when the frame goes away: its exchange is stored all the same. */
+export function voiceProgressStream(
+  run: (progress: VoiceProgress) => Promise<Record<string, unknown>>,
+  options: { everyMs?: number; now?: () => number } = {},
+): ReadableStream<Uint8Array> {
+  const everyMs = options.everyMs ?? VOICE_PROGRESS_EVERY_MS;
+  const now = options.now ?? (() => Date.now());
+  const encoder = new TextEncoder();
+  let open = true;
+  return new ReadableStream<Uint8Array>({
+    cancel() {
+      open = false;
+    },
+    async start(controller) {
+      const started = now();
+      let stage = "";
+      let heard = "";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const send = (line: Record<string, unknown>) => {
+        if (!open) {
+          return;
+        }
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        } catch {
+          open = false;
+        }
+      };
+      const report = (still: boolean) => {
+        clearTimeout(timer);
+        const seconds = still ? Math.floor((now() - started) / 1000) : 0;
+        send({
+          progress: still ? "still" : stage,
+          text: voiceProgressText(heard, VOICE_PROGRESS_WORDS[stage] ?? "", seconds),
+        });
+        timer = setTimeout(() => report(true), everyMs);
+      };
+      const progress: VoiceProgress = (next, transcript) => {
+        if (transcript !== undefined) {
+          heard = transcript;
+        }
+        if (VOICE_PROGRESS_WORDS[next]) {
+          stage = next;
+          report(false);
+        }
+      };
+      let answer: Record<string, unknown>;
+      try {
+        answer = await run(progress);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        answer = { detail: detail.slice(0, 500), error: "chat_failed", ok: false };
+      } finally {
+        clearTimeout(timer);
+      }
+      send(answer);
+      if (open) {
+        open = false;
+        try {
+          controller.close();
+        } catch {
+          // The frame went away: nothing to close.
+        }
+      }
+    },
+  });
+}
+
+/** Whether the frame asked for its closing chunk's answer with progress. */
+export function wantsVoiceProgress(accept: string | null | undefined): boolean {
+  return (accept ?? "").toLowerCase().includes("application/x-ndjson");
+}

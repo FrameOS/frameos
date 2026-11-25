@@ -7,7 +7,12 @@ one with `done=1` (possibly empty) closes the session. Chunks sit in this
 process's memory until then (app/utils/voice_chat.py VoiceSessionStore). The
 closing request answers when the turn is over: the transcript, the reply and
 the tools that ran, or `{"ok": false, "error": …}` for what the frame should
-sound as an error. The frame's bearer is its `server_api_key`, as on every
+sound as an error. Asked with `Accept: application/x-ndjson` (firmware from
+2026.11.25), it answers as it goes: `{"progress": stage, "text": …}` per stage
+of the turn (transcribing, heard, each tool that starts, every 15 s without
+news), the words the frame draws over its picture, and last that same object
+(voice_progress_stream, docs/voice-chat.md "Progress on the panel"). The
+frame's bearer is its `server_api_key`, as on every
 other `/embedded` route; the tools the turn gets are the frame-scoped ones
 (VoiceTools), narrowed by the owner's four permission switches in the
 frame's device_config (VoicePermissions), never the account's MCP tools.
@@ -34,7 +39,7 @@ from typing import Any
 
 from arq import ArqRedis as Redis
 from fastapi import Depends, Header, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.ai_chat import frame_context_block
@@ -64,16 +69,20 @@ from app.utils.voice_chat import (
     VOICE_SESSIONS_PER_FRAME_PER_15_MIN,
     VOICE_TURN_TOOL,
     VoicePermissions,
+    VoiceProgress,
     VoiceSessionStore,
     VoiceTools,
     VoiceTurnResult,
     image_sources_for_settings,
+    no_voice_progress,
     transcribe_and_answer,
     voice_scenes,
     voice_chat_id,
     voice_frame_context,
     voice_history_for_model,
+    voice_progress_stream,
     voice_turn_log,
+    wants_voice_progress,
 )
 from app.utils.voice_scene_builder import build_scene_by_voice
 from . import api_public
@@ -165,10 +174,10 @@ def voice_refusal(frame: Frame) -> str | None:
     return None
 
 
-def _failure(error: str, detail: str) -> JSONResponse:
-    # 200 on purpose: the frame reads the body and sounds the error; a 5xx
-    # would read as "the backend is down" when the backend is fine.
-    return JSONResponse({"ok": False, "error": error, "detail": detail[:500]})
+def _failure(error: str, detail: str) -> dict[str, Any]:
+    # Sent with 200 on purpose: the frame reads the body and sounds the error;
+    # a 5xx would read as "the backend is down" when the backend is fine.
+    return {"ok": False, "error": error, "detail": detail[:500]}
 
 
 @api_public.post("/frames/{id:int}/embedded/voice/{session_id}")
@@ -204,229 +213,244 @@ async def api_embedded_device_voice(
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="unknown_session")
     pcm = session.audio()
 
-    settings = get_settings_dict(db, project_id=int(frame.project_id))
-    openai_settings = settings.get("openAI") or {}
-    api_key = openai_settings.get("backendApiKey")
-    if not isinstance(api_key, str) or not api_key.strip():
-        await new_log(db, redis, int(frame.id), "stderr", "Voice chat: no OpenAI backend API key (Settings → OpenAI)")
-        return _failure("ai_unavailable", "Add an OpenAI API key for the backend in Settings → OpenAI.")
-    if len(pcm) < MIN_AUDIO_SECONDS * VOICE_BYTES_PER_SECOND:
-        return _failure("nothing_heard", "the recording was too short")
+    # The turn, its answer as a dict: sent whole, or as a frame that asked for
+    # progress hears it, each stage a line before it (voice_progress_stream,
+    # docs/voice-chat.md "Progress on the panel").
+    async def answer(progress: VoiceProgress) -> dict[str, Any]:
+        settings = get_settings_dict(db, project_id=int(frame.project_id))
+        openai_settings = settings.get("openAI") or {}
+        api_key = openai_settings.get("backendApiKey")
+        if not isinstance(api_key, str) or not api_key.strip():
+            await new_log(db, redis, int(frame.id), "stderr", "Voice chat: no OpenAI backend API key (Settings → OpenAI)")
+            return _failure("ai_unavailable", "Add an OpenAI API key for the backend in Settings → OpenAI.")
+        if len(pcm) < MIN_AUDIO_SECONDS * VOICE_BYTES_PER_SECOND:
+            return _failure("nothing_heard", "the recording was too short")
 
-    started = time.monotonic()
-    now = datetime.now(timezone.utc)
-    # The scene the frame shows for now without holding it (the editor's or
-    # an earlier turn's preview): the model is told, and change_scene edits it.
-    preview_info = scene_preview_info(db, frame)
-    preview_scene = scene_preview_scene(db, frame) if preview_info else None
-    active_scene_id = await _active_scene_id(
-        redis, frame, [*(frame.scenes or []), *([preview_scene] if preview_scene else [])]
-    )
-    chat = _voice_chat(db, frame)
-    history = _history(db, chat, now)
-    scene_names = [
-        str(scene.get("name")) for scene in voice_scenes(frame.scenes) if scene.get("name")
-    ]
-
-    async def queue_command(command_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return await queue_embedded_command(
-            db,
-            redis,
-            frame,
-            command_type,
-            payload,
-            detail="voice chat",
-            wait_seconds=COMMAND_WAIT_SECONDS,
-            log_line=f"Voice chat queued {command_type}",
+        started = time.monotonic()
+        now = datetime.now(timezone.utc)
+        # The scene the frame shows for now without holding it (the editor's or
+        # an earlier turn's preview): the model is told, and change_scene edits it.
+        preview_info = scene_preview_info(db, frame)
+        preview_scene = scene_preview_scene(db, frame) if preview_info else None
+        active_scene_id = await _active_scene_id(
+            redis, frame, [*(frame.scenes or []), *([preview_scene] if preview_scene else [])]
         )
+        chat = _voice_chat(db, frame)
+        history = _history(db, chat, now)
+        scene_names = [
+            str(scene.get("name")) for scene in voice_scenes(frame.scenes) if scene.get("name")
+        ]
 
-    async def preview_scenes(scenes: list[dict[str, Any]], scene_id: str) -> dict[str, Any]:
-        # The editor's "Preview on frame": the frame's saved scenes plus the
-        # new one, with the new one showing, so the others stay selectable.
-        # It holds through later pushes (frame_commands.previewed_scenes,
-        # carried_preview) until it is installed or discarded.
-        saved = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
-        await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat previews {scenes[0].get('name')}")
-        outcome = await queue_embedded_scene_preview(
-            db, redis, frame, [*saved, *scenes], scene_id, wait_seconds=COMMAND_WAIT_SECONDS, source="voice"
-        )
-        # The workspace's preview row (scene_preview on the frame) changed:
-        # say so to the open tabs, the frame row itself did not move.
-        await update_frame(db, redis, frame)
-        return outcome
-
-    async def update_settings(changes: dict[str, Any]) -> dict[str, Any]:
-        # Into the frame row, as the Settings panel's save does, and a
-        # pull-backed set_settings row like the deploy's: the device fetches
-        # its settings only when its commands pull says a deploy is waiting
-        # (`sync`), and the row is acked when the pull reports the new ETag.
-        # Without the row the second spoken rotation never reached the frame
-        # (E1002, 2026-10-24: the first rode on a preview's pending row).
-        for key, value in changes.items():
-            setattr(frame, key, value)
-        db.add(frame)
-        db.commit()
-        await update_frame(db, redis, frame)
-        detail = ", ".join(f"{key}={value}" for key, value in changes.items())
-        enqueue_frame_command(db, frame, "set_settings", {"_voice": True}, detail=detail)
-        await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat set {detail}")
-        nudged = await nudge_embedded_frame(frame, redis)
-        return {"status": "queued" if not nudged else "pulled"}
-
-    async def list_albums() -> dict[str, Any]:
-        # The photo library's root (docs/photos.md): the albums, as the
-        # Photos page lists them. A library that is not set up says so.
-        try:
-            await asyncio.to_thread(photos.ready_store)
-            listing = await asyncio.to_thread(photos.list_folder, db, int(frame.project_id), "")
-        except HTTPException as error:
-            return {"ok": False, "error": "photos_unavailable", "detail": str(error.detail)[:300]}
-        return {
-            "albums": [
-                {"path": entry["path"], "name": entry.get("name"), "photos": entry.get("items", 0)}
-                for entry in listing["entries"]
-                if entry.get("kind") == "folder"
-            ]
-        }
-
-    async def install_album(path: str, options: dict[str, Any]) -> dict[str, Any]:
-        # What the MCP's photo_album_install does for this frame (docs/photos.md
-        # "Installing photo scenes"): the frame's own share link to the folder
-        # (made now if it has none), the album scene saved next to the frame's
-        # scenes, a fast deploy (the device pulls the saved scenes) and the
-        # switch to it, as the Settings' set_next_scene route queues them.
-        from app.api.photos import _frame_origin
-        from app.tasks import fast_deploy_frame
-        from app.tasks.utils import begin_deploy_progress, deploy_progress_kind_for_frame
-
-        project_id = int(frame.project_id)
-        try:
-            rel = photos.validate_path(path)
-            await asyncio.to_thread(photos.ready_store)
-            await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
-            origin = _frame_origin(frame)
-        except HTTPException as error:
-            return {"ok": False, "status": "failed", "error": "album_unavailable", "detail": str(error.detail)[:300]}
-        share = (
-            db.query(PhotoShare)
-            .filter(
-                PhotoShare.project_id == project_id,
-                PhotoShare.path == rel,
-                PhotoShare.frame_id == int(frame.id),
-                PhotoShare.name.is_(None),
+        async def queue_command(command_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+            return await queue_embedded_command(
+                db,
+                redis,
+                frame,
+                command_type,
+                payload,
+                detail="voice chat",
+                wait_seconds=COMMAND_WAIT_SECONDS,
+                log_line=f"Voice chat queued {command_type}",
             )
-            .order_by(PhotoShare.id.asc())
-            .first()
-        )
-        if share is None:
-            share = PhotoShare(project_id=project_id, path=rel, frame_id=int(frame.id), token=f"pk_{secrets.token_urlsafe(32)}")
-            db.add(share)
+
+        async def preview_scenes(scenes: list[dict[str, Any]], scene_id: str) -> dict[str, Any]:
+            # The editor's "Preview on frame": the frame's saved scenes plus the
+            # new one, with the new one showing, so the others stay selectable.
+            # It holds through later pushes (frame_commands.previewed_scenes,
+            # carried_preview) until it is installed or discarded.
+            saved = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
+            await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat previews {scenes[0].get('name')}")
+            outcome = await queue_embedded_scene_preview(
+                db, redis, frame, [*saved, *scenes], scene_id, wait_seconds=COMMAND_WAIT_SECONDS, source="voice"
+            )
+            # The workspace's preview row (scene_preview on the frame) changed:
+            # say so to the open tabs, the frame row itself did not move.
+            await update_frame(db, redis, frame)
+            return outcome
+
+        async def update_settings(changes: dict[str, Any]) -> dict[str, Any]:
+            # Into the frame row, as the Settings panel's save does, and a
+            # pull-backed set_settings row like the deploy's: the device fetches
+            # its settings only when its commands pull says a deploy is waiting
+            # (`sync`), and the row is acked when the pull reports the new ETag.
+            # Without the row the second spoken rotation never reached the frame
+            # (E1002, 2026-10-24: the first rode on a preview's pending row).
+            for key, value in changes.items():
+                setattr(frame, key, value)
+            db.add(frame)
             db.commit()
-            db.refresh(share)
-        scene = build_photo_album_scene(
-            name=photos.base_name(rel),
-            album_url=origin + photos.share_url(share.token),
-            seconds=options.get("seconds", DEFAULT_SECONDS),
-            order=options.get("order", "random"),
-            fit="cover",
-            shapes=list(photos.SHARE_SHAPES),
-        )
-        saved = [existing for existing in (frame.scenes or []) if isinstance(existing, dict)]
-        frame.scenes = [*saved, scene]
-        db.add(frame)
-        db.commit()
-        await update_frame(db, redis, frame)
-        await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat installed the album {rel}")
-        await begin_deploy_progress(db, redis, frame, deploy_progress_kind_for_frame(frame, "fast"))
-        await fast_deploy_frame(int(frame.id), redis)
-        outcome = await queue_command("set_current_scene", {"scene_id": scene["id"]})
-        return {"scene": scene["name"], "scene_id": scene["id"], "album": rel, **outcome}
+            await update_frame(db, redis, frame)
+            detail = ", ".join(f"{key}={value}" for key, value in changes.items())
+            enqueue_frame_command(db, frame, "set_settings", {"_voice": True}, detail=detail)
+            await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat set {detail}")
+            nudged = await nudge_embedded_frame(frame, redis)
+            return {"status": "queued" if not nudged else "pulled"}
 
-    model = openai_model(openai_settings, "chatModel", CHAT_MODEL)
-    reasoning_effort = openai_settings.get("chatReasoningEffort") or None
+        async def list_albums() -> dict[str, Any]:
+            # The photo library's root (docs/photos.md): the albums, as the
+            # Photos page lists them. A library that is not set up says so.
+            try:
+                await asyncio.to_thread(photos.ready_store)
+                listing = await asyncio.to_thread(photos.list_folder, db, int(frame.project_id), "")
+            except HTTPException as error:
+                return {"ok": False, "error": "photos_unavailable", "detail": str(error.detail)[:300]}
+            return {
+                "albums": [
+                    {"path": entry["path"], "name": entry.get("name"), "photos": entry.get("items", 0)}
+                    for entry in listing["entries"]
+                    if entry.get("kind") == "folder"
+                ]
+            }
 
-    async def build_scene(request: str, base: dict[str, Any] | None, name: str | None) -> dict[str, Any]:
-        # The scene AI as a sub-turn (voice_scene_builder.py): the editor
-        # tools alone, the scene rendered in the frame's memory before it is
-        # handed back; the tool then pushes it as the preview above.
-        from app.api.ai_scenes import _split_state_nodes_by_app
+        async def install_album(path: str, options: dict[str, Any]) -> dict[str, Any]:
+            # What the MCP's photo_album_install does for this frame (docs/photos.md
+            # "Installing photo scenes"): the frame's own share link to the folder
+            # (made now if it has none), the album scene saved next to the frame's
+            # scenes, a fast deploy (the device pulls the saved scenes) and the
+            # switch to it, as the Settings' set_next_scene route queues them.
+            from app.api.photos import _frame_origin
+            from app.tasks import fast_deploy_frame
+            from app.tasks.utils import begin_deploy_progress, deploy_progress_kind_for_frame
 
-        what = f"changes {base.get('name')}" if base else "builds a scene"
-        await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat {what}: {request[:200]}")
-        return await build_scene_by_voice(
+            project_id = int(frame.project_id)
+            try:
+                rel = photos.validate_path(path)
+                await asyncio.to_thread(photos.ready_store)
+                await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
+                origin = _frame_origin(frame)
+            except HTTPException as error:
+                return {"ok": False, "status": "failed", "error": "album_unavailable", "detail": str(error.detail)[:300]}
+            share = (
+                db.query(PhotoShare)
+                .filter(
+                    PhotoShare.project_id == project_id,
+                    PhotoShare.path == rel,
+                    PhotoShare.frame_id == int(frame.id),
+                    PhotoShare.name.is_(None),
+                )
+                .order_by(PhotoShare.id.asc())
+                .first()
+            )
+            if share is None:
+                share = PhotoShare(project_id=project_id, path=rel, frame_id=int(frame.id), token=f"pk_{secrets.token_urlsafe(32)}")
+                db.add(share)
+                db.commit()
+                db.refresh(share)
+            scene = build_photo_album_scene(
+                name=photos.base_name(rel),
+                album_url=origin + photos.share_url(share.token),
+                seconds=options.get("seconds", DEFAULT_SECONDS),
+                order=options.get("order", "random"),
+                fit="cover",
+                shapes=list(photos.SHARE_SHAPES),
+            )
+            saved = [existing for existing in (frame.scenes or []) if isinstance(existing, dict)]
+            frame.scenes = [*saved, scene]
+            db.add(frame)
+            db.commit()
+            await update_frame(db, redis, frame)
+            await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat installed the album {rel}")
+            await begin_deploy_progress(db, redis, frame, deploy_progress_kind_for_frame(frame, "fast"))
+            await fast_deploy_frame(int(frame.id), redis)
+            outcome = await queue_command("set_current_scene", {"scene_id": scene["id"]})
+            return {"scene": scene["name"], "scene_id": scene["id"], "album": rel, **outcome}
+
+        model = openai_model(openai_settings, "chatModel", CHAT_MODEL)
+        reasoning_effort = openai_settings.get("chatReasoningEffort") or None
+
+        async def build_scene(request: str, base: dict[str, Any] | None, name: str | None) -> dict[str, Any]:
+            # The scene AI as a sub-turn (voice_scene_builder.py): the editor
+            # tools alone, the scene rendered in the frame's memory before it is
+            # handed back; the tool then pushes it as the preview above.
+            from app.api.ai_scenes import _split_state_nodes_by_app
+
+            what = f"changes {base.get('name')}" if base else "builds a scene"
+            await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat {what}: {request[:200]}")
+            return await build_scene_by_voice(
+                frame=frame,
+                frame_context=frame_context_block(frame),
+                request=request,
+                base=base,
+                name=name,
+                api_key=api_key.strip(),
+                model=model,
+                reasoning_effort=reasoning_effort,
+                split_state_nodes=_split_state_nodes_by_app,
+            )
+
+        image_sources = image_sources_for_settings(settings)
+        # The owner's switches (Settings -> Voice chat): a tool they turned off is
+        # not offered to the model, and refused if named anyway.
+        permissions = VoicePermissions.from_frame(frame)
+        tools = VoiceTools(
             frame=frame,
-            frame_context=frame_context_block(frame),
-            request=request,
-            base=base,
-            name=name,
+            active_scene_id=active_scene_id,
+            queue_command=queue_command,
+            preview_scenes=preview_scenes,
+            update_settings=update_settings,
+            image_sources=image_sources,
+            permissions=permissions,
+            list_albums=list_albums,
+            install_album=install_album,
+            build_scene=build_scene,
+            preview_scene=preview_scene,
+        )
+        outcome = await transcribe_and_answer(
+            pcm=pcm,
             api_key=api_key.strip(),
             model=model,
             reasoning_effort=reasoning_effort,
-            split_state_nodes=_split_state_nodes_by_app,
+            scene_names=scene_names,
+            context_block=voice_frame_context(
+                frame, active_scene_id, frame_context_block(frame), image_sources, permissions, preview=preview_info, now=now
+            ),
+            history=history,
+            tools=tools,
+            progress=progress,
         )
+        if not isinstance(outcome, VoiceTurnResult):
+            error, detail = outcome
+            await new_log(db, redis, int(frame.id), "stderr", f"Voice chat failed ({error}): {detail[:300]}")
+            return _failure(error, detail)
 
-    image_sources = image_sources_for_settings(settings)
-    # The owner's switches (Settings -> Voice chat): a tool they turned off is
-    # not offered to the model, and refused if named anyway.
-    permissions = VoicePermissions.from_frame(frame)
-    tools = VoiceTools(
-        frame=frame,
-        active_scene_id=active_scene_id,
-        queue_command=queue_command,
-        preview_scenes=preview_scenes,
-        update_settings=update_settings,
-        image_sources=image_sources,
-        permissions=permissions,
-        list_albums=list_albums,
-        install_album=install_album,
-        build_scene=build_scene,
-        preview_scene=preview_scene,
-    )
-    outcome = await transcribe_and_answer(
-        pcm=pcm,
-        api_key=api_key.strip(),
-        model=model,
-        reasoning_effort=reasoning_effort,
-        scene_names=scene_names,
-        context_block=voice_frame_context(
-            frame, active_scene_id, frame_context_block(frame), image_sources, permissions, preview=preview_info, now=now
-        ),
-        history=history,
-        tools=tools,
-    )
-    if not isinstance(outcome, VoiceTurnResult):
-        error, detail = outcome
-        await new_log(db, redis, int(frame.id), "stderr", f"Voice chat failed ({error}): {detail[:300]}")
-        return _failure(error, detail)
+        # The exchange, three rows in one commit: what was heard, the log of what
+        # was done (the workspace draws it as a log bubble; the next turn reads it
+        # as history), the reply. A millisecond apart keeps them in order on a
+        # database whose default timestamp is the whole second.
+        stored_at = datetime.utcnow()
+        chat.updated_at = stored_at
+        db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="user", content=outcome.transcript,
+                           tool=VOICE_TURN_TOOL, created_at=stored_at))
+        db.add(ChatMessage(
+            project_id=chat.project_id,
+            chat_id=chat.id,
+            role="assistant",
+            content=voice_turn_log(outcome.actions, session_id=session_id, seconds=time.monotonic() - started, at=stored_at),
+            tool=VOICE_LOG_TOOL,
+            created_at=stored_at + timedelta(milliseconds=1),
+        ))
+        db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="assistant", content=outcome.reply,
+                           tool=VOICE_TURN_TOOL, created_at=stored_at + timedelta(milliseconds=2)))
+        db.commit()
+        await new_log(
+            db,
+            redis,
+            int(frame.id),
+            "stdinfo",
+            json.dumps({"event": "voice:turn", "transcript": outcome.transcript[:300], "reply": outcome.reply[:300],
+                        "tools": outcome.tools, "seconds": round(time.monotonic() - started, 1)}),
+        )
+        return {"ok": True, "transcript": outcome.transcript, "reply": outcome.reply, "tools": outcome.tools}
 
-    # The exchange, three rows in one commit: what was heard, the log of what
-    # was done (the workspace draws it as a log bubble; the next turn reads it
-    # as history), the reply. A millisecond apart keeps them in order on a
-    # database whose default timestamp is the whole second.
-    stored_at = datetime.utcnow()
-    chat.updated_at = stored_at
-    db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="user", content=outcome.transcript,
-                       tool=VOICE_TURN_TOOL, created_at=stored_at))
-    db.add(ChatMessage(
-        project_id=chat.project_id,
-        chat_id=chat.id,
-        role="assistant",
-        content=voice_turn_log(outcome.actions, session_id=session_id, seconds=time.monotonic() - started, at=stored_at),
-        tool=VOICE_LOG_TOOL,
-        created_at=stored_at + timedelta(milliseconds=1),
-    ))
-    db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="assistant", content=outcome.reply,
-                       tool=VOICE_TURN_TOOL, created_at=stored_at + timedelta(milliseconds=2)))
-    db.commit()
-    await new_log(
-        db,
-        redis,
-        int(frame.id),
-        "stdinfo",
-        json.dumps({"event": "voice:turn", "transcript": outcome.transcript[:300], "reply": outcome.reply[:300],
-                    "tools": outcome.tools, "seconds": round(time.monotonic() - started, 1)}),
+    if not wants_voice_progress(request.headers.get("accept")):
+        return JSONResponse(await answer(no_voice_progress))
+    return StreamingResponse(
+        voice_progress_stream(answer),
+        media_type="application/x-ndjson",
+        # A proxy in front (nginx) holds a buffered answer until its end: every
+        # stage would reach the frame with the reply.
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
-    return {"ok": True, "transcript": outcome.transcript, "reply": outcome.reply, "tools": outcome.tools}
 
 
 # The session id pattern, exported for the test that pins the wire contract.

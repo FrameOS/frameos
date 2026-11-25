@@ -24,7 +24,82 @@ import {
   voiceToolPermissions,
   voiceTools,
   voiceTurnLog,
+  VOICE_PROGRESS_EVERY_MS,
+  VOICE_PROGRESS_TRANSCRIPT_CHARS,
+  VOICE_PROGRESS_WORDS,
+  voiceProgressStream,
+  voiceProgressText,
+  wantsVoiceProgress,
 } from "./voice";
+
+// Every line a progress stream sends, as JSON.
+async function streamLines(stream: ReadableStream<Uint8Array>): Promise<Record<string, unknown>[]> {
+  const text = await new Response(stream).text();
+  return text
+    .split("\n")
+    .filter((line) => line)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+describe("progress on the panel", () => {
+  it("says the transcript in quotes over the stage's words, the seconds once they are ten", () => {
+    expect(voiceProgressText("", "Transcribing…")).toBe("Transcribing…");
+    expect(voiceProgressText("hi", "Thinking…", 9)).toBe('"hi"\nThinking…');
+    expect(voiceProgressText("hi", "Building the scene…", 42)).toBe('"hi"\nBuilding the scene… 42 s');
+    const cut = voiceProgressText("word ".repeat(60), "Thinking…").split("\n")[0]!;
+    // 160 characters of it in quotes, its last an ellipsis.
+    expect(cut).toHaveLength(162);
+    expect(cut.endsWith('word…"')).toBe(true);
+    expect(wantsVoiceProgress("application/json, application/x-ndjson")).toBe(true);
+    expect(wantsVoiceProgress(null)).toBe(false);
+    expect(wantsVoiceProgress("*/*")).toBe(false);
+  });
+
+  it("streams a line per stage with words, again while one lasts, and the answer last", async () => {
+    const lines = await streamLines(
+      voiceProgressStream(
+        async (progress) => {
+          progress("transcribing");
+          progress("heard", "make a clock");
+          progress("list_scenes"); // no words: no news
+          progress("create_scene");
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          return { ok: true, reply: "Here it is." };
+        },
+        { everyMs: 100 },
+      ),
+    );
+    expect(lines.slice(0, 3)).toEqual([
+      { progress: "transcribing", text: "Transcribing…" },
+      { progress: "heard", text: '"make a clock"\nThinking…' },
+      { progress: "create_scene", text: '"make a clock"\nBuilding the scene…' },
+    ]);
+    const still = lines.slice(3, -1);
+    expect(still.length).toBeGreaterThanOrEqual(1);
+    for (const line of still) {
+      expect(line).toEqual({ progress: "still", text: '"make a clock"\nBuilding the scene…' });
+    }
+    expect(lines.at(-1)).toEqual({ ok: true, reply: "Here it is." });
+  });
+
+  it("answers a turn that throws as chat_failed", async () => {
+    const lines = await streamLines(
+      voiceProgressStream(async () => {
+        throw new Error("the model went away");
+      }),
+    );
+    expect(lines).toEqual([{ detail: "the model went away", error: "chat_failed", ok: false }]);
+  });
+
+  it("has words for the slow tools, and none for a listing", () => {
+    for (const tool of ["create_scene", "change_scene", "show_image", "show_album", "activate_scene"]) {
+      expect(VOICE_PROGRESS_WORDS[tool]).toBeTruthy();
+    }
+    expect(VOICE_PROGRESS_WORDS.list_scenes).toBeUndefined();
+    expect(VOICE_PROGRESS_EVERY_MS).toBe(15_000);
+    expect(VOICE_PROGRESS_TRANSCRIPT_CHARS).toBe(160);
+  });
+});
 
 describe("the voice session store", () => {
   it("collects chunks in order and caps a session at 30 s", () => {
@@ -529,5 +604,13 @@ describe("parity with the backend", () => {
       const description = tool.description.split(". ")[0] ?? tool.description;
       expect(python).toContain(description.slice(0, 40));
     }
+  });
+
+  it("shares what the panel says while a turn runs", () => {
+    for (const [stage, words] of Object.entries(VOICE_PROGRESS_WORDS)) {
+      expect(python).toContain(`"${stage}": "${words}"`);
+    }
+    expect(python).toContain(`VOICE_PROGRESS_EVERY_SECONDS = ${VOICE_PROGRESS_EVERY_MS / 1000}.0`);
+    expect(python).toContain(`VOICE_PROGRESS_TRANSCRIPT_CHARS = ${VOICE_PROGRESS_TRANSCRIPT_CHARS}`);
   });
 });

@@ -27,5 +27,12 @@ export default defineConfig({
     // Scrubs environment the CI workflow exports for the build step (the
     // PostHog key) so tests only see values they set themselves.
     setupFiles: ["src/test/setup-env.ts"],
+    // The shared-spa tests render whole SPA panels in jsdom and take 1-2s on
+    // their own. Cloud CI runs this suite while `next build` compiles beside
+    // it (turbo starts test and build together), and under that load two of
+    // them ran past vitest's 5s default: "walks the code dialog" in
+    // lan-access.test.tsx (1.3-1.7s when green) and the ESP32 button map in
+    // cloud-frame-settings-panel.test.tsx.
+    testTimeout: 20_000,
   },
 });

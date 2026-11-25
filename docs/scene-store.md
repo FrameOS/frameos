@@ -7,7 +7,9 @@ scene: **Scene store** (`repo/scenes/samples/Scene store`, one JSX app). Install
 it like any other scene, open it from the scene list (on a desktop of windows,
 from the layout's own entry for it: `docs/scene-layouts.md` "Windows"), and
 pick Scenes or Layouts, open a category or search, scroll through the scenes,
-and Preview or Install one. A scene the frame holds can be opened, updated or
+and Preview or Install one. A window wide enough lists the categories down its
+side; one that is not (the store on the whole of a small screen) shows them as
+its front, a grid of tiles the size of the scenes' in them. A scene the frame holds can be opened, updated or
 deleted there. Leave the store (a preview, the scene list) and come back, and
 it opens on the same spot.
 

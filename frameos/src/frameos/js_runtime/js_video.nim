@@ -254,30 +254,111 @@ else:
       frameos_apps.logError(e.owner, "frameos.video " & what & " failed: " & err.msg)
       return nimStringToJS(ctx, $(%*{"error": err.msg}))
 
-  proc logFallback(owner: AppRoot, video: var JsVideo) =
-    ## A hardware launch of `video` gave way to ffmpeg's own: said once, with
-    ## ffmpeg's reason (docs/video.md "Hardware"). A video renders fast, and
-    ## the runner turns the scene's log off while a scene does ("render:pause"):
-    ## this line goes out anyway, as the runner's own signals do.
-    let count = video.player.fallbacks()
-    if count == video.toldFallbacks:
-      return
-    video.toldFallbacks = count
+  proc logSignal(owner: AppRoot, payload: JsonNode) =
+    ## A line that goes out even while the runner has the scene's log off (a
+    ## video renders fast: "render:pause"), as the runner's own signals do.
     if owner.isNil or owner.scene.isNil or owner.scene.logger.isNil:
       return
-    let fallback = video.player.lastFallback()
     let logger = owner.scene.logger
     let wasEnabled = logger.enabled
     if not wasEnabled:
       logger.enable()
-    frameos_apps.log(owner, %*{"event": "video:software", "src": shownName(video.src),
-      "decoder": fallback.decoder, "reason": fallback.reason,
-      "hardwareKept": fallback.busy})
+    frameos_apps.log(owner, payload)
     if not wasEnabled:
       logger.disable()
 
+  proc logFallback(owner: AppRoot, video: var JsVideo) =
+    ## A hardware launch of `video` gave way (to ffmpeg's own decoder, or from
+    ## the ISP path to ffmpeg's hardware one): said once, with the reason
+    ## (docs/video.md "Hardware").
+    let count = video.player.fallbacks()
+    if count == video.toldFallbacks:
+      return
+    video.toldFallbacks = count
+    let fallback = video.player.lastFallback()
+    logSignal(owner, %*{"event": "video:fallback", "src": shownName(video.src),
+      "from": fallback.decoder, "to": fallback.to, "reason": fallback.reason,
+      "hardwareKept": fallback.busy})
+
+  var planesTold: bool
+    ## The runtime's log said once whether videos go on display planes here.
+  var planeScenes {.threadvar.}: seq[FrameScene]
+    ## The scenes whose videos are on display planes this pass: each runs in
+    ## the next pass whatever its schedule (markVideoPlaneScenesDue), so every
+    ## pass says whether its planes may stay and where.
+
+  proc markVideoPlaneScenesDue*() =
+    ## Before a render pass (runner.nim): the scenes with a video on a plane
+    ## run in it, a window's on a desktop included, though nothing else of
+    ## theirs is due. A pass that did not run one would leave its plane
+    ## unclaimed (off for that pass) or, worse, standing over what changed.
+    for scene in planeScenes:
+      rhythmMarkDue(scene)
+    planeScenes.setLen(0)
+
+  proc videoSpots(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, target: UiTarget,
+      requestedWidth, requestedHeight: int, regionScale: float32): seq[(Image, VideoPlaneSpot)] =
+    ## The videos whose `<img>` can be a display plane (video/planes.nim,
+    ## docs/video.md "Planes"), and where on the panel. Only where the plane is
+    ## exactly right, else the canvas plays it:
+    ## - a UI drawn whole at its size into the panel's own canvas or a view
+    ##   of it (a layout's hole, a desktop's window: panel_canvas.onPanelCanvas),
+    ##   which the layout only gives a scene nothing of it is painted over (its
+    ##   `seekHoles`), on a panel the frame neither turns nor mirrors;
+    ## - the `<img>` a clean hole of that UI (ui/layout.nim seekImageHoles:
+    ##   nothing drawn over it, opaque, not scrolled, no popup);
+    ## - nothing the frame draws over every scene on it: the keyboard docked
+    ##   or in its window (`frameKeyboard`), the mouse cursor (planes.cursorOver);
+    ## - where it was the last render: a window being dragged or the desktop
+    ##   refitted keeps it in the canvas until it stays put.
+    if owner.isNil or owner.frameConfig.isNil or target.isNil or not context.wholeFrame or
+        not context.hasImage or context.image.isNil or context.decodeTargetImage != context.image or
+        requestedWidth != context.image.width or requestedHeight != context.image.height:
+      return
+    let at = context.image.onPanelCanvas()
+    if not at.ok:
+      return
+    let config = owner.frameConfig
+    if ((config.rotate mod 360) + 360) mod 360 != 0 or config.flip in ["horizontal", "vertical", "both"]:
+      return
+    let panel = panelCanvasSize()
+    let ready = panel.width > 0 and planesReady(panel.width, panel.height)
+    if not planesTold:
+      planesTold = true
+      logSignal(owner, %*{"event": "video:planes", "on": ready, "why": planesWhyNot()})
+    if not ready:
+      return
+    var images: seq[Image]
+    for video in runtime.videos:
+      if not video.player.isNil:
+        images.add video.player.placeholder
+        if not video.player.image.isNil:
+          images.add video.player.image
+    for hole in seekImageHoles(target.memo, target.input, images):
+      var video = -1
+      for i in 0 ..< runtime.videos.len:
+        let player = runtime.videos[i].player
+        if not player.isNil and (player.placeholder == hole.image or player.image == hole.image):
+          video = i
+      if video < 0:
+        continue
+      template v: untyped = runtime.videos[video]
+      let r = holeOnPanel(hole.x, hole.y, hole.w, hole.h, regionScale, at.x, at.y, requestedWidth,
+        requestedHeight)
+      let was = v.spotAt
+      v.spotAt = if r.ok: (r.x, r.y, r.w, r.h) else: (0, 0, 0, 0)
+      if not hole.clean or not r.ok or (r.x, r.y, r.w, r.h) != was:
+        continue
+      if frameKeyboard.sceneId.len > 0 and overlaps(r.x, r.y, r.w, r.h, int(frameKeyboard.x),
+          int(frameKeyboard.y), int(ceil(frameKeyboard.w)), int(ceil(frameKeyboard.h))):
+        continue
+      if cursorOver(r.x, r.y, r.w, r.h):
+        continue
+      result.add (hole.image, VideoPlaneSpot(ok: true, x: r.x, y: r.y, clipX: at.x, clipY: at.y,
+        clipW: requestedWidth, clipH: requestedHeight))
+
   proc fillVideosIn(runtime: JsAppRuntime, owner: AppRoot, node: SvgNode, scale: float32, like: Image,
-      wait: var float, taken: var seq[VideoPlayer]) =
+      spots: seq[(Image, VideoPlaneSpot)], wait: var float, taken: var seq[VideoPlayer]) =
     if node.tag == "image" and not node.image.isNil:
       for i in 0 ..< runtime.videos.len:
         let player = runtime.videos[i].player
@@ -301,7 +382,13 @@ else:
               of "none": vfFill
               of "xMidYMid slice": vfCover
               else: vfContain
-        discard player.take(width, height, fit, like)
+        var spot: VideoPlaneSpot
+        for (image, at) in spots:
+          if image == node.image:
+            spot = at
+        discard player.take(width, height, fit, like, spot)
+        if player.onPlane and not owner.scene.isNil and owner.scene notin planeScenes:
+          planeScenes.add owner.scene
         logFallback(owner, runtime.videos[i])
         let shown = player.shownImage()
         if node.image != shown:
@@ -314,15 +401,15 @@ else:
         return
       return
     for child in node.children:
-      runtime.fillVideosIn(owner, child, scale, like, wait, taken)
+      runtime.fillVideosIn(owner, child, scale, like, spots, wait, taken)
 
   proc fillVideos(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, svg: SvgNode,
-      scale: float32) =
+      scale: float32, spots: seq[(Image, VideoPlaneSpot)] = @[]) =
     ## The layout's `<img>`s of this app's videos: each given the frame that
     ## is due at the size it was laid out at, in panel pixels. The scene
     ## renders again when the next frame is due.
     var wait = -1.0
     var taken: seq[VideoPlayer]
-    runtime.fillVideosIn(owner, svg, scale, pictureFormatLike(context), wait, taken)
+    runtime.fillVideosIn(owner, svg, scale, pictureFormatLike(context), spots, wait, taken)
     if wait >= 0:
       context.nextSleep = if context.nextSleep < 0: wait else: min(context.nextSleep, wait)

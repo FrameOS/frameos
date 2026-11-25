@@ -124,7 +124,8 @@ frame has no key hold and no microphone path (yet).
   refusal), word-wrapped
   across the bottom of the panel in the 5x7 font (3 px per font pixel on a
   panel 600 px or wider, 2 below; curly quotes and dashes folded to ASCII).
-  **The panel holds still from the hold until the answer**
+  **The panel holds still from the hold until the answer**, but for the
+  plane's progress over the last image ("Progress on the panel")
   (`fos_client_hold_render` / `fos_client_release_render`): the chat's tools
   arrive one by one — `activate_scene`, then `set_scene_state` for the new
   scene — and each is applied to the scene as it comes (a pulled switch takes
@@ -223,7 +224,10 @@ Content-Type: audio/L16; rate=16000; channels=1
   or `200 {"ok":false,"error":"nothing_heard"|"transcription_failed"|
   "chat_failed"|"ai_unavailable","detail":"…"}` for a problem the frame should
   sound as an error. `4xx` for an unknown or inactive frame, a body over the
-  caps, too many sessions.
+  caps, too many sessions. Sent with `Accept: application/x-ndjson` (firmware
+  from 2026.11.25), the same `200` comes as it goes: a line per stage of the
+  turn before that object, which is the last line ("Progress on the panel"
+  below).
 - **No microphone or the switch off: no turn.** The frame's token alone is
   not the owner talking, so both planes answer `403 no_microphone` /
   `403 voice_chat_off` before reading a byte, by the same facts the Settings
@@ -248,6 +252,66 @@ Content-Type: audio/L16; rate=16000; channels=1
   through `resolveAiAccess`, surface `voice_chat`). The audio is not stored
   anywhere once the turn is over.
 
+## Progress on the panel
+
+A turn can take a while: the transcription a second or two, a picture a few
+seconds, a scene the scene AI builds a minute or more. So the frame says what
+is happening while it waits, on the panel, in the notice's box over the
+picture showing:
+
+```
+Transcribing…
+"make a clock with big numbers"
+Thinking…
+"make a clock with big numbers"
+Building the scene…
+"make a clock with big numbers"
+Building the scene… 30 s
+```
+
+then the answer's notice in its place, as before.
+
+- **The wire.** The frame sends its closing chunk with `Accept:
+  application/x-ndjson`, and a plane that has progress answers it as NDJSON
+  (`Content-Type: application/x-ndjson`, `X-Accel-Buffering: no` so a proxy
+  passes each line on): `{"progress": <stage>, "text": <what the panel
+  says>}` as each stage starts — `transcribing`, `heard` (the transcript is
+  in), each tool of the turn that has words (`activate_scene`,
+  `create_scene`, `show_image`, …; a listing has none and is no news) — a
+  `still` line with the same words and the seconds so far after 15 s without
+  news (`VOICE_PROGRESS_EVERY_MS` / `VOICE_PROGRESS_EVERY_SECONDS`), and last
+  the answer object the plain response is. A frame that does not ask (older
+  firmware) gets the plain response; a plane that does not know the header
+  (an older one) answers the one line, which the frame reads as the answer.
+  The lines every 15 s also keep a proxy's idle timeout (Cloudflare's 100 s)
+  from cutting a long scene build off.
+- **The words are the planes'**: `VOICE_PROGRESS_WORDS` and
+  `voiceProgressText` in `src/lib/ai/voice.ts`, `VOICE_PROGRESS_WORDS` and
+  `voice_progress_text` in `app/utils/voice_chat.py`, pinned to each other by
+  both planes' parity tests. The text is the transcript in quotes (160
+  characters at most) over the stage's words, the seconds after them once
+  they are ten or more. The firmware draws the text it is sent and has no
+  words of its own; the stream is `voiceProgressStream` /
+  `voice_progress_stream`, which a turn reports its stages to
+  (`transcribe_and_answer`'s `progress`, the agent loop's tool `start`
+  events) and which runs the turn to its end when the frame goes away, so the
+  exchange is stored all the same.
+- **On the frame** (`fos_voice.c` `send_chunk`, `fos_client.c`
+  `fos_client_voice_progress`): the closing chunk's answer is read a byte at
+  a time (`esp_http_client_read` waits to fill what it is asked for), each
+  `progress` line's text goes to the render task, and the last line is the
+  answer. The render task draws the newest text as the restart notice draws
+  its band (`band_over_last_image`): the last image with the text in the
+  notice's box, in the fast waveform, and only while the session holds the
+  panel; the answer's render or repaint takes it away. Only where that is
+  quick: an LCD, and e-paper with a partial waveform (`PARTIAL_PANELS`: the
+  reTerminal Sticky's 3.97", the E1003's IT8951); a panel whose every update
+  is a full refresh, seconds of flashing (the E1001, the E1002's Spectra 6,
+  the Waveshare boards), keeps the buzzer's bops alone. The picture the band put
+  up is kept for the next band of the session, which the driver needs as
+  what the glass shows after a quick update (a controller that keeps its own
+  picture needs none). About 0.9 KB of flash on the S3.
+
 ## The chat turn
 
 The transcript is one user message in a chat about the frame — the same chat
@@ -271,7 +335,7 @@ voice chat may do" below), run in-process by the plane:
 | `set_scene_state {state}` | queue `setSceneState` (a `scene_event` with `render: true`) for the scene showing |
 | `render_now` | queue `render` |
 | `show_image {query, source?}` | build a one-picture scene (`render` → `render/image` fed by `unsplash` with `search` = query, or `openaiImage` with `prompt` = query; the app bundled in, `refreshInterval` an hour for a photo, a day for a generated one) and push it as the editor's "Preview on frame": the backend sends the frame's saved scenes plus it (`queue_embedded_scene_preview`, and its settings pull now carries what the previewed apps declare), the cloud a `set_scenes` of it alone (the next `activate_scene` re-pushes the assigned set, as its event route does, and that push carries the picture along — `docs/scene-previews.md` "A preview rides along"). The workspace shows the preview for what it is: both planes report the newest scene push as `scene_preview` `{scene_id, name, source: editor|voice, at}` on the frame (backend `frame_commands.scene_preview_info`, cloud `scenePreviewsByFrame`; the push's `preview` metadata outlives its bundle) while a preview is the newest push, and the scene list draws a dashed "preview" row above the saved scenes — named, marked active when the device shows it, with an "Install" button that puts the previewed scene on the frame's saved list (`scenesLogic.installPreviewScene`: the scene JSON from `GET /api/frames/{id}/scene_preview` on the backend, `/scene-preview` on the cloud — the newest preview push keeps the shown scene, older ones lose it when a newer push is queued — added to the form with its id kept, saved and pushed; on the cloud the save mints the private store scene) and a "Discard" button (`scenesLogic.discardPreview`: a DELETE on the preview route, then the saved list pushed; confirmed first). A deploy or a push of the saved list does NOT remove the picture: a scene push carries the standing preview along, so the frame keeps showing what it was asked for until it is installed or discarded. Nothing accumulates: the frame holds its saved scenes plus ONE picture scene (the next `show_image` replaces it), and the control plane keeps one scene bundle per frame — a newer `set_scenes` row empties the older previews' bundles on the backend (`spend_older_scene_pushes`), the cloud drops a `set_scenes` row's `scenes` the moment the device answers it (`spentCommandPayload`). `source` is `photo` or `generated`; omitted, the first the frame has. Only the sources the context lists work: the backend's are the project's keys, the cloud's the service-setting groups the owner already granted this frame's scenes — the voice turn grants nothing |
-| `create_scene {request, name?}` | **the scene AI, by voice** (what the workspace's "AI scene" does): the request, in the voice model's own full words, goes to a **sub-turn** of the chat's scene-building loop — the chat's system prompt with the scene guide, the frame's context, and the editor and catalog tools alone (`create_scenes`, `update_scene`, `patch_scene`, `edit_app_source`, `render_scene`; the cloud's `search_apps` / `get_app` / `search_examples` / `get_example` / `search_docs` / `read_doc` through `ToolContext.allowedTools`, the backend's in-process `apps_list` / `app_source_get`): never a tool that saves, installs, reads the account or touches a frame, since the caller is the frame's credential (`cloud/apps/auth-web/src/lib/ai/voice-scene-builder.ts`, `backend/app/utils/voice_scene_builder.py`). What the model "delivers to the editor" is captured instead and **rendered once more at the frame's size in the frame's memory** (`docs/ai-chat.md` "Renders run in the frame's memory"); runtime errors or an out-of-memory go back to the sub-turn as the browser's `[Automatic render check]` would, twice at most, and only a scene that draws is pushed — as the voice preview, like `show_image`'s picture, with the frame's other scenes beside it, for the workspace's Install or Discard. A scene that never draws is reported (`render_failed` / `render_out_of_memory`, the runtime's words) and pushed nowhere. Without a renderer on the plane (no Node or wasm build on a backend) the check is skipped, as the chat's install check is. The sub-turn has 100 s and ten rounds; the frame waits three minutes for the answer (`VOICE_DONE_TIMEOUT_MS`), the buzzer bopping every two seconds meanwhile |
+| `create_scene {request, name?}` | **the scene AI, by voice** (what the workspace's "AI scene" does): the request, in the voice model's own full words, goes to a **sub-turn** of the chat's scene-building loop — the chat's system prompt with the scene guide, the frame's context, and the editor and catalog tools alone (`create_scenes`, `update_scene`, `patch_scene`, `edit_app_source`, `render_scene`; the cloud's `search_apps` / `get_app` / `search_examples` / `get_example` / `search_docs` / `read_doc` through `ToolContext.allowedTools`, the backend's in-process `apps_list` / `app_source_get`): never a tool that saves, installs, reads the account or touches a frame, since the caller is the frame's credential (`cloud/apps/auth-web/src/lib/ai/voice-scene-builder.ts`, `backend/app/utils/voice_scene_builder.py`). What the model "delivers to the editor" is captured instead and **rendered once more at the frame's size in the frame's memory** (`docs/ai-chat.md` "Renders run in the frame's memory"); runtime errors or an out-of-memory go back to the sub-turn as the browser's `[Automatic render check]` would, twice at most, and only a scene that draws is pushed — as the voice preview, like `show_image`'s picture, with the frame's other scenes beside it, for the workspace's Install or Discard. A scene that never draws is reported (`render_failed` / `render_out_of_memory`, the runtime's words) and pushed nowhere. Without a renderer on the plane (no Node or wasm build on a backend) the check is skipped, as the chat's install check is. The sub-turn has 100 s and ten rounds; the frame waits three minutes for the answer (`VOICE_DONE_TIMEOUT_MS`), the buzzer bopping every two seconds meanwhile and the panel saying "Building the scene…" with the seconds so far ("Progress on the panel") |
 | `change_scene {request}` | the same sub-turn on **the scene the frame shows**: the standing preview when it is the one showing (or when the device reports no scene of the saved list), else the installed scene the device reports. The preview is replaced in place (same id, the older push's bundle spent); an installed scene is **never overwritten** — its changed copy goes to the sub-turn under a new id (one a saved scene holds would read as installed, `docs/scene-previews.md`) and becomes the preview, installed or discarded in the workspace like any other. The sub-turn gets the scene JSON and is told to use the partial tools (`patch_scene`, `edit_app_source`) for small changes |
 | `rotate_frame {degrees}` | the Settings panel's push for `rotate` (0/90/180/270, absolute; the context carries the current rotation so "another 90" adds up): the backend writes the frame row AND queues a pull-backed `set_settings` row — the device fetches its settings only when its commands pull says a deploy waits, and the row is acked by the new ETag (without the row the second spoken rotation never reached the E1002); the cloud validates, mirrors into `frames.settings` and queues `set_settings`. A rotation restarts the device (`fos_settings.c`), which waits for the session, the answer's render and its refresh first. A frame has no render interval to change (its scenes have theirs; a model given the key once invented `interval: 1` next to a rotation) |
 

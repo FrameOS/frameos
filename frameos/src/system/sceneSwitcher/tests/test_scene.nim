@@ -341,6 +341,30 @@ block the_keys_scroll_the_list_to_the_highlight:
   for (event, _) in sent:
     doAssert event != evSetCurrentScene and event != evSceneSwitcher, event
 
+block it_opens_scrolled_to_the_scene_showing_in_a_layouts_hole:
+  # The reTerminal Sticky's home screen: the list in the hole its layout
+  # leaves on the 800x480 panel (a big clock over it, the keys' help under
+  # it). The open knows the panel alone; the first render scrolls in the
+  # hole, the scene showing in the middle of the list.
+  listed = entries(40)
+  sent.setLen(0)
+  let scene = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-30")
+  discard scene.draw(newImage(800, 300))
+  doAssert listScroll() > 0 and shownWhole(29), "the scene showing in sight at " & $listScroll()
+  let list = listRegion()
+  let tile = uiTarget(SceneSwitcherId, 1).regions[tileRegion(29)]
+  doAssert abs((tile.y + tile.h / 2) - (list.y + list.h / 2)) <= tile.h,
+    "in the middle of the list: " & $tile & " " & $list
+  preview("switcher-800x300-eink-opened", oneBit(scene.draw(newImage(800, 300))))
+  # Scrolled by a finger after that, the list stays where it was put.
+  let held = listScroll()
+  discard scene.draw(newImage(800, 300))
+  doAssert listScroll() == held
+  # One in the first screenful: the list stays at its top.
+  let near = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-3")
+  discard near.draw(newImage(800, 300))
+  doAssert listScroll() == 0 and shownWhole(2)
+
 block forward_and_back_move_a_screenful:
   # What turned a page (the frame's forward and back, a swipe in from an
   # edge, a scene direction, which the dispatcher hands the switcher as
@@ -941,8 +965,12 @@ block the_header_searches_the_scenes:
   doAssert field >= 0, "a search field in the header"
   let r = uiTarget(SceneSwitcherId, 1).regions[field]
   doAssert r.y + r.h <= switcherGrid(800, 480, thumbnails = false).headerH.float32, $r
-  scene.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "mouse"})
-  doAssert sent.len == 0, $sent
+  # A tap on it (an ESP32's glass focuses a field on the tap alone): the
+  # keyboard, and a picture asked for to show it, no scene switch.
+  scene.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "touch"})
+  doAssert sent.len == 1 and sent[0][0] == evRender, $sent
+  doAssert uiTarget(SceneSwitcherId, 1).input.focus > 0, "the field has the keyboard"
+  sent.setLen(0)
   scene.send("textInput", %*{"text": "CLOCK"})
   doAssert scene.state{"query"}.getStr() == "CLOCK"
   doAssert scene.entries.len == 1 and scene.entries[0].name == "Kitchen clock", $scene.entries.len
@@ -982,7 +1010,9 @@ block the_frames_home_stays:
   let grid = switcherGrid(800, 480, thumbnails = false)
   for cx in countdown(800 - grid.pad - 2, 600, 4):
     scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
-  doAssert sent.len == 0, "no Close at home: " & $sent
+  for (event, _) in sent:
+    doAssert event != evSceneSwitcher, "no Close at home: " & $sent
+  sent.setLen(0)
   scene.send("button", %*{"label": "LEFT", "role": "back", "action": "press"})
   scene.send("keyDown", %*{"key": "Escape", "code": "Escape"})
   for (event, _) in sent:

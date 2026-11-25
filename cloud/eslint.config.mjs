@@ -70,6 +70,7 @@ export default tseslint.config(
       // reaches decorators/frame.tsx and the legacy components.
       "**/src/test/shared-spa/frame-status-groups.test.ts",
       "**/src/test/shared-spa/frame-checkin.test.ts",
+      "**/src/test/shared-spa/frame-health.test.ts",
       "**/src/test/shared-spa/frame-firmware-update.test.ts",
       "**/src/test/shared-spa/deploy-progress.test.tsx",
       "**/src/test/shared-spa/frame-status-fixtures.test.ts",

@@ -1014,6 +1014,114 @@ def voice_history_for_model(
     return out
 
 
+# --------------------------------------------------------------- progress
+
+# What the frame's panel says while a turn runs (docs/voice-chat.md "Progress
+# on the panel"): what was heard, in quotes, over the stage's words. A frame
+# asks for it with `Accept: application/x-ndjson` on its closing chunk; the
+# answer is then one JSON line per stage, `{"progress": stage, "text": …}`,
+# and last the same object the plain answer is. The words are the planes',
+# never the firmware's: the cloud's voice.ts has the same table, pinned by
+# both planes' parity tests.
+VOICE_PROGRESS_WORDS: dict[str, str] = {
+    "transcribing": "Transcribing…",
+    "heard": "Thinking…",
+    "activate_scene": "Switching the scene…",
+    "set_scene_state": "Changing the scene's settings…",
+    "render_now": "Drawing it again…",
+    "show_image": "Getting the picture…",
+    "create_scene": "Building the scene…",
+    "change_scene": "Changing the scene…",
+    "rotate_frame": "Turning the frame…",
+    "list_albums": "Looking through the albums…",
+    "show_album": "Putting the album on…",
+}
+# Without news for this long, a line says the turn still runs: the same words
+# and the seconds so far. It also keeps a proxy from closing a quiet
+# connection while the scene AI builds.
+VOICE_PROGRESS_EVERY_SECONDS = 15.0
+# What of the transcript the panel shows over the words.
+VOICE_PROGRESS_TRANSCRIPT_CHARS = 160
+
+# A stage of the turn, as it starts: `transcribing`, `heard` (with the
+# transcript) or a tool's name. One without words is no news.
+VoiceProgress = Callable[..., None]
+
+
+def no_voice_progress(stage: str, transcript: str | None = None) -> None:
+    """A frame that did not ask for progress: the stages go nowhere."""
+    return None
+
+
+def voice_progress_text(transcript: str, words: str, seconds: int = 0) -> str:
+    """The panel's text for a stage: the transcript in quotes (cut to
+    VOICE_PROGRESS_TRANSCRIPT_CHARS) over the words, with the seconds the turn
+    has taken once they are ten or more."""
+    heard = (
+        transcript[: VOICE_PROGRESS_TRANSCRIPT_CHARS - 1].rstrip() + "…"
+        if len(transcript) > VOICE_PROGRESS_TRANSCRIPT_CHARS
+        else transcript
+    )
+    timed = f"{words} {seconds} s" if seconds >= 10 else words
+    return f'"{heard}"\n{timed}' if heard else timed
+
+
+def wants_voice_progress(accept: str | None) -> bool:
+    """Whether the frame asked for its closing chunk's answer with progress."""
+    return "application/x-ndjson" in (accept or "").lower()
+
+
+# The turns whose frame went away mid-answer run to their end (their exchange
+# is stored all the same): held here so nothing collects them.
+_progress_turns: set[asyncio.Task[Any]] = set()
+
+
+async def voice_progress_stream(
+    run: Callable[[VoiceProgress], Awaitable[dict[str, Any]]],
+    *,
+    every_seconds: float = VOICE_PROGRESS_EVERY_SECONDS,
+):
+    """The closing chunk's answer for a frame that asked for progress: a line
+    per stage `run` reports, one every `every_seconds` without news, and last
+    `run`'s answer (a raise is `chat_failed`)."""
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    state = {"stage": "", "heard": ""}
+    started = time.monotonic()
+
+    def progress(stage: str, transcript: str | None = None) -> None:
+        if transcript is not None:
+            state["heard"] = transcript
+        if stage in VOICE_PROGRESS_WORDS:
+            state["stage"] = stage
+            queue.put_nowait({"progress": stage, "text": voice_progress_text(state["heard"], VOICE_PROGRESS_WORDS[stage])})
+
+    async def turn() -> None:
+        try:
+            answer = await run(progress)
+        except Exception as error:  # noqa: BLE001 — the frame sounds it as an error
+            answer = {"ok": False, "error": "chat_failed", "detail": str(error)[:500]}
+        queue.put_nowait(answer)
+        queue.put_nowait(None)
+
+    task = asyncio.create_task(turn())
+    _progress_turns.add(task)
+    task.add_done_callback(_progress_turns.discard)
+    while True:
+        try:
+            line = await asyncio.wait_for(queue.get(), timeout=every_seconds)
+        except asyncio.TimeoutError:
+            if not state["stage"]:
+                continue
+            seconds = int(time.monotonic() - started)
+            line = {
+                "progress": "still",
+                "text": voice_progress_text(state["heard"], VOICE_PROGRESS_WORDS[state["stage"]], seconds),
+            }
+        if line is None:
+            return
+        yield (json.dumps(line) + "\n").encode()
+
+
 # ------------------------------------------------------------------- turn
 
 
@@ -1075,12 +1183,14 @@ async def run_voice_turn(
     history: list[dict[str, str]],
     tools: VoiceTools,
     http_client: httpx.AsyncClient | None = None,
+    progress: VoiceProgress = no_voice_progress,
 ) -> VoiceTurnResult:
-    """One turn: the loop's events go nowhere (no browser is reading), the
-    result is what the frame gets back."""
+    """One turn: no browser reads the loop's events, a tool starting is the
+    frame's next stage (`progress`); the result is what the frame gets back."""
 
     async def emit(event: dict[str, Any]) -> None:
-        return None
+        if event.get("type") == "tool" and event.get("status") == "start":
+            progress(str(event.get("name") or ""))
 
     result = await run_agent_loop(
         api_key=api_key,
@@ -1109,13 +1219,15 @@ async def transcribe_and_answer(
     history: list[dict[str, str]],
     tools: VoiceTools,
     http_client: httpx.AsyncClient | None = None,
+    progress: VoiceProgress = no_voice_progress,
 ) -> VoiceTurnResult | tuple[str, str]:
     """The whole answer to a finished session, or (error, detail) for the
     frame to sound as an error: `nothing_heard`, `transcription_failed`,
-    `chat_failed`."""
+    `chat_failed`. Each stage is told to `progress` as it starts."""
     peak = pcm_peak(pcm)
     if peak < VOICE_SILENCE_PEAK:
         return "nothing_heard", f"silence (peak {peak})"
+    progress("transcribing")
     try:
         transcript = await transcribe_pcm(
             pcm, api_key=api_key, prompt=", ".join(scene_names) if scene_names else None, http_client=http_client
@@ -1127,6 +1239,7 @@ async def transcribe_and_answer(
         return "nothing_heard", "the transcription came back empty"
     if transcript_is_hint_echo(transcript, scene_names):
         return "nothing_heard", "only the scene names came back"
+    progress("heard", transcript)
     try:
         return await run_voice_turn(
             transcript=transcript,
@@ -1137,6 +1250,7 @@ async def transcribe_and_answer(
             history=history,
             tools=tools,
             http_client=http_client,
+            progress=progress,
         )
     except (OpenAiRequestError, httpx.HTTPError, asyncio.TimeoutError) as error:
         return "chat_failed", str(error)

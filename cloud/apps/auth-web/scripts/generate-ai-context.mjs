@@ -13,8 +13,9 @@
 // Output is src/generated/ai-context.json, imported by src/lib/ai/context.ts.
 // The file is committed (like frontend/src/generated/*) so tests and dev
 // servers work without a build step; this script re-syncs it and runs from
-// predev/prebuild.
-/* global console */
+// predev, prebuild, prelint, pretest and pretypecheck, so several copies of it
+// often run at once (see the write at the end).
+/* global console, process */
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -365,8 +366,24 @@ const context = {
   docs,
 }
 
+// Turbo starts auth-web's lint, test and build together, and each one's
+// pre-script runs this. A plain writeFile truncates the file before writing
+// it, so vitest, loading the file while a build's copy of this script wrote
+// it, read half of it: "Failed to parse JSON file" in Cloud CI on main, three
+// times on 2026-11-24/25. Leave an up-to-date file alone, and replace a stale
+// one with a rename, so a reader gets the old file or the new one, never part.
+const json = JSON.stringify(context, null, 1)
 await fs.mkdir(path.dirname(outputPath), { recursive: true })
-await fs.writeFile(outputPath, JSON.stringify(context, null, 1))
+const current = await fs.readFile(outputPath, 'utf8').catch(() => null)
+if (current !== json) {
+  const tempPath = `${outputPath}.${process.pid}.tmp`
+  try {
+    await fs.writeFile(tempPath, json)
+    await fs.rename(tempPath, outputPath)
+  } finally {
+    await fs.rm(tempPath, { force: true })
+  }
+}
 const stat = await fs.stat(outputPath)
 console.log(
   `ai-context.json: ${Object.keys(context.apps).length} apps, ${examples.length} example scenes, ` +

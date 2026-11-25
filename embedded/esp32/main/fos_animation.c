@@ -54,7 +54,23 @@ bool fos_animation_update(fos_animation_t *a, bool wanted, double scene_interval
 
 static bool in_burst(const fos_animation_t *a, int64_t now_us)
 {
-    return !a->active && a->burst_last_us != 0 && now_us - a->burst_last_us < FOS_ANIMATION_BURST_US;
+    int64_t gap = a->loop ? FOS_ANIMATION_LOOP_GAP_US : FOS_ANIMATION_BURST_US;
+    return !a->active && a->burst_last_us != 0 && now_us - a->burst_last_us < gap;
+}
+
+bool fos_animation_fast_loop(double scene_interval_s, bool animating)
+{
+    return !animating && scene_interval_s > 0.0 && scene_interval_s < 1.0;
+}
+
+void fos_animation_set_loop(fos_animation_t *a, bool loop)
+{
+    a->loop = loop && !a->active;
+}
+
+bool fos_animation_steady(const fos_animation_t *a, int64_t now_us)
+{
+    return a->active || in_burst(a, now_us);
 }
 
 bool fos_animation_housekeeping_due(fos_animation_t *a, int64_t now_us)
