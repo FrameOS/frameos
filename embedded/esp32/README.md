@@ -1892,6 +1892,34 @@ a change stops naming are emptied by the store task, the lock let go after
 each (`store_sweep_behind`): emptying is a flash write for every page, and
 71 dropped scenes were a minute and a half of it.
 
+**A set over USB** (`usb_api scenes-deflated <set|put> <inflated bytes>
+<bytes>`, then a zlib stream of a JSON array of scenes). The browser flasher
+and the backend's flasher (`uploadScenesOverUsbAfterFlash`) send a set in
+batches of up to 512 KB of JSON, the most the board holds at once, each
+deflated: the first (`set`) is what `upload-scenes` takes, the rest (`put`)
+are added to it as one change each, written the way a whole set is
+(`fos_scene_store_add_set`: unnamed slots, the index once). The board
+inflates with the ROM's tinfl and the stream's Adler-32 checks what came
+over the cable; firmware before it answers `unknown subcommand` before
+READY, and the page sends `upload-scenes` and a `scene-put` a scene. Scene
+JSON deflates to between a third and a quarter, and the console reads 11.5
+KB a second at 115200 baud: every sample (105 scenes, 4.2 MB) went onto a
+reTerminal Sticky in 302 s, 100 s of it on the cable and most of the rest
+making slot files ("What still costs"), where the plain commands took 6
+minutes on the wire alone (2026-11-25).
+
+A change made while a whole set waits for the render task's apply (the
+first batch, on a board that has no network yet: its render task holds its
+passes for the Wi-Fi portal until the reboot that ends the setup) goes into
+the index that set wrote, and the apply stays the set's own, which loads
+that index whole (`ensure_split_locked`). Through 2026.11.14 such a change was
+refused ("a scene upload is waiting to be applied"), so every scene after
+the flasher's first upload was: the page now restarts such a board once and
+sends the rest. A change also waits for the store task to split a whole
+payload a producer stored (`producer_split_done`): the split lets the lock
+go between files, and a put that came then split the same file again
+beside it.
+
 **Making room is one walk of the partition** (`fos_spiffs_gc.c`). Flash is
 erased a 4 KB block at a time before it is written, and the blocks that hold
 nothing but deleted pages are found by walking the partition's lookup

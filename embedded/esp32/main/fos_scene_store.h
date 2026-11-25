@@ -186,6 +186,15 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
                                                 void (*on_dropped)(const char *id, void *ctx),
                                                 void *ctx);
 
+/* `puts` added to the set on flash as fos_scene_store_apply_set writes a set
+ * (at once where there is room, else a scene at a time), each one replacing
+ * the scene of its id in its place or going after the others; nothing is
+ * dropped. A put a change each wrote the index twice a scene: over USB, the
+ * index, its copy and their lookups by name were 1.5 s of every scene put on
+ * the reTerminal Sticky's 24 MB /state (2026-11-25). */
+fos_scene_store_err_t fos_scene_store_add_set(const fos_scene_store_put_t *puts, int count, const char *source,
+                                              fos_scene_store_set_result_t *result);
+
 /* ---- A set written as it arrives ---------------------------------------
  *
  * fos_scene_store_stage_open() starts one and answers its id; then, for each

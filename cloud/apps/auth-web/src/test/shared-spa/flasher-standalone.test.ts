@@ -318,9 +318,13 @@ describe("the scenes to start with", () => {
     expect(storeCoversFromListing({ templates: "nope" }, listingUrl)).toEqual({});
   });
 
-  it("says how long the scenes take over the cable", () => {
-    expect(sceneUploadSeconds(110 * 1024, 4)).toBe(10);
-    // Past one upload, every scene goes alone.
-    expect(sceneUploadSeconds(1100 * 1024, 20)).toBe(140);
+  it("says how long the scenes take over the cable and onto the board", () => {
+    // Every sample (105 scenes, 4.2 MB) took 302 s onto a reTerminal Sticky
+    // (32 MB of flash): 100 s on the cable, deflated, the rest storing them.
+    expect(sceneUploadSeconds(4168234, 105, "32MB")).toBe(304);
+    // A scene's slot file costs a walk of /state: less on a smaller one.
+    expect(sceneUploadSeconds(110 * 1024, 4, "8MB")).toBe(5);
+    expect(sceneUploadSeconds(1100 * 1024, 20, "16MB")).toBe(51);
+    expect(sceneUploadSeconds(1100 * 1024, 20, "unknown")).toBe(sceneUploadSeconds(1100 * 1024, 20, "8MB"));
   });
 });

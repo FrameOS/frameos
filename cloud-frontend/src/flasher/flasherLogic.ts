@@ -328,8 +328,9 @@ export const flasherLogic = kea<flasherLogicType>([
         pickedScenesProblem(chosen, kind, samples),
     ],
     uploadSeconds: [
-      (s) => [s.chosenScenes],
-      (chosen: PickedScenes): number => sceneUploadSeconds(chosen.bytes, chosen.scenes),
+      (s) => [s.chosenScenes, s.sceneRoom],
+      (chosen: PickedScenes, room: StandaloneSceneRoom): number =>
+        sceneUploadSeconds(chosen.bytes, chosen.scenes, room.flashSize),
     ],
     sampleGroups: [
       (s) => [s.samples, s.picked, s.storeCovers, s.query],

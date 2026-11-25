@@ -63,7 +63,7 @@ static const char *TAG = "fos_scenes";
  * /state is what bounds it (backend_spool). 529 KB of scenes were refused
  * whole on a reTerminal Sticky with 24 MB of /state (`payload-too-large`,
  * the hardware bench, 2026-11-18). */
-#define SCENES_HELD_MAX_BYTES (512 * 1024)
+#define SCENES_HELD_MAX_BYTES FOS_SCENES_HELD_MAX_BYTES
 /* How long a download waits for its body's block (fos_http_request_t
  * alloc_wait_ms): an e-paper render holds its PSRAM for a few seconds. */
 #define SCENES_BODY_WAIT_MS 8000
@@ -91,6 +91,7 @@ static bool store_sweep_behind(void);
 static bool s_boot_sweep_due = false;
 static void store_split_stored(void);
 static bool backend_set_written(uint32_t timeout_ms);
+static bool producer_split_done(uint32_t timeout_ms);
 /* Who installed the scenes. s_source is the RESIDENT store's source (what the
  * index on flash says, i.e. what the frame is rendering); s_pending_source is
  * the source declared by the producer of a stored-but-not-yet-applied payload,
@@ -2035,18 +2036,33 @@ _Static_assert(sizeof(STORE_ERR_TO_ESP) / sizeof(STORE_ERR_TO_ESP[0]) == FOS_SCE
 
 /* A one-scene change is made on the per-scene store. A combined payload not
  * yet split is split here (a frame that last synced from a backend holds one
- * until its next boot), unless the render task is about to apply it. */
-static esp_err_t ensure_split_locked(void)
+ * until its next boot), unless the render task is about to apply it.
+ *
+ * `set_waits`: a whole payload stored since boot, split already, waits for the
+ * render task's apply. The change goes into the index that payload wrote and
+ * the apply stays the payload's own, which loads that index whole: made a
+ * patch, it would be applied to an index the runtime has not loaded, and the
+ * payload's own apply skipped. Refused instead, a set bigger than one upload
+ * could not go on at all while the render task holds off its apply: the
+ * browser flasher sends the first 512 KB whole and the rest a scene at a time,
+ * to a board whose render task waits out the Wi-Fi portal until the reboot
+ * that ends the setup, and every scene after the first upload was refused
+ * (the reTerminal Sticky, 105 scenes, 2026-11-25). */
+static esp_err_t ensure_split_locked(bool *set_waits)
 {
-    /* A whole payload stored since boot and split already, waiting for the
-     * render task's apply: a change now would be applied as a patch to an
-     * index the runtime has not loaded, and the payload's own apply skipped. */
-    if (s_pending && s_payload_stored_since_boot && !s_patch_pending) {
-        set_scene_simple_error("a scene upload is waiting to be applied, try again", 0);
-        return ESP_ERR_INVALID_STATE;
-    }
+    *set_waits = false;
     struct stat st;
-    if (!combined_stored() || stat(SCENES_PATH, &st) != 0 || st.st_size <= 2) return ESP_OK;
+    bool combined = combined_stored() && stat(SCENES_PATH, &st) == 0 && st.st_size > 2;
+    if (s_pending && s_payload_stored_since_boot && !s_patch_pending) {
+        if (combined) {
+            /* Not split: the apply loads the combined file whole. */
+            set_scene_simple_error("a scene upload is waiting to be applied, try again", 0);
+            return ESP_ERR_INVALID_STATE;
+        }
+        *set_waits = true;
+        return ESP_OK;
+    }
+    if (!combined) return ESP_OK;
     if (s_pending) {
         set_scene_simple_error("a scene upload is waiting to be applied, try again", 0);
         return ESP_ERR_INVALID_STATE;
@@ -2131,7 +2147,7 @@ static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes
      * back, came out "4 written at once, 0 kept, 1 dropped", and every sync
      * after it was a 304 (the reTerminal E1002, the hardware bench,
      * 2026-11-20). The set goes on flash first, then the change on top. */
-    if (!backend_set_written(CHANGE_STORE_WAIT_MS)) {
+    if (!backend_set_written(CHANGE_STORE_WAIT_MS) || !producer_split_done(CHANGE_STORE_WAIT_MS)) {
         set_scene_simple_error("store-busy", result->put_bytes);
         log_scene_event(event, "error", scene_source_str((int)source), "", s_last_error, 0, 0, 0,
                         ESP_ERR_TIMEOUT);
@@ -2145,9 +2161,22 @@ static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes
     if (err == ESP_OK) {
         store_lock();
         s_store_urgent = urgent; /* the split first, if one is owed: it is waited for too */
-        err = ensure_split_locked();
+        bool set_waits = false;
+        err = ensure_split_locked(&set_waits);
         if (err == ESP_OK) {
-            fos_scene_store_err_t store_err = fos_scene_store_apply(change, result, forget_dropped_scene, NULL);
+            fos_scene_store_err_t store_err = FOS_SCENE_STORE_ERR_NOT_FOUND;
+            if (change->puts != NULL && change->put_count > 1) {
+                /* Several scenes: added as a set is written, the index once
+                 * where there is room, the lock let go between pieces. */
+                fos_scene_store_set_result_t added;
+                store_err = fos_scene_store_add_set(change->puts, change->put_count, change->source, &added);
+                result->scene_count = added.scene_count;
+                result->put_bytes = added.written_bytes;
+            }
+            /* One scene, or no index to add to yet: one change. */
+            if (store_err == FOS_SCENE_STORE_ERR_NOT_FOUND) {
+                store_err = fos_scene_store_apply(change, result, forget_dropped_scene, NULL);
+            }
             /* The slots it wrote, and the ones a sweep may give to the next put. */
             fos_slot_cache_clear(&s_slot_cache);
             err = STORE_ERR_TO_ESP[store_err];
@@ -2155,8 +2184,10 @@ static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes
         }
         if (err == ESP_OK) {
             /* Inside the lock: the render task's sweep must see the change
-             * coming before it treats a slot the old index named as unused. */
-            s_patch_pending = true;
+             * coming before it treats a slot the old index named as unused.
+             * On top of a whole set waiting for its apply, that apply loads
+             * this change with the set (ensure_split_locked). */
+            if (!set_waits) s_patch_pending = true;
             s_pending = true;
         }
         s_store_urgent = false;
@@ -2187,6 +2218,23 @@ esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t sourc
     fos_scene_store_result_t result;
     esp_err_t err = apply_store_change(&change, source, NULL, "scenes:put", urgent, &result);
     snprintf(out_id, out_id_len, "%s", result.first_put_id);
+    return err;
+}
+
+esp_err_t fos_scenes_put_many(const char *json, size_t len, fos_scenes_source_t source)
+{
+    fos_scene_store_put_t *puts = puts_new();
+    if (puts == NULL) return ESP_ERR_NO_MEM;
+    int count = scan_array_elements(json, len, puts, SCENES_SET_MAX);
+    esp_err_t err = ESP_ERR_INVALID_ARG;
+    if (count <= 0) {
+        set_scene_simple_error("scenes payload is not a JSON array of scenes", len);
+    } else {
+        fos_scene_store_change_t change = {.puts = puts, .put_count = count};
+        fos_scene_store_result_t result;
+        err = apply_store_change(&change, source, NULL, "scenes:put", false, &result);
+    }
+    free(puts);
     return err;
 }
 
@@ -2461,8 +2509,9 @@ static fos_http_body_err_t spool_begin(void *ctx)
          * or one that waits for its apply: the set this one is read against
          * is about to be another. */
         bool combined = combined_stored();
+        bool set_waits = false;
         if (s_store_changing || fos_scenes_store_busy() || (s_pending && !s_patch_pending) ||
-            ensure_split_locked() != ESP_OK) {
+            ensure_split_locked(&set_waits) != ESP_OK) {
             spool->busy = true;
             store_unlock();
             return FOS_HTTP_BODY_INVALID;
@@ -2948,6 +2997,32 @@ static bool backend_set_written(uint32_t timeout_ms)
                  (unsigned)((esp_timer_get_time() - from) / 1000));
     }
     return written;
+}
+
+/* Whether no whole payload a producer stored is being stored or split, after
+ * waiting up to `timeout_ms` for it (apply_store_change). The store task's
+ * split (store_split_stored) lets the lock go between files: a change that
+ * took it then found the combined file still there and split it again beside
+ * the task, and whichever index went on flash last named the set (a scene put
+ * over USB right after a first upload, the flasher's order). The split goes
+ * on flash first, then the change on top. */
+static bool producer_split_done(uint32_t timeout_ms)
+{
+    if (!s_store_changing || s_store_task == NULL || xTaskGetCurrentTaskHandle() == s_store_task) return true;
+    bool render = fos_client_on_render_task();
+    if (render) s_render_waits_for_store = true;
+    int64_t until = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    bool done = true;
+    while (s_store_changing) {
+        if (esp_timer_get_time() >= until) {
+            ESP_LOGW(TAG, "a scene set still being stored after %u ms: change refused", (unsigned)timeout_ms);
+            done = false;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (render) s_render_waits_for_store = false;
+    return done;
 }
 
 fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t etag_len, esp_err_t *out_err)

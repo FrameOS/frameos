@@ -24,6 +24,8 @@
 #include "sdkconfig.h"
 
 #include "cJSON.h"
+/* The ROM's inflater (tinfl), for a usb_api `scenes-deflated` payload. */
+#include "miniz.h"
 #include "fos_assets.h"
 #include "fos_assets_flash.h"
 #include "fos_assets_sd.h"
@@ -1678,7 +1680,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene-list|scene-get|scene-put|scene-delete|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scenes-deflated|scene-list|scene-get|scene-put|scene-delete|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
         return 1;
     }
 
@@ -1950,6 +1952,74 @@ static int cmd_usb_api(int argc, char **argv)
         }
         usb_api_payload_text(subcommand, json);
         cJSON_free(json);
+        return 0;
+    }
+
+    /* scenes-deflated <set|put> <inflated bytes> <bytes>: a JSON array of
+     * scenes in a zlib stream (its Adler-32 checks what came), at most
+     * FOS_SCENES_HELD_MAX_BYTES inflated. `set` is upload-scenes' whole set;
+     * `put` adds or replaces these scenes as one change and keeps the rest.
+     * Scenes are text that deflates to about a third, and the console reads
+     * 11.5 KB a second at 115200 baud: 105 scenes (4.2 MB) were six minutes
+     * on the wire alone, and a put a scene wrote the index once a scene (the
+     * browser flasher on the reTerminal Sticky, 2026-11-25). Firmware without
+     * it answers "unknown subcommand" before READY, and a host sends
+     * upload-scenes and scene-put instead. */
+    if (strcmp(subcommand, "scenes-deflated") == 0) {
+        bool set = argc >= 5 && strcmp(argv[2], "set") == 0;
+        if (argc < 5 || (!set && strcmp(argv[2], "put") != 0)) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: scenes-deflated <set|put> <inflated bytes> <bytes>");
+            return 1;
+        }
+        size_t inflated = (size_t)strtoul(argv[3], NULL, 10);
+        size_t len = (size_t)strtoul(argv[4], NULL, 10);
+        if (inflated == 0 || inflated > FOS_SCENES_HELD_MAX_BYTES || len == 0 || len > FOS_USB_API_MAX_UPLOAD) {
+            usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad upload length");
+            return 1;
+        }
+        uint8_t *body = fos_big_malloc(len);
+        char *json = body ? fos_big_malloc(inflated + 1) : NULL;
+        /* ~11 KB of tables: never on this task's stack. */
+        tinfl_decompressor *inflater = json ? fos_big_malloc(sizeof(*inflater)) : NULL;
+        if (!inflater) {
+            free(json);
+            free(body);
+            usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");
+            return 1;
+        }
+        usb_api_ready(subcommand);
+        size_t bytes_read = 0;
+        bool read = usb_api_read_exact(body, len, &bytes_read);
+        size_t in_size = len, out_size = inflated;
+        tinfl_status status = TINFL_STATUS_FAILED;
+        if (read) {
+            tinfl_init(inflater);
+            status = tinfl_decompress(inflater, body, &in_size, (mz_uint8 *)json, (mz_uint8 *)json, &out_size,
+                                      TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+        }
+        free(inflater);
+        free(body);
+        if (!read) {
+            free(json);
+            usb_api_payload_timeout_error(subcommand, bytes_read, len);
+            return 1;
+        }
+        if (status != TINFL_STATUS_DONE || out_size != inflated) {
+            free(json);
+            usb_api_error(subcommand, ESP_ERR_INVALID_CRC, "payload does not inflate to its length");
+            return 1;
+        }
+        json[inflated] = '\0';
+        esp_err_t err = set ? fos_http_store_uploaded_scenes_payload(json, inflated)
+                            : fos_scenes_put_many(json, inflated, FOS_SCENES_SOURCE_LOCAL);
+        free(json);
+        if (err != ESP_OK) {
+            const char *detail = fos_scenes_last_error();
+            usb_api_error(subcommand, err, (detail && detail[0]) ? detail : "scene upload failed");
+            return 1;
+        }
+        if (set) fos_client_render_now();
+        usb_api_ok(subcommand);
         return 0;
     }
 
