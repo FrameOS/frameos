@@ -103,6 +103,7 @@ type
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
     keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close or gear to draw
     headed*: bool ## the categories have headings (heads): a dozen scenes and more, two a category
+    revealing: bool ## just opened: the next render scrolls to the highlight in the room it has (draw)
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
@@ -543,10 +544,12 @@ proc scrollList(y: float32) =
   ## The list scrolled to `y` (the next layout keeps it in range).
   uiTarget(SceneSwitcherId, SwitcherNode).input.scrollTo(ListKey, 0, max(y, 0))
 
-proc reveal(self: SceneSwitcherScene, index: int) =
+proc reveal(self: SceneSwitcherScene, index: int, centred = false) =
   ## The list scrolled as little as it takes for the tile at `index` to
   ## show, with its heading where it starts a category: the keys walk a list
   ## longer than the screen, and e-paper has nothing else to follow them by.
+  ## `centred`: one out of sight comes to the middle of the list instead, as
+  ## the scene showing does when the list opens.
   let grid = self.grid()
   let spot = self.spots(grid)[index]
   let margin = grid.y0 - grid.listY
@@ -555,7 +558,9 @@ proc reveal(self: SceneSwitcherScene, index: int) =
     top -= grid.headingH
   let bottom = spot.top + grid.tileH + margin
   let y = listScroll()
-  if top.float32 < y:
+  if centred and (top.float32 < y or bottom.float32 > y + grid.listH.float32):
+    scrollList(float32(top - max(grid.listH - (bottom - top), 0) div 2))
+  elif top.float32 < y:
     scrollList(top.float32)
   elif bottom.float32 > y + grid.listH.float32:
     scrollList(float32(bottom - grid.listH))
@@ -638,7 +643,8 @@ proc takesNoTaps*(frameConfig: FrameConfig, paper: bool): bool =
 proc opened(self: SceneSwitcherScene) =
   ## Shown: the scene it was opened from is the highlighted one, the list's
   ## first when there is none or it is gone (then Close goes to the first),
-  ## and the list scrolled from its top to it.
+  ## and the list scrolled from its top to it: at the first render, which
+  ## knows the room (`revealing`; a layout's hole is not the panel).
   self.list()
   self.keysOnly = takesNoTaps(self.frameConfig, panelLook(self.frameConfig).paper)
   self.gear = framePageOffered() and not self.keysOnly
@@ -651,6 +657,7 @@ proc opened(self: SceneSwitcherScene) =
     self.forget()
   scrollList(0)
   self.highlight(max(index, 0))
+  self.revealing = true
   self.touch()
 
 # ---------------------------------------------------------------- input
@@ -763,16 +770,19 @@ proc onClick(node: sink SvgNode, handler: int): SvgNode =
   node.attrs.add(("on-click", $handler))
   node
 
-proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: string): SvgNode =
-  ## The frame page's gear, round. Lit while the keys are on it: inverted on
-  ## e-paper as a tile is, ringed on an LCD.
+proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: string,
+    wide = false): SvgNode =
+  ## The frame page's gear, round; `wide`, the header's: wider than tall, its
+  ## gear larger, as the scene settings' is. Lit while the keys are on it:
+  ## inverted on e-paper as a tile is, ringed on an LCD.
   var c = "shrink-0 flex items-center justify-center rounded-full"
-  c.square(size)
+  c.px("h", size)
+  c.px("w", if wide: size * 8 div 5 else: size)
   if paper and lit: c.add " bg-black text-white"
   else:
     c.add button
     if lit: c.add " border-2 border-sky-400"
-  result = el("div", c, iconNode(GearPath, size * 2 div 3, "0 0 48 48"))
+  result = el("div", c, iconNode(GearPath, if wide: size * 4 div 5 else: size * 2 div 3, "0 0 48 48"))
   result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 1)
 
 type TileLook = object
@@ -891,8 +901,8 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: 
     search.attrs.add(("on-change", $SearchHandler))
     header.children.add search.role("field")
   if self.gear:
-    header.children.add self.gearButton(clamp(grid.headerH * 6 div 10, 14, 40), paper,
-      self.highlighted() == self.entries.len, button)
+    header.children.add self.gearButton(clamp(grid.headerH * 3 div 4, 14, 48), paper,
+      self.highlighted() == self.entries.len, button, wide = true)
   if self.keysOnly:
     root.children.add header.role("bar")
     return
@@ -1092,7 +1102,20 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   # target's input (what is hovered, what is pressed) empty. Back by itself
   # once nobody has touched it for a while.
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
-  let tree = self.tree(roomW, roomH, self.paper, self.sizeUnit(image))
+  let unit = self.sizeUnit(image)
+  if self.revealing:
+    # Just opened: the scene it was opened from in sight, in the middle of
+    # the list where it is further down, measured in the room this render
+    # has (a layout's hole, a window), which the open did not know.
+    self.revealing = false
+    self.roomW = roomW
+    self.roomH = roomH
+    self.unit = unit
+    scrollList(0)
+    let lit = self.highlighted()
+    if lit >= 0 and lit < self.entries.len:
+      self.reveal(lit, centred = true)
+  let tree = self.tree(roomW, roomH, self.paper, unit)
   if self.drawUi(SceneSwitcherId, tree, image, self.paper, self.slow, onTap, idleSeconds(self.slow), roomW, roomH):
     leave()
 
@@ -1102,7 +1125,6 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
   ## A pointer event over the switcher: ui/events.nim hit-tests it, and
   ## scrolls the list under a finger or the wheel. A slow panel shows no
   ## press there, and a drag of the list only where it let go.
-  let tap = event == "tap"
   tapped = -1
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
   let count = self.entries.len
@@ -1124,9 +1146,12 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
     else: self.choose(count)
     tapped = -1
     self.touch()
-  elif changed and not tap:
-    # What is pressed moved, or the list scrolled: the contract renders
-    # nothing after a pointer event, so the picture is asked for here.
+  elif changed:
+    # What is pressed moved, the list scrolled, or a tap gave the search the
+    # keyboard or took it away: the contract renders nothing after a pointer
+    # event, so the picture is asked for here. (A tap on the search asked for
+    # none, and an ESP32 focuses a field on the tap alone: the keyboard came
+    # up only when something else drew, on the reTerminal Sticky 2026-11-25.)
     self.touch()
     sendEvent(evRender, newJObject(), eoScene)
 

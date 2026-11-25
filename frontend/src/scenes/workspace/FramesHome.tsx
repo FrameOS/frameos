@@ -120,9 +120,10 @@ function FrameActivityLine({ frame }: { frame: FrameType }): JSX.Element {
 
 function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: boolean }): JSX.Element {
   const stale = frameIsStale(frame)
-  // Backend frames say "ready"; a cloud frame's status is its enrollment
+  // Backend frames say "ready" (or that they are rendering or deploying, which
+  // is no less up: frameIsHealthy); a cloud frame's status is its enrollment
   // state, and the hub's `connected` flag is the live one.
-  const ready = (frame.status === 'ready' || frame.connected === true) && !stale
+  const ready = (frameIsHealthy(frame) || frame.connected === true) && !stale
   const connected = (frame.active_connections ?? 0) > 0
   const checkin = frameCheckin(frame)
   const statusDescription = frameStatusDescription(frame)
@@ -322,7 +323,7 @@ function FrameTreeRow({
               : 'text-slate-700 hover:bg-slate-100'
         )}
       >
-        <FrameChangeStatusIcon frameId={frame.id} />
+        <FrameChangeStatusIcon frameId={frame.id} quiet={inactive} />
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <button
             type="button"

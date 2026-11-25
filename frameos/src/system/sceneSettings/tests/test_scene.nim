@@ -790,9 +790,22 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   doAssert scene.shownName == "Layout settings"
   doAssert settings.exportedScene.render(scene, ExecutionContext(scene: scene, event: "render", payload: %*{},
     image: newImage(480, 480), hasImage: true)) != nil
+  # Its header is the frame page's: the gear lit, and where the frame holds
+  # the code editor a code button that opens the layout's code.
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather"), SwitcherEntry(id: "my-editor", name: "Code editor")]
+  image = scene.draw()
   if previews.len > 0:
-    image = scene.draw()
     image.writeFile(previews / "settings-layout.png")
+  let layoutGear = regionWith(2)
+  doAssert regionWith(3).x + regionWith(3).w <= layoutGear.x and layoutGear.x + layoutGear.w <= regionWith(1).x
+  doAssert layoutGear.w > layoutGear.h, "wider than tall: " & $layoutGear
+  sent.setLen(0)
+  scene.tap(regionWith(3))
+  doAssert sent.len >= 1 and sent[0][1] == %*{"sceneId": "my-editor", "state": {"open": "layouts/bar"}}, $sent
+  sent.setLen(0)
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
   # Back to the frame page; a layout chosen there is the frame's, not the host's.
   discard scene.draw()
   scene.tap(regionWith(0))

@@ -313,6 +313,18 @@ not deep-sleep, animates:
 - The render task blocks for one tick a second, so the idle task on its core
   runs while a frame slower than the panel never waits.
 
+The same scene on e-paper does not animate: the whole-second loop renders it
+on every pass, a **fast loop** (`fos_animation_fast_loop`). Its timed frames
+are a burst's (below): one in ten seconds logged in full, the rest quiet, the
+pulls once a second, a `render:burst` line when the scene stops asking. The
+gap that keeps it going is `FOS_ANIMATION_LOOP_GAP_US` (3 s), not the burst's
+second: a pass's pulls or a refresh waited for can hold a frame back past it.
+Each pass of the Kitchen sink (0.05 s) on a reTerminal Sticky logged seven
+lines in full, which the backend dropped (`log:dropped`) and which moved the
+frame's status to `rendering` and back twice a second (2026-11-24). The
+`power` line goes out in such a run (an animation, a burst, a fast loop)
+only when what it decided changes.
+
 Every line the firmware logs is also printed on UART0 at 115200 baud
 (11.5 KB/s), so the ~2.2 KB of lines a fully logged pass prints take ~190 ms on
 the wire. The task that logs does not wait for them: they go into a 16 KB PSRAM

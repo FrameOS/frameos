@@ -458,6 +458,22 @@ proc codeEditor(): string =
     if result.len == 0 and entry.name == CodeEditorName:
       result = entry.id
 
+proc codeOf(self: SceneSettingsScene, editor: string): string =
+  ## The scene the header's code button opens in the code editor `editor`:
+  ## on the layout's page the layout's, on the scene's and the frame's the
+  ## scene's it was opened from. "" for none: no editor, a built-in scene,
+  ## or the editor itself (open on it already).
+  if editor.len == 0:
+    return ""
+  if self.onLayoutPage():
+    let worn = self.frameLayout()
+    if not worn.isNil:
+      result = worn.id.string
+  else:
+    result = self.opener()
+  if result == editor or isBuiltInScene(result):
+    result = ""
+
 proc leave() =
   ## Back to the scene it was opened from, nothing saved: the dispatcher
   ## knows which.
@@ -599,20 +615,21 @@ proc acting(self: SceneSettingsScene) =
     elif frame: self.saveFrame(fields)
     else: self.save()
   elif handler == HCode:
-    # The scene's code in the code editor, which opens on it (its public
-    # field `open`, set as a Save sets the scene's).
+    # The scene's code (the layout's, on its page) in the code editor, which
+    # opens on it (its public field `open`, set as a Save sets the scene's).
     let editor = codeEditor()
-    let opener = self.opener()
-    if editor.len > 0 and opener.len > 0:
+    let code = self.codeOf(editor)
+    if code.len > 0:
       let state = newJObject()
-      state.put("open", newJString(opener))
+      state.put("open", newJString(code))
       goTo(editor, state)
   elif handler == HGear:
     if self.ownWindow():
       # The frame page has a window of its own: it comes forward.
       sendEvent(evSceneSettings, %*{"page": "frame"}, eoScene)
     else:
-      self.showPage(not frame)
+      # Lit on the frame's and the layout's pages: back to the scene's form.
+      self.showPage(not frame and not self.onLayoutPage())
   elif handler >= HAction:
     self.press(handler - HAction)
   elif handler >= HSelect:
@@ -672,37 +689,40 @@ proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
   else: c.add " bg-zinc-800 active:bg-zinc-600"
   el("div", move c, SvgNode(text: label)).role(if primary: "primary" else: "button").on("on-click", handler)
 
-proc icon(look: Look, path: string): SvgNode =
+proc icon(look: Look, path: string, side = 0): SvgNode =
   # The hole winds against the teeth: the default fill rule cuts it out.
   let path = SvgNode(tag: "path", attrs: @[("d", path), ("fill", "currentColor")])
+  let side = if side > 0: side else: look.size * 6 div 5
   var i = ""
-  i.px("w", look.size * 6 div 5)
-  i.px("h", look.size * 6 div 5)
+  i.px("w", side)
+  i.px("h", side)
   result = el("svg", move i, path)
   result.attrs.add(("viewBox", "0 0 48 48"))
 
-proc iconButton(look: Look, lit: bool, path: string, handler: int): SvgNode =
-  ## A round button with a picture on it.
+proc iconButton(look: Look, lit: bool, path: string, handler: int, wide = false): SvgNode =
+  ## A round button with a picture on it; `wide`, the header's: half as wide
+  ## again as it is tall, its picture larger, easy to hit with a thumb.
   var c = "shrink-0 flex items-center justify-center rounded-full"
   c.px("h", look.line * 4 div 5)
-  c.px("w", look.line * 4 div 5)
+  c.px("w", if wide: look.line * 6 div 5 else: look.line * 4 div 5)
   if look.paper: c.add(if lit: " bg-black text-white" else: " border-2 border-black")
   elif lit: c.add " bg-sky-600 active:bg-sky-500"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  el("div", move c, look.icon(path)).role(if lit: "selected" else: "button").on("on-click", handler)
+  el("div", move c, look.icon(path, if wide: look.size * 3 div 2 else: 0)).role(
+    if lit: "selected" else: "button").on("on-click", handler)
 
 proc gear(look: Look, lit, named: bool): SvgNode =
-  ## The gear that opens the frame page, lit while it shows, with its name
-  ## beside it where the header has the room.
+  ## The gear that opens the frame page, lit while it or the layout's page
+  ## shows, with its name beside it where the header has the room.
   if not named:
-    return look.iconButton(lit, gearPath(), HGear)
+    return look.iconButton(lit, gearPath(), HGear, wide = true)
   var c = "shrink-0 flex items-center rounded-full font-bold"
   c.px("h", look.line * 4 div 5)
   c.px("px", look.size)
   c.px("gap", look.size div 2)
   if look.paper: c.add " border-2 border-black"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  result = el("div", move c, look.icon(gearPath())).on("on-click", HGear)
+  result = el("div", move c, look.icon(gearPath(), look.size * 3 div 2)).on("on-click", HGear)
   result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
   result = result.role("button")
 
@@ -1024,18 +1044,17 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   header.children.add look.button(if frame or layoutPage: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if frame: "Frame settings" else: title))
-  # The scene's code, where the frame holds the code editor (not the
-  # editor's own: it is open on it already).
-  let opener = self.opener()
-  let code = not frame and not layoutPage and opener.len > 0 and
-    (let editor = codeEditor(); editor.len > 0 and editor != opener)
+  # The scene's code (on the layout's page the layout's), where the frame
+  # holds the code editor (not the editor's own: it is open on it already).
+  let code = self.codeOf(codeEditor()).len > 0
   if code:
-    header.children.add look.iconButton(false, CodePath, HCode)
-  if not info.isNil and not layoutPage:
-    # About 30 of the text's size: the two buttons, the title and the name
-    # (34 with the code button beside them).
-    if not self.panelWindow():
-      header.children.add look.gear(frame, named = not frame and width >= look.size * (if code: 34 else: 30))
+    header.children.add look.iconButton(false, CodePath, HCode, wide = true)
+  if not info.isNil and not self.panelWindow():
+    # Lit on the frame's and the layout's pages, which are the frame's. Named
+    # where there are about 31 of the text's size: the two buttons, the
+    # title and the name (36 with the code button beside them).
+    header.children.add look.gear(frame or layoutPage,
+      named = not frame and not layoutPage and width >= look.size * (if code: 36 else: 31))
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
