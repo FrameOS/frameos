@@ -18,9 +18,12 @@
  * sends that rectangle alone (even-aligned, as the controller wants), the
  * words byte-swapped on the way through two small DMA buffers in internal
  * RAM. A clock's second hand is a few kilobytes, a whole frame 434 KB (about
- * 20 ms at 40 MHz). A flash write cannot tear the picture (nothing scans
- * PSRAM), so a scene store needs no "Updating" screen: those calls are
- * no-ops here.
+ * 30 ms at 40 MHz). The compare and the push run on a task of their own:
+ * the render task hands the picture over and draws the next frame in the
+ * other buffer meanwhile, waiting only for the compare to have read it, and
+ * at the next present for the push to be over. A flash write cannot tear
+ * the picture (nothing scans PSRAM), so a scene store needs no "Updating"
+ * screen: those calls are no-ops here.
  *
  * The boot splash and the loading mark (lcd_splash.h, lcd_loading.h) are the
  * RGB LCD's, drawn into the buffer the glass shows and pushed by the
@@ -83,9 +86,14 @@ typedef struct {
     uint32_t presents;     /* pictures presented since the last reset */
     uint32_t pushes;       /* of which sent something (the rest changed nothing) */
     uint32_t last_box[4];  /* the last push's rectangle: x, y, w, h */
-    uint32_t last_us;      /* how long it took, the compare included */
+    uint32_t last_us;      /* how long it took on the bus (the window and the pixels) */
     uint32_t max_us;
+    uint64_t push_us;      /* every push's, summed */
+    uint64_t compare_us;   /* the compares, summed */
+    uint32_t waits;        /* a writer or a present that waited for the job before */
+    uint64_t waited_us;    /* and how long, summed */
     uint64_t bytes;        /* pixel bytes sent */
+    uint32_t push_stack_free; /* the push task's stack, the least it had free */
     uint8_t brightness;
     bool on;
 } fos_lcd_qspi_stats_t;

@@ -82,6 +82,7 @@ bool fos_lcd_qspi_round(void)
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -124,6 +125,23 @@ static volatile int64_t s_splash_status_at_us = 0;
 static bool s_on = true;
 static uint8_t s_brightness = 0xFF;
 static fos_lcd_qspi_stats_t s_stats;
+/* A presented picture goes onto the glass on a task of its own (core 0; the
+ * render task is on core 1 on an LCD): the compare with the picture before,
+ * then the push of what differs. The render task draws the next frame in the
+ * other buffer meanwhile. That buffer is the picture before, which only the
+ * compare reads: a writer waits for QSPI_OLD_FREE, a present for QSPI_IDLE
+ * (the job before is over: one bus, one job). Without the task (it did not
+ * start) a present compares and pushes in place, as before. */
+#define QSPI_PUSH_CORE 0
+#define QSPI_PUSH_PRIORITY 5
+/* It uses about 1.1 KB (`lcd`'s "push stack N free"); internal RAM, as a
+ * task stack in PSRAM faults while a flash write has the cache off. */
+#define QSPI_PUSH_STACK 2048
+#define QSPI_IDLE BIT0     /* no job in flight */
+#define QSPI_OLD_FREE BIT1 /* the job's compare has read the picture before */
+static TaskHandle_t s_push_task = NULL;
+static EventGroupHandle_t s_push_state = NULL;
+static int s_job_old = -1, s_job_new = -1;
 
 static int buffer_index(const uint8_t *buf)
 {
@@ -178,7 +196,8 @@ static esp_err_t push_box_locked(const uint8_t *frame, const fos_lcd_qspi_box_t 
     if (err != ESP_OK) return err;
     err = spi_device_acquire_bus(s_dev, portMAX_DELAY);
     if (err != ESP_OK) return err;
-    spi_transaction_ext_t t[2];
+    /* Under the bus lock, so one push at a time uses them. */
+    static spi_transaction_ext_t t[2];
     int queued = 0;
     int which = 0;
     for (int row = 0; row < h && err == ESP_OK; row += rows_per_chunk) {
@@ -335,38 +354,90 @@ static void release_writer(void)
     if (xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle()) xSemaphoreGive(s_write_lock);
 }
 
+static void wait_bits(EventBits_t bits)
+{
+    if (!s_push_task) return;
+    if ((xEventGroupGetBits(s_push_state) & bits) == bits) return;
+    int64_t start = esp_timer_get_time();
+    xEventGroupWaitBits(s_push_state, bits, pdFALSE, pdTRUE, portMAX_DELAY);
+    s_stats.waits++;
+    s_stats.waited_us += (uint64_t)(esp_timer_get_time() - start);
+}
+
 static uint8_t *writable_back(void)
 {
+    /* The picture before, which the job in flight may still be comparing. */
+    wait_bits(QSPI_OLD_FREE);
     if (s_drawing < 0) s_drawing = (s_front + 1) % QSPI_FBS;
     uint8_t *back = s_fbs[s_drawing];
     if (s_before_write) s_before_write(back);
     return back;
 }
 
-/* The drawn buffer onto the glass: what differs from the one it shows, and it
- * is the one the glass shows from then on. */
+/* The picture in buffer `now` onto the glass, which shows buffer `old`: what
+ * differs, timed. `compared` runs between the compare and the push. */
+static void show_changes(int old, int now, void (*compared)(void))
+{
+    int64_t start = esp_timer_get_time();
+    fos_lcd_qspi_box_t box;
+    bool changed = fos_lcd_qspi_changed_box((const uint16_t *)s_fbs[old], (const uint16_t *)s_fbs[now],
+                                            s_board->width, s_board->height, &box);
+    int64_t pushed = esp_timer_get_time();
+    s_stats.compare_us += (uint64_t)(pushed - start);
+    if (compared) compared();
+    if (!changed) return;
+    push_box(s_fbs[now], box);
+    uint32_t took = (uint32_t)(esp_timer_get_time() - pushed);
+    fos_lcd_qspi_align_box(&box, s_board->width, s_board->height);
+    s_stats.pushes++;
+    s_stats.last_box[0] = (uint32_t)box.x0;
+    s_stats.last_box[1] = (uint32_t)box.y0;
+    s_stats.last_box[2] = (uint32_t)(box.x1 - box.x0 + 1);
+    s_stats.last_box[3] = (uint32_t)(box.y1 - box.y0 + 1);
+    s_stats.last_us = took;
+    s_stats.push_us += took;
+    if (took > s_stats.max_us) s_stats.max_us = took;
+}
+
+static void old_picture_free(void)
+{
+    xEventGroupSetBits(s_push_state, QSPI_OLD_FREE);
+}
+
+static void push_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        show_changes(s_job_old, s_job_new, old_picture_free);
+        xEventGroupSetBits(s_push_state, QSPI_IDLE | QSPI_OLD_FREE);
+    }
+}
+
+/* Until the picture presented last is in the controller's RAM. */
+static void wait_for_push(void)
+{
+    if (s_push_task) xEventGroupWaitBits(s_push_state, QSPI_IDLE, pdFALSE, pdTRUE, portMAX_DELAY);
+}
+
+/* The drawn buffer onto the glass, which shows it from then on (for the
+ * loading mark, the splash and the next writer at once; the job sends it). */
 static void present_back(void)
 {
     int back = s_drawing;
     /* A picture after a switch began is that switch's: the loading mark
      * goes (and the glass gets back what was under it) first. */
     fos_lcd_qspi_loading_end();
-    int64_t start = esp_timer_get_time();
-    fos_lcd_qspi_box_t box;
     s_stats.presents++;
-    if (fos_lcd_qspi_changed_box((const uint16_t *)s_fbs[s_front], (const uint16_t *)s_fbs[back], s_board->width,
-                                 s_board->height, &box)) {
-        push_box(s_fbs[back], box);
-        s_stats.pushes++;
-        fos_lcd_qspi_align_box(&box, s_board->width, s_board->height);
-        s_stats.last_box[0] = (uint32_t)box.x0;
-        s_stats.last_box[1] = (uint32_t)box.y0;
-        s_stats.last_box[2] = (uint32_t)(box.x1 - box.x0 + 1);
-        s_stats.last_box[3] = (uint32_t)(box.y1 - box.y0 + 1);
+    if (s_push_task) {
+        wait_bits(QSPI_IDLE);
+        xEventGroupClearBits(s_push_state, QSPI_IDLE | QSPI_OLD_FREE);
+        s_job_old = s_front;
+        s_job_new = back;
+        xTaskNotifyGive(s_push_task);
+    } else {
+        show_changes(s_front, back, NULL);
     }
-    uint32_t took = (uint32_t)(esp_timer_get_time() - start);
-    s_stats.last_us = took;
-    if (took > s_stats.max_us) s_stats.max_us = took;
     s_front = back;
     s_drawing = -1;
 }
@@ -387,6 +458,7 @@ static void splash_task(void *arg)
         if (xSemaphoreTake(s_write_lock, 0) != pdTRUE) continue;
         if (s_splash_on) {
             int64_t now_us = esp_timer_get_time();
+            wait_bits(QSPI_OLD_FREE);
             int back = (s_front + 1) % QSPI_FBS;
             memcpy(s_fbs[back], s_fbs[s_front], s_fb_bytes);
             uint16_t *fb = (uint16_t *)s_fbs[back];
@@ -542,7 +614,9 @@ int fos_lcd_qspi_init(void)
     }
     s_write_lock = xSemaphoreCreateMutex();
     s_bus_lock = xSemaphoreCreateMutex();
-    if (!s_write_lock || !s_bus_lock) return 1;
+    s_push_state = xEventGroupCreate();
+    if (!s_write_lock || !s_bus_lock || !s_push_state) return 1;
+    xEventGroupSetBits(s_push_state, QSPI_IDLE | QSPI_OLD_FREE);
     if (bus_init() != ESP_OK) return 1;
     if (controller_init() != ESP_OK) {
         ESP_LOGE(TAG, "%s: the controller did not take its setup", b->preset);
@@ -557,6 +631,11 @@ int fos_lcd_qspi_init(void)
     s_front = 0;
     push_all(s_fbs[0]);
     send_cmd(DCS_DISPON, NULL, 0);
+    if (xTaskCreatePinnedToCore(push_task, "fos_qspi_push", QSPI_PUSH_STACK, NULL, QSPI_PUSH_PRIORITY, &s_push_task,
+                                QSPI_PUSH_CORE) != pdPASS) {
+        s_push_task = NULL;
+        ESP_LOGW(TAG, "no push task: each present pushes in place");
+    }
     s_on = true;
     s_stats.spi_hz = b->spi_hz;
     s_ready = true;
@@ -658,6 +737,8 @@ esp_err_t fos_lcd_qspi_brightness(uint8_t level)
 esp_err_t fos_lcd_qspi_prepare_deep_sleep(void)
 {
     if (!s_ready) return ESP_ERR_NOT_SUPPORTED;
+    /* The last picture into the controller's RAM before it sleeps. */
+    wait_for_push();
     xSemaphoreTake(s_bus_lock, portMAX_DELAY);
     esp_err_t err = send_cmd(DCS_DISPOFF, NULL, 0);
     if (err == ESP_OK) err = send_cmd(DCS_SLPIN, NULL, 0);
@@ -673,6 +754,7 @@ bool fos_lcd_qspi_stats(fos_lcd_qspi_stats_t *out, bool reset)
         *out = s_stats;
         out->on = s_on;
         out->brightness = s_brightness;
+        out->push_stack_free = s_push_task ? (uint32_t)uxTaskGetStackHighWaterMark(s_push_task) : 0;
     }
     if (reset) {
         uint32_t hz = s_stats.spi_hz;

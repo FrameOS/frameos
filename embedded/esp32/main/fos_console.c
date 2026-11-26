@@ -38,6 +38,7 @@
 #include "fos_gauge.h"
 #include "fos_imu.h"
 #include "fos_touch.h"
+#include "lcd_qspi_amoled.h"
 #include "lcd_st7701s_rgb.h"
 #include "esp_private/esp_clk.h"
 #include "fos_client.h"
@@ -2330,12 +2331,27 @@ static int cmd_touch(int argc, char **argv)
 /* `lcd [reset | pclk <MHz>]`: how steadily an RGB LCD scans out (frames
  * off schedule since the last reset, the worst one), and a pixel clock to
  * try live — the bench's way to find the fastest clock the shared
- * flash/PSRAM bus can feed on a board. Not stored. */
+ * flash/PSRAM bus can feed on a board. Not stored. On a QSPI AMOLED, what
+ * its pushes cost: the bus time, the compares, and the presents that waited
+ * for the push before them. */
 static int cmd_lcd(int argc, char **argv)
 {
     if (!fos_display_is_lcd()) {
-        printf("lcd: the panel is not an RGB LCD\n");
+        printf("lcd: the panel is not an LCD\n");
         return 1;
+    }
+    bool reset_stats = argc >= 2 && strcmp(argv[1], "reset") == 0;
+    fos_lcd_qspi_stats_t q;
+    if (fos_lcd_qspi_stats(&q, reset_stats)) {
+        uint32_t n = q.pushes ? q.pushes : 1, p = q.presents ? q.presents : 1;
+        printf("lcd: qspi %.0f MHz, %lu presents, %lu pushes (%.1f ms each, worst %.1f ms, last %lux%lu at %lu,%lu), "
+               "compare %.1f ms each, %lu waits for the job before (%.1f ms each), %llu KB sent, push stack %lu free%s\n",
+               q.spi_hz / 1e6, (unsigned long)q.presents, (unsigned long)q.pushes, q.push_us / 1000.0 / n,
+               q.max_us / 1000.0, (unsigned long)q.last_box[2], (unsigned long)q.last_box[3],
+               (unsigned long)q.last_box[0], (unsigned long)q.last_box[1], q.compare_us / 1000.0 / p,
+               (unsigned long)q.waits, q.waits ? q.waited_us / 1000.0 / q.waits : 0.0,
+               (unsigned long long)(q.bytes / 1024), (unsigned long)q.push_stack_free, reset_stats ? " (reset)" : "");
+        return 0;
     }
     if (argc >= 3 && strcmp(argv[1], "pclk") == 0) {
         double mhz = atof(argv[2]);
@@ -2442,7 +2458,7 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "imu", .help = "imu — the accelerometer's reading, in thousandths of g", .func = cmd_imu},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
         {.command = "touch", .help = "touch [tap <x> <y> [ms]] — the touch panel's controller and its last point; a finger made up", .func = cmd_touch},
-        {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out: frames off schedule, the pixel clock", .func = cmd_lcd},
+        {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out (frames off schedule, the pixel clock), a QSPI AMOLED's pushes", .func = cmd_lcd},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
