@@ -509,6 +509,52 @@ block:
   doAssert coverHost.covered.isNil, "the way back led elsewhere"
   echo "covered scene ok"
 
+# ------------------------------------------- a covered scene replaced
+#
+# A scene changed while the switcher or the settings cover it (a push, a store
+# install, the Code editor's save, an ESP32's `usb_api scene-put`) comes back
+# as the frame holds it now, never as the instance from before: the CrowPanel
+# 1.46" rotary kept running 2048's old onEvent after a put made under its
+# switcher, until a restart (the hardware bench, 2026-11-26).
+block:
+  proc painted(color: string): string =
+    $(%*[{"id": "tests/replaced", "name": "Replaced", "settings": {"execution": "interpreted",
+      "refreshInterval": 300, "backgroundColor": "#000000"}, "fields": [], "apps": {},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": color}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"}]}])
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs(painted("#ff0000"))))
+  let replaceHost = SingleSceneHost(frameConfig: config, logger: logger)
+  replaceHost.requestSelect = proc (sceneId: string): bool = true
+  replaceHost.start()
+  let replacedId = "tests/replaced".SceneId
+  proc shownRed(): bool =
+    doAssert replaceHost.ensureScene()
+    let image = replaceHost.renderScene(ExecutionContext(scene: replaceHost.scene, event: "render",
+      payload: %*{}, image: newImage(4, 3), hasImage: true, loopIndex: 0, loopKey: "."))
+    image[0, 0].r > 128 and image[0, 0].b < 128
+  replaceHost.makeCurrent(replacedId)
+  doAssert shownRed()
+  let before = replaceHost.scene
+  replaceHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert replaceHost.ensureScene()
+  doAssert replaceHost.covered == before
+  # What an ESP32's loadScene does with the scene read off flash again.
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs(painted("#0000ff"))),
+    newSet = false)
+  replaceHost.makeCurrent(replacedId)
+  doAssert not shownRed(), "the scene as it is now, not the covered instance's old graph"
+  doAssert replaceHost.scene != before, "a new instance"
+  doAssert replaceHost.covered.isNil
+  # Unchanged, the way back is still the same instance.
+  let after = replaceHost.scene
+  replaceHost.makeCurrent("system/sceneSwitcher".SceneId)
+  doAssert replaceHost.ensureScene()
+  replaceHost.makeCurrent(replacedId)
+  doAssert replaceHost.ensureScene() and replaceHost.scene == after
+  replaceHost.dropScene()
+  echo "covered scene replaced ok"
+
 # ------------------------------------------- the layout kept between scenes
 #
 # The host holds one scene, so a switch dropped the layout the old scene wore
