@@ -720,6 +720,11 @@ proc resolveSceneExport(sceneId: SceneId): ExportedScene =
   if result.isNil and not sceneLoader.isNil and sceneLoader(sceneId):
     result = loadedScenes.getOrDefault(sceneId, nil)
 
+proc heldDefinition*(sceneId: SceneId, exported: ExportedInterpretedScene): bool =
+  ## Whether the scene table (an ESP32's, the preview's) still holds
+  ## `exported` for `sceneId`: one replaced since is not. No copy of the table.
+  loadedScenes.getOrDefault(sceneId, nil) == exported
+
 proc dropLayout(layout: FrameScene) =
   ## A layout the frame stopped wearing: its interpreters go with it, its
   ## context with its JS apps in it (evaluated again if it is worn again).

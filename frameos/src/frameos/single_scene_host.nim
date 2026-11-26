@@ -611,17 +611,24 @@ proc ensureScene*(host: SingleSceneHost): bool =
     return false
   let sceneId = host.sceneId.get()
   if host.coveredId == some(sceneId) and not host.covered.isNil:
-    # Back from the switcher or the settings to the scene they covered: the
-    # same instance, told it is current again. A switch that carried state
-    # applies it as it would to a fresh one.
-    host.scene = host.covered
-    host.exported = host.coveredExported
-    host.covered = nil
-    host.coveredExported = nil
-    host.coveredId = none(SceneId)
-    host.applyPendingSwitch(sceneId)
-    host.lifecycle("open", %*{"sceneId": sceneId.string})
-    return true
+    if heldDefinition(sceneId, host.coveredExported):
+      # Back from the switcher or the settings to the scene they covered: the
+      # same instance, told it is current again. A switch that carried state
+      # applies it as it would to a fresh one.
+      host.scene = host.covered
+      host.exported = host.coveredExported
+      host.covered = nil
+      host.coveredExported = nil
+      host.coveredId = none(SceneId)
+      host.applyPendingSwitch(sceneId)
+      host.lifecycle("open", %*{"sceneId": sceneId.string})
+      return true
+    # Replaced while it was covered (a push, a store install, the Code
+    # editor's save, an ESP32's scene read off flash again): the way back is
+    # the scene as the frame holds it now. The instance from before kept
+    # running its old apps until a restart (2048 on the CrowPanel 1.46"
+    # rotary, the hardware bench, 2026-11-26).
+    host.dropCovered()
   if host.windowed and host.takeWindow(sceneId):
     # The scene it was in a window, or when it was left: the same one,
     # brought forward. A switch that carried state applies it.

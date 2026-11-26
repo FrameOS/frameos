@@ -119,7 +119,10 @@ The layout and the JS side:
 Hosts:
 - The scene a built-in scene (switcher, settings) opens over stays resident
   for the way back while the headroom kept interpreters use holds
-  (`single_scene_host` `covered`).
+  (`single_scene_host` `covered`), unless the scene was replaced meanwhile
+  (the scene table holds another definition of it than the one it was built
+  from): then it is built again, or it ran its old apps until a restart
+  (2048 on the CrowPanel 1.46" rotary, 2026-11-26).
 - The Pi runner wakes on input: `channels.nim` triggers an `AsyncEvent` after
   queueing, and both runner loops end their sleep on it.
 - `frameos/render_probe.nim`: the per-phase split on the device's render line.
