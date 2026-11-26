@@ -503,6 +503,28 @@ EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH = {
     "touchPins": "sda=15,scl=16,int=1,rst=-1,en=-1",
     "i2cBuses": "sda=15,scl=16",
 }
+# Elecrow CrowPanel 1.46" rotary (ESP32-S3R8, 16 MB flash, 8 MB PSRAM): the
+# round 360x360 IPS glass, an ST77961 on one SPI lane that keeps its own
+# picture, the watch's driver (CS9, SCLK10, MOSI11, D/C3, reset 14, backlight
+# 46); its supply (GPIO1 high) is the firmware's own (fos_board_rails). The
+# CST816T touch controller (0x15) on its own bus, SDA6/SCL7, INT GPIO5, reset
+# GPIO13. BOOT is GPIO0 and the knob's press GPIO41; its turns (A GPIO45, B
+# GPIO42) are NEXT and PREV presses the firmware makes itself. No microphone
+# and no buzzer; the power LED on GPIO40 is lit low; the cell's divider is on
+# GPIO18, an ADC2 pin (Wi-Fi's), so the battery is not read; the eight-LED
+# ring (GPIO48, its supply GPIO17) is not driven.
+EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_GPIO_BUTTONS = [
+    {"pin": 0, "label": "BOOT"},
+    {"pin": 41, "label": "OK"},
+]
+# The watch's keys without its voice key: BOOT pressed the screen off and on,
+# pressed twice the scene switcher; the edges swipe. fos_board.c's
+# CROWPANEL_WATCH_KEYS is the device copy.
+EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP = [
+    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
+]
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
     "batteryDivider": 2.0,
@@ -1096,6 +1118,19 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         **EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_TOUCH,
         **EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PERIPHERALS,
     },
+    # Elecrow CrowPanel 1.46" rotary: the round 360x360 ST77961 IPS on one SPI
+    # lane; see EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_GPIO_BUTTONS.
+    "elecrow_crowpanel_rotary_1in46": {
+        "device": "lcd.st77961_360x360",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS,
+        "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP,
+        "touchPins": "sda=6,scl=7,int=5,rst=13,en=-1",
+        "ledPin": 40,
+        "ledType": "gpio_inverted",
+    },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
@@ -1370,6 +1405,8 @@ EMBEDDED_EXTRA_PANELS = {
     "AMOLED_CO5300_466x466": FOS_PIXEL_RGB565,
     # The Elecrow CrowPanel 2.01" watch's GC9309 on one SPI lane, the same driver.
     "LCD_GC9309_240x296": FOS_PIXEL_RGB565,
+    # The Elecrow CrowPanel 1.46" rotary's round ST77961, the same driver.
+    "LCD_ST77961_360x360": FOS_PIXEL_RGB565,
     # The Elecrow CrowPanel 5.79"'s glass in black and white on its own
     # waveforms, with partial updates (the Waveshare driver's file).
     "EPD_5in79_BW": FOS_PIXEL_1BPP,
@@ -1383,6 +1420,7 @@ EMBEDDED_DEVICE_PANELS = {
     "lcd.sc7277_800x480": "LCD_SC7277_800x480",
     "amoled.co5300_466x466": "AMOLED_CO5300_466x466",
     "lcd.gc9309_240x296": "LCD_GC9309_240x296",
+    "lcd.st77961_360x360": "LCD_ST77961_360x360",
     "waveshare.EPD_5in79_BW": "EPD_5in79_BW",
 }
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}

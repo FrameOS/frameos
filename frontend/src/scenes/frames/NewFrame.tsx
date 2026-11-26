@@ -528,6 +528,11 @@ const ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'OK', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
+// The CrowPanel 1.46" rotary: the watch's keys without its voice key (no
+// microphone). Mirrors EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP.
+const ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP: EventMapRule[] = ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP.filter(
+  (rule) => rule.emit !== 'voiceChat'
+)
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 17,
   dc: 16,
@@ -797,6 +802,19 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 18, label: 'OK' },
     ],
     eventMap: ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP,
+  },
+  elecrow_crowpanel_rotary_1in46: {
+    label: 'Elecrow CrowPanel 1.46" rotary (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st77961_360x360',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ELECROW_CROWPANEL_WATCH_2IN01_PINS,
+    gpioButtons: [
+      { pin: 0, label: 'BOOT' },
+      { pin: 41, label: 'OK' },
+    ],
+    eventMap: ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP,
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',

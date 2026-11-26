@@ -817,6 +817,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "label": "GC9309 2.01\" IPS LCD 240x296 (ESP32 SPI, Elecrow CrowPanel 2.01\" watch)",
         "width": 240,
         "height": 296
+      },
+      {
+        "value": "lcd.st77961_360x360",
+        "label": "ST77961 1.46\" round IPS LCD 360x360 (ESP32 SPI, Elecrow CrowPanel 1.46\" rotary)",
+        "width": 360,
+        "height": 360
       }
     ]
   }

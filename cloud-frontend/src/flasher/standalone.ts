@@ -30,6 +30,7 @@ export const TOUCH_PRESETS = new Set([
   'waveshare_esp32_s3_touch_amoled_1_75',
   'elecrow_crowpanel_watch_2in01',
   'elecrow_crowpanel_advance_7',
+  'elecrow_crowpanel_rotary_1in46',
 ])
 
 export interface StandaloneBoard {

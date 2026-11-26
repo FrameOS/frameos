@@ -1,6 +1,7 @@
 #include "fos_board.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -208,6 +209,9 @@ static const struct {
     {"guition_esp32_4848s040", "", NULL, true},
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
     {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS, ONE_KEY_VOICE("OK"), true},
+    /* The CrowPanel 1.46" rotary: the watch's keys (BOOT, the knob pressed
+     * OK and turned NEXT / PREV) and no microphone; the edges swipe. */
+    {"elecrow_crowpanel_rotary_1in46", CROWPANEL_WATCH_KEYS, NULL, true},
     {"elecrow_crowpanel_5in79", CROWPANEL_5IN79_KEYS, NULL, false},
     /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
      * swipe, BOOT twice opens the switcher. */
@@ -327,6 +331,8 @@ static const struct {
     /* The Elecrow boards' lit high: the watch's on GPIO16, the 5.79"'s power
      * LED on GPIO41 (Elecrow's config.h and demo). */
     {"elecrow_crowpanel_watch_2in01", 16, 0},
+    /* The 1.46" rotary's power LED, GPIO40, lit low (Elecrow's schematic). */
+    {"elecrow_crowpanel_rotary_1in46", 40, 1},
     {"elecrow_crowpanel_5in79", 41, 0},
 };
 
@@ -356,10 +362,33 @@ static const struct {
  * the microphone and the sensors, GPIO40 low for the LCD, its backlight and
  * the touch panel. -1 ends the list. */
 static const fos_board_rail_t k_watch_rails[] = {{47, 1}, {40, 0}, {-1, 0}};
+/* The CrowPanel 1.46" rotary's LCD supply (VDD and VDDIO): GPIO1 high
+ * (Elecrow's schematic, Q11 to Q10). */
+static const fos_board_rail_t k_rotary_1in46_rails[] = {{1, 1}, {-1, 0}};
+
+/* The boards with a crown or a knob: its two phases, pulled up. The watch's
+ * A GPIO20 / B GPIO19, the 1.46" rotary's A GPIO45 / B GPIO42. */
+static const struct {
+    const char *preset;
+    const fos_board_rail_t *rails;
+    int8_t a, b;
+} k_elecrow_rounds[] = {
+    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 20, 19},
+    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 45, 42},
+};
+
+static int elecrow_round(const char *hardware_preset)
+{
+    for (size_t i = 0; hardware_preset && i < sizeof(k_elecrow_rounds) / sizeof(k_elecrow_rounds[0]); i++) {
+        if (strcmp(hardware_preset, k_elecrow_rounds[i].preset) == 0) return (int)i;
+    }
+    return -1;
+}
 
 const fos_board_rail_t *fos_board_rails(const char *hardware_preset)
 {
-    return hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_watch_2in01") == 0 ? k_watch_rails : NULL;
+    int i = elecrow_round(hardware_preset);
+    return i < 0 ? NULL : k_elecrow_rounds[i].rails;
 }
 
 /* The Elecrow CrowPanel Advance 7.0" (V1.2): its STC8H1K28 at 0x30 holds the
@@ -387,11 +416,10 @@ size_t fos_board_i2c_writes(const char *hardware_preset, const uint8_t **pairs)
 
 bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b)
 {
-    /* The watch's crown: phase A GPIO20, B GPIO19, pulled up. */
-    bool watch = hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_watch_2in01") == 0;
-    *a = watch ? 20 : -1;
-    *b = watch ? 19 : -1;
-    return watch;
+    int i = elecrow_round(hardware_preset);
+    *a = i < 0 ? -1 : k_elecrow_rounds[i].a;
+    *b = i < 0 ? -1 : k_elecrow_rounds[i].b;
+    return i >= 0;
 }
 
 size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out, size_t max)
@@ -561,6 +589,9 @@ static const struct {
     /* The Elecrow CrowPanel Advance 7.0"'s GT911 on the board's bus, INT
      * GPIO1; its reset is the STC8 coprocessor's (fos_board_i2c_writes). */
     {"elecrow_crowpanel_advance_7", "sda=15,scl=16,int=1,rst=-1,en=-1"},
+    /* The CrowPanel 1.46" rotary's Hynitron CST816T (0x15) on its own bus,
+     * SDA6/SCL7, INT GPIO5, reset GPIO13 (Elecrow's schematic). */
+    {"elecrow_crowpanel_rotary_1in46", "sda=6,scl=7,int=5,rst=13,en=-1"},
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap

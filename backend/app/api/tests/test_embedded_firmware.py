@@ -843,6 +843,36 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_watch_2in01():
     assert "elecrow_crowpanel_watch_2in01" in embedded_firmware_module.EMBEDDED_SOUND_PRESETS
 
 
+def test_embedded_hardware_preset_for_elecrow_crowpanel_rotary_1in46():
+    frame = Frame(id=21, embedded={"hardwarePreset": "elecrow_crowpanel_rotary_1in46"})
+    ensure_embedded_frame_defaults(frame)
+    # The round 360x360 ST77961 on one SPI lane: 16-bit colour, rendered
+    # on-device on the S3R8's 8 MB (16 MB of flash).
+    assert frame.device == "lcd.st77961_360x360"
+    assert embedded_panel_for_frame(frame) == "LCD_ST77961_360x360"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("LCD_ST77961_360x360") == FOS_PIXEL_RGB565
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    # BOOT and the knob's press; its turns are the firmware's own presses.
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (41, "OK")]
+    # The watch's keys without a voice key (no microphone), the edges swipe.
+    assert frame.event_map[:2] == [
+        {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    ]
+    assert [rule["event"] for rule in frame.event_map[2:]] == ["edgeSwipe"] * 4
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "LCD_ST77961_360x360"
+    assert settings["gpio_buttons"] == "0:BOOT,41:OK"
+    assert settings["led_pin"] == "40"
+    assert settings["led_type"] == "gpio_inverted"
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["elecrow_crowpanel_rotary_1in46"]
+    assert preset["touchPins"] == "sda=6,scl=7,int=5,rst=13,en=-1"
+
+
 def test_embedded_panel_for_lcd_device_without_preset():
     frame = Frame(id=14, device="lcd.st7701s_480x480", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
@@ -852,6 +882,8 @@ def test_embedded_panel_for_lcd_device_without_preset():
     assert embedded_panel_for_frame(frame) == "AMOLED_CO5300_466x466"
     frame = Frame(id=20, device="lcd.gc9309_240x296", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "LCD_GC9309_240x296"
+    frame = Frame(id=22, device="lcd.st77961_360x360", embedded={"platform": "esp32-s3"})
+    assert embedded_panel_for_frame(frame) == "LCD_ST77961_360x360"
 
 
 def test_embedded_hardware_preset_for_trmnl_bwry():

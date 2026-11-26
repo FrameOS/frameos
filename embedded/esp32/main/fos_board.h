@@ -96,7 +96,7 @@ size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out
 /* GPIOs the board drives at boot, before anything it powers is probed: its
  * peripherals' supplies (fos_charger_latch_power drives them). NULL for a
  * board without; else a list ended by pin -1. The Elecrow CrowPanel 2.01"
- * watch's GPIO47 high and GPIO40 low. */
+ * watch's GPIO47 high and GPIO40 low, the 1.46" rotary's GPIO1 high. */
 typedef struct {
     int pin;
     int level;
@@ -113,7 +113,8 @@ size_t fos_board_i2c_writes(const char *hardware_preset, const uint8_t **pairs);
 bool fos_board_i2c_backlight(const char *hardware_preset, uint8_t *addr, uint8_t *on, uint8_t *off);
 /* A rotary encoder's two phases (fos_buttons.c turns its steps into NEXT
  * and PREV presses): the CrowPanel 2.01" watch's crown, A GPIO20 and B
- * GPIO19. False and -1 / -1 on every other board. */
+ * GPIO19; the CrowPanel 1.46" rotary's knob, A GPIO45 and B GPIO42. False
+ * and -1 / -1 on every other board. */
 bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b);
 
 /* The board's I2C peripheral buses as the `i2c_buses` spec

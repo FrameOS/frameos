@@ -179,6 +179,10 @@ export const devices: OptionGroup<Option>[] = [
         value: 'lcd.gc9309_240x296',
         label: 'GC9309 2.01" IPS LCD 240x296 (ESP32 SPI, Elecrow CrowPanel 2.01" watch)',
       },
+      {
+        value: 'lcd.st77961_360x360',
+        label: 'ST77961 1.46" round IPS LCD 360x360 (ESP32 SPI, Elecrow CrowPanel 1.46" rotary)',
+      },
     ],
   },
 ]

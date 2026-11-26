@@ -254,6 +254,7 @@ describe("bindings and rules", () => {
     expect(frameOffersEdgeGestures(null, "lcd.sc7277_800x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "amoled.co5300_466x466", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.gc9309_240x296", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "lcd.st77961_360x360", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "waveshare.EPD_7in5_V2", presetRules)).toBe(false);
     // A map that binds an edge already shows it as a row, whatever the device.
     expect(frameOffersEdgeGestures(null, null, [{ event: "edgeSwipe", match: { edge: "left" }, emit: "render", as: {} }])).toBe(true);

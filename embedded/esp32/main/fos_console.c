@@ -840,6 +840,17 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "0:BOOT\n18:OK",
               1, 1.73f, -1, 0, 0 },
+            /* Elecrow CrowPanel 1.46" rotary (ESP32-S3R8, 16 MB flash): the
+             * round 360x360 ST77961 on one SPI lane, its wiring the driver's
+             * own board table (lcd_qspi_amoled.c), so no EPD pins; BOOT on
+             * GPIO0 and the knob's press on GPIO41 (its turns are
+             * fos_board_encoder_pins). The battery divider is on GPIO18,
+             * ADC2 (Wi-Fi's): not read. Rail, touch and LED from
+             * fos_board.c. */
+            { "elecrow_crowpanel_rotary_1in46", "LCD_ST77961_360x360",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT\n41:OK",
+              -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): the panel on
              * SCK13/MOSI14 with EP_PWR_EN GPIO47, the AI/Power key GPIO4 and
              * UP/DOWN GPIO5/6 (Seeed's porting specification). The buzzer
