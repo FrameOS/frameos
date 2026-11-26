@@ -794,6 +794,11 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
       if carried.layoutId == layoutId:
         carried = ("", nil) # the instance itself came along
       carriedOpen = nil
+      # The scene a built-in scene wearing it opened over (event_loop
+      # layoutAround): named again by the next built-in scene, never left on
+      # a scene's own.
+      if not parked.state.isNil and parked.state.kind == JObject and parked.state.hasKey("openedOver"):
+        parked.state.delete("openedOver")
       for key, value in wornState().pairs:
         parked.state[key] = value
       parked.shownName = owner.shownName

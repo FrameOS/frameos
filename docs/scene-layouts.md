@@ -126,8 +126,11 @@ scene has the keyboard up (`FrameScene.typing`, read off
 layout again when it changes): `if (app.frame.typing) return <yield />` gives
 the scene all the panel the keyboard leaves. The reTerminal layouts do this.
 Its `app.state.openedOver` then holds the name of the scene the built-in scene
-opened over (a layout is made afresh around it), for a taskbar to keep that
-scene's button.
+opened over, for a taskbar to keep that scene's button. Around a built-in
+scene the layout is the instance the scene under it wore, lent while the
+built-in scene shows and handed back with the scene (an ESP32 and the browser
+preview, `single_scene_host`; a Pi's runner parks it at every switch), or made
+afresh when that scene wore none.
 
 **On the frame.** Frame settings has a Layout select, with a gear for that
 layout's fields. It lists the layouts by category, a heading over each: a
@@ -669,7 +672,7 @@ memory, 2026-11-19). A layout parked between two scenes goes when the next one
 starts a layout of its own, its open scenes handed to that one
 (`releaseParkedLayout`). An ESP32 without a desktop keeps
 one scene, as before (the scene under the switcher kept while there is room,
-`covered`), and its one settings scene (`builtInScenesStay` follows the
+`covered`, its layout lent to the switcher and parked for its way back), and its one settings scene (`builtInScenesStay` follows the
 desktop there, `followDesktop`). The firmware reads a scene off flash only to start it: one running
 in a window comes to the front at once (`frameos_nim_scene_running`, then
 `selectScene`), and the cache keeps only the scenes running. A board rendered

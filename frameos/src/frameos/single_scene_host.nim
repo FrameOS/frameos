@@ -199,16 +199,21 @@ proc releaseOtherParked(layoutId: string, before: proc(layout: FrameScene) {.nim
 
 releaseParkedLayout = releaseOtherParked
 
-proc cleanupScene*(scene: FrameScene) =
-  ## Break ORC cycles and close the scene's QuickJS context before dropping
-  ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
-  ## outside these builds). The layout it wore is kept for the next scene.
+proc parkLayoutOf(scene: FrameScene) =
+  ## The layout `scene` wears, parked for the next scene that wears it; the one
+  ## parked before goes.
   if not scene.isNil and not scene.wornLayout.isNil:
     let layout = scene.wornLayout
     scene.wornLayout = nil
     if layout != parkedLayout:
       dropParkedLayout()
       parkedLayout = layout
+
+proc cleanupScene*(scene: FrameScene) =
+  ## Break ORC cycles and close the scene's QuickJS context before dropping
+  ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
+  ## outside these builds). The layout it wore is kept for the next scene.
+  parkLayoutOf(scene)
   if scene.isNil or not (scene of InterpretedFrameScene):
     return
   when defined(memProbe): memProbe("  cleanupScene: entry")
@@ -314,12 +319,7 @@ proc keepAsWindow(host: SingleSceneHost) =
   if host.scene.isNil:
     return
   let scene = host.scene
-  if not scene.wornLayout.isNil:
-    let layout = scene.wornLayout
-    scene.wornLayout = nil
-    if layout != parkedLayout:
-      dropParkedLayout()
-      parkedLayout = layout
+  parkLayoutOf(scene)
   host.windows[scene.id] = scene
   if not isBuiltInScene(scene.id.string):
     host.windowOrder.add scene.id
@@ -578,6 +578,12 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
       host.coveredId = leaving
       host.scene = nil
       host.exported = nil
+      # The built-in scene wears the layout of the scene it covers: that
+      # instance, lent while it shows and parked again when it goes, so the
+      # scene gets it back. Read off flash, parsed and started a second time,
+      # it was 1.6-2.5 s of every scene switcher open on a reTerminal Sticky
+      # (the hardware bench, 2026-11-26).
+      parkLayoutOf(host.covered)
     else:
       host.dropScene()
   # The way back led somewhere else. Also when the old instance stays until the
