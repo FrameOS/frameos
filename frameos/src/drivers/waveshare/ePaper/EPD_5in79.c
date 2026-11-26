@@ -936,8 +936,11 @@ parameter:
 ******************************************************************************/
 static void EPD_5in79_WaitIdle(void)
 {
-    for (UDOUBLE waited = 0; DEV_Digital_Read(EPD_BUSY_PIN) && waited < EPD_BUSY_TIMEOUT_MS; waited += 2) {
-        DEV_Delay_ms(2);
+    // 10 ms a look, as EPD_5in79_ReadBusy counts: a shorter delay sleeps a
+    // whole tick anyway, and counted as less it made the timeout five times
+    // longer (a 10 minute stall on the bench, 2026-11-26).
+    for (UDOUBLE waited = 0; DEV_Digital_Read(EPD_BUSY_PIN) && waited < EPD_BUSY_TIMEOUT_MS; waited += 10) {
+        DEV_Delay_ms(10);
     }
 }
 
@@ -1062,8 +1065,11 @@ parameter:
 ******************************************************************************/
 void EPD_5in79_Rest(void)
 {
+    // GxEPD2's power off for this glass: the clock on, then the analog supply
+    // and the clock off. 0x03 alone (the SSD1677's) never finished here: a
+    // partial update's 0xFF leaves the clock off, and BUSY stayed high.
     EPD_5in79_SendCommand(0x22);
-    EPD_5in79_SendData(0x03);
+    EPD_5in79_SendData(0x83);
     EPD_5in79_SendCommand(0x20);
     EPD_5in79_WaitIdle();
 }
