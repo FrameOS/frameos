@@ -366,15 +366,17 @@ static const fos_board_rail_t k_watch_rails[] = {{47, 1}, {40, 0}, {-1, 0}};
  * (Elecrow's schematic, Q11 to Q10). */
 static const fos_board_rail_t k_rotary_1in46_rails[] = {{1, 1}, {-1, 0}};
 
-/* The boards with a crown or a knob: its two phases, pulled up. The watch's
- * A GPIO20 / B GPIO19, the 1.46" rotary's A GPIO45 / B GPIO42. */
+/* The boards with a crown or a knob: its two phases, pulled up, A the one
+ * that leads for NEXT. The watch's A GPIO20 / B GPIO19; the 1.46" rotary's
+ * Elecrow labels the other way round (their A GPIO45, B GPIO42), and turned
+ * that way NEXT and PREV came out reversed (the bench, 2026-11-26). */
 static const struct {
     const char *preset;
     const fos_board_rail_t *rails;
     int8_t a, b;
 } k_elecrow_rounds[] = {
     {"elecrow_crowpanel_watch_2in01", k_watch_rails, 20, 19},
-    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 45, 42},
+    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 42, 45},
 };
 
 static int elecrow_round(const char *hardware_preset)

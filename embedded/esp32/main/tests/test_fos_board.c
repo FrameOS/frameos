@@ -493,7 +493,7 @@ static void test_crowpanel_boards(void)
     const char *rotary = "elecrow_crowpanel_rotary_1in46";
     rails = fos_board_rails(rotary);
     CHECK(rails && rails[0].pin == 1 && rails[0].level == 1 && rails[1].pin == -1, "the rotary's LCD supply");
-    CHECK(fos_board_encoder_pins(rotary, &a, &b) && a == 45 && b == 42, "the rotary's knob on 45/42");
+    CHECK(fos_board_encoder_pins(rotary, &a, &b) && a == 42 && b == 45, "the rotary's knob on 42/45 (Elecrow's B leads for NEXT)");
     CHECK(strcmp(fos_board_touch_pins(rotary), "sda=6,scl=7,int=5,rst=13,en=-1") == 0, "the rotary's touch pins");
     CHECK(strcmp(fos_board_i2c_buses(rotary), "") == 0, "no board bus");
     CHECK(!fos_board_mic_pins(rotary, &clk, &data, &pwr), "no microphone");
