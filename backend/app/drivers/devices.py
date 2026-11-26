@@ -139,6 +139,9 @@ NATIVE_DEVICE_DIMENSIONS = {
     # The Elecrow CrowPanel 5.79"'s glass in black and white (embedded/esp32
     # EPD_5in79_BW); on a Pi the Waveshare 5.79" driver, four greys.
     "waveshare.EPD_5in79_BW": (792, 272),
+    # The Elecrow CrowPanel 4.2"'s glass in black and white (embedded/esp32
+    # EPD_4in2_BW); on a Pi the Waveshare 4.2" driver, four greys.
+    "waveshare.EPD_4in2_BW": (400, 300),
     "pimoroni.inky_impression_7_3": (800, 480),
     "pimoroni.inky_impression_7_color": (800, 480),
     "pimoroni.inky_impression_5_7": (600, 448),

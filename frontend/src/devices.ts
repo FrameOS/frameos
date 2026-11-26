@@ -105,6 +105,10 @@ export const devices: OptionGroup<Option>[] = [
       { value: 'waveshare.EPD_4in0e', label: 'Waveshare 4.0" (E) 600x400 Spectra 6 Color' },
       { value: 'waveshare.EPD_4in01f', label: 'Waveshare 4.01" (F) 640x400 7 Color' },
       { value: 'waveshare.EPD_4in2', label: 'Waveshare 4.2" 400x300 4 Grayscale' },
+      {
+        value: 'waveshare.EPD_4in2_BW',
+        label: 'Waveshare 4.2" 400x300 Black/White (ESP32, Elecrow CrowPanel 4.2")',
+      },
       { value: 'waveshare.EPD_4in2_V2', label: 'Waveshare 4.2" (V2) 400x300 4 Grayscale' },
       { value: 'waveshare.EPD_4in2b', label: 'Waveshare 4.2" (B) 400x300 Black/White/Red' },
       { value: 'waveshare.EPD_4in2b_V2', label: 'Waveshare 4.2" (B V2) 400x300 Black/White/Red' },

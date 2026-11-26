@@ -10,6 +10,7 @@
     "elecrow_crowpanel_rotary_1in46": {"key": "crowrot146", "name": "Elecrow CrowPanel 1.46\" rotary", "target": "esp32-s3", "display": "LCD_ST77961_360x360", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "sunton_esp32_8048s070": {"key": "sunton", "name": "Sunton ESP32-8048S070", "target": "esp32-s3", "display": "LCD_EK9716_800x480", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "elecrow_crowpanel_5in79": {"key": "crow579", "name": "Elecrow CrowPanel 5.79\" e-paper", "target": "esp32-s3", "display": "EPD_5in79", "psram_bytes": 8388608, "flash_bytes": 8388608},
+    "elecrow_crowpanel_epd_4in2": {"key": "crowepd42", "name": "Elecrow CrowPanel 4.2\" e-paper", "target": "esp32-s3", "display": "EPD_4in2_BW", "psram_bytes": 8388608, "flash_bytes": 8388608},
     "seeed_reterminal_sticky": {"key": "sticky", "name": "reTerminal Sticky", "target": "esp32-s3", "display": "EPD_3in97", "psram_bytes": 8388608, "flash_bytes": 33554432},
     "seeed_reterminal_e1002": {"key": "e1002", "name": "reTerminal E1002", "target": "esp32-s3", "display": "EPD_7in3e", "psram_bytes": 8388608, "flash_bytes": 8388608},
     "seeed_reterminal_e1003": {"key": "e1003", "name": "reTerminal E1003", "target": "esp32-s3", "display": "EPD_10in3", "psram_bytes": 8388608, "flash_bytes": 33554432},
@@ -31,6 +32,7 @@
     "EPD_10in3": {"width": 1872, "height": 1404, "kind": "epaper", "colors": "grey16"},
     "EPD_13in3e": {"width": 1200, "height": 1600, "kind": "epaper", "colors": "spectra6"},
     "EPD_5in79": {"width": 792, "height": 272, "kind": "epaper", "colors": "grey4"},
+    "EPD_4in2_BW": {"width": 400, "height": 300, "kind": "epaper", "colors": "bw"},
     "EPD_7in5_V2": {"width": 800, "height": 480, "kind": "epaper", "colors": "bw"},
     "pimoroni.hyperpixel4sq_touch": {"width": 720, "height": 720, "kind": "lcd", "colors": "rgb666"},
     "pimoroni.hyperpixel4_touch": {"width": 480, "height": 800, "kind": "lcd", "colors": "rgb666"}

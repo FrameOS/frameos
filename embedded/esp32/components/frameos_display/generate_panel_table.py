@@ -64,6 +64,16 @@ PARTIAL_PANELS = {
         "NULL",
         "NULL",
     ),
+    # The Elecrow CrowPanel 4.2"'s glass in black and white (EPD_4in2_BW,
+    # below).
+    "EPD_4in2_BW": (
+        "EPD_4in2_Init_Partial_BW",
+        "EPD_4in2_Display_Partial_BW",
+        "EPD_4in2_Rest",
+        "NULL",
+        "NULL",
+        "NULL",
+    ),
     "EPD_10in3": (
         "fos_it8951_10in3_partial_init",
         "fos_it8951_10in3_partial_show",
@@ -104,6 +114,24 @@ EXTRA_PANELS = [
         "clear": "EPD_5in79_Clear",
         "display": "EPD_5in79_Display_BW",
         "sleep": "EPD_5in79_Sleep",
+    },
+    {
+        # The Elecrow CrowPanel 4.2"'s glass (400x300, the controller of the
+        # Waveshare 4.2" V1, UC8176) in black and white on the waveforms
+        # Elecrow loads for it, where the Waveshare entry is its four-grey
+        # table, which drew this glass's white grey (the bench, 2026-11-26).
+        # The Waveshare driver's file (EPD_4in2.c), on the shared EPD pins;
+        # partial updates in PARTIAL_PANELS.
+        "name": "EPD_4in2_BW",
+        "width": 400,
+        "height": 300,
+        "format": 1,  # FOS_PIXEL_1BPP
+        "bus": 0,
+        "header": "EPD_4in2.h",
+        "init": "EPD_4in2_Init_BW",
+        "clear": "EPD_4in2_Clear_BW",
+        "display": "EPD_4in2_Display_BW",
+        "sleep": "EPD_4IN2_Sleep",
     },
     {
         "name": "OLED_SSD1306_72x40",

@@ -503,6 +503,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "height": 300
       },
       {
+        "value": "waveshare.EPD_4in2_BW",
+        "label": "Waveshare 4.2\" 400x300 Black/White (ESP32, Elecrow CrowPanel 4.2\")",
+        "width": 400,
+        "height": 300
+      },
+      {
         "value": "waveshare.EPD_4in2_V2",
         "label": "Waveshare 4.2\" (V2) 400x300 4 Grayscale",
         "width": 400,
@@ -1031,6 +1037,10 @@ export const esp32Panels: { key: string; label: string }[] = [
   {
     "key": "EPD_4in2",
     "label": "Waveshare 4.2\" 400x300 4 Grayscale"
+  },
+  {
+    "key": "EPD_4in2_BW",
+    "label": "Waveshare 4.2\" 400x300 Black/White (Elecrow CrowPanel)"
   },
   {
     "key": "EPD_4in2_V2",

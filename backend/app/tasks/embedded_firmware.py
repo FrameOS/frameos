@@ -235,6 +235,12 @@ EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_PINS = {
     "pwr": -1,
     "det": -1,
 }
+# The CrowPanel 4.2" e-paper's: the same bus, the slot's supply switched on by
+# GPIO42 high (IO42_TF_3.3_CTL in Elecrow's schematic, its TF demo).
+EMBEDDED_ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_PINS = {
+    **EMBEDDED_ELECROW_CROWPANEL_5IN79_SD_CARD_PINS,
+    "pwr": 42,
+}
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -260,6 +266,7 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_touch_amoled_1_75": EMBEDDED_WAVESHARE_AMOLED_1_75_SD_CARD_PINS,
     "elecrow_crowpanel_5in79": EMBEDDED_ELECROW_CROWPANEL_5IN79_SD_CARD_PINS,
     "elecrow_crowpanel_advance_2in8": EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_PINS,
+    "elecrow_crowpanel_epd_4in2": EMBEDDED_ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_PINS,
     # The Sticky's pins are defined further down; filled in after the table.
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
@@ -1352,6 +1359,29 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
             "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
         },
     },
+    # Elecrow CrowPanel 4.2" e-paper (ESP32-S3-WROOM-1-N8R8): its 400x300
+    # glass (the Waveshare 4.2" V1's controller, the board Elecrow ships with
+    # its "green sticker" driver) in black and white with partial updates
+    # (EPD_4in2_BW), wired
+    # as the 5.79" (Elecrow's schematic: the panel's supply GPIO7, MENU 2,
+    # EXIT 1, the rocker UP 6 / DOWN 4 / CONF 5, the LED 41), and the same keys.
+    "elecrow_crowpanel_epd_4in2": {
+        "device": "waveshare.EPD_4in2_BW",
+        "flashSize": "8MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
+        "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP,
+        "ledPin": 41,
+        "ledType": "gpio",
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "elecrow_crowpanel_epd_4in2",
+            "mountPath": "/srv/assets",
+            "pins": EMBEDDED_ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_PINS,
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+        },
+    },
     # Pimoroni Inky Frame family: Pico W (originals) / Pico 2 W (2025
     # refresh) carrier with the EPD on SPI0 and BUSY + buttons behind a
     # shift register — the extended pin keys (sr_*, busy_bit) are consumed
@@ -1468,6 +1498,9 @@ EMBEDDED_EXTRA_PANELS = {
     # The Elecrow CrowPanel 5.79"'s glass in black and white on its own
     # waveforms, with partial updates (the Waveshare driver's file).
     "EPD_5in79_BW": FOS_PIXEL_1BPP,
+    # The Elecrow CrowPanel 4.2"'s glass in black and white on Elecrow's
+    # waveforms, with partial updates (EPD_4in2.c, whose own entry is four greys).
+    "EPD_4in2_BW": FOS_PIXEL_1BPP,
 }
 EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
 # Device keys for those panels (the `waveshare.<key>` convention does not fit).
@@ -1481,6 +1514,7 @@ EMBEDDED_DEVICE_PANELS = {
     "lcd.st77961_360x360": "LCD_ST77961_360x360",
     "lcd.st7789_320x240": "LCD_ST7789_320x240",
     "waveshare.EPD_5in79_BW": "EPD_5in79_BW",
+    "waveshare.EPD_4in2_BW": "EPD_4in2_BW",
 }
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"

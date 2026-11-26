@@ -962,6 +962,13 @@ static int cmd_set(int argc, char **argv)
               "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=7",
               "2:HOME\n1:EXIT\n4:NEXT\n5:OK\n6:PREV",
               -1, 2.0f, -1, 0, 0 },
+            /* Elecrow CrowPanel 4.2" e-paper (ESP32-S3-WROOM-1-N8R8): its
+             * glass (the Waveshare 4.2" V1's controller) in black and white
+             * with partial updates (EPD_4in2_BW), wired as the 5.79". */
+            { "elecrow_crowpanel_epd_4in2", "EPD_4in2_BW",
+              "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=7",
+              "2:HOME\n1:EXIT\n4:NEXT\n5:OK\n6:PREV",
+              -1, 2.0f, -1, 0, 0 },
         };
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
         for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {

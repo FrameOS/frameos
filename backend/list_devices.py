@@ -80,6 +80,13 @@ def build_groups():
                 "value": "waveshare.EPD_5in79_BW",
                 "label": 'Good Display 5.79" 792x272 Black/White (ESP32, Elecrow CrowPanel 5.79")',
             })
+        if v.key == "EPD_4in2":
+            # Its controller in black and white with partial updates: the
+            # ESP32 panel EPD_4in2_BW (Elecrow's CrowPanel 4.2").
+            waveshare_devices.append({
+                "value": "waveshare.EPD_4in2_BW",
+                "label": 'Waveshare 4.2" 400x300 Black/White (ESP32, Elecrow CrowPanel 4.2")',
+            })
         if v.key == "EPD_7in3e":
             waveshare_devices.append({
                 "value": WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
@@ -171,6 +178,8 @@ def build_esp32_panels():
         })
         if v.key == "EPD_5in79":
             panels.append({"key": "EPD_5in79_BW", "label": 'Good Display 5.79" 792x272 Black/White (Elecrow CrowPanel)'})
+        if v.key == "EPD_4in2":
+            panels.append({"key": "EPD_4in2_BW", "label": 'Waveshare 4.2" 400x300 Black/White (Elecrow CrowPanel)'})
     return panels
 
 
