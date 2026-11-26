@@ -251,6 +251,7 @@ describe("bindings and rules", () => {
     expect(frameOffersEdgeGestures(null, "pimoroni.hyperpixel4sq_touch", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.st7701s_480x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.ek9716_800x480", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "lcd.sc7277_800x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "amoled.co5300_466x466", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.gc9309_240x296", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "waveshare.EPD_7in5_V2", presetRules)).toBe(false);

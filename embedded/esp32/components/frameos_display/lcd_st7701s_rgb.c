@@ -150,6 +150,34 @@ static const lcd_board_t k_boards[] = {
         .pclk_active_neg = 0,
         .bounce_lines = 20,
     },
+    /* Elecrow CrowPanel Advance 7.0" (V1.2; factory_sourcecode/V1.2,
+     * LovyanGFX_Driver.h): an ESP32-S3-WROOM-1-N16R8 beside a 7.0" 800x480
+     * IPS glass (SC7277) that, like the Sunton's, takes no init: its 50-pin
+     * connector carries the RGB lines, DE, the syncs and the clock alone.
+     * Data B0..B4 = GPIO21,47,48,45,38, G0..G5 = GPIO9..14, R0..R4 =
+     * GPIO7,17,18,3,46; DE 42, VSYNC 41, HSYNC 40, PCLK 39; Elecrow's
+     * porches (8/4/8 both ways) and falling-edge clock (pclk_idle_high).
+     * The backlight is the board's STC8H1K28 coprocessor's (I2C 0x30:
+     * fos_board_i2c_writes turns it on), so no GPIO here. 12 MHz as the
+     * Sunton's, not Elecrow's 21: the generic image's shared flash and
+     * PSRAM bus. */
+    {
+        .preset = "elecrow_crowpanel_advance_7",
+        .panel = "LCD_SC7277_800x480",
+        .width = 800, .height = 480,
+        .i2c_sda = -1, .i2c_scl = -1,
+        .exp_lcd_cs = -1, .exp_lcd_rst = -1, .exp_tp_rst = -1,
+        .exp_hold_high = {-1, -1},
+        .spi_sck = -1, .spi_sda = -1, .gpio_lcd_cs = -1,
+        .backlight = -1,
+        .hsync = 40, .vsync = 41, .de = 42, .pclk = 39,
+        .data = {21, 47, 48, 45, 38, 9, 10, 11, 12, 13, 14, 7, 17, 18, 3, 46},
+        .pclk_hz = 12 * 1000 * 1000,
+        .hsync_pulse = 4, .hsync_back = 8, .hsync_front = 8,
+        .vsync_pulse = 4, .vsync_back = 8, .vsync_front = 8,
+        .pclk_active_neg = 1,
+        .bounce_lines = 20,
+    },
 };
 
 static const lcd_board_t *s_board = &k_boards[0];
@@ -702,8 +730,18 @@ static esp_err_t rgb_init(void)
     return ESP_OK;
 }
 
+/* A backlight that is not a GPIO (the CrowPanel Advance 7.0"'s coprocessor's):
+ * main.c hands the call over (fos_lcd_st7701s_set_backlight_hook). */
+static void (*s_backlight_hook)(bool on) = NULL;
+
+void fos_lcd_st7701s_set_backlight_hook(void (*hook)(bool on))
+{
+    s_backlight_hook = hook;
+}
+
 static void backlight_set(bool on)
 {
+    if (s_backlight_hook) s_backlight_hook(on);
     if (s_board->backlight < 0) return;
     gpio_reset_pin((gpio_num_t)s_board->backlight);
     gpio_set_direction((gpio_num_t)s_board->backlight, GPIO_MODE_OUTPUT);
@@ -1339,6 +1377,11 @@ esp_err_t fos_lcd_st7701s_set_pclk(uint32_t hz)
 }
 
 #else /* !SOC_LCD_RGB_SUPPORTED: the chip has no RGB LCD peripheral (ESP32-C3) */
+
+void fos_lcd_st7701s_set_backlight_hook(void (*hook)(bool on))
+{
+    (void)hook;
+}
 
 int fos_lcd_st7701s_init(void)
 {

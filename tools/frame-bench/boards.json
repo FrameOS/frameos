@@ -5,6 +5,7 @@
     "waveshare_esp32_s3_touch_amoled_1_75": {"key": "amoled175", "name": "Waveshare ESP32-S3-Touch-AMOLED-1.75", "target": "esp32-s3", "display": "AMOLED_CO5300_466x466", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "guition_esp32_4848s040": {"key": "guition4848", "name": "Guition ESP32-4848S040", "target": "esp32-s3", "display": "LCD_ST7701S_480x480", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "elecrow_crowpanel_watch_2in01": {"key": "crowwatch", "name": "Elecrow CrowPanel 2.01\" watch", "target": "esp32-s3", "display": "LCD_GC9309_240x296", "psram_bytes": 8388608, "flash_bytes": 16777216},
+    "elecrow_crowpanel_advance_7": {"key": "crowadv7", "name": "Elecrow CrowPanel Advance 7.0\"", "target": "esp32-s3", "display": "LCD_SC7277_800x480", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "sunton_esp32_8048s070": {"key": "sunton", "name": "Sunton ESP32-8048S070", "target": "esp32-s3", "display": "LCD_EK9716_800x480", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "elecrow_crowpanel_5in79": {"key": "crow579", "name": "Elecrow CrowPanel 5.79\" e-paper", "target": "esp32-s3", "display": "EPD_5in79", "psram_bytes": 8388608, "flash_bytes": 8388608},
     "seeed_reterminal_sticky": {"key": "sticky", "name": "reTerminal Sticky", "target": "esp32-s3", "display": "EPD_3in97", "psram_bytes": 8388608, "flash_bytes": 33554432},
@@ -18,6 +19,7 @@
   "panels": {
     "LCD_ST7701S_480x480": {"width": 480, "height": 480, "kind": "lcd", "colors": "rgb565"},
     "LCD_EK9716_800x480": {"width": 800, "height": 480, "kind": "lcd", "colors": "rgb565"},
+    "LCD_SC7277_800x480": {"width": 800, "height": 480, "kind": "lcd", "colors": "rgb565"},
     "AMOLED_CO5300_466x466": {"width": 466, "height": 466, "kind": "lcd", "colors": "rgb565"},
     "LCD_GC9309_240x296": {"width": 240, "height": 296, "kind": "lcd", "colors": "rgb565"},
     "EPD_3in97": {"width": 800, "height": 480, "kind": "epaper", "colors": "bw"},

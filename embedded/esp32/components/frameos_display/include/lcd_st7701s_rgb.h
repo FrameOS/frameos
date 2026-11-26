@@ -106,6 +106,9 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 /* Backlight on or off (the Indicator's GPIO45, the Sunton's GPIO2).
  * ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_st7701s_backlight(bool on);
+/* For a backlight that is no GPIO of the board table's (the CrowPanel Advance
+ * 7.0"'s, its coprocessor's over I2C): called on every switch. */
+void fos_lcd_st7701s_set_backlight_hook(void (*hook)(bool on));
 
 /* A scene store begins: hundreds of flash writes, through which the refill
  * interrupt cannot run and the picture would tear. The glass shows the FrameOS

@@ -482,6 +482,27 @@ EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PERIPHERALS = {
     "batteryPin": 1,
     "batteryDivider": 1.73,
 }
+# Elecrow CrowPanel Advance 7.0" (ESP32-S3-WROOM-1-N16R8, hardware V1.2): an
+# 800x480 SC7277 IPS glass on the chip's RGB interface that takes no init. Its
+# wiring is the LCD driver's own board table (lcd_st7701s_rgb.c), so the EPD
+# pin slots carry nothing. The GT911 (INT GPIO1), the BM8563 clock (a
+# PCF8563) and the STC8H1K28 coprocessor that holds the touch reset and the
+# backlight (fos_board_i2c_writes) share SDA15/SCL16. BOOT (GPIO0) works like
+# the Sunton's; the edges swipe.
+EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": -1,
+    "mosi": -1,
+    "pwr": -1,
+}
+EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH = {
+    "touchPins": "sda=15,scl=16,int=1,rst=-1,en=-1",
+    "i2cBuses": "sda=15,scl=16",
+}
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
     "batteryDivider": 2.0,
@@ -1056,6 +1077,15 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
     },
     # Elecrow CrowPanel 2.01" watch: the 240x296 GC9309 IPS on one SPI lane;
     # see EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS.
+    "elecrow_crowpanel_advance_7": {
+        "device": "lcd.sc7277_800x480",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_PINS,
+        "gpioButtons": EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP,
+        **EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH,
+    },
     "elecrow_crowpanel_watch_2in01": {
         "device": "lcd.gc9309_240x296",
         "flashSize": "16MB",
@@ -1334,6 +1364,8 @@ EMBEDDED_EXTRA_PANELS = {
     "LCD_ST7701S_480x480": FOS_PIXEL_RGB565,
     # The Sunton 7" 800x480 EK9716, same ST7701S RGB driver stack.
     "LCD_EK9716_800x480": FOS_PIXEL_RGB565,
+    # The Elecrow CrowPanel Advance 7.0"'s SC7277, the same RGB driver.
+    "LCD_SC7277_800x480": FOS_PIXEL_RGB565,
     # The Waveshare 1.75" round CO5300 AMOLED on QSPI (lcd_qspi_amoled.c).
     "AMOLED_CO5300_466x466": FOS_PIXEL_RGB565,
     # The Elecrow CrowPanel 2.01" watch's GC9309 on one SPI lane, the same driver.
@@ -1348,6 +1380,7 @@ EMBEDDED_DEVICE_PANELS = {
     "oled.ssd1306_72x40": "OLED_SSD1306_72x40",
     "lcd.st7701s_480x480": "LCD_ST7701S_480x480",
     "lcd.ek9716_800x480": "LCD_EK9716_800x480",
+    "lcd.sc7277_800x480": "LCD_SC7277_800x480",
     "amoled.co5300_466x466": "AMOLED_CO5300_466x466",
     "lcd.gc9309_240x296": "LCD_GC9309_240x296",
     "waveshare.EPD_5in79_BW": "EPD_5in79_BW",

@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* What chip and board this firmware is actually running on.
  *
@@ -101,6 +102,15 @@ typedef struct {
     int level;
 } fos_board_rail_t;
 const fos_board_rail_t *fos_board_rails(const char *hardware_preset);
+/* One-byte commands sent to I2C devices when the board's first bus comes up
+ * (fos_i2c.c), as address / byte pairs: how many, NULL / 0 for a board
+ * without. The Elecrow CrowPanel Advance 7.0"'s STC8 coprocessor at 0x30:
+ * 0x19 (the touch panel out of reset), 0x10 (the backlight on). */
+size_t fos_board_i2c_writes(const char *hardware_preset, const uint8_t **pairs);
+/* A backlight switched by a one-byte command on the board's first bus: the
+ * device's address and the bytes for on and off. The CrowPanel Advance 7.0"'s
+ * STC8 at 0x30: 0x10 on, 0x05 off. False (and zeros) for every other board. */
+bool fos_board_i2c_backlight(const char *hardware_preset, uint8_t *addr, uint8_t *on, uint8_t *off);
 /* A rotary encoder's two phases (fos_buttons.c turns its steps into NEXT
  * and PREV presses): the CrowPanel 2.01" watch's crown, A GPIO20 and B
  * GPIO19. False and -1 / -1 on every other board. */

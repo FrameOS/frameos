@@ -59,5 +59,8 @@ const char *fos_i2c_chip_name(fos_i2c_chip_t chip);
 /* The IO expander's input register (FOS_I2C_TCA9554, register 0): a bit per
  * pin, the level it reads. ESP_ERR_NOT_FOUND without one. */
 esp_err_t fos_i2c_expander_input(uint8_t *value);
+/* One byte to `addr` on the first bus, no register: a coprocessor's command
+ * (the CrowPanel Advance 7.0"'s backlight, main.c). */
+esp_err_t fos_i2c_command(uint8_t addr, uint8_t byte);
 /* One line: `sda19/scl20: pcf8563 sht4x; sda39/scl40: sy6974b`, or "none". */
 void fos_i2c_summary(char *out, size_t out_len);

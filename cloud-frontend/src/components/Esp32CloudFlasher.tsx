@@ -110,6 +110,11 @@ const boardChoices = [
     value: 'hw:elecrow_crowpanel_watch_2in01',
     platform: genericPlatform,
   },
+  {
+    label: 'Elecrow CrowPanel Advance 7.0" (800x480 LCD ESP32-S3)',
+    value: 'hw:elecrow_crowpanel_advance_7',
+    platform: genericPlatform,
+  },
   { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
   {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',

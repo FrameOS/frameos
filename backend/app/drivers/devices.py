@@ -122,6 +122,8 @@ NATIVE_DEVICE_DIMENSIONS = {
     "lcd.st7701s_480x480": (480, 480),
     # The Sunton ESP32-8048S070's RGB LCD (embedded/esp32 LCD_EK9716_800x480); no Pi driver.
     "lcd.ek9716_800x480": (800, 480),
+    # The Elecrow CrowPanel Advance 7.0"'s RGB LCD (embedded/esp32 LCD_SC7277_800x480); no Pi driver.
+    "lcd.sc7277_800x480": (800, 480),
     # The Waveshare ESP32-S3-Touch-AMOLED-1.75's round QSPI AMOLED (embedded/esp32
     # AMOLED_CO5300_466x466); no Pi driver.
     "amoled.co5300_466x466": (466, 466),

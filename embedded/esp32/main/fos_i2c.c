@@ -12,6 +12,7 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
+#include "fos_board.h"
 #include "fos_config.h"
 #include "fos_usb_pads.h"
 
@@ -143,6 +144,44 @@ static void probe_bus_locked(i2c_master_bus_handle_t bus, uint8_t index)
     }
 }
 
+/* One byte to a device with no registers (a coprocessor's command), tried
+ * `tries` times 20 ms apart. */
+static esp_err_t command_locked(i2c_master_bus_handle_t bus, uint8_t addr, uint8_t byte, int tries)
+{
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = addr,
+        .scl_speed_hz = I2C_SPEED_HZ,
+    };
+    i2c_master_dev_handle_t dev = NULL;
+    esp_err_t err = i2c_master_bus_add_device(bus, &dev_config, &dev);
+    if (err != ESP_OK) return err;
+    while ((err = i2c_master_transmit(dev, &byte, 1, I2C_XFER_TIMEOUT_MS)) != ESP_OK && --tries > 0) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    i2c_master_bus_rm_device(dev);
+    return err;
+}
+
+/* The board's one-byte commands (fos_board_i2c_writes) on its first bus,
+ * before anything is probed: a coprocessor that comes up after the ESP32
+ * gets each for up to 200 ms. */
+static void board_writes_locked(i2c_master_bus_handle_t bus, const char *hardware_preset)
+{
+    const uint8_t *pairs = NULL;
+    size_t n = fos_board_i2c_writes(hardware_preset, &pairs);
+    for (size_t i = 0; i < n; i++) command_locked(bus, pairs[2 * i], pairs[2 * i + 1], 10);
+}
+
+esp_err_t fos_i2c_command(uint8_t addr, uint8_t byte)
+{
+    if (!s_lock || s_bus_count == 0) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(I2C_LOCK_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    esp_err_t err = command_locked(s_buses[0], addr, byte, 3);
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
 esp_err_t fos_i2c_init(void)
 {
     if (!s_lock) {
@@ -193,6 +232,7 @@ esp_err_t fos_i2c_init(void)
         s_buses[s_bus_count] = bus;
         s_bus_pins[s_bus_count] = config->i2c_buses[i];
         s_bus_lent[s_bus_count] = false;
+        if (s_bus_count == 0) board_writes_locked(bus, config->hardware_preset);
         probe_bus_locked(bus, s_bus_count);
         s_bus_count++;
     }

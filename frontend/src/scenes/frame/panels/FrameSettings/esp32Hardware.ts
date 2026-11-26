@@ -562,6 +562,16 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       mountPath: '/srv/assets',
     },
   },
+  // The Elecrow CrowPanel Advance 7.0": its RGB LCD is the firmware's board
+  // table's too, and its backlight and touch reset are its coprocessor's.
+  elecrow_crowpanel_advance_7: {
+    label: 'Elecrow CrowPanel Advance 7.0" (800x480 LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.sc7277_800x480',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_SUNTON_ESP32_8048S070_PIN_LAYOUT,
+  },
   // Its LCD is wired by the firmware's board table, like the Indicator's.
   guition_esp32_4848s040: {
     label: 'Guition ESP32-4848S040 (4" LCD ESP32-S3)',

@@ -804,6 +804,14 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "0:BOOT",
               -1, 2.0f, -1, 0, 0 },
+            /* Elecrow CrowPanel Advance 7.0" (ESP32-S3-WROOM-1-N16R8, V1.2):
+             * the 800x480 RGB glass's wiring is lcd_st7701s_rgb.c's board
+             * table, so no EPD pins; the BOOT key on GPIO0. The bus, the
+             * GT911 and the coprocessor's commands come from fos_board.c. */
+            { "elecrow_crowpanel_advance_7", "LCD_SC7277_800x480",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT",
+              -1, 2.0f, -1, 0, 0 },
             /* Guition ESP32-4848S040: the LCD's wiring is lcd_st7701s_rgb.c's
              * board table, so no EPD pins. */
             { "guition_esp32_4848s040", "LCD_ST7701S_480x480",

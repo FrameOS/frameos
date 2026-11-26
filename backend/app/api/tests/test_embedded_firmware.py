@@ -708,6 +708,35 @@ def test_embedded_hardware_preset_for_sunton_esp32_8048s070():
     assert "touch_pins" not in settings
 
 
+def test_embedded_hardware_preset_for_elecrow_crowpanel_advance_7():
+    frame = Frame(id=21, embedded={"hardwarePreset": "elecrow_crowpanel_advance_7"})
+    ensure_embedded_frame_defaults(frame)
+    # The 7" 800x480 RGB LCD (SC7277): the Sunton's driver, its own board row.
+    assert frame.device == "lcd.sc7277_800x480"
+    assert embedded_panel_for_frame(frame) == "LCD_SC7277_800x480"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("LCD_SC7277_800x480") == FOS_PIXEL_RGB565
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
+    assert frame.event_map[0] == {
+        "event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {},
+    }
+    assert any(rule["event"] == "edgeSwipe" for rule in frame.event_map)
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "LCD_SC7277_800x480"
+    # The GT911, the clock and the coprocessor share SDA15/SCL16 (fos_board.c).
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["elecrow_crowpanel_advance_7"]
+    assert preset["touchPins"] == "sda=15,scl=16,int=1,rst=-1,en=-1"
+    assert preset["i2cBuses"] == "sda=15,scl=16"
+    assert embedded_panel_for_frame(Frame(id=22, device="lcd.sc7277_800x480", embedded={"platform": "esp32-s3"})) == (
+        "LCD_SC7277_800x480"
+    )
+
+
 def test_embedded_hardware_preset_for_guition_esp32_4848s040():
     frame = Frame(id=16, embedded={"hardwarePreset": "guition_esp32_4848s040"})
     ensure_embedded_frame_defaults(frame)

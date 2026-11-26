@@ -503,8 +503,34 @@ static void test_crowpanel_boards(void)
     CHECK(map[0] == '[' && map[strlen(map) - 1] == ']', "a JSON list");
 }
 
+/* The Elecrow CrowPanel Advance 7.0": its coprocessor's commands, its bus,
+ * its touch panel and its key. */
+static void test_crowpanel_advance_7(void)
+{
+    const char *preset = "elecrow_crowpanel_advance_7";
+    const uint8_t *pairs = NULL;
+    CHECK(fos_board_i2c_writes(preset, &pairs) == 2 && pairs, "two commands");
+    CHECK(pairs && pairs[0] == 0x30 && pairs[1] == 0x19, "touch out of reset first");
+    CHECK(pairs && pairs[2] == 0x30 && pairs[3] == 0x10, "then the backlight on");
+    CHECK(fos_board_i2c_writes("sunton_esp32_8048s070", &pairs) == 0 && !pairs, "none elsewhere");
+    CHECK(fos_board_i2c_writes(NULL, &pairs) == 0, "no preset, none");
+    uint8_t addr = 1, on = 1, off = 1;
+    CHECK(fos_board_i2c_backlight(preset, &addr, &on, &off) && addr == 0x30 && on == 0x10 && off == 0x05,
+          "the backlight is the coprocessor's");
+    CHECK(!fos_board_i2c_backlight("sunton_esp32_8048s070", &addr, &on, &off) && addr == 0, "a GPIO elsewhere");
+    CHECK(strcmp(fos_board_i2c_buses(preset), "sda=15,scl=16") == 0, "one bus");
+    CHECK(strcmp(fos_board_touch_pins(preset), "sda=15,scl=16,int=1,rst=-1,en=-1") == 0, "touch pins");
+    CHECK(strcmp(fos_board_rtc_chip(preset), "pcf8563") == 0, "the BM8563 reads as a PCF8563");
+    char map[1024];
+    fos_board_event_map(preset, map, sizeof(map));
+    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "BOOT twice opens the switcher");
+    CHECK(strstr(map, "\"edgeSwipe\"") != NULL, "the edges swipe");
+}
+
 int main(void)
 {
+    test_crowpanel_advance_7();
     test_crowpanel_boards();
     test_amoled_1_75();
     test_touch_pins();

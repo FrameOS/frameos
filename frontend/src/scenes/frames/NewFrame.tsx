@@ -751,6 +751,18 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
     sdCardAssets: SUNTON_ESP32_8048S070_SD_CARD_ASSETS,
   },
+  // The Elecrow CrowPanel Advance 7.0" (V1.2): BOOT as on the Sunton, the
+  // edges swipe; its coprocessor's commands are the firmware's board facts.
+  elecrow_crowpanel_advance_7: {
+    label: 'Elecrow CrowPanel Advance 7.0" (800x480 LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.sc7277_800x480',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: SUNTON_ESP32_8048S070_PINS,
+    gpioButtons: [{ pin: 0, label: 'BOOT' }],
+    eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
+  },
   // GPIO0 is an RGB data line, so there is no key: only the edges swipe.
   guition_esp32_4848s040: {
     label: 'Guition ESP32-4848S040 (4" LCD ESP32-S3)',
