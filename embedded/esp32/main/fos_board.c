@@ -209,6 +209,9 @@ static const struct {
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
     {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS, ONE_KEY_VOICE("OK"), true},
     {"elecrow_crowpanel_5in79", CROWPANEL_5IN79_KEYS, NULL, false},
+    /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
+     * swipe, BOOT twice opens the switcher. */
+    {"elecrow_crowpanel_advance_7", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
 };
 
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
@@ -359,6 +362,29 @@ const fos_board_rail_t *fos_board_rails(const char *hardware_preset)
     return hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_watch_2in01") == 0 ? k_watch_rails : NULL;
 }
 
+/* The Elecrow CrowPanel Advance 7.0" (V1.2): its STC8H1K28 at 0x30 holds the
+ * GT911 in reset and the backlight's boost off until told (Elecrow's factory
+ * sketch and ESP-IDF lesson 3): 0x19 lets the touch panel go, 0x10 is the
+ * backlight full on. Address, byte; address, byte. */
+static const uint8_t k_advance_7_writes[] = {0x30, 0x19, 0x30, 0x10};
+
+bool fos_board_i2c_backlight(const char *hardware_preset, uint8_t *addr, uint8_t *on, uint8_t *off)
+{
+    /* The same coprocessor: 0x10 full on, 0x05 off (V1.2's commands). */
+    bool advance = hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_advance_7") == 0;
+    *addr = advance ? 0x30 : 0;
+    *on = advance ? 0x10 : 0;
+    *off = advance ? 0x05 : 0;
+    return advance;
+}
+
+size_t fos_board_i2c_writes(const char *hardware_preset, const uint8_t **pairs)
+{
+    bool advance = hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_advance_7") == 0;
+    *pairs = advance ? k_advance_7_writes : NULL;
+    return advance ? sizeof(k_advance_7_writes) / 2 : 0;
+}
+
 bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b)
 {
     /* The watch's crown: phase A GPIO20, B GPIO19, pulled up. */
@@ -418,6 +444,10 @@ static const struct {
      * clock (0x51), the AXS5106L touch controller (0x63) and an SC7A20H
      * accelerometer (0x19, not read). */
     {"elecrow_crowpanel_watch_2in01", "sda=4,scl=3"},
+    /* The Elecrow CrowPanel Advance 7.0"'s one bus, SDA15/SCL16: its
+     * STC8H1K28 coprocessor (0x30, fos_board_i2c_writes), the BM8563 clock
+     * (0x51, a PCF8563) and the GT911 touch panel (0x5d). */
+    {"elecrow_crowpanel_advance_7", "sda=15,scl=16"},
 };
 
 const char *fos_board_i2c_buses(const char *hardware_preset)
@@ -528,6 +558,9 @@ static const struct {
      * registers) on the board's bus, INT GPIO2, reset GPIO5; its supply is
      * the board's rails (fos_board_rails). */
     {"elecrow_crowpanel_watch_2in01", "sda=4,scl=3,int=2,rst=5,en=-1"},
+    /* The Elecrow CrowPanel Advance 7.0"'s GT911 on the board's bus, INT
+     * GPIO1; its reset is the STC8 coprocessor's (fos_board_i2c_writes). */
+    {"elecrow_crowpanel_advance_7", "sda=15,scl=16,int=1,rst=-1,en=-1"},
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap

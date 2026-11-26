@@ -162,6 +162,20 @@ EXTRA_PANELS = [
         "sleep": "fos_lcd_st7701s_sleep",
     },
     {
+        # The Elecrow CrowPanel Advance 7.0"'s 800x480 IPS glass (SC7277):
+        # the same driver, its own board row (lcd_st7701s_rgb.c).
+        "name": "LCD_SC7277_800x480",
+        "width": 800,
+        "height": 480,
+        "format": 9,  # FOS_PIXEL_RGB565
+        "bus": 3,
+        "header": "lcd_st7701s_rgb.h",
+        "init": "fos_lcd_st7701s_init",
+        "clear": "fos_lcd_st7701s_clear",
+        "display": "fos_lcd_st7701s_display",
+        "sleep": "fos_lcd_st7701s_sleep",
+    },
+    {
         # The Waveshare ESP32-S3-Touch-AMOLED-1.75's round 1.75" AMOLED: a
         # CO5300 on QSPI holding its own picture (lcd_qspi_amoled.c); only
         # the circle inside the square shows.

@@ -742,6 +742,7 @@ export function deviceSwitchesDisplay(device?: string | null): boolean {
     deviceSupportsDisplayPower(device) ||
     device === 'lcd.st7701s_480x480' ||
     device === 'lcd.ek9716_800x480' ||
+    device === 'lcd.sc7277_800x480' ||
     device === 'amoled.co5300_466x466' ||
     device === 'lcd.gc9309_240x296'
   )

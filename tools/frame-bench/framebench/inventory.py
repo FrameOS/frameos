@@ -23,7 +23,7 @@ from . import linux
 
 # Boards with a touch panel the bench can tap (module ids from fos_board.c).
 TOUCH_MODULES = {'seeed_sensecap_indicator_d1', 'guition_esp32_4848s040', 'sunton_esp32_8048s070', 'waveshare_esp32_s3_touch_amoled_1_75', 'seeed_reterminal_sticky', 'seeed_reterminal_e1003',
-                 'elecrow_crowpanel_watch_2in01',
+                 'elecrow_crowpanel_watch_2in01', 'elecrow_crowpanel_advance_7',
                  'waveshare_esp32s3_touch_lcd_4', 'hyperpixel'}
 BOARDS_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'boards.json')
 

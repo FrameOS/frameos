@@ -44,6 +44,7 @@
 #include "fos_buzzer.h"
 #include "fos_charger.h"
 #include "fos_climate.h"
+#include "fos_board.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
 #include "fos_panel_draw.h"
@@ -149,6 +150,14 @@ static bool panel_temperature(int *celsius)
 
 /* fos_display_set_i2c_lender: a board chip the display drives (the
  * PhotoPainter's AXP2101) joins the bus fos_i2c.c already runs on its pins. */
+/* The CrowPanel Advance 7.0"'s backlight: a command to its coprocessor
+ * (fos_board_i2c_backlight), for the RGB LCD driver. */
+static uint8_t s_backlight_addr, s_backlight_on, s_backlight_off;
+static void i2c_backlight(bool on)
+{
+    fos_i2c_command(s_backlight_addr, on ? s_backlight_on : s_backlight_off);
+}
+
 static void *lend_i2c_bus(int sda, int scl)
 {
     return fos_i2c_lend_bus(sda, scl);
@@ -514,6 +523,11 @@ void app_main(void)
      * about USB, the clock that knows the time before Wi-Fi (not after a deep
      * sleep: the chip kept it), the climate sensor. A few milliseconds. */
     fos_i2c_init();
+    /* A backlight that is a coprocessor's command, not a GPIO (the CrowPanel
+     * Advance 7.0"'s): the RGB LCD driver switches it through the bus. */
+    if (fos_board_i2c_backlight(config->hardware_preset, &s_backlight_addr, &s_backlight_on, &s_backlight_off)) {
+        fos_lcd_st7701s_set_backlight_hook(i2c_backlight);
+    }
     /* A charger that waits for a pin before it charges (the Sticky's). */
     fos_charger_enable(config->hardware_preset);
     if (esp_reset_reason() != ESP_RST_DEEPSLEEP) fos_rtc_load_time();

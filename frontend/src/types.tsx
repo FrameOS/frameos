@@ -24,6 +24,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'esp32_c3_042_oled'
   | 'seeed_sensecap_indicator_d1'
   | 'sunton_esp32_8048s070'
+  | 'elecrow_crowpanel_advance_7'
   | 'guition_esp32_4848s040'
   | 'waveshare_esp32_s3_touch_amoled_1_75'
   | 'elecrow_crowpanel_watch_2in01'

@@ -68,6 +68,10 @@ int main(void)
      * own wiring, and the panel alone stays the Indicator's. */
     expect_size("guition_esp32_4848s040", "LCD_ST7701S_480x480", 480, 480, "guition");
     expect_board("guition_esp32_4848s040", "LCD_ST7701S_480x480", "guition_esp32_4848s040", "guition board");
+    /* The Elecrow CrowPanel Advance 7.0": its preset, or its panel alone. */
+    expect_size("elecrow_crowpanel_advance_7", "LCD_SC7277_800x480", 800, 480, "advance 7");
+    expect_board("", "LCD_SC7277_800x480", "elecrow_crowpanel_advance_7", "advance 7 panel alone");
+    expect_board("", "LCD_EK9716_800x480", "sunton_esp32_8048s070", "the sunton panel stays the sunton's");
     expect_board("guition_esp32_4848s040", NULL, "guition_esp32_4848s040", "guition, no panel");
     expect_board("", "LCD_ST7701S_480x480", "seeed_sensecap_indicator_d1", "st7701s panel alone");
     /* A choice is not sticky: the next call starts over. */
