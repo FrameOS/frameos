@@ -548,6 +548,7 @@ export function EmbeddedPowerSection(): JSX.Element | null {
     embeddedPowerSettings,
     setEmbeddedPowerSettings,
     embeddedRenderOnServer,
+    embeddedBrightness,
   } = useFrameSettings()
   if (!showEmbeddedPowerSection) {
     return null
@@ -563,6 +564,7 @@ export function EmbeddedPowerSection(): JSX.Element | null {
           value={embeddedPowerSettings}
           onChange={setEmbeddedPowerSettings}
           renderOnServer={embeddedRenderOnServer}
+          brightness={embeddedBrightness}
           footnote={
             embeddedPowerProfile === 'pico'
               ? 'This reaches the board on its next settings poll and is sent over USB when a board is provisioned.'

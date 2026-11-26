@@ -222,6 +222,9 @@ void fos_client_http_press(bool down);
 /* turnOn (1), turnOff (0), toggleScreen (-1) for a frame whose dispatcher is
  * not here (rendered on the server): the backlight is the board's. Any task. */
 void fos_client_set_display_power(int on);
+/* The glass's brightness the client last set, percent; -1 before the first
+ * (or on a display that cannot dim). */
+int fos_client_brightness_now(void);
 /* Something other than a render drew the panel (the portal's screen, a
  * console display_test): what the panel shows is no longer the last render,
  * so the next one refreshes and asks the plane for its picture whole. Any

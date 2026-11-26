@@ -356,6 +356,12 @@ export interface FrameType {
     wake_check_seconds?: number
     awakeAfterInputSeconds?: number
     awake_after_input_seconds?: number
+    /** ESP32: the glass's brightness in percent and its dim after idle (2026.11.16, docs/cloud-frames-contract.json). */
+    brightness?: number
+    dimAfterSeconds?: number
+    dim_after_seconds?: number
+    dimBrightness?: number
+    dim_brightness?: number
     batteryPin?: number
     battery_pin?: number
     batteryDivider?: number
@@ -477,6 +483,10 @@ export interface FrameType {
   deep_sleep_on_battery?: boolean
   wake_check_seconds?: number
   awake_after_input_seconds?: number
+  /** ESP32: the glass's brightness in percent, and its dim after idle (`dim_after_seconds`, 0 = never). */
+  brightness?: number
+  dim_after_seconds?: number
+  dim_brightness?: number
   battery_pin?: number
   battery_divider?: number
   battery_enable_pin?: number

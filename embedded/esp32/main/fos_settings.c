@@ -542,6 +542,26 @@ static bool apply_frame_settings(const cJSON *frame)
         }
     }
 
+    /* The glass's brightness and its idle dim (fos_client.c), live. */
+    const cJSON *bright = cJSON_GetObjectItem(frame, "brightness");
+    if (cJSON_IsNumber(bright) && bright->valueint >= 5 && bright->valueint <= 100 &&
+        config->brightness != (uint8_t)bright->valueint) {
+        config->brightness = (uint8_t)bright->valueint;
+        changed = true;
+    }
+    const cJSON *dim_bright = cJSON_GetObjectItem(frame, "dimBrightness");
+    if (cJSON_IsNumber(dim_bright) && dim_bright->valueint >= 0 && dim_bright->valueint <= 100 &&
+        config->dim_brightness != (uint8_t)dim_bright->valueint) {
+        config->dim_brightness = (uint8_t)dim_bright->valueint;
+        changed = true;
+    }
+    const cJSON *dim_after = cJSON_GetObjectItem(frame, "dimAfterSeconds");
+    if (cJSON_IsNumber(dim_after) && dim_after->valuedouble >= 0 && dim_after->valuedouble <= 86400 &&
+        config->dim_after_sec != (uint32_t)dim_after->valuedouble) {
+        config->dim_after_sec = (uint32_t)dim_after->valuedouble;
+        changed = true;
+    }
+
     const cJSON *wake_check = cJSON_GetObjectItem(frame, "wakeCheckSeconds");
     if (cJSON_IsNumber(wake_check) && wake_check->valuedouble >= 0 &&
         wake_check->valuedouble <= 86400) {
@@ -1002,6 +1022,13 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->awake_after_input_sec != after->awake_after_input_sec) {
         change_append_int(out, out_len, "awake_after_input_seconds", (long)after->awake_after_input_sec);
+    }
+    if (before->brightness != after->brightness) change_append_int(out, out_len, "brightness", after->brightness);
+    if (before->dim_brightness != after->dim_brightness) {
+        change_append_int(out, out_len, "dim_brightness", after->dim_brightness);
+    }
+    if (before->dim_after_sec != after->dim_after_sec) {
+        change_append_int(out, out_len, "dim_after_seconds", (long)after->dim_after_sec);
     }
     if (before->battery_pin != after->battery_pin) {
         change_append_int(out, out_len, "battery_pin", (long)after->battery_pin);

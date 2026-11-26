@@ -898,6 +898,42 @@ export const cloudFramesContract = {
         }
       }
     },
+    "brightness": {
+      "rule": {
+        "type": "int",
+        "min": 5,
+        "max": 100
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.16"
+        }
+      }
+    },
+    "dim_after_seconds": {
+      "rule": {
+        "type": "int",
+        "min": 0,
+        "max": 86400
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.16"
+        }
+      }
+    },
+    "dim_brightness": {
+      "rule": {
+        "type": "int",
+        "min": 0,
+        "max": 100
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.16"
+        }
+      }
+    },
     "cpu_mode": {
       "rule": {
         "type": "string",

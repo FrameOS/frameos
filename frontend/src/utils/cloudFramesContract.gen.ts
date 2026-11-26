@@ -163,6 +163,15 @@ export const cloudFramesContractSettings = {
     "click_sounds": {
       "since": "2026.11.15"
     },
+    "brightness": {
+      "since": "2026.11.16"
+    },
+    "dim_after_seconds": {
+      "since": "2026.11.16"
+    },
+    "dim_brightness": {
+      "since": "2026.11.16"
+    },
     "cpu_mode": {
       "since": "2026.11.7",
       "restart": true

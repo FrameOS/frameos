@@ -99,6 +99,9 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 18, 2, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 5.0f, 100.0f},
+    {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 86400.0f},
+    {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 100.0f},
     {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 20, 3, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 23, 2, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
@@ -174,15 +177,18 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"voice_chat", 64, 0, NULL},
     {"touch_beep", 65, 0, NULL},
     {"click_sounds", 66, 0, NULL},
-    {"cpu_mode", 67, 1, NULL},
-    {"render_mode", 68, 0, NULL},
-    {"mic_clk_pin", 69, 0, NULL},
-    {"mic_data_pin", 70, 0, NULL},
-    {"mic_pwr_pin", 71, 0, NULL},
-    {"led_pin", 72, 0, NULL},
-    {"led_type", 73, 0, NULL},
+    {"brightness", 67, 0, NULL},
+    {"dim_after_seconds", 68, 0, NULL},
+    {"dim_brightness", 69, 0, NULL},
+    {"cpu_mode", 70, 1, NULL},
+    {"render_mode", 71, 0, NULL},
+    {"mic_clk_pin", 72, 0, NULL},
+    {"mic_data_pin", 73, 0, NULL},
+    {"mic_pwr_pin", 74, 0, NULL},
+    {"led_pin", 75, 0, NULL},
+    {"led_type", 76, 0, NULL},
 };
-#define FOS_CONTRACT_SETTINGS_COUNT 32
+#define FOS_CONTRACT_SETTINGS_COUNT 35
 
 /* Every verb in the contract, with the scope it requires (NULL = none) and
  * whether it is a content verb (refused `backend_managed` when a backend owns the frame). */

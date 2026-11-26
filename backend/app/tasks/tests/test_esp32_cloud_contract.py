@@ -112,5 +112,8 @@ def test_single_plane_settings_carry_a_parity_reason():
     # run, docs/server-rendering.md; a Pi always renders on its own runtime);
     # 20 with `click_sounds` (2026.11.15: silent or the buzzer's own clicks,
     # the same buzzer path); 19 again when `cpu_mode` went both-planes
-    # (2026.11.15: a Pi's CPU governor, cpu_governor.nim).
-    assert by_plane.get("esp32", 0) <= 19, by_plane
+    # (2026.11.15: a Pi's CPU governor, cpu_governor.nim); 22 with
+    # `brightness`, `dim_after_seconds`, `dim_brightness` (2026.11.16: the
+    # glass's brightness lives in the ESP32 display drivers, and the Linux
+    # runtime has no backlight control yet).
+    assert by_plane.get("esp32", 0) <= 22, by_plane

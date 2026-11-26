@@ -78,3 +78,10 @@ typedef struct {
  * `deep_sleep` (the always-on flag) can sleep. */
 void fos_power_decide(const fos_power_input_t *in, fos_power_state_t *state,
                       fos_power_decision_t *out);
+
+/* The glass's brightness now, in percent (the frame settings `brightness`,
+ * `dim_after_seconds`, `dim_brightness`): `bright` until `dim_after_s` passed
+ * without input (`idle_us` since the last touch, press or turn, or since boot
+ * before the first), `dim` from then on; never dimmer than it would be dimmed
+ * and never brighter than `bright`. `dim_after_s` 0 never dims. */
+int fos_power_brightness(int bright, uint32_t dim_after_s, int dim, int64_t idle_us);

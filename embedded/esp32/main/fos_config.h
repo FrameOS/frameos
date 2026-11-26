@@ -296,6 +296,14 @@ typedef struct {
                                     * page, the console): no plane sets it.
                                     * Default normal. */
     uint8_t cpu_mode;              /* fos_cpu_mode_t, read at boot */
+    /* The glass's brightness in percent where the display can set it
+     * (fos_display_brightness: the AMOLED's register, a backlight's PWM):
+     * `brightness` (5..100, default 100), and after `dim_after_sec` without
+     * input (0 = never) `dim_brightness` (0..100, default 10) until the next
+     * touch or press (fos_client.c). Live, from both planes and the console. */
+    uint8_t brightness;
+    uint8_t dim_brightness;
+    uint32_t dim_after_sec;
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

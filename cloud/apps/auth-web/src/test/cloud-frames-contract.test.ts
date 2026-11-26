@@ -110,8 +110,11 @@ describe("settings parity between the device planes", () => {
     // (docs/server-rendering.md); a Pi always renders on its own runtime.
     // 20 with `click_sounds` (2026.11.15): silent or the buzzer's own clicks,
     // the same buzzer path; a Pi has no buzzer. 19 again when `cpu_mode` went
-    // both-planes (2026.11.15: a Pi's CPU governor, cpu_governor.nim).
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(19);
+    // both-planes (2026.11.15: a Pi's CPU governor, cpu_governor.nim). 22
+    // with `brightness`, `dim_after_seconds`, `dim_brightness` (2026.11.16):
+    // the glass's brightness lives in the ESP32 display drivers and the
+    // Linux runtime has no backlight control yet.
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(22);
   });
 });
 

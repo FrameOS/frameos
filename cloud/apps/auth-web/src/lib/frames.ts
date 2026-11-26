@@ -588,6 +588,13 @@ export const esp32ClickSoundsFrameSettingsMinVersion = "2026.11.15";
 export const esp32ClickSoundsFrameSettingKeys = new Set<string>(
   contractSettingKeysSince("esp32", esp32ClickSoundsFrameSettingsMinVersion),
 );
+// 2026.11.16: `brightness`, `dim_after_seconds`, `dim_brightness`: the glass's
+// brightness and its dim after idle, where the display can set it (the round
+// AMOLED, the CrowPanel watch). Live, no reboot.
+export const esp32BrightnessFrameSettingsMinVersion = "2026.11.16";
+export const esp32BrightnessFrameSettingKeys = new Set<string>(
+  contractSettingKeysSince("esp32", esp32BrightnessFrameSettingsMinVersion),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

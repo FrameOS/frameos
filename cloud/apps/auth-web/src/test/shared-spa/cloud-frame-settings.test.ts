@@ -51,6 +51,8 @@ import {
   cloudFrameSupportsEsp32CpuMode,
   esp32ClickSoundsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32ClickSounds,
+  esp32BrightnessCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32Brightness,
   esp32RenderModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32RenderMode,
   cloudFrameSupportsEsp32Led,
@@ -88,6 +90,8 @@ import {
   esp32TouchBeepFrameSettingsMinVersion,
   esp32CpuModeFrameSettingKeys,
   esp32ClickSoundsFrameSettingKeys,
+  esp32BrightnessFrameSettingKeys,
+  esp32BrightnessFrameSettingsMinVersion,
   esp32CpuModeFrameSettingsMinVersion,
   cpuModeFrameSettingKeys,
   cpuModeFrameSettingsMinVersion,
@@ -197,7 +201,8 @@ describe("cloud settings push", () => {
         !esp32LedFrameSettingKeys.has(key) &&
         !esp32TouchBeepFrameSettingKeys.has(key) &&
         !esp32CpuModeFrameSettingKeys.has(key) &&
-        !esp32ClickSoundsFrameSettingKeys.has(key),
+        !esp32ClickSoundsFrameSettingKeys.has(key) &&
+        !esp32BrightnessFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -373,6 +378,13 @@ describe("cloud settings push", () => {
     expect(esp32ClickSoundsCloudFrameSettingsMinVersion).toBe("2026.11.15");
     expect(cloudFrameSupportsEsp32ClickSounds("2026.11.14")).toBe(false);
     expect(cloudFrameSupportsEsp32ClickSounds("2026.11.15")).toBe(true);
+  });
+
+  it("gates the glass's brightness and its dim after idle on their floor", () => {
+    expect([...esp32BrightnessFrameSettingKeys].sort()).toEqual(["brightness", "dim_after_seconds", "dim_brightness"]);
+    expect(esp32BrightnessCloudFrameSettingsMinVersion).toBe(esp32BrightnessFrameSettingsMinVersion);
+    expect(cloudFrameSupportsEsp32Brightness("2026.11.15")).toBe(false);
+    expect(cloudFrameSupportsEsp32Brightness("2026.11.16")).toBe(true);
   });
 
   it("gates the processor speed on its floor, a power key no older push carries", () => {

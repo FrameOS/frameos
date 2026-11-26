@@ -332,6 +332,8 @@ static int cmd_status(int argc, char **argv)
     else printf("buzzer:      none\n");
     printf("click_sounds: %s (touch_beep=%d)\n", fos_config_click_sounds_name(config->click_sounds),
            config->touch_beep ? 1 : 0);
+    printf("brightness:  %u%%, %u%% after %lu s idle (0: never), now %d%%\n", config->brightness,
+           config->dim_brightness, (unsigned long)config->dim_after_sec, fos_client_brightness_now());
     if (config->led_pin >= 0) {
         printf("led:         GPIO %d, %s%s\n", (int)config->led_pin, fos_config_led_type_name(config->led_type),
                fos_led_present() ? "" : " (pin refused, see boot log)");
@@ -608,7 +610,7 @@ static int cmd_set(int argc, char **argv)
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
                "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|click_sounds|mic_pins|voice_chat|"
-               "cpu_mode|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
+               "cpu_mode|brightness|dim_after|dim_brightness|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
@@ -1145,6 +1147,19 @@ static int cmd_set(int argc, char **argv)
         if (seconds > 86400) seconds = 86400;
         if (seconds > 0 && seconds < 60) seconds = 60;
         config->wake_check_sec = seconds;
+    }
+    /* The glass's brightness, percent, and its idle dim (fos_client.c). */
+    else if (strcmp(key, "brightness") == 0) {
+        int pct = atoi(value);
+        config->brightness = (uint8_t)(pct < 5 ? 5 : pct > 100 ? 100 : pct);
+    }
+    else if (strcmp(key, "dim_brightness") == 0) {
+        int pct = atoi(value);
+        config->dim_brightness = (uint8_t)(pct < 0 ? 0 : pct > 100 ? 100 : pct);
+    }
+    else if (strcmp(key, "dim_after") == 0) {
+        uint32_t seconds = strtoul(value, NULL, 10);
+        config->dim_after_sec = seconds > 86400 ? 86400 : seconds;
     }
     /* Seconds a press or a tap keeps a deep-sleeping frame awake (0 = none). */
     else if (strcmp(key, "awake_input") == 0) {

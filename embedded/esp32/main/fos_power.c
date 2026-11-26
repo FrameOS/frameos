@@ -88,3 +88,9 @@ void fos_power_decide(const fos_power_input_t *in, fos_power_state_t *state,
     out->deep_sleep = in->deep_sleep ||
                       (in->deep_sleep_on_battery && (out->on_battery || out->critical));
 }
+
+int fos_power_brightness(int bright, uint32_t dim_after_s, int dim, int64_t idle_us)
+{
+    if (dim_after_s == 0 || idle_us < (int64_t)dim_after_s * 1000000) return bright;
+    return dim < bright ? dim : bright;
+}

@@ -106,6 +106,8 @@ static void load_defaults(void)
     cfg->touch_beep = true;
     cfg->click_sounds = FOS_CLICK_SOUNDS_NORMAL;
     cfg->cpu_mode = FOS_CPU_AUTO;
+    cfg->brightness = 100;
+    cfg->dim_brightness = 10;
     cfg->led_pin = -1;
     cfg->led_type = FOS_LED_GPIO;
     cfg->i2c_bus_count = 0;
@@ -321,6 +323,9 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "touch_beep", &u8) == ESP_OK) cfg->touch_beep = u8 != 0;
     if (nvs_get_u8(nvs, "click_sounds", &u8) == ESP_OK && u8 <= FOS_CLICK_SOUNDS_LAST) cfg->click_sounds = u8;
     if (nvs_get_u8(nvs, "cpu_mode", &u8) == ESP_OK && u8 <= FOS_CPU_PERFORMANCE) cfg->cpu_mode = u8;
+    if (nvs_get_u8(nvs, "brightness", &u8) == ESP_OK && u8 >= 5 && u8 <= 100) cfg->brightness = u8;
+    if (nvs_get_u8(nvs, "dim_bright", &u8) == ESP_OK && u8 <= 100) cfg->dim_brightness = u8;
+    if (nvs_get_u32(nvs, "dim_after", &u32) == ESP_OK) cfg->dim_after_sec = u32;
     /* The touch panel and the audio codec the same way: stored, else the
      * board's own (fos_board_touch_pins / fos_board_codec_pins), so a Sticky
      * or a PhotoPainter provisioned before the keys existed gets them with
@@ -468,6 +473,9 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "touch_beep", cfg->touch_beep ? 1 : 0), "touch_beep");
     FOS_NVS_SET(nvs_set_u8(nvs, "click_sounds", cfg->click_sounds), "click_sounds");
     FOS_NVS_SET(nvs_set_u8(nvs, "cpu_mode", cfg->cpu_mode), "cpu_mode");
+    FOS_NVS_SET(nvs_set_u8(nvs, "brightness", cfg->brightness), "brightness");
+    FOS_NVS_SET(nvs_set_u8(nvs, "dim_bright", cfg->dim_brightness), "dim_bright");
+    FOS_NVS_SET(nvs_set_u32(nvs, "dim_after", cfg->dim_after_sec), "dim_after");
     char touch_pins[FOS_STR_LEN];
     fos_config_format_touch_pins(&cfg->touch_pins, touch_pins, sizeof(touch_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "touch_pins", touch_pins), "touch_pins");
