@@ -105,7 +105,9 @@ first scene of the list (the Clock of a flasher's set), which nobody chose.
   so the next boot starts there, and the switcher opened from it later is the
   usual one (`state.home` goes when it is opened from a scene).
 - It wears the frame's chosen layout, if any (`layoutFor("")`): on a desktop
-  it is the launcher's window.
+  it is the launcher's window. What the scenes name is not it: the browser
+  flasher makes the layout it picked the frame's choice (`set layout`,
+  cloud/docs/flasher.md), or a reTerminal Sticky's home has no header.
 - A Pi starts on its first scene as before (`getFirstSceneId`): a Pi always
   gets its scenes from a backend deploy.
 

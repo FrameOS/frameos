@@ -57,6 +57,7 @@
 #include "fos_voice.h"
 #include "fos_upload_limits.h"
 #include "fos_ota.h"
+#include "fos_scene_state.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
 #include "fos_netguard.h"
@@ -551,12 +552,55 @@ static int cmd_buttons(int argc, char **argv)
     return 0;
 }
 
+/* The frame's own layout choice, the frame page's Layout (layout_choice.nim,
+ * docs/scene-layouts.md "On the frame"): a layout's scene id, `none` for no
+ * layout around any scene, `-` for each scene's own. The browser flasher sends
+ * the one it picked for a standalone frame, so its home (the scene switcher,
+ * which wears the frame's choice alone) and a scene installed on the frame
+ * later wear it too. Kept as the runtime keeps it: the state of
+ * `frame-layout`, `{"active": ...}`, with the Nim host's format marker
+ * (embedded_runtime.nim `SceneStateFormatKey`: a file without it is dropped).
+ * The runtime reads it once, at its start: `restart` after it. */
+#define LAYOUT_CHOICE_STATE_ID "frame-layout"
+#define SCENE_STATE_FORMAT_KEY "__persist"
+#define SCENE_STATE_FORMAT 2
+
+static int set_layout_choice(const char *value)
+{
+    if (strlen(value) >= FOS_USB_API_MAX_SCENE_ID) {
+        printf("want a layout's scene id, none, or - for each scene's own\n");
+        return 1;
+    }
+    bool own = value[0] == '\0' || strcmp(value, "-") == 0;
+    char *json = NULL;
+    if (!own) {
+        cJSON *state = cJSON_CreateObject();
+        if (state != NULL && cJSON_AddStringToObject(state, "active", value) != NULL &&
+            cJSON_AddNumberToObject(state, SCENE_STATE_FORMAT_KEY, SCENE_STATE_FORMAT) != NULL) {
+            json = cJSON_PrintUnformatted(state);
+        }
+        cJSON_Delete(state);
+        if (json == NULL) {
+            printf("out of memory\n");
+            return 1;
+        }
+    }
+    bool kept = fos_scene_state_save(LAYOUT_CHOICE_STATE_ID, own ? "{}" : json);
+    cJSON_free(json);
+    if (!kept) {
+        printf("could not keep the layout choice\n");
+        return 1;
+    }
+    printf("layout: %s, from the next start\n", own ? "each scene's own" : value);
+    return 0;
+}
+
 static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|render_scale|"
-               "frame_settings_on_screen|settings_unlock|time_zone|"
+               "frame_settings_on_screen|settings_unlock|layout|time_zone|"
                "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
@@ -1033,6 +1077,9 @@ static int cmd_set(int argc, char **argv)
      * off and whose Wi-Fi then broke (a Pi's is a file on its boot partition). */
     else if (strcmp(key, "settings_unlock") == 0)
         config->settings_unlock = atoi(value) != 0;
+    /* Not config: kept beside the scenes, where the frame page keeps it. */
+    else if (strcmp(key, "layout") == 0)
+        return set_layout_choice(value);
     else if (strcmp(key, "assets_path") == 0) {
         if (!fos_assets_mount_point_valid(value)) {
             printf("bad assets_path, want an absolute mount point of at most %d bytes "

@@ -136,6 +136,10 @@ const OPTIONAL_ON_OLDER_FIRMWARE: ReadonlySet<EmbeddedUsbConfigKey> = new Set<Em
   // carry their own.
   'led_pin',
   'led_type',
+  // 2026.11.16: the frame's own layout choice, sent by the browser flasher
+  // alone. Before it every scene still wears the layout it names; only the
+  // home (the scene switcher) and a scene installed later go without.
+  'layout',
 ])
 
 export interface ProvisionOverUsbResult {

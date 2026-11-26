@@ -229,7 +229,12 @@ E1004) and any other board on none (`defaultBoardLayout`); a layout picked by
 hand stays when another board is picked that can wear it. The layout goes to
 the board right after the Scene store, in the first batch, and every scene
 names it the way a control plane installs one (`layout: {sceneId}`,
-`starterSceneSet`). A frame of a backend or of FrameOS Cloud is not given one
+`starterSceneSet`). It is also made the frame's own choice, the frame page's
+Layout (`set layout`, after the time zone; `-` with no layout, since a flash
+leaves `/state` and a choice from before with it): the scene switcher a tap
+board opens on as its home wears that choice alone, never what the scenes
+name, and so does a scene installed on the frame later. A board on firmware
+from before the key skips it, and only its home goes without. A frame of a backend or of FrameOS Cloud is not given one
 here: its scenes and the layout they wear are its plane's, chosen in the
 frame's Settings.
 

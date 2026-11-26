@@ -70,6 +70,7 @@ describe("standaloneProvisioning", () => {
       { key: "hardware", value: "seeed_reterminal_e1002", secret: false },
       { key: "hostname", value: "kitchen-frame", secret: false },
       { key: "time_zone", value: "Europe/Brussels", secret: false },
+      { key: "layout", value: "-", secret: false },
     ]);
     expect(plan.wifi).toEqual({ ssid: "Home", password: "hunter2" });
     const keys = plan.settings.map((setting) => setting.key as string);
@@ -99,6 +100,19 @@ describe("standaloneProvisioning", () => {
       choices({ board: CUSTOM_BOARD, panel: "EPD_7in5_V2", pins: "rst=5, dc=4,cs=3" })
     ).settings;
     expect(pinned[1]).toEqual({ key: "pins", value: "rst=5,dc=4,cs=3", secret: false });
+  });
+
+  it("makes the layout picked the frame's own choice, and none a choice too", () => {
+    // The home (the scene switcher a tap board opens on) wears the frame's
+    // choice alone, never the layout the scenes name.
+    const sticky = standaloneProvisioning(choices({ board: "seeed_reterminal_sticky" }), {
+      id: "layout-reterminal-sticky",
+    }).settings;
+    expect(sticky[sticky.length - 1]).toEqual({ key: "layout", value: "layout-reterminal-sticky", secret: false });
+    // A flash leaves /state, and a choice from before with it: "-" puts each
+    // scene's own back.
+    const none = standaloneProvisioning(choices(), null).settings;
+    expect(none[none.length - 1]).toEqual({ key: "layout", value: "-", secret: false });
   });
 
   it("joins no network when given none", () => {
