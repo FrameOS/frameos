@@ -40,7 +40,7 @@ import { webSerialNeedsFlasher, webSerialSupported } from '../../../frontend/src
 import { browserTimeZone } from '../lib/browser-time-zone'
 import { bridgeFirmwareSource, listenForBridgeJob, type BridgeConnection } from './bridgeClient'
 import { sendFlasherEvent, type FlasherEventProperties } from './flasherEvents'
-import { type FlasherSample } from './sampleCatalog'
+import { type FlasherLayout, type FlasherSample } from './sampleCatalog'
 import {
   FLASHER_SAMPLES_URL,
   flasherSampleGroups,
@@ -52,7 +52,11 @@ import {
 import {
   CUSTOM_BOARD,
   boardFromQuery,
+  boardLayouts,
+  defaultBoardLayout,
   defaultScenePreset,
+  flasherLayoutGroups,
+  pickedSceneCount,
   pickedScenes,
   pickedScenesProblem,
   presetPicks,
@@ -63,6 +67,7 @@ import {
   standaloneProvisioning,
   standaloneSceneRoom,
   starterSceneSet,
+  type FlasherLayoutGroup,
   type PickedScenes,
   type ScenePresetKey,
   type StandaloneBoardKind,
@@ -103,7 +108,7 @@ function errorDetail(error: unknown): string {
 interface FlasherCache {
   stopListening?: () => void
   connection?: BridgeConnection | null
-  /** Each picked sample's scenes, fetched once. */
+  /** Each picked sample's scenes (and the layout's), fetched once. */
   sampleScenes?: Map<string, Promise<Record<string, unknown>[]>>
   /** The run being counted (flasherEvents.ts): when it started and what it was. */
   run?: { startedAt: number; properties: FlasherEventProperties }
@@ -128,6 +133,11 @@ export interface flasherLogicValues {
   timeZone: string | null
   samples: FlasherSample[] | null
   samplesError: string | null
+  layouts: FlasherLayout[]
+  /** The layout picked (its sample's name), "" for none. */
+  layout: string
+  /** Picked in the list: a board picked after it keeps it, if it can wear it. */
+  layoutByHand: boolean
   storeCovers: Record<string, StoreCover>
   picked: string[]
   preset: ScenePresetKey | null
@@ -148,6 +158,8 @@ export interface flasherLogicValues {
   standaloneIssue: string | null
   boardKind: StandaloneBoardKind
   sceneRoom: StandaloneSceneRoom
+  chosenLayout: FlasherLayout | null
+  layoutGroups: FlasherLayoutGroup[]
   chosenScenes: PickedScenes
   scenesIssue: string | null
   uploadSeconds: number
@@ -180,6 +192,8 @@ export interface flasherLogicActions {
     samples: FlasherSample[] | null
     error: string | null
   }
+  setLayouts: (layouts: FlasherLayout[]) => { layouts: FlasherLayout[] }
+  setLayout: (layout: string, byHand: boolean) => { layout: string; byHand: boolean }
   togglePicked: (name: string) => { name: string }
   setGroupPicked: (names: string[], picked: boolean) => { names: string[]; picked: boolean }
   applyPreset: (preset: ScenePresetKey) => { preset: ScenePresetKey }
@@ -231,6 +245,8 @@ export const flasherLogic = kea<flasherLogicType>([
     loadStoreCovers: true,
     setStoreCovers: (covers: Record<string, StoreCover>) => ({ covers }),
     setSamples: (samples: FlasherSample[] | null, error: string | null) => ({ samples, error }),
+    setLayouts: (layouts: FlasherLayout[]) => ({ layouts }),
+    setLayout: (layout: string, byHand: boolean) => ({ layout, byHand }),
     togglePicked: (name: string) => ({ name }),
     setGroupPicked: (names: string[], picked: boolean) => ({ names, picked }),
     applyPreset: (preset: ScenePresetKey) => ({ preset }),
@@ -267,6 +283,9 @@ export const flasherLogic = kea<flasherLogicType>([
     timeZone: [null as string | null, { setTimeZone: (_, { timeZone }) => timeZone }],
     samples: [null as FlasherSample[] | null, { setSamples: (_, { samples }) => samples }],
     samplesError: [null as string | null, { setSamples: (_, { error }) => error }],
+    layouts: [[] as FlasherLayout[], { setLayouts: (_, { layouts }) => layouts }],
+    layout: ['', { setLayout: (_, { layout }) => layout }],
+    layoutByHand: [false, { setLayout: (_, { byHand }) => byHand }],
     storeCovers: [{} as Record<string, StoreCover>, { setStoreCovers: (_, { covers }) => covers }],
     picked: [
       [] as string[],
@@ -318,9 +337,20 @@ export const flasherLogic = kea<flasherLogicType>([
     standaloneIssue: [(s) => [s.choices], (choices: StandaloneChoices): string | null => standaloneProblem(choices)],
     boardKind: [(s) => [s.board], (board: string): StandaloneBoardKind => standaloneBoardKind(board)],
     sceneRoom: [(s) => [s.boardKind], (kind: StandaloneBoardKind): StandaloneSceneRoom => standaloneSceneRoom(kind)],
+    // The layout picked, while the board can wear it.
+    chosenLayout: [
+      (s) => [s.layouts, s.layout, s.board],
+      (layouts: FlasherLayout[], layout: string, board: string): FlasherLayout | null =>
+        boardLayouts(board, layouts).find((entry) => entry.name === layout) ?? null,
+    ],
+    layoutGroups: [
+      (s) => [s.layouts, s.board],
+      (layouts: FlasherLayout[], board: string): FlasherLayoutGroup[] => flasherLayoutGroups(board, layouts),
+    ],
     chosenScenes: [
-      (s) => [s.samples, s.picked],
-      (samples: FlasherSample[] | null, picked: string[]): PickedScenes => pickedScenes(samples ?? [], picked),
+      (s) => [s.samples, s.picked, s.chosenLayout],
+      (samples: FlasherSample[] | null, picked: string[], layout: FlasherLayout | null): PickedScenes =>
+        pickedScenes(samples ?? [], picked, layout),
     ],
     scenesIssue: [
       (s) => [s.chosenScenes, s.boardKind, s.samples],
@@ -330,7 +360,7 @@ export const flasherLogic = kea<flasherLogicType>([
     uploadSeconds: [
       (s) => [s.chosenScenes, s.sceneRoom],
       (chosen: PickedScenes, room: StandaloneSceneRoom): number =>
-        sceneUploadSeconds(chosen.bytes, chosen.scenes, room.flashSize),
+        sceneUploadSeconds(chosen.bytes, pickedSceneCount(chosen), room.flashSize),
     ],
     sampleGroups: [
       (s) => [s.samples, s.picked, s.storeCovers, s.query],
@@ -377,7 +407,7 @@ export const flasherLogic = kea<flasherLogicType>([
     }
 
     // A picked sample's scenes, fetched once (build.mjs writes one file each).
-    const sampleScenes = (sample: FlasherSample): Promise<Record<string, unknown>[]> => {
+    const sampleScenes = (sample: Pick<FlasherSample, 'file' | 'title'>): Promise<Record<string, unknown>[]> => {
       state.sampleScenes ??= new Map()
       let scenes = state.sampleScenes.get(sample.file)
       if (!scenes) {
@@ -481,7 +511,8 @@ export const flasherLogic = kea<flasherLogicType>([
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}`)
           }
-          const index = (await response.json()) as { samples?: FlasherSample[] }
+          const index = (await response.json()) as { samples?: FlasherSample[]; layouts?: FlasherLayout[] }
+          actions.setLayouts(Array.isArray(index.layouts) ? index.layouts : [])
           actions.setSamples(Array.isArray(index.samples) ? index.samples : [], null)
         } catch (error) {
           actions.setSamples(null, `Could not load the scenes to start with (${errorDetail(error)}).`)
@@ -503,11 +534,21 @@ export const flasherLogic = kea<flasherLogicType>([
       setSamples: () => {
         actions.applyPreset(values.preset ?? defaultScenePreset())
       },
-      setBoard: () => {
+      setBoard: ({ board }) => {
         // Picks a preset made follow the board (what fits its panel and its
         // room); picks made by hand stay.
         if (values.preset !== null && values.samples) {
           actions.applyPreset(values.preset)
+        }
+        // So does the layout: the board's own (the reTerminals'), else none,
+        // unless one was picked that this board can wear too.
+        if (!values.layoutByHand || !values.chosenLayout) {
+          actions.setLayout(defaultBoardLayout(board, values.layouts), false)
+        }
+      },
+      setLayouts: ({ layouts }) => {
+        if (!values.layoutByHand) {
+          actions.setLayout(defaultBoardLayout(values.board, layouts), false)
         }
       },
       applyPreset: ({ preset }) => {
@@ -545,7 +586,10 @@ export const flasherLogic = kea<flasherLogicType>([
           // click's first await. The engine asks for them after the flash.
           const fetched = Promise.all(values.chosenScenes.samples.map((sample) => sampleScenes(sample)))
           fetched.catch(() => undefined)
-          scenes = async () => starterSceneSet(await fetched, kind)
+          const layout = values.chosenLayout
+          const layoutFetched = layout ? sampleScenes(layout) : Promise.resolve([])
+          layoutFetched.catch(() => undefined)
+          scenes = async () => starterSceneSet(await fetched, kind, (await layoutFetched)[0] ?? null)
         }
         started('setup')
         const connection = state.connection

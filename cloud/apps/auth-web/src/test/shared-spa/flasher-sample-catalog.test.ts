@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareFlasherCategories,
   flasherSampleFile,
+  flasherLayoutOf,
   flasherSampleIndex,
   flasherSampleLeftOut,
   flasherSampleThumb,
@@ -159,7 +160,52 @@ describe("the flasher's index", () => {
     expect(leftOut.get("Video player")).toBe("video");
     expect(leftOut.get("Chromium Screenshot")).toBe("pi");
     expect(leftOut.get("OpenAI image")).toBe("key");
-    // A set holds 128 scenes: "Everything" has to fit in it.
-    expect(index.samples.reduce((sum, sample) => sum + sample.scenes, 0)).toBeLessThanOrEqual(128);
+    // A set holds 128 scenes: "Everything" has to fit in it, with a layout.
+    expect(index.samples.reduce((sum, sample) => sum + sample.scenes, 0) + 1).toBeLessThanOrEqual(128);
+  });
+
+  it("offers the repo's layouts beside the samples, the reTerminals' first", () => {
+    const index = flasherSampleIndex(repoSamples());
+    const titles = index.layouts.map((layout) => layout.title);
+    expect(titles.slice(0, 2)).toEqual(["reTerminal", "reTerminal Sticky"]);
+    const sticky = index.layouts.find((layout) => layout.id === "layout-reterminal-sticky");
+    expect(sticky?.devices).toEqual(["seeed_reterminal_sticky"]);
+    expect(index.layouts.find((layout) => layout.id === "layout-reterminal")?.devices).toEqual([
+      "seeed_reterminal_e1001",
+      "seeed_reterminal_e1002",
+      "seeed_reterminal_e1003",
+      "seeed_reterminal_e1004",
+    ]);
+    // The desktops after the device layouts, then the layouts around one scene.
+    const kinds = index.layouts.map((layout) => (layout.devices.length > 0 ? 0 : layout.desktop ? 1 : 2));
+    expect(kinds).toEqual([...kinds].sort());
+    expect(titles).toContain("Windows 98");
+    expect(titles).toContain("Top bar");
+    for (const layout of index.layouts) {
+      expect(layout.thumb, layout.title).not.toBeNull();
+      expect(layout.bytes).toBeLessThan(512 * 1024);
+      // Served beside the samples, under names of their own.
+      expect(index.samples.some((sample) => sample.file === layout.file)).toBe(false);
+    }
+  });
+
+  it("is a layout when its one scene is one a standalone frame can run", () => {
+    const layout = { id: "chrome", name: "Chrome", settings: { isLayout: true, desktop: true, devices: ["a", 3] } };
+    expect(flasherLayoutOf(source("Chrome layout", [layout]))).toEqual({
+      name: "Chrome layout",
+      title: "Chrome",
+      description: "Chrome layout.",
+      id: "chrome",
+      desktop: true,
+      devices: ["a"],
+    });
+    expect(flasherLayoutOf(source("Not one", [{ id: "a" }]))).toBeNull();
+    expect(flasherLayoutOf(source("Two", [layout, { ...layout, id: "other" }]))).toBeNull();
+    // One a frame without a plane could not run (a key) is not offered.
+    const keyed = {
+      ...sceneWithApp("keyed", "export function get() { return getSetting('openAI', 'apiKey') }", [], ["openAI"]),
+      settings: { isLayout: true },
+    };
+    expect(flasherLayoutOf(source("Keyed", [keyed]))).toBeNull();
   });
 });

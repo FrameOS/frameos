@@ -88,8 +88,9 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
   await fs.mkdir(sampleDir, { recursive: true })
   const byName = new Map(sources.map((source) => [source.name, source]))
   let thumbBytes = 0
+  // The layouts go the same way: a file and a picture each (the picker's list).
   await Promise.all(
-    index.samples.map(async (sample) => {
+    [...index.samples, ...index.layouts].map(async (sample) => {
       const source = byName.get(sample.name)
       await fs.writeFile(path.join(sampleDir, sample.file), catalog.flasherScenesJson(source.scenes))
       if (sample.thumb) {
@@ -103,7 +104,7 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
       }
     })
   )
-  const indexJson = JSON.stringify({ samples: index.samples })
+  const indexJson = JSON.stringify({ samples: index.samples, layouts: index.layouts })
   await fs.writeFile(path.join(sampleDir, 'index.json'), indexJson)
   const total = index.samples.reduce((sum, sample) => sum + sample.bytes, 0)
   console.log(
@@ -111,7 +112,7 @@ await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(o
       indexJson.length / 1024
     )} KB, ${index.samples.filter((sample) => sample.thumb).length} pictures in ${Math.round(
       thumbBytes / 1024
-    )} KB), ${index.leftOut.length} left out`
+    )} KB), ${index.layouts.length} layouts, ${index.leftOut.length - index.layouts.length} left out`
   )
 }
 
