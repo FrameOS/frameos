@@ -495,6 +495,89 @@ block a_round_panel_has_the_frame_page_inside_its_circle:
   allOnTheGlass("the frame page from the form")
   frameSettingsRead = nil
 
+block the_about_card:
+  # docs/scene-settings.md "About": what the frame is, the host's facts in the
+  # page's words, a row each, last on the frame page. On the 2.01" watch
+  # (240x296) and a round panel every word stays on the glass: a value that
+  # does not fit beside its name goes under it, wrapped rather than cut.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": [], "version": "2026.11.26",
+      "about": {"chip": "esp32-s3", "cores": 2, "mhz": 240, "board": "elecrow_crowpanel_watch_2in01",
+        "display": "LCD_GC9309_240x296", "psram": [8388608, 5452595], "memory": [393216, 98304],
+        "flash": 16777216, "storage": [4194304, 3040870], "card": 31914983424, "uptime": 273900,
+        "mac": "68:ee:8f:5c:c7:54", "hostname": "watch", "frameId": "9",
+        "server": "http://192.168.1.10:8989", "build": "1a2b3c4d"}}
+  proc texts(node: SvgNode, into: var seq[string]) =
+    if node.text.len > 0: into.add node.text
+    for child in node.children: texts(child, into)
+  proc drawAt(scene: FrameScene, width, height: int): Image =
+    settings.exportedScene.render(scene, ExecutionContext(scene: scene, event: "render", payload: %*{},
+      image: newImage(width, height), hasImage: true))
+  let watch = FrameConfig(width: 240, height: 296, device: "embedded", scalingMode: "cover", saveAssets: %*false)
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, watch, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  doAssert scene.state["page"].getStr() == "frame"
+  var words: seq[string]
+  texts(SceneSettingsScene(scene).tree(240, 296, false, "", info = frameSettingsRead()), words)
+  for (label, text) in [("Chip", "ESP32-S3 \xc2\xb7 2 cores \xc2\xb7 240 MHz"), ("Board", "elecrow_crowpanel_watch_2in01"),
+      ("Display", "LCD_GC9309_240x296 \xc2\xb7 240\xc3\x97296"), ("PSRAM", "5.2 MB free of 8 MB"),
+      ("Memory", "96 KB free of 384 KB"), ("Flash", "16 MB"), ("Storage", "2.9 MB free of 4 MB"),
+      ("SD card", "30 GB"), ("Uptime", "3 d 4:05"), ("MAC address", "68:ee:8f:5c:c7:54"),
+      ("Host name", "watch"), ("Frame ID", "9"), ("Server", "http://192.168.1.10:8989"), ("Build", "1a2b3c4d")]:
+    let at = words.find(label)
+    doAssert at >= 0 and at + 1 < words.len and words[at + 1] == text, label & ": " & $words
+  doAssert "About" in words
+  # On the watch: scrolled to the end, nothing drawn in the page's margins
+  # (an unwrapped value would run past the scroll bar into the right one).
+  var image = scene.drawAt(240, 296)
+  let target = uiTarget(SceneSettingsId, 1, create = false)
+  for r in target.regions:
+    if r.scrollY > 0:
+      target.input.scrollTo(r.key, 0, r.scrollY.float32)
+  image = scene.drawAt(240, 296)
+  if previews.len > 0: image.writeFile(previews / "settings-about-watch.png")
+  let background = image[0, 295]
+  for y in 60 ..< 296:
+    for x in [0, 1, 2, 3, 238, 239]:
+      doAssert image[x, y] == background, "the watch's About reaches its margin at " & $(x, y)
+  # A Linux frame's: its driver from the frame's own config, its SoC before
+  # its machine, and what a host does not say left out.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": [], "about": {"chip": "aarch64", "soc": "bcm2711",
+      "cores": 4, "mhz": 1500, "board": "Raspberry Pi 4 Model B Rev 1.4", "system": "Debian GNU/Linux 12 (bookworm)",
+      "memory": [3977236480, 3111292928], "storage": [31268536320, 21474836480], "uptime": 300}}
+  let pi = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  pi.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  words.setLen(0)
+  texts(SceneSettingsScene(pi).tree(480, 480, false, "", info = frameSettingsRead()), words)
+  for (label, text) in [("Chip", "BCM2711 \xc2\xb7 ARM 64-bit \xc2\xb7 4 cores \xc2\xb7 1500 MHz"),
+      ("Board", "Raspberry Pi 4 Model B Rev 1.4"), ("System", "Debian GNU/Linux 12 (bookworm)"),
+      ("Display", "pimoroni.hyperpixel4sq_touch \xc2\xb7 480\xc3\x97480"), ("Memory", "2.9 GB free of 3.7 GB"),
+      ("Storage", "20 GB free of 29 GB"), ("Uptime", "0:05")]:
+    let at = words.find(label)
+    doAssert at >= 0 and at + 1 < words.len and words[at + 1] == text, label & ": " & $words
+  for label in ["PSRAM", "Flash", "SD card", "MAC address", "Frame ID", "Build"]:
+    doAssert label notin words, label
+  image = pi.draw()
+  pi.scrollToEnd()
+  image = pi.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-about-pi.png")
+  # A round panel (the 1.75" AMOLED): the card in the list inside the circle.
+  let round = FrameConfig(width: 480, height: 480, device: "amoled.co5300_466x466", scalingMode: "cover",
+    saveAssets: %*false)
+  let disc = settings.exportedScene.init(SceneSettingsId.SceneId, round, logger, %*{})
+  disc.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  image = disc.draw()
+  disc.scrollToEnd()
+  image = disc.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-about-round.png")
+  let rim = image[0, 0]
+  for y in 0 ..< 480:
+    for x in 0 ..< 480:
+      if not insideRound(480, 480, x, y, RoundInset):
+        doAssert image[x, y] == rim, "the round About drawn off the glass at " & $(x, y)
+  frameSettingsRead = nil
+
 block it_opens_on_the_frame_page_with_no_scene_showing:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     %*{"rotate": 0, "renderScale": 0, "actions": []}

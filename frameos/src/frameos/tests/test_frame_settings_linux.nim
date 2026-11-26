@@ -7,6 +7,8 @@ import frameos/frame_settings_lock
 import frameos/frame_settings_linux
 import frameos/local_access
 import frameos/cloud/link_state
+import frameos/about_linux
+from frameos/utils/system import setSystemHostnameForTest
 
 # The settings panel's frame page on a Linux frame (docs/scene-settings.md
 # "The frame page"): what the host hands the page, the plane's switch and the
@@ -261,5 +263,56 @@ suite "the frame page on a Linux frame":
     writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5")
     linuxFrameSettingsAction("linkCloud")
     check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+
+  test "About: what the frame is, read off /proc, /sys and /etc, and the plane's address":
+    # docs/scene-settings.md "About": numbers as they are, bytes as bytes,
+    # [total, free] for what fills; a fact the system does not say is left out.
+    let root = dir / "root"
+    for (path, text) in [("/proc/device-tree/model", "Raspberry Pi 4 Model B Rev 1.4\0"),
+        ("/proc/device-tree/compatible", "raspberrypi,4-model-b\0brcm,bcm2711\0"),
+        ("/proc/meminfo", "MemTotal:        3884024 kB\nMemFree:          912344 kB\nMemAvailable:    3038372 kB\n"),
+        ("/proc/uptime", "273900.52 1083260.11\n"),
+        ("/etc/os-release", "PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nID=debian\n"),
+        ("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "1500000\n"),
+        ("/sys/class/net/eth0/address", "dc:a6:32:01:02:03\n"),
+        ("/sys/class/net/wlan0/address", "dc:a6:32:0a:0b:0c\n")]:
+      createDir(parentDir(root & path))
+      writeFile(root & path, text)
+    aboutRoot = root
+    aboutMachineForTest = "aarch64"
+    setSystemHostnameForTest("kitchen")
+    var facts = linuxAboutFacts("wlan0", dir)
+    check facts["chip"] == %"aarch64"
+    check facts["soc"] == %"bcm2711"
+    check facts["cores"].getInt() >= 1
+    check facts["mhz"] == %1500
+    check facts["board"] == %"Raspberry Pi 4 Model B Rev 1.4"
+    check facts["system"] == %"Debian GNU/Linux 12 (bookworm)"
+    check facts["memory"] == %*[3884024 * 1024, 3038372 * 1024]
+    check facts["uptime"] == %273900
+    check facts["mac"] == %"dc:a6:32:0a:0b:0c"
+    check facts["hostname"] == %"kitchen"
+    check facts["storage"].len == 2 and facts["storage"][0].getBiggestInt() >= facts["storage"][1].getBiggestInt()
+    # No Wi-Fi device known: wlan0's, and without one the wired one. A system
+    # that says less, less.
+    check linuxAboutFacts("", dir)["mac"] == %"dc:a6:32:0a:0b:0c"
+    removeFile(root & "/sys/class/net/wlan0/address")
+    check linuxAboutFacts("", dir)["mac"] == %"dc:a6:32:01:02:03"
+    removeFile(root & "/proc/device-tree/model")
+    removeFile(root & "/proc/device-tree/compatible")
+    removeFile(root & "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+    facts = linuxAboutFacts("wlan0", dir / "missing")
+    check not facts.hasKey("board") and not facts.hasKey("soc") and not facts.hasKey("mhz")
+    check not facts.hasKey("storage")
+    # On the page, with where the backend that manages the frame is.
+    writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5", serverApiKey = "k")
+    let about = linuxFrameSettingsRead()["about"]
+    check about["chip"] == %"aarch64"
+    check about["server"].getStr().startsWith("http://10.0.0.5:")
+    writeConfig(true)
+    check not linuxFrameSettingsRead()["about"].hasKey("server")
+    aboutRoot = ""
+    aboutMachineForTest = ""
+    setSystemHostnameForTest("")
 
 removeDir(dir)

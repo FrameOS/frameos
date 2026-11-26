@@ -36,6 +36,7 @@ import frameos/server/api
 import frameos/frame_service_keys
 from frameos/utils/system import readFileNoFollow, writePrivateFile
 from frameos/upgrade import installedFrameOSVersion
+import frameos/about_linux
 import system/sceneSettings/scene as sceneSettings
 
 const
@@ -364,6 +365,15 @@ proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
         if f.connected and f.ip.len > 0:
           wifi["ip"] = %f.ip
         result["wifi"] = wifi
+      # What the frame is (about_linux.nim), and where the plane that
+      # manages it is.
+      var about = linuxAboutFacts(f.device)
+      if manager == "FrameOS backend":
+        about["server"] = %(normalizeServerScheme(config.serverScheme, config.serverPort) & "://" &
+          config.serverHost & ":" & $config.serverPort)
+      elif manager.len > 0:
+        about["server"] = %cloudLinkFacts().providerUrl
+      result["about"] = about
       linkFacts(config, f, result)
     except Exception:
       result = nil

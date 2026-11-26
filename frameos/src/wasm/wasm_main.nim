@@ -595,7 +595,9 @@ proc wasmFrameSettingsRead(): JsonNode {.nimcall, gcsafe, raises: [].} =
       if not framePage or frameConfig.isNil:
         return nil
       result = %*{"rotate": frameConfig.rotate, "renderScale": frameConfig.renderScale,
-        "version": publishedFrameOSVersion(compiledFrameOSVersion()), "actions": ["restart"]}
+        "version": publishedFrameOSVersion(compiledFrameOSVersion()), "actions": ["restart"],
+        # What the frame is: the page's tab, the panel the frame's config says.
+        "about": {"chip": "wasm"}}
       if framePageNote.len > 0:
         result["note"] = %framePageNote
     except Exception:

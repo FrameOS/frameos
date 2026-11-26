@@ -125,6 +125,12 @@ const
     ("github", "api_key", "GitHub API key"), ("frameOS", "apiKey", "FrameOS Gallery API key")]
   KeysNote = "A key typed here stays on this frame and is used instead of the one its control plane " &
     "sends. An address typed here is sent only keys typed here. Empty a field to remove its key."
+  # The About card's rows (the host's `about`, docs/scene-settings.md
+  # "About"), in the order shown: the fact's key and its name.
+  AboutRows = [(cstring"chip", cstring"Chip"), ("board", "Board"), ("system", "System"), ("display", "Display"),
+    ("psram", "PSRAM"), ("memory", "Memory"), ("flash", "Flash"), ("storage", "Storage"), ("card", "SD card"),
+    ("uptime", "Uptime"), ("mac", "MAC address"), ("hostname", "Host name"), ("frameId", "Frame ID"),
+    ("server", "Server"), ("build", "Build")]
 
 var
   # What the last handler did: its number and the text it carried. Read by
@@ -1102,6 +1108,113 @@ proc linkPage(look: Look, link: JsonNode, width, height: int, color: bool, addre
     row.children.add look.pressButton("Change address", AAddress)
   words.children.add row
 
+proc cardClass(look: Look): string =
+  if look.paper: "flex flex-col gap-1 p-3 rounded-lg border-2 border-black"
+  else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900"
+
+proc line(card: SvgNode, look: Look, label, text: string) =
+  ## A card's row: the text beside its name where the two fit side by side,
+  ## under it where they do not (a small or round panel), wrapped there rather
+  ## than cut; none for no text.
+  if text.len > 0:
+    let row = el("div", "flex flex-wrap gap-x-3", el("span", look.grey, SvgNode(text: label)).role("muted"))
+    row.children.add el("span", "ml-auto text-right", SvgNode(text: text))
+    card.children.add row
+
+proc addBytes(s: var string, n: BiggestInt) =
+  ## 512 KB, 7.6 MB, 29 GB: a tenth under ten of a unit, in 1024s.
+  var
+    unit = 0
+    base = 1'i64
+  while unit < 4 and n >= base * 1024:
+    base = base * 1024
+    inc unit
+  let tenths = (n * 10 + base div 2) div base
+  if unit > 0 and tenths < 100:
+    s.addInt(tenths div 10)
+    if tenths mod 10 != 0:
+      s.add '.'
+      s.add char(ord('0') + int(tenths mod 10))
+  else:
+    s.addInt((tenths + 5) div 10)
+  s.add ' '
+  if unit > 0:
+    s.add "KMGT"[unit - 1]
+  s.add 'B'
+
+proc addAbout(s: var string, self: SceneSettingsScene, about: JsonNode, key: string) =
+  ## One About row's words from the host's facts; none leaves the row out.
+  const Dot = " \xc2\xb7 "
+  let value = about{key}
+  if key == "chip":
+    # The processor: an ESP32's target ("esp32-s3"), a Linux kernel's
+    # machine (uname) after its SoC where the device tree names one, its
+    # cores and its clock.
+    let chip = value.getStr()
+    when defined(frameosEmbedded):
+      s.add chip.toUpperAscii()
+    else:
+      let soc = about{"soc"}.getStr()
+      if soc.len > 0:
+        s.add soc.toUpperAscii()
+        s.add Dot
+      s.add(if chip in ["aarch64", "arm64"]: "ARM 64-bit" elif chip == "armv7l": "ARMv7 32-bit"
+        elif chip == "armv6l": "ARMv6 32-bit" elif chip == "x86_64": "x86-64" elif chip == "wasm": "WebAssembly"
+        else: chip.toUpperAscii())
+    let cores = about{"cores"}.getInt()
+    if cores > 1:
+      s.add Dot
+      s.addInt cores
+      s.add " cores"
+    let mhz = about{"mhz"}.getInt()
+    if mhz > 0:
+      s.add Dot
+      s.addInt mhz
+      s.add " MHz"
+  elif key == "display":
+    # The panel's driver (a Linux frame's is its `device`) and its size.
+    s.add value.getStr()
+    let config = self.frameConfig
+    when not defined(frameosEmbedded):
+      if s.len == 0 and config.device != "wasm":
+        s.add config.device
+    if config.width > 0 and config.height > 0:
+      if s.len > 0:
+        s.add Dot
+      s.addInt config.width
+      s.add "\xc3\x97"
+      s.addInt config.height
+  elif value.isNil:
+    discard
+  elif value.kind == JString:
+    s.add value.getStr()
+  elif value.kind == JArray:
+    # What fills: [total, free].
+    if value.elems.len == 2:
+      s.addBytes value.elems[1].getBiggestInt()
+      s.add " free of "
+      s.addBytes value.elems[0].getBiggestInt()
+  elif key == "uptime":
+    # 3 d 4:05, 0:05: days, then hours and minutes.
+    let n = value.getBiggestInt()
+    if n >= 86400:
+      s.addInt n div 86400
+      s.add " d "
+    s.addInt n mod 86400 div 3600
+    s.add(if n mod 3600 < 600: ":0" else: ":")
+    s.addInt n mod 3600 div 60
+  else:
+    s.addBytes value.getBiggestInt()
+
+proc aboutCard(self: SceneSettingsScene, look: Look, about: JsonNode): SvgNode =
+  ## What the frame is (the host's `about`): a row a fact it gave.
+  result = el("div", cardClass(look), el("div", "font-bold", SvgNode(text: "About")))
+  for (key, label) in AboutRows:
+    var text: string
+    text.addAbout(self, about, $key)
+    result.line(look, $label, text)
+  result = result.role("card")
+
 proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit, width,
     height: int): SvgNode =
   ## The frame page: how it is doing (a card of label and text rows), its
@@ -1138,14 +1251,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     row.children.add look.pressButton("Cancel", ACancelUnlink)
     result.children.add row
     return
-  let card = el("div", if look.paper: "flex flex-col gap-1 p-3 rounded-lg border-2 border-black"
-    else: "flex flex-col gap-1 p-3 rounded-lg bg-zinc-900")
-  proc line(card: SvgNode, look: Look, label, text: string) =
-    if text.len > 0:
-      let row = el("div", "flex gap-3", el("span", look.grey, SvgNode(text: label)).role("muted"))
-      row.children.add el("div", "grow min-w-0 flex justify-end",
-        el("span", "truncate", SvgNode(text: text)))
-      card.children.add row
+  let card = el("div", cardClass(look))
   let wifi = info{"wifi"}
   if not wifi.isNil and wifi.kind == JObject:
     card.line(look, "Wi-Fi", wifiLine(wifi))
@@ -1221,6 +1327,10 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       else: ""
     if note.len > 0:
       result.note(look, note)
+  # What the frame is, last: looked up, not changed.
+  let about = info{"about"}
+  if not about.isNil and about.kind == JObject:
+    result.children.add self.aboutCard(look, about)
 
 proc box(c: var string, x, y, w, h: int) =
   c.add "absolute"

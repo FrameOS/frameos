@@ -2,8 +2,9 @@
  * The frame page of the settings panel on the screen, behind its gear
  * (system/sceneSettings, docs/scene-settings.md "The frame page"): the facts
  * the page shows (Wi-Fi, address, who manages the frame, the version, the
- * rotation and render scale) and what it sets (the Wi-Fi network, the
- * rotation, the scale). The page has the words; this file has the facts.
+ * rotation and render scale, what the frame is: `about`) and what it sets
+ * (the Wi-Fi network, the rotation, the scale). The page has the words; this
+ * file has the facts.
  *
  * The Nim scene asks through three hooks (embedded_runtime.nim); every call
  * comes on the render task, under the runtime lock. What the page shows
@@ -24,15 +25,23 @@
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_flash.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_random.h"
+#include "esp_spiffs.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "nvs.h"
 
+#include "fos_assets_sd.h"
+#include "fos_board.h"
 #include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_cpu.h"
 #include "fos_lan_access.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
@@ -68,9 +77,10 @@ static const char *manager(void)
 /* The page's facts as JSON, written as text: the keys are literals, and what
  * the frame says (a network's name) is escaped on its way in. A buffer of
  * JSON_CAP holds the worst case: every name in range and the saved one, 32
- * bytes each, every byte escaped to \u00XX, and a link code with its QR text,
- * its server and why it failed. */
-#define JSON_CAP (1280 + (FOS_URL_LEN + 64) * 6 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
+ * bytes each, every byte escaped to \u00XX, a link code with its QR text,
+ * its server and why it failed, and the About facts (the server, the preset,
+ * the panel and the host name escaped). */
+#define JSON_CAP (1536 + (FOS_URL_LEN * 2 + 64) * 6 + 3 * FOS_STR_LEN * 6 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
 
 typedef struct {
     char *buf;
@@ -111,6 +121,52 @@ static void put_pair(out_t *out, const char *key, const char *text)
     put(out, key);
     put(out, "\":");
     put_string(out, text);
+}
+
+/* What the frame is, for the page's About card (docs/scene-settings.md
+ * "About"): numbers as they are, bytes as bytes ([total, free] for what
+ * fills), the frame id as text; the page has the words and the units. */
+static void put_about(out_t *out, const fos_config_t *config)
+{
+    char line[256];
+    size_t state_total = 0, state_used = 0;
+    esp_spiffs_info("state", &state_total, &state_used);
+    uint32_t flash = 0;
+    esp_flash_get_size(NULL, &flash);
+    uint8_t mac[6] = {0};
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char build[9];
+    esp_app_get_elf_sha256(build, sizeof(build));
+    snprintf(line, sizeof(line),
+             ",\"about\":{\"chip\":\"%s\",\"cores\":%d,\"mhz\":%d,\"memory\":[%u,%u],\"flash\":%lu,"
+             "\"storage\":[%u,%u],\"uptime\":%lld,\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"build\":\"%s\"",
+             fos_board_target(), portNUM_PROCESSORS, fos_cpu_mhz(),
+             (unsigned)heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned long)flash, (unsigned)state_total,
+             (unsigned)(state_total - state_used), esp_timer_get_time() / 1000000, mac[0], mac[1], mac[2], mac[3],
+             mac[4], mac[5], build);
+    put(out, line);
+    size_t psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    if (psram > 0) {
+        snprintf(line, sizeof(line), ",\"psram\":[%u,%u]", (unsigned)psram,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+        put(out, line);
+    }
+    if (fos_assets_sd_mounted()) {
+        snprintf(line, sizeof(line), ",\"card\":%llu", (unsigned long long)fos_assets_sd_capacity_bytes());
+        put(out, line);
+    }
+    if (config->frame_id) {
+        snprintf(line, sizeof(line), ",\"frameId\":\"%lu\"", (unsigned long)config->frame_id);
+        put(out, line);
+    }
+    if (config->hardware_preset[0]) put_pair(out, "board", config->hardware_preset);
+    put_pair(out, "display", config->panel);
+    if (config->hostname[0]) put_pair(out, "hostname", config->hostname);
+    /* Where the plane that manages it is. */
+    if (config->backend_url[0]) put_pair(out, "server", config->backend_url);
+    else if (manager() != NULL) put_pair(out, "server", config->cloud_url);
+    put(out, "}");
 }
 
 char *fos_frame_settings_json(void)
@@ -175,6 +231,7 @@ char *fos_frame_settings_json(void)
     }
     if (manager() != NULL) put_pair(&out, "managedBy", manager());
     put_pair(&out, "version", esp_app_get_description()->version);
+    put_about(&out, config);
     /* The clock in the frame's own time zone; empty while it is not set.
      * Not strftime, which alone brings 12 KB of libc. */
     time_t now = time(NULL);
