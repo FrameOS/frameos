@@ -155,6 +155,9 @@ const char *fos_board_touch_pins(const char *hardware_preset);
  * of the `touch_pins` spec a frame stores. 0 for most boards. */
 #define FOS_BOARD_TOUCH_MIRROR_X 1
 #define FOS_BOARD_TOUCH_MIRROR_Y 2
+/* A controller with no range of its own (FocalTech's) that reports along the
+ * panel's other axis: its range is the panel's turned, so the axes swap. */
+#define FOS_BOARD_TOUCH_ACROSS 4
 int fos_board_touch_mirror(const char *hardware_preset);
 
 /* The board's I2S audio codec as the `codec_pins` spec

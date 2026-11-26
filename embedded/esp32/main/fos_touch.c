@@ -1160,13 +1160,16 @@ esp_err_t fos_touch_start(void)
     }
     /* A report left over from before the reset would hold the next one back. */
     if (s_controller == CTRL_GT911) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
-    /* A controller with no configured range reports in the panel's. */
-    if (s_x_max <= 1 || s_y_max <= 1 || s_x_max > 4096 || s_y_max > 4096) {
-        s_x_max = fos_display_width();
-        s_y_max = fos_display_height();
-    }
-    s_swap = fos_touch_axes_swapped(s_x_max, s_y_max, fos_display_width(), fos_display_height());
+    /* A controller with no configured range reports in the panel's, or in
+     * the panel's turned (FOS_BOARD_TOUCH_ACROSS). */
     s_mirror = fos_board_touch_mirror(config->hardware_preset);
+    if (s_x_max <= 1 || s_y_max <= 1 || s_x_max > 4096 || s_y_max > 4096) {
+        bool across = s_mirror & FOS_BOARD_TOUCH_ACROSS;
+        s_x_max = across ? fos_display_height() : fos_display_width();
+        s_y_max = across ? fos_display_width() : fos_display_height();
+    }
+    s_mirror &= FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y;
+    s_swap = fos_touch_axes_swapped(s_x_max, s_y_max, fos_display_width(), fos_display_height());
     s_irq = xSemaphoreCreateBinary();
     if (!s_irq) return ESP_ERR_NO_MEM;
     if (!s_polled) {

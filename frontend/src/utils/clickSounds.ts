@@ -28,6 +28,7 @@ export const SOUND_HARDWARE_PRESETS: ReadonlySet<string> = new Set([
   'waveshare_esp32_s3_epaper_13_3e6',
   // Its vibration motor plays the notes.
   'elecrow_crowpanel_watch_2in01',
+  'elecrow_crowpanel_advance_2in8',
 ])
 
 /**

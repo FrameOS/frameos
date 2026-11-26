@@ -114,6 +114,8 @@ export const EMBEDDED_PRESET_MICROPHONE_PINS: Partial<Record<FrameEmbeddedHardwa
   seeed_reterminal_e1002: { clk: 42, data: 41, pwr: 38 },
   seeed_reterminal_e1003: { clk: 42, data: 41, pwr: 38 },
   elecrow_crowpanel_watch_2in01: { clk: 12, data: 11, pwr: -1 },
+  // GPIO45 high turns the board's switch from the wireless header to the microphone.
+  elecrow_crowpanel_advance_2in8: { clk: 9, data: 10, pwr: 45 },
 }
 
 /**

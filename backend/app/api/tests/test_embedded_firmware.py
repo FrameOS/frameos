@@ -737,6 +737,43 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_advance_7():
     )
 
 
+def test_embedded_hardware_preset_for_elecrow_crowpanel_advance_2in8():
+    frame = Frame(id=23, embedded={"hardwarePreset": "elecrow_crowpanel_advance_2in8"})
+    ensure_embedded_frame_defaults(frame)
+    # The 2.8" 320x240 ST7789 on one SPI lane: the watch's driver, its own board row.
+    assert frame.device == "lcd.st7789_320x240"
+    assert embedded_panel_for_frame(frame) == "LCD_ST7789_320x240"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("LCD_ST7789_320x240") == FOS_PIXEL_RGB565
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
+    # BOOT like the 7.0"'s, and held it talks: the board has a microphone.
+    assert frame.event_map[:3] == [
+        {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    ]
+    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "LCD_ST7789_320x240"
+    assert settings["buzzer_pin"] == "8"
+    assert frame.device_config["micClkPin"] == 9
+    assert frame.device_config["micDataPin"] == 10
+    assert frame.device_config["micPwrPin"] == 45
+    # The FT6336U on SDA15/SCL16, no clock on the bus (fos_board.c).
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["elecrow_crowpanel_advance_2in8"]
+    assert preset["touchPins"] == "sda=15,scl=16,int=47,rst=48,en=-1"
+    assert "i2cBuses" not in preset
+    assert "elecrow_crowpanel_advance_2in8" in embedded_firmware_module.EMBEDDED_SOUND_PRESETS
+    assert embedded_panel_for_frame(Frame(id=24, device="lcd.st7789_320x240", embedded={"platform": "esp32-s3"})) == (
+        "LCD_ST7789_320x240"
+    )
+
+
 def test_embedded_hardware_preset_for_guition_esp32_4848s040():
     frame = Frame(id=16, embedded={"hardwarePreset": "guition_esp32_4848s040"})
     ensure_embedded_frame_defaults(frame)

@@ -116,6 +116,11 @@ const boardChoices = [
     platform: genericPlatform,
   },
   {
+    label: 'Elecrow CrowPanel Advance 2.8" (320x240 LCD ESP32-S3)',
+    value: 'hw:elecrow_crowpanel_advance_2in8',
+    platform: genericPlatform,
+  },
+  {
     label: 'Elecrow CrowPanel 1.46" rotary (ESP32-S3)',
     value: 'hw:elecrow_crowpanel_rotary_1in46',
     platform: genericPlatform,

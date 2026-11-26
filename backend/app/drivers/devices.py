@@ -133,6 +133,9 @@ NATIVE_DEVICE_DIMENSIONS = {
     # The Elecrow CrowPanel 1.46" rotary's round ST77961 on one SPI lane
     # (embedded/esp32 LCD_ST77961_360x360); no Pi driver.
     "lcd.st77961_360x360": (360, 360),
+    # The Elecrow CrowPanel Advance 2.8"'s ST7789 IPS on one SPI lane
+    # (embedded/esp32 LCD_ST7789_320x240); no Pi driver.
+    "lcd.st7789_320x240": (320, 240),
     # The Elecrow CrowPanel 5.79"'s glass in black and white (embedded/esp32
     # EPD_5in79_BW); on a Pi the Waveshare 5.79" driver, four greys.
     "waveshare.EPD_5in79_BW": (792, 272),

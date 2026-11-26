@@ -572,6 +572,23 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     psramMB: 8,
     pins: ESP32_SUNTON_ESP32_8048S070_PIN_LAYOUT,
   },
+  // The Elecrow CrowPanel Advance 2.8": its ST7789 is the firmware's board
+  // table's too; its TF slot is on a bus of its own.
+  elecrow_crowpanel_advance_2in8: {
+    label: 'Elecrow CrowPanel Advance 2.8" (320x240 LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st7789_320x240',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_SUNTON_ESP32_8048S070_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'elecrow_crowpanel_advance_2in8',
+      pins: { cs: 7, sck: 5, miso: 4, mosi: 6, pwr: -1, det: -1 },
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
   // Its LCD is wired by the firmware's board table, like the Indicator's.
   guition_esp32_4848s040: {
     label: 'Guition ESP32-4848S040 (4" LCD ESP32-S3)',

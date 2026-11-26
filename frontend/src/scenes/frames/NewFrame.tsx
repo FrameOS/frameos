@@ -510,6 +510,25 @@ const SUNTON_ESP32_8048S070_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
+// The CrowPanel Advance 2.8"'s BOOT works like the Sunton's and, the board
+// having a microphone, held it talks; the edges swipe. Mirrors
+// EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP.
+const ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
+  { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
+  { event: 'button', match: { label: 'BOOT', action: 'longPress' }, emit: 'voiceChat', as: {} },
+  ...TOUCH_EDGE_SWIPES,
+]
+// Its TF slot on a bus of its own (EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_PINS).
+const ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  enabled: true,
+  preset: 'elecrow_crowpanel_advance_2in8',
+  mountPath: '/srv/assets',
+  pins: { cs: 7, sck: 5, miso: 4, mosi: 6, pwr: -1, det: -1 },
+  maxFrequencyKHz: 20000,
+}
 // The AMOLED 1.75's PWR key (on its IO expander, the firmware's own) works like
 // the Indicator's key, BOOT held talks into its microphones, the edges swipe.
 const WAVESHARE_AMOLED_1_75_EVENT_MAP: EventMapRule[] = [
@@ -772,6 +791,19 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     pins: SUNTON_ESP32_8048S070_PINS,
     gpioButtons: [{ pin: 0, label: 'BOOT' }],
     eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
+  },
+  // The Elecrow CrowPanel Advance 2.8" (V1.2): its ST7789 is wired by the
+  // firmware's board table; BOOT as on the 7.0", held it talks.
+  elecrow_crowpanel_advance_2in8: {
+    label: 'Elecrow CrowPanel Advance 2.8" (320x240 LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st7789_320x240',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: SUNTON_ESP32_8048S070_PINS,
+    gpioButtons: [{ pin: 0, label: 'BOOT' }],
+    eventMap: ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP,
+    sdCardAssets: ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_ASSETS,
   },
   // GPIO0 is an RGB data line, so there is no key: only the edges swipe.
   guition_esp32_4848s040: {

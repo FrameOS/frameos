@@ -218,6 +218,20 @@ EXTRA_PANELS = [
         "display": "fos_lcd_qspi_display",
         "sleep": "fos_lcd_qspi_sleep",
     },
+    {
+        # The Elecrow CrowPanel Advance 2.8"'s IPS glass: an ST7789 on one
+        # SPI lane holding its own picture, the watch's driver.
+        "name": "LCD_ST7789_320x240",
+        "width": 320,
+        "height": 240,
+        "format": 9,  # FOS_PIXEL_RGB565
+        "bus": 4,
+        "header": "lcd_qspi_amoled.h",
+        "init": "fos_lcd_qspi_init",
+        "clear": "fos_lcd_qspi_clear",
+        "display": "fos_lcd_qspi_display",
+        "sleep": "fos_lcd_qspi_sleep",
+    },
 ]
 
 FOS_PANEL_BUS_SPI = 0
