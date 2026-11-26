@@ -1640,6 +1640,35 @@ def test_provisioning_plan_carries_the_conditional_settings_too():
     assert "max_http_response_bytes" not in _provisioned(embedded_provisioning_plan(frame))
 
 
+@pytest.mark.skipif(not _FOS_CONSOLE_C.is_file(), reason="needs the embedded firmware sources")
+def test_console_layout_choice_is_written_as_the_runtime_reads_it():
+    """`set layout` (the browser flasher's layout for a standalone frame) writes
+    the frame's own layout choice from C, where the Nim runtime reads it: the
+    state of `frame-layout`, `{"active": ...}`, with the host's format marker,
+    without which the runtime drops the file. The two sides share no header,
+    so the names are pinned here."""
+    runtime = _FOS_CONSOLE_C.parents[3] / "frameos" / "src"
+    choice = (runtime / "frameos" / "layout_choice.nim").read_text(encoding="utf-8")
+    host = (runtime / "embedded" / "embedded_runtime.nim").read_text(encoding="utf-8")
+    console = _FOS_CONSOLE_C.read_text(encoding="utf-8")
+
+    def nim_const(source: str, name: str) -> str:
+        found = re.search(rf"^\s*{name}\*?\s*=\s*(\S+)", source, re.MULTILINE)
+        assert found, f"{name} not found"
+        return found.group(1).strip('"')
+
+    def c_define(name: str) -> str:
+        found = re.search(rf"^#define {name} (\S+)", console, re.MULTILINE)
+        assert found, f"#define {name} not found in fos_console.c"
+        return found.group(1).strip('"')
+
+    assert c_define("LAYOUT_CHOICE_STATE_ID") == nim_const(choice, "ChoiceStateId")
+    assert c_define("SCENE_STATE_FORMAT_KEY") == nim_const(host, "const SceneStateFormatKey")
+    assert c_define("SCENE_STATE_FORMAT") == nim_const(host, "const SceneStateFormat")
+    assert 'savedLayoutState(ChoiceStateId){"active"}' in choice
+    assert 'cJSON_AddStringToObject(state, "active", value)' in console
+    assert "layout" in _console_set_keys()
+
 
 def test_embedded_backend_url_states_its_scheme() -> None:
     """The provisioning URL reads frame.server_scheme; it never guesses TLS

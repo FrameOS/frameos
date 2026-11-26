@@ -1324,6 +1324,7 @@ export type EmbeddedUsbConfigKey =
   | 'render_scale'
   | 'frame_settings_on_screen'
   | 'settings_unlock'
+  | 'layout'
   | 'time_zone'
   | 'max_http_response_bytes'
   | 'server_send_logs'

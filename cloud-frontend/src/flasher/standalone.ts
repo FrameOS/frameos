@@ -149,8 +149,17 @@ function setting(key: EmbeddedUsbConfigKey, value: string, secret = false) {
  * in order: the board bundle first (`set hardware` applies panel, wiring,
  * buttons, SD slot and battery sensing in one), then what overrides it.
  * No `backend`, no `cloud_url`: a frame with no plane.
+ *
+ * Then the layout, as the frame's own choice (`set layout`, the frame page's
+ * Layout): the scene switcher the board opens on as its home wears the
+ * frame's choice alone, never what the scenes name, and so does a scene
+ * installed on the frame later. Sent with no layout too (`-`, each scene's
+ * own): a flash leaves `/state`, and a choice from before with it.
  */
-export function standaloneProvisioning(choices: StandaloneChoices): ProvisioningCommands {
+export function standaloneProvisioning(
+  choices: StandaloneChoices,
+  layout: Pick<FlasherLayout, 'id'> | null = null
+): ProvisioningCommands {
   const settings = []
   const board = standaloneBoard(choices.board)
   if (board) {
@@ -173,6 +182,7 @@ export function standaloneProvisioning(choices: StandaloneChoices): Provisioning
   if (choices.timeZone) {
     settings.push(setting('time_zone', choices.timeZone))
   }
+  settings.push(setting('layout', layout?.id || '-'))
   return {
     settings,
     wifi: choices.wifi && choices.wifi.ssid ? { ssid: choices.wifi.ssid, password: choices.wifi.password } : null,

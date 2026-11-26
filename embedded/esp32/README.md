@@ -659,6 +659,7 @@ frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
 frameos> set battery_divider 2.0         # Vbat = Vpin * divider
 frameos> set frame_settings_on_screen 0 # hide the settings panel's frame page (the plane's switch)
 frameos> set settings_unlock 1           # show it whatever the plane says, until set back to 0
+frameos> set layout layout-reterminal-sticky # the frame's own layout (none: no layout, -: each scene's own), at the next start
 frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset

@@ -146,7 +146,12 @@ the layout around the scene in front (`types.frameLayoutShown`). The choice cove
 until "As each scene says" is picked, and what the gear sets overlays the install's `layout.state`. Both are
 the frame's to keep (`layout_choice.nim`, in the hosts' per-scene state files under
 `frame-layout` and the layout's id). No plane is told: the selects in the
-workspace keep showing what each scene was given.
+workspace keep showing what each scene was given. An ESP32's console sets the
+choice too (`set layout <id>`, `none`, or `-` for each scene's own; read at
+the next start), and the browser flasher sends the layout it picked for a
+standalone frame that way: the scene switcher a tap board opens on as its home
+wears the frame's choice alone (docs/scene-switcher.md), never the layout the
+scenes name.
 
 **What a layout can ask.** `app.frame.sceneName` is the name of the scene it
 wraps (its own, shown on its own), `app.frame.wifiRssi` and

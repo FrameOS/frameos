@@ -580,13 +580,13 @@ export const flasherLogic = kea<flasherLogicType>([
             actions.setPhase('error')
             return
           }
-          plan = standaloneProvisioning(values.choices)
+          const layout = values.chosenLayout
+          plan = standaloneProvisioning(values.choices, layout)
           const kind = values.boardKind
           // Fetched now, without waiting: the port prompt must stay the
           // click's first await. The engine asks for them after the flash.
           const fetched = Promise.all(values.chosenScenes.samples.map((sample) => sampleScenes(sample)))
           fetched.catch(() => undefined)
-          const layout = values.chosenLayout
           const layoutFetched = layout ? sampleScenes(layout) : Promise.resolve([])
           layoutFetched.catch(() => undefined)
           scenes = async () => starterSceneSet(await fetched, kind, (await layoutFetched)[0] ?? null)
