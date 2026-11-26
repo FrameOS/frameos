@@ -1360,6 +1360,33 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
     assert settings["led_type"] == "gpio"
 
 
+def test_embedded_hardware_preset_for_elecrow_crowpanel_epd_4in2():
+    frame = Frame(id=9, embedded={"hardwarePreset": "elecrow_crowpanel_epd_4in2"})
+    crowpanel_5in79 = Frame(id=10, embedded={"hardwarePreset": "elecrow_crowpanel_5in79"})
+
+    ensure_embedded_frame_defaults(frame)
+    ensure_embedded_frame_defaults(crowpanel_5in79)
+
+    # Its glass in black and white with partial updates, not the Waveshare
+    # 4.2"'s four greys.
+    assert embedded_panel_for_frame(frame) == "EPD_4in2_BW"
+    assert embedded_pixel_format_for_panel("EPD_4in2_BW") == FOS_PIXEL_1BPP
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "8MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    check_embedded_panel_fits_memory(frame)
+    # Wired as the 5.79", with its keys and their map.
+    assert embedded_pins_for_frame(frame) == embedded_pins_for_frame(crowpanel_5in79)
+    assert frame.gpio_buttons == crowpanel_5in79.gpio_buttons
+    assert frame.event_map == crowpanel_5in79.event_map
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "EPD_4in2_BW"
+    assert settings["pins"] == "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=7"
+    # The TF slot's supply is GPIO42.
+    assert settings["assets_sd_pins"] == "cs=10,sck=39,miso=13,mosi=40,pwr=42"
+    assert settings["led_pin"] == "41"
+
+
 def test_embedded_hardware_preset_for_inky_frames():
     for preset, panel, platform, flash in (
         ("pimoroni_inky_frame_4", "EPD_4in01f", "pico-w", "2MB"),

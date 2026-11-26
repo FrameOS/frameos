@@ -127,4 +127,14 @@ void EPD_4IN2_PartialDisplay(UWORD X_start,UWORD Y_start,UWORD X_end,UWORD Y_end
 
 void EPD_4IN2_Init_4Gray(void);
 void EPD_4IN2_4GrayDisplay(const UBYTE *Image);
+
+/* FrameOS: the glass in black and white with partial updates, on the
+ * waveforms Elecrow drives it with (the ESP32's EPD_4in2_BW, the Elecrow
+ * CrowPanel 4.2"). */
+int EPD_4in2_Init_BW(void);
+void EPD_4in2_Init_Partial_BW(void);
+void EPD_4in2_Clear_BW(void);
+void EPD_4in2_Display_BW(UBYTE *Image);
+void EPD_4in2_Display_Partial_BW(UBYTE *Image, UBYTE *Previous);
+void EPD_4in2_Rest(void);
 #endif

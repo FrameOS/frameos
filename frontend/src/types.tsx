@@ -41,6 +41,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'seeed_xiao_ee05'
   | 'seeed_xiao_epaper_7in5'
   | 'elecrow_crowpanel_5in79'
+  | 'elecrow_crowpanel_epd_4in2'
   | 'pimoroni_inky_frame_4'
   | 'pimoroni_inky_frame_5_7'
   | 'pimoroni_inky_frame_7_3'
@@ -456,6 +457,7 @@ export interface FrameType {
         | 'waveshare_esp32_s3_touch_amoled_1_75'
         | 'elecrow_crowpanel_5in79'
         | 'elecrow_crowpanel_advance_2in8'
+        | 'elecrow_crowpanel_epd_4in2'
       pins?: {
         cs?: number
         sck?: number

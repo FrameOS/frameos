@@ -321,6 +321,12 @@ export const ESP32_ELECROW_CROWPANEL_5IN79_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLay
   pwr: -1,
   det: -1,
 }
+// The CrowPanel 4.2" e-paper is wired as the 5.79"; its TF slot's supply is
+// switched on by GPIO42 (high).
+export const ESP32_ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  ...ESP32_ELECROW_CROWPANEL_5IN79_SD_CARD_PIN_LAYOUT,
+  pwr: 42,
+}
 
 // The Inky Frame carrier's wiring beyond the eight ESP32-vocabulary keys: BUSY
 // and the five front buttons sit behind a shift register (clock/latch/data,
@@ -762,6 +768,21 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       mountPath: '/srv/assets',
     },
   },
+  elecrow_crowpanel_epd_4in2: {
+    label: 'Elecrow CrowPanel 4.2" e-paper (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_4in2_BW',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'elecrow_crowpanel_epd_4in2',
+      pins: ESP32_ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
   // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
   // BOOTSEL and are provisioned via USB serial — the backend never builds
   // per-frame firmware for them.
@@ -1054,6 +1075,11 @@ export const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp
   {
     value: 'elecrow-crowpanel-5in79',
     label: 'Elecrow CrowPanel 5.79"',
+    pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+  },
+  {
+    value: 'elecrow-crowpanel-epd-4in2',
+    label: 'Elecrow CrowPanel 4.2" e-paper',
     pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
   },
   {

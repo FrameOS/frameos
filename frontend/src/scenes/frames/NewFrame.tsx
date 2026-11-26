@@ -629,6 +629,15 @@ const ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 10, sck: 39, miso: 13, mosi: 40, pwr: -1, det: -1 },
   maxFrequencyKHz: 20000,
 }
+// The CrowPanel 4.2" e-paper's TF slot: the same bus, its supply switched on by
+// GPIO42. Mirrors EMBEDDED_ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_PINS.
+const ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  ...ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS,
+  preset: 'elecrow_crowpanel_epd_4in2',
+  pins: { cs: 10, sck: 39, miso: 13, mosi: 40, pwr: 42, det: -1 },
+}
 // HOME, the top key, opens the scene switcher and held the scene's settings;
 // EXIT, the bottom one, is back; the rocker held walks the scene list. Mirrors
 // EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
@@ -999,6 +1008,24 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     ],
     eventMap: ELECROW_CROWPANEL_5IN79_EVENT_MAP,
     sdCardAssets: ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS,
+  },
+  // Wired as the 5.79", one SSD1683 400x300 in black and white.
+  elecrow_crowpanel_epd_4in2: {
+    label: 'Elecrow CrowPanel 4.2" e-paper (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_4in2_BW',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ELECROW_CROWPANEL_5IN79_PINS,
+    gpioButtons: [
+      { pin: 2, label: 'HOME' },
+      { pin: 1, label: 'EXIT' },
+      { pin: 4, label: 'NEXT' },
+      { pin: 5, label: 'OK' },
+      { pin: 6, label: 'PREV' },
+    ],
+    eventMap: ELECROW_CROWPANEL_5IN79_EVENT_MAP,
+    sdCardAssets: ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_ASSETS,
   },
   // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
   // BOOTSEL and are provisioned via USB serial — no backend firmware builds.

@@ -29,6 +29,7 @@ export const previewDevices: PreviewDevice[] = [
   { group: "E-paper", height: 1200, key: "waveshare-13in3e6", label: 'Waveshare 13.3" Spectra 6', panel: "spectra6", width: 1600 },
   { group: "E-paper", height: 480, key: "waveshare-7in5", label: 'Waveshare 7.5" black and white', panel: "blackWhite", width: 800 },
   { group: "E-paper", height: 272, key: "crowpanel-5in79", label: 'Elecrow CrowPanel 5.79" 4 greys', panel: "fourGray", width: 792 },
+  { group: "E-paper", height: 300, key: "crowpanel-epd-4in2", label: 'Elecrow CrowPanel 4.2" black and white', panel: "blackWhite", width: 400 },
   { group: "E-paper", height: 448, key: "inky-impression-5in7", label: 'Pimoroni Inky Impression 5.7" 7 colour', panel: "sevenColor", width: 600 },
   { group: "E-paper", height: 480, key: "inky-impression-7in3", label: 'Pimoroni Inky Impression 7.3" Spectra 6', panel: "spectra6", width: 800 },
   { group: "E-paper", height: 1200, key: "inky-impression-13in3", label: 'Pimoroni Inky Impression 13.3" Spectra 6', panel: "spectra6", width: 1600 },

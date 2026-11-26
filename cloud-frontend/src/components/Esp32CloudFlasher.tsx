@@ -168,6 +168,11 @@ const boardChoices = [
     value: 'hw:elecrow_crowpanel_5in79',
     platform: genericPlatform,
   },
+  {
+    label: 'Elecrow CrowPanel 4.2" e-paper (ESP32-S3)',
+    value: 'hw:elecrow_crowpanel_epd_4in2',
+    platform: genericPlatform,
+  },
   // The C3 presets of EMBEDDED_HARDWARE_PRESETS (esp32Hardware.ts, fos_console.c).
   { label: 'TRMNL OG (7.5" ESP32-C3)', value: 'hw:trmnl_og', platform: genericC3Platform },
   { label: 'TRMNL BWRY (7.5" color ESP32-C3)', value: 'hw:trmnl_bwry', platform: genericC3Platform },

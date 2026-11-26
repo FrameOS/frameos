@@ -524,6 +524,16 @@ static void test_crowpanel_boards(void)
           "NEXT held walks the scenes");
     CHECK(strstr(map, "edgeSwipe") == NULL && strstr(map, "voiceChat") == NULL, "no glass, no microphone");
     CHECK(map[0] == '[' && map[strlen(map) - 1] == ']', "a JSON list");
+
+    /* The CrowPanel 4.2" e-paper: wired as the 5.79", its keys' map the
+     * same, its TF slot's supply on GPIO42. */
+    const char *epd42 = "elecrow_crowpanel_epd_4in2";
+    char map42[1024];
+    fos_board_event_map(epd42, map42, sizeof(map42));
+    CHECK(strcmp(map42, map) == 0, "the 4.2's keys as the 5.79's");
+    CHECK(strcmp(fos_board_sd_pins(epd42), "cs=10,sck=39,miso=13,mosi=40,pwr=42") == 0, "the 4.2's TF slot");
+    CHECK(fos_board_led(epd42, &pin, &type) && pin == 41 && type == 0, "the 4.2's LED lit high on 41");
+    CHECK(fos_board_rails(epd42) == NULL && fos_board_buzzer_pin(epd42) == -1, "no rails, no buzzer");
 }
 
 /* The Elecrow CrowPanel Advance 7.0": its coprocessor's commands, its bus,

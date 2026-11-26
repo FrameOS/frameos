@@ -225,6 +225,10 @@ static const struct {
      * OK and turned NEXT / PREV) and no microphone; the edges swipe. */
     {"elecrow_crowpanel_rotary_1in46", CROWPANEL_WATCH_KEYS, NULL, true},
     {"elecrow_crowpanel_5in79", CROWPANEL_EPAPER_KEYS, NULL, false},
+    /* The CrowPanel 4.2" e-paper: the 5.79"'s keys on the same pins
+     * (Elecrow's schematic: IO2_MENU, IO1_EXIT, the rocker IO6_UP, IO4_DOWN
+     * and IO5_CONF). */
+    {"elecrow_crowpanel_epd_4in2", CROWPANEL_EPAPER_KEYS, NULL, false},
     /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
      * swipe, BOOT twice opens the switcher. */
     {"elecrow_crowpanel_advance_7", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
@@ -353,6 +357,7 @@ static const struct {
     /* The 1.46" rotary's power LED, GPIO40, lit low (Elecrow's schematic). */
     {"elecrow_crowpanel_rotary_1in46", 40, 1},
     {"elecrow_crowpanel_5in79", 41, 0},
+    {"elecrow_crowpanel_epd_4in2", 41, 0},
 };
 
 bool fos_board_led(const char *hardware_preset, int *pin, int *type)
@@ -571,6 +576,9 @@ static const struct {
     /* The CrowPanel Advance 2.8"'s TF slot on its own bus: CS7, SCK5, MISO4,
      * MOSI6 (V1.2 schematic). */
     {"elecrow_crowpanel_advance_2in8", "cs=7,sck=5,miso=4,mosi=6"},
+    /* The CrowPanel 4.2"'s: the same bus, its supply switched by GPIO42
+     * (IO42_TF_3.3_CTL, high on: Elecrow's schematic and TF demo). */
+    {"elecrow_crowpanel_epd_4in2", "cs=10,sck=39,miso=13,mosi=40,pwr=42"},
 };
 
 const char *fos_board_sd_pins(const char *hardware_preset)

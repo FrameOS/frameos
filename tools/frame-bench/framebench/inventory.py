@@ -39,7 +39,7 @@ def _panel_kinds() -> dict:
 
 
 # Seconds a full refresh takes, for timeouts and pacing (a guess for unknown panels).
-PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_13in3e': 35, 'EPD_10in3': 4, 'EPD_3in97': 4, 'EPD_7in5_V2': 6, 'EPD_5in79_BW': 4}
+PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_13in3e': 35, 'EPD_10in3': 4, 'EPD_3in97': 4, 'EPD_7in5_V2': 6, 'EPD_5in79_BW': 4, 'EPD_4in2_BW': 4}
 
 
 def serial_ports():

@@ -802,6 +802,7 @@ describe("Esp32CloudFlasher", () => {
         "hw:seeed_xiao_ee04",
         "hw:seeed_xiao_ee05",
         "hw:elecrow_crowpanel_5in79",
+        "hw:elecrow_crowpanel_epd_4in2",
       ]),
     );
     const c3Group = picker.querySelector('optgroup[label^="ESP32-C3 boards"]');
