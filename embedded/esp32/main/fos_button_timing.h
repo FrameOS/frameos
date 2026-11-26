@@ -43,7 +43,7 @@ typedef struct {
     bool twice;             /* this press is the second (or third) of a run: no long press */
     bool thrice;            /* this press is the third of a triple press: nothing follows it */
     bool triple;            /* a rule binds this key's triplePress (fos_buttons.c, from the frame's map) */
-    uint32_t seconds;       /* whole FOS_BUTTON_LONG_PRESS_MS this hold has sounded */
+    uint32_t seconds;       /* whole FOS_BUTTON_LONG_PRESS_MS this hold has been down */
 } fos_button_timing_t;
 
 /* The line as first read: a key already down counts as pressed at `now_ms`
@@ -62,11 +62,10 @@ fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, in
  * on any other key starts over, as in the dispatcher. */
 int fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
 
-/* The key is still down at `now_ms`: true at every whole
- * FOS_BUTTON_LONG_PRESS_MS of hold counted from the press (1 s, 2 s, ...),
- * when the buzzer counts the hold out loud. The first is when the scene's
- * `longPress` comes (the dispatcher's tick, once); the rest count the hold.
- * Never for the second press of a
+/* The key is still down at `now_ms`: true once, when the hold first reaches
+ * FOS_BUTTON_LONG_PRESS_MS counted from the press, the moment the scene's
+ * `longPress` comes (the dispatcher's tick): the buzzer says so, and says
+ * nothing more while the key stays down. Never for the second press of a
  * double press. One per call: a late call catches up with one. */
 bool fos_button_timing_hold_tick(fos_button_timing_t *b, int64_t now_ms);
 

@@ -268,11 +268,11 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
     else fos_buzzer_click_down();
 }
 
-/* A key still down: the long-press sound at every whole longPressMs held
- * (1 s, 2 s, ...), counting the hold out loud, the key that woke the chip
- * too (counted from its wake click). The scene hears its `longPress` once,
- * with the `up`; this says "it is one now, and still going". Not for the
- * second press of a double press: no long press comes of it. */
+/* A key still down: the long-press sound once, at longPressMs held, the key
+ * that woke the chip too (counted from its wake click): the moment the
+ * scene hears its `longPress` (the dispatcher's tick). Nothing after it,
+ * which would talk over what the long press started. Not for the second
+ * press of a double press: no long press comes of it. */
 static void hold_sounds(size_t index, int64_t now_ms)
 {
     if (!fos_button_timing_hold_tick(&s_timing[index], now_ms)) return;

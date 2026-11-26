@@ -546,9 +546,10 @@ Each event has its sound on an ESP32 with a buzzer, at the instant it
 happens: a click on `down`, a lower one on every `up`, a higher click
 for the second `down` of a `doublePress`, and one an octave over the press
 for the third `down` of a `triplePress` (a key the frame's map binds three
-times; one only a scene's map binds clicks as a first press). While a key is held a short falling pair sounds at every whole
-second, counting the hold out loud; the scene's `longPress` still comes once,
-with the `up`. A `press` adds no sound: its clicks were the down and the up
+times; one only a scene's map binds clicks as a first press). While a key is held a short falling pair sounds once, at
+`longPressMs`: the moment the scene's `longPress` comes; nothing more while
+it stays down, which would talk over what the long press started (a scene
+loading's chirp). A `press` adds no sound: its clicks were the down and the up
 (`embedded/esp32/README.md`, "Button beep"). On e-paper a press on the glass
 that something takes clicks the same way, unless the frame's `touch_beep` is off.
 An `edgeSwipe` there is four quick clicks, the moment the finger has gone far

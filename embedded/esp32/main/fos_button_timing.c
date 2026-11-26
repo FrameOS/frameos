@@ -43,8 +43,12 @@ bool fos_button_timing_hold_tick(fos_button_timing_t *b, int64_t now_ms)
     int64_t held = now_ms - b->pressed_at_ms;
     uint32_t whole = held > 0 ? (uint32_t)(held / FOS_BUTTON_LONG_PRESS_MS) : 0;
     if (whole <= b->seconds) return false;
+    /* Once: the long press comes then, and a sound a second after it would
+     * talk over what it started (a scene loading's chirp, the owner on the
+     * bench, 2026-11-26). */
+    bool first = b->seconds == 0;
     b->seconds = whole;
-    return true;
+    return first;
 }
 
 uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *long_press)
