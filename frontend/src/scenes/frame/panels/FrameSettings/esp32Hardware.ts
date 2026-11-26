@@ -604,6 +604,14 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     psramMB: 8,
     pins: ESP32_ELECROW_CROWPANEL_WATCH_2IN01_PIN_LAYOUT,
   },
+  elecrow_crowpanel_rotary_1in46: {
+    label: 'Elecrow CrowPanel 1.46" rotary (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st77961_360x360',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_ELECROW_CROWPANEL_WATCH_2IN01_PIN_LAYOUT,
+  },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,

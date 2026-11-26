@@ -190,7 +190,7 @@
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
   and the E1003, the Sticky, the SenseCAP Indicator, the Guition 4848S040,
-  the Sunton S070 and the CrowPanel 2.01" watch the edge swipes (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset
+  the Sunton S070, the CrowPanel 2.01" watch and the CrowPanel 1.46" rotary the edge swipes (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset
   table: keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
   own, never a scene switch: the switcher moves a screenful on them), up from the bottom

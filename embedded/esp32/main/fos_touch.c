@@ -289,8 +289,8 @@ static const char *TAG = "fos_touch";
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
 
-typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1, CTRL_CST92XX = 2, CTRL_AXS5106 = 3 } controller_t;
-static const char *const k_controller_names[] = {"gt911", "ft6x36", "cst92xx", "axs5106l"};
+typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1, CTRL_CST92XX = 2, CTRL_AXS5106 = 3, CTRL_CST816 = 4 } controller_t;
+static const char *const k_controller_names[] = {"gt911", "ft6x36", "cst92xx", "axs5106l", "cst816t"};
 
 static bool s_present = false;
 static i2c_master_bus_handle_t s_bus = NULL;
@@ -655,12 +655,32 @@ static void reset_cst92(const fos_touch_pins_t *pins)
 #define TOUCH_AXS_ADDR 0x63
 #define TOUCH_AXS_REG_REPORT 0x01
 
-static bool probe_axs(const fos_touch_pins_t *pins)
+/* The Hynitron CST816T (the CrowPanel 1.46" rotary) at 0x15 reports the
+ * same way. Left alone it sleeps after seconds untouched, answering nothing
+ * until a finger wakes it, and pulls INT for gestures alone: it is told to
+ * stay awake (0xFE) and to pull INT for every report (IRQ_CTL 0xFA:
+ * EnTouch | EnChange; Elecrow's cst816t library). */
+#define TOUCH_CST816_ADDR 0x15
+
+/* One of the two by its address (after a reset of its own when `reset`):
+ * its address, 0 for neither. */
+static uint8_t probe_reg1(const fos_touch_pins_t *pins, bool reset)
 {
-    if (i2c_master_probe(s_bus, TOUCH_AXS_ADDR, TOUCH_I2C_TIMEOUT_MS) != ESP_OK) return false;
-    reset_cst92(pins);
-    vTaskDelay(pdMS_TO_TICKS(250));
-    return attach(TOUCH_AXS_ADDR, TOUCH_I2C_HZ);
+    static const uint8_t addrs[] = {TOUCH_AXS_ADDR, TOUCH_CST816_ADDR};
+    for (size_t i = 0; i < sizeof(addrs); i++) {
+        if (i2c_master_probe(s_bus, addrs[i], TOUCH_I2C_TIMEOUT_MS) != ESP_OK) continue;
+        if (reset) {
+            reset_cst92(pins);
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+        if (!attach(addrs[i], TOUCH_I2C_HZ)) return 0;
+        if (addrs[i] == TOUCH_CST816_ADDR) {
+            ft_write(0xFE, 0xFF);
+            ft_write(0xFA, 0x60);
+        }
+        return addrs[i];
+    }
+    return 0;
 }
 
 static bool probe_cst92(void)
@@ -690,9 +710,9 @@ static int read_points(fos_touch_point_t *points)
         reg_write_byte(FOS_TOUCH_CST92_REG_REPORT, FOS_TOUCH_CST92_ACK);
         return count;
     }
-    if (s_controller == CTRL_FT6X36 || s_controller == CTRL_AXS5106) {
-        /* The AXS5106L's report starts a byte earlier. */
-        bool axs = s_controller == CTRL_AXS5106;
+    if (s_controller == CTRL_FT6X36 || s_controller >= CTRL_AXS5106) {
+        /* The AXS5106L's and the CST816T's report starts a byte earlier. */
+        bool axs = s_controller >= CTRL_AXS5106;
         uint8_t report[1 + FOS_TOUCH_FT_REPORT_BYTES];
         if (ft_read(axs ? TOUCH_AXS_REG_REPORT : FOS_TOUCH_FT_REG_TOUCHES, report, sizeof(report) - !axs) != ESP_OK) {
             return -1;
@@ -1090,12 +1110,13 @@ esp_err_t fos_touch_start(void)
     /* An AXS5106L first (probe_axs), then a Hynitron CST92xx, each after a
      * reset of its own: the Goodix one below holds INT low through the reset
      * to pick an address. */
-    if (probe_axs(pins)) {
-        s_addr = TOUCH_AXS_ADDR;
-        s_controller = CTRL_AXS5106;
-    } else {
+    s_addr = probe_reg1(pins, true);
+    if (s_addr == 0) {
         reset_cst92(pins);
+        /* A CST816T asleep at the first look answers after that reset. */
+        if (!probe_cst92()) s_addr = probe_reg1(pins, false);
     }
+    if (s_addr) s_controller = s_addr == TOUCH_CST816_ADDR ? CTRL_CST816 : CTRL_AXS5106;
     if (s_addr == 0 && probe_cst92()) {
         s_addr = TOUCH_CST92_ADDR;
         s_controller = CTRL_CST92XX;
@@ -1116,7 +1137,7 @@ esp_err_t fos_touch_start(void)
         }
     }
     if (s_addr == 0) {
-        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x63, 0x5a, 0x5d, 0x14, 0x48 or 0x38\"}");
+        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x63, 0x15, 0x5a, 0x5d, 0x14, 0x48 or 0x38\"}");
         drop_bus();
         return ESP_ERR_NOT_FOUND;
     }
