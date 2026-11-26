@@ -648,7 +648,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     gpioButtons: [{ pin: 2, label: 'BUTTON' }],
   },
   trmnl_og_diy_kit: {
-    label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)',
+    label: 'TRMNL 7.5" (OG) DIY Kit (ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
     device: 'waveshare.EPD_7in5_V2',
     flashSize: '8MB',
@@ -660,7 +660,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     ],
   },
   trmnl_4in26_diy_kit: {
-    label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)',
+    label: 'XIAO ePaper Driver Board + 4.26" panel (XIAO ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
     device: 'waveshare.EPD_4in26',
     flashSize: '8MB',
@@ -854,7 +854,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     ],
   },
   seeed_xiao_epaper_7in5: {
-    label: 'Seeed XIAO 7.5" ePaper Panel (ESP32-C3)',
+    label: 'XIAO 7.5" ePaper Panel (XIAO ESP32-C3)',
     platform: EMBEDDED_ESP32_C3,
     device: 'waveshare.EPD_7in5_V2',
     flashSize: '4MB',

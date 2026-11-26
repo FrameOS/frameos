@@ -485,7 +485,7 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     pins: ESP32_TRMNL_OG_PIN_LAYOUT,
   },
   trmnl_og_diy_kit: {
-    label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)',
+    label: 'TRMNL 7.5" (OG) DIY Kit (ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
     device: 'waveshare.EPD_7in5_V2',
     flashSize: '8MB',
@@ -493,7 +493,7 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
   },
   trmnl_4in26_diy_kit: {
-    label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)',
+    label: 'XIAO ePaper Driver Board + 4.26" panel (XIAO ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
     device: 'waveshare.EPD_4in26',
     flashSize: '8MB',
@@ -674,7 +674,7 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     pins: ESP32_SEEED_XIAO_EE_PIN_LAYOUT,
   },
   seeed_xiao_epaper_7in5: {
-    label: 'Seeed XIAO 7.5" ePaper Panel (ESP32-C3)',
+    label: 'XIAO 7.5" ePaper Panel (XIAO ESP32-C3)',
     platform: EMBEDDED_ESP32_C3,
     device: 'waveshare.EPD_7in5_V2',
     flashSize: '4MB',
@@ -954,7 +954,7 @@ export const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp
   { value: 'trmnl-og', label: 'TRMNL OG/BWRY (ESP32-C3)', pins: ESP32_TRMNL_OG_PIN_LAYOUT },
   {
     value: 'xiao-epaper-driver-board',
-    label: 'Seeed XIAO ePaper Driver Board (TRMNL DIY Kit)',
+    label: 'Seeed XIAO ePaper Driver Board (TRMNL 7.5" (OG) DIY Kit)',
     pins: ESP32_XIAO_EPAPER_DRIVER_BOARD_PIN_LAYOUT,
   },
   { value: 'xteink-x4', label: 'XTEINK X4 (ESP32-C3)', pins: ESP32_XTEINK_X4_PIN_LAYOUT },
