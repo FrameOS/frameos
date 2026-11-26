@@ -273,6 +273,11 @@ static void boot_splash_task(void *arg)
             }
             esp_err_t err = fos_display_quick_update(buf, prev, len);
             if (err != ESP_OK) ESP_LOGW(TAG, "boot splash: %s", esp_err_to_name(err));
+            /* The band is on the glass now, not in the stored picture's hash:
+             * without this the first render, the picture from before the
+             * reboot, was "unchanged" and the band stayed until something
+             * moved (the CrowPanel 5.79", 2026-11-26). */
+            else fos_client_note_panel_drawn();
         }
     }
     free(buf);

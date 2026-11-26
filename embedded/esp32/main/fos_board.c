@@ -588,9 +588,12 @@ static const struct {
      * registers) on the board's bus, INT GPIO2, reset GPIO5; its supply is
      * the board's rails (fos_board_rails). */
     {"elecrow_crowpanel_watch_2in01", "sda=4,scl=3,int=2,rst=5,en=-1"},
-    /* The Elecrow CrowPanel Advance 7.0"'s GT911 on the board's bus, INT
-     * GPIO1; its reset is the STC8 coprocessor's (fos_board_i2c_writes). */
-    {"elecrow_crowpanel_advance_7", "sda=15,scl=16,int=1,rst=-1,en=-1"},
+    /* The Elecrow CrowPanel Advance 7.0"'s GT911 on the board's bus, polled
+     * as Elecrow's own driver has it (`pin_int = -1`): its GPIO1 never moved
+     * once it was up, so only a touch still held at the 2 s idle read was
+     * seen, a light slow one (the bench, 2026-11-26). Its reset is the STC8
+     * coprocessor's (fos_board_i2c_writes). */
+    {"elecrow_crowpanel_advance_7", "sda=15,scl=16,int=-1,rst=-1,en=-1"},
     /* The CrowPanel 1.46" rotary's Hynitron CST816T (0x15) on its own bus,
      * SDA6/SCL7, INT GPIO5, reset GPIO13 (Elecrow's schematic). */
     {"elecrow_crowpanel_rotary_1in46", "sda=6,scl=7,int=5,rst=13,en=-1"},

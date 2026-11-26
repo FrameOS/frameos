@@ -730,7 +730,7 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_advance_7():
     assert settings["panel"] == "LCD_SC7277_800x480"
     # The GT911, the clock and the coprocessor share SDA15/SCL16 (fos_board.c).
     preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["elecrow_crowpanel_advance_7"]
-    assert preset["touchPins"] == "sda=15,scl=16,int=1,rst=-1,en=-1"
+    assert preset["touchPins"] == "sda=15,scl=16,int=-1,rst=-1,en=-1"
     assert preset["i2cBuses"] == "sda=15,scl=16"
     assert embedded_panel_for_frame(Frame(id=22, device="lcd.sc7277_800x480", embedded={"platform": "esp32-s3"})) == (
         "LCD_SC7277_800x480"

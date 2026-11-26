@@ -500,7 +500,7 @@ EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_PINS = {
     "pwr": -1,
 }
 EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH = {
-    "touchPins": "sda=15,scl=16,int=1,rst=-1,en=-1",
+    "touchPins": "sda=15,scl=16,int=-1,rst=-1,en=-1",
     "i2cBuses": "sda=15,scl=16",
 }
 # Elecrow CrowPanel 1.46" rotary (ESP32-S3R8, 16 MB flash, 8 MB PSRAM): the

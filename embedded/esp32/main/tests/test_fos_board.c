@@ -533,7 +533,7 @@ static void test_crowpanel_advance_7(void)
           "the backlight is the coprocessor's");
     CHECK(!fos_board_i2c_backlight("sunton_esp32_8048s070", &addr, &on, &off) && addr == 0, "a GPIO elsewhere");
     CHECK(strcmp(fos_board_i2c_buses(preset), "sda=15,scl=16") == 0, "one bus");
-    CHECK(strcmp(fos_board_touch_pins(preset), "sda=15,scl=16,int=1,rst=-1,en=-1") == 0, "touch pins");
+    CHECK(strcmp(fos_board_touch_pins(preset), "sda=15,scl=16,int=-1,rst=-1,en=-1") == 0, "touch pins, polled");
     CHECK(strcmp(fos_board_rtc_chip(preset), "pcf8563") == 0, "the BM8563 reads as a PCF8563");
     char map[1024];
     fos_board_event_map(preset, map, sizeof(map));
