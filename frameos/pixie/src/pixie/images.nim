@@ -979,8 +979,12 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
     xEnd = min(b.width, a.width - px)
     yEnd = min(b.height, a.height - py)
 
-  if a.format == pfGray4 and b.format == pfGray4 and blendMode in {NormalBlend, OverwriteBlend}:
-    # A 4-bit picture is opaque and dithered already: its levels, as they are.
+  if a.format == b.format and a.format in {pfGray4, pfGray8} and blendMode in {NormalBlend, OverwriteBlend}:
+    # A grey picture is opaque and dithered already (its stores were): its
+    # levels, as they are. An 8-bit one is a canvas on a black-and-white
+    # e-paper's luma surface (frameos.canvas), drawn at its own size: through
+    # the accessors it was 3.5 us a pixel on an ESP32-S3, 1.3 s for the
+    # reTerminal Sticky's 800x480 (2026-11-26).
     for y in yStart ..< yEnd:
       breathe()
       a.copyPixelRow(a.dataIndex(xStart + px, y + py), b, b.dataIndex(xStart, y), xEnd - xStart)
