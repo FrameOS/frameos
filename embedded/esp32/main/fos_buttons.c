@@ -381,6 +381,15 @@ static void encoder_start(const char *hardware_preset)
     }
 }
 
+/* A key another chip answers by flipping a line while it is down
+ * (fos_board_toggle_key: the CrowPanel watch's power key, whose STC8G flips
+ * GPIO14 every 150 to 200 ms, the bench 2026-11-26). A flip after 400 ms
+ * without one is a press of HOME, said as a press like a detent; the flips
+ * after it are the same press held. */
+#define TOGGLE_QUIET_MS 400
+static int s_toggle_pin = -1;
+static int s_toggle_presses = 0;
+
 static void buttons_task(void *arg)
 {
     fos_config_t *config = fos_config();
@@ -422,10 +431,21 @@ static void buttons_task(void *arg)
 
     for (size_t i = 0; i < s_button_count; i++) fos_voice_hold_init(&s_hold[i]);
     int enc_moves = 0;
+    int toggle_level = s_toggle_pin >= 0 ? gpio_get_level(s_toggle_pin) : 0;
+    int64_t toggle_at = 0;
 
     while (true) {
         int64_t now = now_ms();
-        /* The crown turned: a tick, and the render task woken to take it. */
+        if (s_toggle_pin >= 0 && gpio_get_level(s_toggle_pin) != toggle_level) {
+            toggle_level ^= 1;
+            if (now - toggle_at > TOGGLE_QUIET_MS) {
+                __atomic_fetch_add(&s_toggle_presses, 1, __ATOMIC_RELAXED);
+                __atomic_fetch_add(&s_enc_moves, 1, __ATOMIC_RELAXED);
+            }
+            toggle_at = now;
+        }
+        /* The crown turned or the toggle key pressed: a tick, and the render
+         * task woken to take it. */
         int moves = __atomic_load_n(&s_enc_moves, __ATOMIC_RELAXED);
         if (moves != enc_moves) {
             enc_moves = moves;
@@ -560,6 +580,11 @@ esp_err_t fos_buttons_start(void)
     }
 
     encoder_start(config->hardware_preset);
+    s_toggle_pin = fos_board_toggle_key(config->hardware_preset);
+    if (s_toggle_pin >= 0) {
+        gpio_config_t io = {.pin_bit_mask = 1ULL << s_toggle_pin, .mode = GPIO_MODE_INPUT};
+        if (gpio_config(&io) != ESP_OK) s_toggle_pin = -1;
+    }
     BaseType_t created = xTaskCreate(buttons_task, "fos_buttons", 3072, NULL, 4, NULL);
     if (created != pdPASS) {
         vQueueDelete(s_queue);
@@ -578,6 +603,11 @@ void fos_buttons_process_events(void)
         char payload[64];
         snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\",\"action\":\"press\"}",
                  s_enc_pin[n > 0 ? 0 : 1], n > 0 ? "NEXT" : "PREV");
+        fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload);
+    }
+    for (int n = __atomic_exchange_n(&s_toggle_presses, 0, __ATOMIC_RELAXED); n > 0; n--) {
+        char payload[64];
+        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"HOME\",\"action\":\"press\"}", s_toggle_pin);
         fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload);
     }
 
@@ -734,7 +764,8 @@ bool fos_buttons_busy(void)
 bool fos_buttons_pending(void)
 {
     return s_queue != NULL &&
-           (uxQueueMessagesWaiting(s_queue) > 0 || __atomic_load_n(&s_enc_detents, __ATOMIC_RELAXED) != 0);
+           (uxQueueMessagesWaiting(s_queue) > 0 || __atomic_load_n(&s_enc_detents, __ATOMIC_RELAXED) != 0 ||
+            __atomic_load_n(&s_toggle_presses, __ATOMIC_RELAXED) != 0);
 }
 
 bool fos_buttons_present(void)

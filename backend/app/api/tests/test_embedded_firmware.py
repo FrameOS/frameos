@@ -730,7 +730,7 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_advance_7():
     assert settings["panel"] == "LCD_SC7277_800x480"
     # The GT911, the clock and the coprocessor share SDA15/SCL16 (fos_board.c).
     preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["elecrow_crowpanel_advance_7"]
-    assert preset["touchPins"] == "sda=15,scl=16,int=1,rst=-1,en=-1"
+    assert preset["touchPins"] == "sda=15,scl=16,int=-1,rst=-1,en=-1"
     assert preset["i2cBuses"] == "sda=15,scl=16"
     assert embedded_panel_for_frame(Frame(id=22, device="lcd.sc7277_800x480", embedded={"platform": "esp32-s3"})) == (
         "LCD_SC7277_800x480"
@@ -818,12 +818,14 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_watch_2in01():
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     # BOOT and the crown's press; its turns are the firmware's own presses.
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (18, "OK")]
-    assert frame.event_map[:3] == [
+    # The power key is HOME: the firmware's own presses (fos_board_toggle_key).
+    assert frame.event_map[:4] == [
         {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
         {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
     ]
-    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    assert [rule["event"] for rule in frame.event_map[4:]] == ["edgeSwipe"] * 4
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["panel"] == "LCD_GC9309_240x296"
     assert settings["gpio_buttons"] == "0:BOOT,18:OK"
@@ -1295,10 +1297,11 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
     }
     assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
     assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
-    # HOME opens the scene switcher (held: the settings), the rocker held walks the scenes.
+    # HOME (top) opens the switcher and held the settings, EXIT (bottom) is back, the rocker held walks the scenes.
     assert frame.event_map == [
         {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
+        {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "back", "as": {}},
         {
             "event": "button",
             "match": {"label": "PREV", "action": "longPress"},

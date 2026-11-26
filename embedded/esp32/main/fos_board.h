@@ -112,10 +112,14 @@ size_t fos_board_i2c_writes(const char *hardware_preset, const uint8_t **pairs);
  * STC8 at 0x30: 0x10 on, 0x05 off. False (and zeros) for every other board. */
 bool fos_board_i2c_backlight(const char *hardware_preset, uint8_t *addr, uint8_t *on, uint8_t *off);
 /* A rotary encoder's two phases (fos_buttons.c turns its steps into NEXT
- * and PREV presses): the CrowPanel 2.01" watch's crown, A GPIO20 and B
- * GPIO19; the CrowPanel 1.46" rotary's knob, A GPIO45 and B GPIO42. False
+ * and PREV presses): the CrowPanel 2.01" watch's crown, A GPIO19 and B
+ * GPIO20; the CrowPanel 1.46" rotary's knob, A GPIO42 and B GPIO45. False
  * and -1 / -1 on every other board. */
 bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b);
+/* A key another chip answers by flipping a line while it is down
+ * (fos_buttons.c makes a burst of flips one press of HOME): the CrowPanel
+ * 2.01" watch's power key, GPIO14. -1 on every other board. */
+int fos_board_toggle_key(const char *hardware_preset);
 
 /* The board's I2C peripheral buses as the `i2c_buses` spec
  * (`sda=19,scl=20;sda=39,scl=40`), "" for a board without any. The reTerminal

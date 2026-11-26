@@ -518,20 +518,23 @@ const WAVESHARE_AMOLED_1_75_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BOOT', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
-// The CrowPanel 2.01" watch's BOOT works like the Indicator's key, its crown
-// held talks into its microphone (the crown's turns are NEXT / PREV presses
-// the firmware makes itself), the edges swipe. Mirrors
+// The CrowPanel 2.01" watch's BOOT works like the Indicator's key, its power
+// key is HOME and opens the scene switcher, its crown held talks into its
+// microphone (the crown's turns and the power key are presses the firmware
+// makes itself), the edges swipe. Mirrors
 // EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP.
 const ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
   { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
+  { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSwitcher', as: {} },
   { event: 'button', match: { label: 'OK', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
 // The CrowPanel 1.46" rotary: the watch's keys without its voice key (no
-// microphone). Mirrors EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP.
+// microphone) and its power key. Mirrors
+// EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP.
 const ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP: EventMapRule[] = ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP.filter(
-  (rule) => rule.emit !== 'voiceChat'
+  (rule) => rule.emit !== 'voiceChat' && rule.match?.label !== 'HOME'
 )
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 17,
@@ -607,11 +610,13 @@ const ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 10, sck: 39, miso: 13, mosi: 40, pwr: -1, det: -1 },
   maxFrequencyKHz: 20000,
 }
-// HOME pressed opens the scene switcher and held the scene's settings; the
-// rocker held walks the scene list. Mirrors EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
+// HOME, the top key, opens the scene switcher and held the scene's settings;
+// EXIT, the bottom one, is back; the rocker held walks the scene list. Mirrors
+// EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
 const ELECROW_CROWPANEL_5IN79_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSwitcher', as: {} },
   { event: 'button', match: { label: 'HOME', action: 'longPress' }, emit: 'sceneSettings', as: {} },
+  { event: 'button', match: { label: 'EXIT', action: 'press' }, emit: 'back', as: {} },
   { event: 'button', match: { label: 'PREV', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   { event: 'button', match: { label: 'NEXT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
 ]

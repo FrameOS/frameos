@@ -454,11 +454,14 @@ EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_GPIO_BUTTONS = [
     {"pin": 18, "label": "OK"},
 ]
 # BOOT works like the Indicator's key (pressed the screen off and on, pressed
-# twice the scene switcher), the crown held talks, the edges swipe.
-# fos_board.c's CROWPANEL_WATCH_KEYS + ONE_KEY_VOICE("OK") is the device copy.
+# twice the scene switcher), the power key is HOME and opens the scene switcher
+# (the firmware's own presses, fos_board_toggle_key), the crown held talks, the
+# edges swipe. fos_board.c's CROWPANEL_WATCH_KEYS + CROWPANEL_WATCH_HOME +
+# ONE_KEY_VOICE("OK") is the device copy.
 EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP = [
     {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
     {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
     {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
     *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
@@ -500,7 +503,7 @@ EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_PINS = {
     "pwr": -1,
 }
 EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH = {
-    "touchPins": "sda=15,scl=16,int=1,rst=-1,en=-1",
+    "touchPins": "sda=15,scl=16,int=-1,rst=-1,en=-1",
     "i2cBuses": "sda=15,scl=16",
 }
 # Elecrow CrowPanel 1.46" rotary (ESP32-S3R8, 16 MB flash, 8 MB PSRAM): the
@@ -855,12 +858,13 @@ EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
     {"pin": 5, "label": "OK"},
     {"pin": 6, "label": "PREV"},
 ]
-# HOME pressed opens the scene switcher and held the scene's settings; the
-# rocker held walks the scene list. fos_board.c's CROWPANEL_5IN79_KEYS is the
-# device copy.
+# HOME, the top key, opens the scene switcher and held the scene's settings;
+# EXIT, the bottom one, is back; the rocker held walks the scene list.
+# fos_board.c's CROWPANEL_EPAPER_KEYS is the device copy.
 EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP = [
     {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
     {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
+    {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "back", "as": {}},
     {
         "event": "button",
         "match": {"label": "PREV", "action": "longPress"},

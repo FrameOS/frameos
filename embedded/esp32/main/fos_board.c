@@ -169,16 +169,24 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 #define AMOLED_175_KEYS ONE_BUTTON_TOGGLE("PWR")
 /* The Elecrow CrowPanel 2.01" watch: BOOT works like the Indicator's key, the
  * crown's knob turns the keys' ring (NEXT / PREV, fos_buttons.c) and its
- * press is Enter (OK), and held it talks; the edges swipe. */
+ * press is Enter (OK), and held it talks; the edges swipe. Its power key is
+ * HOME (fos_board_toggle_key) and opens the scene switcher. */
 #define CROWPANEL_WATCH_KEYS ONE_BUTTON_TOGGLE("BOOT")
-/* The Elecrow CrowPanel 5.79": HOME, EXIT and a rocker that tilts NEXT and
- * PREV and presses OK. HOME pressed opens the scene switcher, held the
- * scene's settings; the rocker held walks the scene list. */
-#define CROWPANEL_5IN79_KEYS \
+#define CROWPANEL_WATCH_HOME \
+    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
+/* The Elecrow CrowPanel e-paper boards (the 5.79"): HOME, EXIT and a rocker
+ * that tilts NEXT and PREV and presses OK. With the picture turned to its
+ * keys, HOME (GPIO2) is the top key and opens the scene switcher, held the
+ * scene's settings; EXIT (GPIO1) the bottom one is back (the Sticky's back);
+ * the rocker held walks the scene list. */
+#define CROWPANEL_EPAPER_KEYS \
     "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
     "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"longPress\"}," \
     "\"emit\":\"sceneSettings\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"EXIT\",\"action\":\"press\"}," \
+    "\"emit\":\"back\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"PREV\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"NEXT\",\"action\":\"longPress\"}," \
@@ -208,11 +216,11 @@ static const struct {
      * GPIO0, is the glass's R4 data line), so the edges are the whole map. */
     {"guition_esp32_4848s040", "", NULL, true},
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
-    {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS, ONE_KEY_VOICE("OK"), true},
+    {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS "," CROWPANEL_WATCH_HOME, ONE_KEY_VOICE("OK"), true},
     /* The CrowPanel 1.46" rotary: the watch's keys (BOOT, the knob pressed
      * OK and turned NEXT / PREV) and no microphone; the edges swipe. */
     {"elecrow_crowpanel_rotary_1in46", CROWPANEL_WATCH_KEYS, NULL, true},
-    {"elecrow_crowpanel_5in79", CROWPANEL_5IN79_KEYS, NULL, false},
+    {"elecrow_crowpanel_5in79", CROWPANEL_EPAPER_KEYS, NULL, false},
     /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
      * swipe, BOOT twice opens the switcher. */
     {"elecrow_crowpanel_advance_7", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
@@ -367,16 +375,19 @@ static const fos_board_rail_t k_watch_rails[] = {{47, 1}, {40, 0}, {-1, 0}};
 static const fos_board_rail_t k_rotary_1in46_rails[] = {{1, 1}, {-1, 0}};
 
 /* The boards with a crown or a knob: its two phases, pulled up, A the one
- * that leads for NEXT. The watch's A GPIO20 / B GPIO19; the 1.46" rotary's
+ * that leads for NEXT. The watch's GPIO19 leads (Elecrow's B; GPIO20 first
+ * walked the ring backwards, the bench 2026-11-26); the 1.46" rotary's
  * Elecrow labels the other way round (their A GPIO45, B GPIO42), and turned
  * that way NEXT and PREV came out reversed (the bench, 2026-11-26). */
+/* The watch's power key (SW3) is its STC8G1K08 power chip's, which flips
+ * GPIO14 (Elecrow's LCD_POWER_DET) while the key is down: the toggle key. */
 static const struct {
     const char *preset;
     const fos_board_rail_t *rails;
-    int8_t a, b;
+    int8_t a, b, toggle;
 } k_elecrow_rounds[] = {
-    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 20, 19},
-    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 42, 45},
+    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 19, 20, 14},
+    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 42, 45, -1},
 };
 
 static int elecrow_round(const char *hardware_preset)
@@ -422,6 +433,12 @@ bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b)
     *a = i < 0 ? -1 : k_elecrow_rounds[i].a;
     *b = i < 0 ? -1 : k_elecrow_rounds[i].b;
     return i >= 0;
+}
+
+int fos_board_toggle_key(const char *hardware_preset)
+{
+    int i = elecrow_round(hardware_preset);
+    return i < 0 ? -1 : k_elecrow_rounds[i].toggle;
 }
 
 size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out, size_t max)
@@ -588,9 +605,12 @@ static const struct {
      * registers) on the board's bus, INT GPIO2, reset GPIO5; its supply is
      * the board's rails (fos_board_rails). */
     {"elecrow_crowpanel_watch_2in01", "sda=4,scl=3,int=2,rst=5,en=-1"},
-    /* The Elecrow CrowPanel Advance 7.0"'s GT911 on the board's bus, INT
-     * GPIO1; its reset is the STC8 coprocessor's (fos_board_i2c_writes). */
-    {"elecrow_crowpanel_advance_7", "sda=15,scl=16,int=1,rst=-1,en=-1"},
+    /* The Elecrow CrowPanel Advance 7.0"'s GT911 on the board's bus, polled
+     * as Elecrow's own driver has it (`pin_int = -1`): its GPIO1 never moved
+     * once it was up, so only a touch still held at the 2 s idle read was
+     * seen, a light slow one (the bench, 2026-11-26). Its reset is the STC8
+     * coprocessor's (fos_board_i2c_writes). */
+    {"elecrow_crowpanel_advance_7", "sda=15,scl=16,int=-1,rst=-1,en=-1"},
     /* The CrowPanel 1.46" rotary's Hynitron CST816T (0x15) on its own bus,
      * SDA6/SCL7, INT GPIO5, reset GPIO13 (Elecrow's schematic). */
     {"elecrow_crowpanel_rotary_1in46", "sda=6,scl=7,int=5,rst=13,en=-1"},

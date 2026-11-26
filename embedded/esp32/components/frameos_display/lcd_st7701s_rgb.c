@@ -158,9 +158,10 @@ static const lcd_board_t k_boards[] = {
      * GPIO7,17,18,3,46; DE 42, VSYNC 41, HSYNC 40, PCLK 39; Elecrow's
      * porches (8/4/8 both ways) and falling-edge clock (pclk_idle_high).
      * The backlight is the board's STC8H1K28 coprocessor's (I2C 0x30:
-     * fos_board_i2c_writes turns it on), so no GPIO here. 12 MHz as the
-     * Sunton's, not Elecrow's 21: the generic image's shared flash and
-     * PSRAM bus. */
+     * fos_board_i2c_writes turns it on), so no GPIO here. Elecrow's 21 MHz:
+     * at 12 MHz (the Sunton's) these porches scan 29 frames a second and the
+     * glass flickered; at 21, 51 a second, and Pixel toys animating held
+     * every frame with no late refill (`lcd`, the bench, 2026-11-26). */
     {
         .preset = "elecrow_crowpanel_advance_7",
         .panel = "LCD_SC7277_800x480",
@@ -172,7 +173,7 @@ static const lcd_board_t k_boards[] = {
         .backlight = -1,
         .hsync = 40, .vsync = 41, .de = 42, .pclk = 39,
         .data = {21, 47, 48, 45, 38, 9, 10, 11, 12, 13, 14, 7, 17, 18, 3, 46},
-        .pclk_hz = 12 * 1000 * 1000,
+        .pclk_hz = 21 * 1000 * 1000,
         .hsync_pulse = 4, .hsync_back = 8, .hsync_front = 8,
         .vsync_pulse = 4, .vsync_back = 8, .vsync_front = 8,
         .pclk_active_neg = 1,
