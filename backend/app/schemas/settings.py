@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from pydantic import ConfigDict, RootModel, BaseModel
+from pydantic import field_validator, ConfigDict, RootModel, BaseModel
 
 
 class SettingsResponse(RootModel):
@@ -29,6 +29,15 @@ class SettingsUpdateRequest(BaseModel):
     buildEnvironment: Optional[Dict[str, Any]] = None
     buildHost: Optional[Dict[str, Any]] = None
     modalSandbox: Optional[Dict[str, Any]] = None
+    # The owner's own dithering presets (docs/dithering.md): {id, name, dither}.
+    ditherPresets: Optional[List[Any]] = None
+
+    @field_validator("ditherPresets")
+    @classmethod
+    def _dither_presets(cls, value):
+        from app.utils.panel_dither import validate_dither_presets
+
+        return validate_dither_presets(value)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_unset=True)

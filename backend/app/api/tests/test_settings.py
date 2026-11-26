@@ -59,6 +59,20 @@ async def test_set_settings_rejects_unknown_keys(async_client):
 
 
 @pytest.mark.asyncio
+async def test_dither_presets_are_stored_and_checked(async_client):
+    """The owner's own dithering presets (docs/dithering.md)."""
+    presets = [{"id": "p1", "name": "Photo", "dither": {"method": "opendisplay", "exposure": 1.3, "saturation": 1.1}}]
+    response = await async_client.post('/api/settings', json={"ditherPresets": presets})
+    assert response.status_code == 200, response.text
+    assert response.json()["ditherPresets"] == presets
+    assert (await async_client.get('/api/settings')).json()["ditherPresets"] == presets
+    bad = [{"id": "p1", "name": "Photo", "dither": {"method": "opendisplay", "exposure": 9}}]
+    response = await async_client.post('/api/settings', json={"ditherPresets": bad})
+    assert response.status_code == 422, response.text
+    assert (await async_client.get('/api/settings')).json()["ditherPresets"] == presets
+
+
+@pytest.mark.asyncio
 async def test_settings_round_trip_survives_internal_rows(async_client, db):
     """The settings table also holds `@system/...` markers (repositories.py
     writes them on first boot) and legacy keys. The form posts back the whole

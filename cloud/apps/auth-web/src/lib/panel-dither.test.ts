@@ -150,13 +150,27 @@ describe("the dither setting", () => {
       dbs: false,
       exposure: 1,
       viewingDistanceCm: 30,
+      saturation: 1,
+      shadows: 0,
+      highlights: 0,
+      tone: 0,
+      gamut: 0,
+      ppi: null,
     });
-    expect(normalizeDither({ method: "opendisplay", algorithm: "nope", exposure: 9, viewingDistanceCm: true })).toEqual({
+    expect(
+      normalizeDither({ method: "opendisplay", algorithm: "nope", exposure: 9, viewingDistanceCm: true, saturation: 5, tone: -1, ppi: 10 }),
+    ).toEqual({
       method: "opendisplay",
       algorithm: "burkes",
       dbs: false,
       exposure: 2,
       viewingDistanceCm: 30,
+      saturation: 2,
+      shadows: 0,
+      highlights: 0,
+      tone: 0,
+      gamut: 0,
+      ppi: 50,
     });
   });
 
@@ -167,6 +181,10 @@ describe("the dither setting", () => {
     { method: "opendisplay", exposure: 3 },
     { method: "opendisplay", viewingDistanceCm: 2 },
     { method: "opendisplay", colour: "red" },
+    { method: "opendisplay", saturation: 2.5 },
+    { method: "opendisplay", gamut: -0.1 },
+    { method: "opendisplay", ppi: 20 },
+    { method: "opendisplay", tone: "a bit" },
     ["opendisplay"],
   ])("refuses %j", (value) => {
     expect(ditherProblem(value)).not.toBeNull();
@@ -177,6 +195,10 @@ describe("the dither setting", () => {
     expect(
       ditherProblem({ method: "opendisplay", algorithm: "stucki", dbs: true, exposure: 1.3, viewingDistanceCm: 80 }),
     ).toBeNull();
+    expect(
+      ditherProblem({ method: "opendisplay", saturation: 0, shadows: 1, highlights: 0.5, tone: 0.2, gamut: 1, ppi: null }),
+    ).toBeNull();
+    expect(ditherProblem({ method: "opendisplay", ppi: 180 })).toBeNull();
   });
 
   it("reads the panel's size from its name", () => {

@@ -211,6 +211,23 @@ describe("filterAccountSettings", () => {
     expect(filterAccountSettings({ ssh_keys: [] }).error).toBe("invalid_settings");
   });
 
+  it("stores the owner's dithering presets as a checked list (docs/dithering.md)", () => {
+    const presets = [{ id: "p1", name: " Photo ", dither: { method: "opendisplay", exposure: 1.3, saturation: 1.1 } }];
+    expect(filterAccountSettings({ ditherPresets: presets })).toEqual({
+      settings: { ditherPresets: [{ ...presets[0], name: "Photo" }] },
+    });
+    expect(filterAccountSettings({ ditherPresets: [] })).toEqual({ settings: { ditherPresets: [] } });
+    for (const bad of [
+      "photo",
+      [{ id: "p1", name: "x" }],
+      [{ id: "p1", name: "x", dither: { method: "opendisplay", exposure: 9 } }],
+      [{ id: "p1", name: "x", dither: { method: "opendisplay", gamut: 2 } }],
+      [presets[0], presets[0]],
+    ]) {
+      expect(filterAccountSettings({ ditherPresets: bad }).error).toBe("invalid_settings");
+    }
+  });
+
   it("never resolves groups or fields through Object.prototype", () => {
     for (const key of ["toString", "__proto__", "constructor", "valueOf"]) {
       expect(filterAccountSettings({ [key]: { x: "y" } }).settings).toEqual({});

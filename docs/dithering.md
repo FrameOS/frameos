@@ -13,13 +13,14 @@ distance.
 |---|---|---|
 | Backend | `backend/app/utils/panel_dither.py`, `pack_image_for_panel` in `backend/app/api/embedded_device.py` | `backend/app/utils/tests/test_panel_dither.py` (writes and replays the fixtures) |
 | Cloud | `cloud/apps/auth-web/src/lib/panel-dither.ts`, `panel-pack.ts` | `panel-dither.test.ts` (replays the same fixtures) |
-| Settings | `frontend/src/scenes/frame/panels/FrameSettings/fields/ditheringSection.tsx` | `workspace-surfaces.test.ts` |
+| Settings | `frontend/src/scenes/frame/panels/FrameSettings/fields/ditheringSection.tsx`, `frontend/src/utils/ditherPresets.ts` | `dither-presets.test.ts`, `workspace-surfaces.test.ts` |
 
 The backend uses the `epaper-dithering` Python wheel; the cloud uses the
 `@opendisplay/epaper-dithering` npm package. Both are builds of the same Rust
 core, so both planes pack the same bytes for the same picture:
-`docs/dither-fixtures.json` holds five cases (Spectra 6 with and without DBS,
-7-colour, BWYR, a measured palette) that each plane replays byte for byte.
+`docs/dither-fixtures.json` holds six cases (Spectra 6 with and without DBS,
+7-colour, BWYR, a measured palette, every fine-tuning setting with a density
+override) that each plane replays byte for byte.
 
 ## Why
 
@@ -52,6 +53,16 @@ matches by perception but aims at idealised inks the panel cannot show.
 | `exposure` | 0.5 to 2.0, multiplied in linear light (the screen shows it as brightness −50% to +100%) | 1.0 |
 | `dbs` | `true` to refine with Direct Binary Search | `false` |
 | `viewingDistanceCm` | 10 to 500, what DBS tunes the dot pattern for | 30 |
+| `saturation` | 0 to 2, OKLab chroma multiplier (0 = grey) | 1.0 |
+| `shadows` | 0 to 1, shadow lift | 0 |
+| `highlights` | 0 to 1, highlight compression | 0 |
+| `tone` | 0 to 1, maps lightness onto the panel's darkest and lightest ink (shadow detail for lighter blacks) | 0 |
+| `gamut` | 0 to 1, pulls colours the panel cannot show towards ones it can | 0 |
+| `ppi` | 50 to 600, or `null`: overrides the density DBS reads from the panel's name | `null` |
+
+OpenDisplay runs these in a fixed order before it matches inks: exposure,
+saturation, shadows and highlights, tone, gamut. Each is a no-op at its
+default, so a stored value only needs the keys it changes.
 
 Unknown keys and out-of-range values are refused when saved (backend:
 `validate_dither`; cloud: `ditherProblem`). When read, the packer fills in the
@@ -66,6 +77,33 @@ that renders its own scenes, which keeps the device's Floyd-Steinberg. The
 backend stores it in the frame's `dither` column; the cloud in
 `frames.dither`, written by `POST /api/frames/{id}/dither` (owner only,
 audited as `frame.dither_changed`), the same way as `voice_permissions`.
+
+## Presets and fine tuning
+
+The Dithering section works like Colors: a preset, and fine tuning folded
+away under it.
+
+- **Built-in presets** (`BUILTIN_DITHER_PRESETS` in
+  `frontend/src/utils/ditherPresets.ts`): Floyd-Steinberg (the FrameOS
+  default, `null`), OpenDisplay (no tone changes) and OpenDisplay photo
+  (+30 %, DBS at 30 cm: the settings picked on the real panels above). Only
+  settings tried on a panel are offered as built-ins.
+- **Fine tuning** shows every setting in the table above, with a preview of
+  the frame's current image dithered as the panel will show it, in the
+  palette's colours. The preview runs the npm package's WASM build in the
+  browser, the same Rust core as both planes' packers, so it shows the
+  picture the frame will get; it is loaded only when fine tuning is opened.
+- **Your own presets**: fine tuning saves the current settings under a name.
+  They are kept in the plane's settings as the `ditherPresets` group (a list
+  of `{id, name, dither}`, at most 50; backend `validate_dither_presets`,
+  cloud `readDitherPresets`, each `dither` checked like the frame's own), so
+  every frame of the project (backend) or account (cloud) offers them. A
+  frame stores the values, not the preset: editing or deleting a preset
+  later changes no frame. The section shows which preset a frame's values
+  match, or "Custom settings".
+
+Presets never reach a device: on the cloud, the service settings a frame
+pulls take string maps only (`revealedServiceSettings`).
 
 ## What the packer does
 
@@ -88,7 +126,8 @@ to a frame that renders its own scenes.
 
 DBS needs the panel's pixel density. It is read from the panel's name
 (`EPD_7in3e` is 7.3", `inky_impression_4` is 4") with the picture's size;
-when the name says nothing it assumes 127 ppi (a 7.3" 800×480 panel).
+when the name says nothing it assumes 127 ppi (a 7.3" 800×480 panel), unless
+the frame sets `ppi`.
 
 ### Cost
 

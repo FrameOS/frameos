@@ -14,7 +14,7 @@ import { inHassioAddon } from '../../utils/inHassioAddon'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../socketLogic'
 import { forms } from 'kea-forms'
-import { FrameOSSettings, SSHKeyEntry } from '../../types'
+import { DitherPreset, FrameOSSettings, SSHKeyEntry } from '../../types'
 import { apiFetch, logApiError } from '../../utils/apiFetch'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 import { normalizeSshKeys } from '../../utils/sshKeys'
@@ -68,6 +68,7 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     },
     buildHost: settings.buildHost ?? {},
     modalSandbox: settings.modalSandbox ?? {},
+    ditherPresets: Array.isArray(settings.ditherPresets) ? settings.ditherPresets : [],
   }
 }
 
@@ -228,6 +229,9 @@ export interface settingsLogicActions {
   setGeneratingSshKeyId: (id: string | null) => {
     id: string | null
   }
+  saveDitherPresets: (presets: DitherPreset[]) => {
+    presets: DitherPreset[]
+  }
   setPersonalFavouriteTemplateIds: (templateIds: string[]) => {
     templateIds: string[]
   }
@@ -350,6 +354,7 @@ export const settingsLogic = kea<settingsLogicType>([
     setSshKeyExpanded: (id: string, expanded: boolean) => ({ id, expanded }),
     toggleSshKeyExpanded: (id: string) => ({ id }),
     setPersonalFavouriteTemplateIds: (templateIds: string[]) => ({ templateIds }),
+    saveDitherPresets: (presets: DitherPreset[]) => ({ presets }),
     togglePersonalFavouriteTemplate: (templateId: string) => ({ templateId }),
     toggleOpenAiModelOverrides: true,
     newBuildHostKey: true,
@@ -598,6 +603,30 @@ export const settingsLogic = kea<settingsLogicType>([
         keys.filter((key) => key.id !== id)
       )
       actions.setSshKeyExpanded(id, false)
+    },
+    // The owner's own dithering presets (Frame settings → Dithering): only
+    // this group is posted, so unsaved edits elsewhere in the form stay put.
+    saveDitherPresets: async ({ presets }) => {
+      const previous = values.savedSettings.ditherPresets ?? []
+      actions.updateSavedSettings({ ditherPresets: presets })
+      actions.setSettingsValue(['ditherPresets'] as any, presets)
+      try {
+        const response = await apiFetch(`/api/settings`, {
+          method: 'POST',
+          body: JSON.stringify({ ditherPresets: presets }),
+          headers: { 'Content-Type': 'application/json' },
+        })
+        if (!response.ok) {
+          throw new Error('Failed to save dithering presets')
+        }
+        const saved = setDefaultSettings(await response.json()).ditherPresets ?? []
+        actions.updateSavedSettings({ ditherPresets: saved })
+        actions.setSettingsValue(['ditherPresets'] as any, saved)
+      } catch (error) {
+        logApiError(error)
+        actions.updateSavedSettings({ ditherPresets: previous })
+        actions.setSettingsValue(['ditherPresets'] as any, previous)
+      }
     },
     setPersonalFavouriteTemplateIds: async ({ templateIds }) => {
       const previousPersonal = values.savedSettings.personal ?? { favouriteTemplateIds: [] }

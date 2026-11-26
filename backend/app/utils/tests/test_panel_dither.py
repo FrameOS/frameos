@@ -23,6 +23,7 @@ from app.utils.panel_dither import (
     panel_diagonal_inches,
     panel_ppi,
     validate_dither,
+    validate_dither_presets,
 )
 
 DITHER_FIXTURES = Path(__file__).resolve().parents[4] / "docs" / "dither-fixtures.json"
@@ -54,6 +55,10 @@ def _cases():
     yield "7-colour stock, burkes", FOS_PIXEL_4BPP_7COLOR, SEVEN_COLOR_PALETTE, opendisplay, DEFAULT_PPI, _image(16, 12, 4)
     yield "bwyr stock, dbs", FOS_PIXEL_2BPP_BWYR, BWYR_PALETTE, normalize_dither({"method": "opendisplay", "dbs": True}), \
         DEFAULT_PPI, _image(16, 12, 5)
+    tuned = normalize_dither({"method": "opendisplay", "dbs": True, "exposure": 1.2, "saturation": 1.3, "shadows": 0.4,
+                              "highlights": 0.3, "tone": 0.2, "gamut": 0.5, "ppi": 200})
+    yield "spectra6 measured, fine tuned, ppi override", FOS_PIXEL_4BPP_SPECTRA6, MEASURED_SPECTRA6, tuned, DEFAULT_PPI, \
+        _image(16, 12, 6)
 
 
 def _hex(colors):
@@ -135,9 +140,12 @@ def test_normalize_fills_in_and_clamps():
     assert normalize_dither({"method": "floydSteinberg", "dbs": True}) is None
     assert normalize_dither({"method": "opendisplay"}) == {
         "method": "opendisplay", "algorithm": "burkes", "dbs": False, "exposure": 1.0, "viewingDistanceCm": 30.0,
+        "saturation": 1.0, "shadows": 0.0, "highlights": 0.0, "tone": 0.0, "gamut": 0.0, "ppi": None,
     }
-    assert normalize_dither({"method": "opendisplay", "algorithm": "nope", "exposure": 9, "viewingDistanceCm": True}) == {
+    assert normalize_dither({"method": "opendisplay", "algorithm": "nope", "exposure": 9, "viewingDistanceCm": True,
+                             "saturation": 5, "tone": -1, "ppi": 10}) == {
         "method": "opendisplay", "algorithm": "burkes", "dbs": False, "exposure": 2.0, "viewingDistanceCm": 30.0,
+        "saturation": 2.0, "shadows": 0.0, "highlights": 0.0, "tone": 0.0, "gamut": 0.0, "ppi": 50.0,
     }
 
 
@@ -148,6 +156,10 @@ def test_normalize_fills_in_and_clamps():
     {"method": "opendisplay", "exposure": 3},
     {"method": "opendisplay", "viewingDistanceCm": 2},
     {"method": "opendisplay", "colour": "red"},
+    {"method": "opendisplay", "saturation": 2.5},
+    {"method": "opendisplay", "gamut": -0.1},
+    {"method": "opendisplay", "ppi": 20},
+    {"method": "opendisplay", "tone": "a bit"},
     ["opendisplay"],
 ])
 def test_validate_refuses(value):
@@ -159,6 +171,47 @@ def test_validate_accepts():
     assert validate_dither(None) is None
     value = {"method": "opendisplay", "algorithm": "stucki", "dbs": True, "exposure": 1.3, "viewingDistanceCm": 80}
     assert validate_dither(value) == value
+    tuned = {"method": "opendisplay", "saturation": 0.0, "shadows": 1, "highlights": 0.5, "tone": 0.2, "gamut": 1,
+             "ppi": None}
+    assert validate_dither(tuned) == tuned
+    assert validate_dither({"method": "opendisplay", "ppi": 180}) == {"method": "opendisplay", "ppi": 180}
+
+
+def test_each_adjustment_changes_the_picture():
+    """Every fine-tuning setting really reaches OpenDisplay. Saturated hues,
+    so gamut compression has colours outside the panel's range to pull in."""
+    import colorsys
+
+    image = Image.new("RGB", (24, 16))
+    image.putdata([tuple(int(c * 255) for c in colorsys.hsv_to_rgb(x / 24, 1, 0.6 + 0.4 * y / 16))
+                   for y in range(16) for x in range(24)])
+    base = normalize_dither({"method": "opendisplay"})
+    plain = panel_dither.opendisplay_indices(image, MEASURED_SPECTRA6, base, DEFAULT_PPI)
+    for key, value in (("saturation", 0.2), ("shadows", 1.0), ("highlights", 1.0), ("tone", 1.0), ("gamut", 1.0)):
+        tuned = panel_dither.opendisplay_indices(image, MEASURED_SPECTRA6, {**base, key: value}, DEFAULT_PPI)
+        assert tuned is not None and tuned != plain, key
+    dbs = {**base, "dbs": True}
+    assert (panel_dither.opendisplay_indices(image, MEASURED_SPECTRA6, {**dbs, "ppi": 60.0}, DEFAULT_PPI)
+            != panel_dither.opendisplay_indices(image, MEASURED_SPECTRA6, dbs, DEFAULT_PPI))
+
+
+def test_presets():
+    preset = {"id": "p1", "name": " Photo ", "dither": {"method": "opendisplay", "exposure": 1.3}}
+    assert validate_dither_presets(None) is None
+    assert validate_dither_presets([]) == []
+    assert validate_dither_presets([preset]) == [{**preset, "name": "Photo"}]
+    for bad in (
+        "photo",
+        [{"id": "p1", "name": "x"}],
+        [{"id": "p1", "name": "", "dither": {"method": "opendisplay"}}],
+        [{"id": "p1", "name": "x" * 61, "dither": {"method": "opendisplay"}}],
+        [{"id": "p1", "name": "x", "dither": {"method": "opendisplay", "exposure": 9}}],
+        [{"id": "p1", "name": "x", "dither": {"method": "opendisplay"}, "colour": "red"}],
+        [preset, preset],
+        [{**preset, "id": f"p{i}"} for i in range(51)],
+    ):
+        with pytest.raises(ValueError):
+            validate_dither_presets(bad)
 
 
 def test_panel_density_from_the_name():

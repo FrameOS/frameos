@@ -813,6 +813,25 @@ export interface FrameDither {
   dbs?: boolean
   exposure?: number
   viewingDistanceCm?: number
+  /** OKLab saturation multiplier, 0 to 2 (1 = unchanged). */
+  saturation?: number
+  /** Shadow lift, 0 to 1. */
+  shadows?: number
+  /** Highlight compression, 0 to 1. */
+  highlights?: number
+  /** Black-point lift onto the panel's range, 0 to 1. */
+  tone?: number
+  /** Gamut compression, 0 to 1. */
+  gamut?: number
+  /** Overrides the pixel density read from the panel's name (50 to 600); null = from the name. */
+  ppi?: number | null
+}
+
+/** One of the owner's own dithering presets (the `ditherPresets` settings group). */
+export interface DitherPreset {
+  id: string
+  name: string
+  dither: FrameDither
 }
 
 export interface FrameColors {
@@ -1629,6 +1648,8 @@ export interface FrameOSSettings {
     environmentName?: string
     enableDocker?: boolean
   }
+  /** The owner's own dithering presets (docs/dithering.md). */
+  ditherPresets?: DitherPreset[]
 }
 
 /** Mirrors GET /api/cloud/status (backend/app/api/cloud.py and the frame's cloud_api_routes.nim) */

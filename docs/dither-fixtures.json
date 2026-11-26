@@ -22,7 +22,13 @@
         "algorithm": "burkes",
         "dbs": false,
         "exposure": 1.0,
-        "viewingDistanceCm": 30.0
+        "viewingDistanceCm": 30.0,
+        "saturation": 1.0,
+        "shadows": 0.0,
+        "highlights": 0.0,
+        "tone": 0.0,
+        "gamut": 0.0,
+        "ppi": null
       },
       "ppi": 127.0,
       "packed": "000003333333333300003003333333336063036333333333066606636333333366066363633113136666666663233133666666661661232166662662632632316226626226112312266662662662621266666621221621216626666661622212"
@@ -47,7 +53,13 @@
         "algorithm": "burkes",
         "dbs": true,
         "exposure": 1.3,
-        "viewingDistanceCm": 30.0
+        "viewingDistanceCm": 30.0,
+        "saturation": 1.0,
+        "shadows": 0.0,
+        "highlights": 0.0,
+        "tone": 0.0,
+        "gamut": 0.0,
+        "ppi": null
       },
       "ppi": 180.0,
       "packed": "000000033333333306000003333333330000600333333333600600023333331360060600032333336666666660333133666666666623233166666666266223236626666666262222666626226226222266662662222222126666662626222222"
@@ -72,7 +84,13 @@
         "algorithm": "atkinson",
         "dbs": false,
         "exposure": 1.0,
-        "viewingDistanceCm": 30.0
+        "viewingDistanceCm": 30.0,
+        "saturation": 1.0,
+        "shadows": 0.0,
+        "highlights": 0.0,
+        "tone": 0.0,
+        "gamut": 0.0,
+        "ppi": null
       },
       "ppi": 127.0,
       "packed": "000030333333333000000033333333306066030633333330666666366633313066666666612311306666666266612320666622622626221062626666622612106666666212122120"
@@ -97,7 +115,13 @@
         "algorithm": "burkes",
         "dbs": false,
         "exposure": 1.0,
-        "viewingDistanceCm": 30.0
+        "viewingDistanceCm": 30.0,
+        "saturation": 1.0,
+        "shadows": 0.0,
+        "highlights": 0.0,
+        "tone": 0.0,
+        "gamut": 0.0,
+        "ppi": null
       },
       "ppi": 127.0,
       "packed": "000000404444444400040400444444440000004444444444222240044444644422222224444464442222226226666666252222525666666652555555255656552555255555555155222555255555555522252255555555112222222555555555"
@@ -119,10 +143,47 @@
         "algorithm": "burkes",
         "dbs": true,
         "exposure": 1.0,
-        "viewingDistanceCm": 30.0
+        "viewingDistanceCm": 30.0,
+        "saturation": 1.0,
+        "shadows": 0.0,
+        "highlights": 0.0,
+        "tone": 0.0,
+        "gamut": 0.0,
+        "ppi": null
       },
       "ppi": 127.0,
       "packed": "000fffff0003ffff0000ffff0208ffff00002fff88820fef08882af7a22282bbaaaaaaaaaaaaaaaaaaaaaa9aaaaaaaaa"
+    },
+    {
+      "name": "spectra6 measured, fine tuned, ppi override",
+      "pixelFormat": 7,
+      "width": 16,
+      "height": 12,
+      "rgb": "0c00072900000a001b4006255b000e3e001d5a161d810a32760030a4143ea2123cce0034c90035df003eff0057f314540005001e0b1a211e013b2323581f00651612741a1a752413751f3ba20b1cb8292ab62d2acc1d30cd2534ff202cf30931112b14233d1c1d2d123c2e1034412240212274452565321f753c3f9d3231963739c1294fce1b33f4413df2355ef217360a34051e44061a4d1a304e1346472e5c3e326c572e7e3643884c2ca94a32a9572cca4553da3e40ee464fff3747ff2d60044705006b22116f30325b265147184655374e5f367e48377e4a35984d4dba534db74d2edc6e36f24a37ff6256ff486600872101820814822f2b84284b87116563216a79357b7e2f8e8847856d3ea4722ea87b41c56c53e07750d88843f6816a00953200a2121f8a0e1ea2405c804158881d58a149668c45789056a09b309a7746c47440d5a042d0856ddf9366ff815514ae3401a43814ba242aad392cae3149ba3266ab3e5fa34893b434ae9859b4b94cb4b444bd946aed925ada8d47e9a87b00a83526c31635b83b1da43b3abb2c6dc54e60a64563cf5073ab5a9da83cbeac3ccea26edfcf5deece59e6bd59f3ca7211c5211eb8252be64848e3334dbd4763e12965cf5866c66071cf6196d36495ce46a4b857b8d747e2c850ffdd77f8c65c00e93704de4322f5393ff04a4ae03745e22e5aff4c65da5976cf598bd647b7e860c2f073d6ed58eee759f3cf69ffdf6d00f9301eff3518e73526ec4153ff3a66ec3c66ff3d8ff05a73ff5fa0fe57bfff5fb4ff75b8f758c7ee79fcff87f0ff7d",
+      "palette": [
+        "#21132d",
+        "#b0babb",
+        "#bbaa35",
+        "#7e060f",
+        null,
+        "#38699e",
+        "#577b5f"
+      ],
+      "dither": {
+        "method": "opendisplay",
+        "algorithm": "burkes",
+        "dbs": true,
+        "exposure": 1.2,
+        "viewingDistanceCm": 30.0,
+        "saturation": 1.3,
+        "shadows": 0.4,
+        "highlights": 0.3,
+        "tone": 0.2,
+        "gamut": 0.5,
+        "ppi": 200.0
+      },
+      "ppi": 127.0,
+      "packed": "000003333333333360020033333333330000000333333333600060203333333366020000023333336606602020333233666666660023333366666666262232226666666666602233666666666626622266666626622222626666666662622222"
     }
   ]
 }

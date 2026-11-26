@@ -787,6 +787,9 @@ importers:
       '@monaco-editor/react':
         specifier: ^4.5.2
         version: 4.7.0(monaco-editor@0.43.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@opendisplay/epaper-dithering':
+        specifier: 7.0.1
+        version: 7.0.1
       '@popperjs/core':
         specifier: ^2.11.8
         version: 2.11.8

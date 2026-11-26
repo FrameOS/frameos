@@ -35,6 +35,24 @@ export const defaultViewingDistanceCm = 30;
 export const defaultPanelPpi = 127;
 /** Above this many pixels the DBS pass is skipped (about 4 s on a 13.3" panel). */
 export const dbsMaxPixels = 2_000_000;
+/** An owner's override of the density read from the panel's name. */
+export const ditherPpiRange = [50, 600] as const;
+/**
+ * OpenDisplay's tone and colour steps, as panel_dither.py ADJUSTMENTS:
+ * [low, high, default], each a no-op at its default.
+ */
+export const ditherAdjustments = {
+  saturation: [0, 2, 1],
+  shadows: [0, 1, 0],
+  highlights: [0, 1, 0],
+  tone: [0, 1, 0],
+  gamut: [0, 1, 0],
+} as const;
+export type DitherAdjustment = keyof typeof ditherAdjustments;
+const adjustmentKeys = Object.keys(ditherAdjustments) as DitherAdjustment[];
+/** What a saved preset list may hold (the `ditherPresets` settings group). */
+export const maxDitherPresets = 50;
+export const maxDitherPresetName = 60;
 
 export type DitherAlgorithm = (typeof ditherAlgorithms)[number];
 
@@ -44,8 +62,9 @@ export type NormalizedDither = {
   dbs: boolean;
   exposure: number;
   method: "opendisplay";
+  ppi: number | null;
   viewingDistanceCm: number;
-};
+} & Record<DitherAdjustment, number>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -66,7 +85,7 @@ export function normalizeDither(value: unknown): NormalizedDither | null {
   const algorithm = (ditherAlgorithms as readonly unknown[]).includes(value.algorithm)
     ? (value.algorithm as DitherAlgorithm)
     : defaultDitherAlgorithm;
-  return {
+  const normalized = {
     method: "opendisplay",
     algorithm,
     dbs: value.dbs === true,
@@ -77,14 +96,23 @@ export function normalizeDither(value: unknown): NormalizedDither | null {
       ditherViewingDistanceRangeCm[1],
       defaultViewingDistanceCm,
     ),
-  };
+  } as NormalizedDither;
+  for (const key of adjustmentKeys) {
+    const [low, high, fallback] = ditherAdjustments[key];
+    normalized[key] = clamp(value[key], low, high, fallback);
+  }
+  normalized.ppi =
+    value.ppi === null || value.ppi === undefined
+      ? null
+      : clamp(value.ppi, ditherPpiRange[0], ditherPpiRange[1], defaultPanelPpi);
+  return normalized;
 }
 
 /** validate_dither: the reason a stored value is refused, or null when it is fine (null clears it). */
 export function ditherProblem(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (!isRecord(value)) return "dither must be an object";
-  const allowed = new Set(["method", "algorithm", "dbs", "exposure", "viewingDistanceCm"]);
+  const allowed = new Set(["method", "algorithm", "dbs", "exposure", "viewingDistanceCm", "ppi", ...adjustmentKeys]);
   const unknown = Object.keys(value).filter((key) => !allowed.has(key));
   if (unknown.length > 0) return `unknown dither keys: ${unknown.sort().join(", ")}`;
   if ("method" in value && !(ditherMethods as readonly unknown[]).includes(value.method)) {
@@ -94,10 +122,14 @@ export function ditherProblem(value: unknown): string | null {
     return `dither.algorithm must be one of ${ditherAlgorithms.join(", ")}`;
   }
   if ("dbs" in value && typeof value.dbs !== "boolean") return "dither.dbs must be true or false";
-  for (const [key, [low, high]] of [
+  const ranges: [string, readonly [number, number]][] = [
     ["exposure", ditherExposureRange],
     ["viewingDistanceCm", ditherViewingDistanceRangeCm],
-  ] as const) {
+    ["ppi", ditherPpiRange],
+    ...adjustmentKeys.map((key): [string, readonly [number, number]] => [key, [ditherAdjustments[key][0], ditherAdjustments[key][1]]]),
+  ];
+  for (const [key, [low, high]] of ranges) {
+    if (key === "ppi" && (value.ppi === null || value.ppi === undefined)) continue;
     if (key in value) {
       const number = value[key];
       if (typeof number !== "number" || !Number.isFinite(number) || number < low || number > high) {
@@ -106,6 +138,39 @@ export function ditherProblem(value: unknown): string | null {
     }
   }
   return null;
+}
+
+export type DitherPreset = { dither: Record<string, unknown>; id: string; name: string };
+
+/**
+ * validate_dither_presets: the `ditherPresets` settings group, checked and
+ * tidied (names trimmed), or the reason it is refused.
+ */
+export function readDitherPresets(
+  value: unknown,
+): { error: string; presets?: undefined } | { error?: undefined; presets: DitherPreset[] } {
+  if (!Array.isArray(value)) return { error: "ditherPresets must be a list" };
+  if (value.length > maxDitherPresets) return { error: `at most ${maxDitherPresets} dithering presets` };
+  const presets: DitherPreset[] = [];
+  const seen = new Set<string>();
+  for (const preset of value) {
+    if (!isRecord(preset) || Object.keys(preset).some((key) => !["id", "name", "dither"].includes(key))) {
+      return { error: "a dithering preset is {id, name, dither}" };
+    }
+    const { id, name, dither } = preset;
+    if (typeof id !== "string" || id.length === 0 || id.length > 64 || seen.has(id)) {
+      return { error: "a dithering preset needs a unique id" };
+    }
+    if (typeof name !== "string" || name.trim().length === 0 || name.trim().length > maxDitherPresetName) {
+      return { error: `a dithering preset needs a name of 1 to ${maxDitherPresetName} characters` };
+    }
+    if (dither === null || dither === undefined) return { error: "a dithering preset needs its dither settings" };
+    const problem = ditherProblem(dither);
+    if (problem) return { error: problem };
+    seen.add(id);
+    presets.push({ id, name: name.trim(), dither: { ...(dither as Record<string, unknown>) } });
+  }
+  return { presets };
 }
 
 /** panel_diagonal_inches: the diagonal a panel's name carries (`EPD_7in3e` = 7.3"). */
@@ -172,13 +237,19 @@ export function createOpenDisplayDitherer(
         true,
       );
       const useDbs = dither.dbs && width * height <= dbsMaxPixels;
+      const density = dither.ppi || ppi;
       const result = od.ditherImage(
         { width, height, data: new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.byteLength) },
         palette,
         {
           mode: dither.algorithm,
           exposure: dither.exposure,
-          dbs: useDbs ? { viewingDistanceCm: dither.viewingDistanceCm, ppi } : false,
+          saturation: dither.saturation,
+          shadows: dither.shadows,
+          highlights: dither.highlights,
+          tone: dither.tone,
+          gamut: dither.gamut,
+          dbs: useDbs ? { viewingDistanceCm: dither.viewingDistanceCm, ppi: density } : false,
         },
       );
       return result.indices;
