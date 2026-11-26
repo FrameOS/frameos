@@ -185,7 +185,11 @@ def cmd_run(args):
     with open(bookings.BOARDS_JSON) as fh:
         known = json.load(fh).get('boards', {})
     for key in sorted(held):
-        module = names[key]
+        module = names.get(key)
+        if module is None:
+            # A board this checkout's boards.json does not name yet (one a
+            # session is bringing up on its branch): not one of these frames.
+            continue
         if args.linux_only and not (known.get(module) or {}).get('ram_bytes'):
             continue
         stub = {'key': key, 'module': module, 'name': known.get(module, {}).get('name', key), 'port': None,
