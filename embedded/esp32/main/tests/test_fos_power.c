@@ -200,8 +200,18 @@ static void test_big_drop_is_believed_on_repeat(void)
     CHECK(!d.suspect, "20 mV between passes is ordinary");
 }
 
+static void test_idle_dims_the_glass(void)
+{
+    CHECK(fos_power_brightness(80, 0, 10, 999999999LL) == 80, "dim_after 0 never dims");
+    CHECK(fos_power_brightness(80, 30, 10, 29999999LL) == 80, "bright until the 30 s are up");
+    CHECK(fos_power_brightness(80, 30, 10, 30000000LL) == 10, "dimmed from then on");
+    CHECK(fos_power_brightness(40, 30, 60, 60000000LL) == 40, "a dim level above full is full");
+    CHECK(fos_power_brightness(100, 5, 0, 6000000LL) == 0, "dim 0 is dark");
+}
+
 int main(void)
 {
+    test_idle_dims_the_glass();
     test_healthy_cell_sleeps_every_pass();
     test_one_glitch_does_not_switch_deep_sleep_off();
     test_two_low_reads_mean_no_cell();

@@ -21,6 +21,9 @@ enum CloudFramesContractSource {
         "restart": true,
         "since": null
       },
+      "brightness": {
+        "since": "2026.11.16"
+      },
       "buzzer_pin": {
         "since": "2026.10.12"
       },
@@ -45,6 +48,12 @@ enum CloudFramesContractSource {
       },
       "deep_sleep_on_battery": {
         "since": null
+      },
+      "dim_after_seconds": {
+        "since": "2026.11.16"
+      },
+      "dim_brightness": {
+        "since": "2026.11.16"
       },
       "event_map": {
         "rule": {
@@ -272,6 +281,11 @@ enum CloudFramesContractSource {
     "battery_pin": {
       "max": 48,
       "min": -1,
+      "type": "int"
+    },
+    "brightness": {
+      "max": 100,
+      "min": 5,
       "type": "int"
     },
     "buzzer_pin": {
@@ -520,6 +534,16 @@ enum CloudFramesContractSource {
       },
       "minKeys": 1,
       "type": "object"
+    },
+    "dim_after_seconds": {
+      "max": 86400,
+      "min": 0,
+      "type": "int"
+    },
+    "dim_brightness": {
+      "max": 100,
+      "min": 0,
+      "type": "int"
     },
     "error_behavior": {
       "keys": {

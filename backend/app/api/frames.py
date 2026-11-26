@@ -1498,6 +1498,9 @@ async def api_frame_get_states(
             ),
         }
 
+    # The scene known before the refresh starts: read after, it races the
+    # refresh's own write of the active scene.
+    scene_id = await _active_scene_id_from_cache(redis, frame.id)
     refreshing = await _schedule_frame_states_cache_refresh(
         redis,
         frame.id,
@@ -1505,7 +1508,7 @@ async def api_frame_get_states(
         lock_key,
     )
     return {
-        "sceneId": await _active_scene_id_from_cache(redis, frame.id),
+        "sceneId": scene_id,
         "states": {},
         "cache": _frame_states_cache_meta(
             cached=False,

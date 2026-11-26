@@ -3016,6 +3016,14 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     }
     const cJSON *awake_input = cJSON_GetObjectItem(settings, "awake_after_input_seconds");
     if (awake_input != NULL) config->awake_after_input_sec = (uint32_t)awake_input->valuedouble;
+    /* The glass's brightness and its idle dim (fos_client.c applies them
+     * within a second); the contract checked the ranges. */
+    const cJSON *bright = cJSON_GetObjectItem(settings, "brightness");
+    if (bright != NULL) config->brightness = (uint8_t)bright->valueint;
+    const cJSON *dim_bright = cJSON_GetObjectItem(settings, "dim_brightness");
+    if (dim_bright != NULL) config->dim_brightness = (uint8_t)dim_bright->valueint;
+    const cJSON *dim_after = cJSON_GetObjectItem(settings, "dim_after_seconds");
+    if (dim_after != NULL) config->dim_after_sec = (uint32_t)dim_after->valuedouble;
     const cJSON *wake_check = cJSON_GetObjectItem(settings, "wake_check_seconds");
     if (wake_check != NULL) {
         uint32_t seconds = (uint32_t)wake_check->valuedouble;

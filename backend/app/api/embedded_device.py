@@ -1768,6 +1768,10 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("deepSleepOnBattery", ("deepSleepOnBattery", "deep_sleep_on_battery"), "bool"),
             ("wakeCheckSeconds", ("wakeCheckSeconds", "wake_check_seconds"), "int"),
             ("awakeAfterInputSeconds", ("awakeAfterInputSeconds", "awake_after_input_seconds"), "int"),
+            # The glass's brightness and its idle dim (docs/cloud-frames-contract.json).
+            ("brightness", ("brightness",), "int"),
+            ("dimAfterSeconds", ("dimAfterSeconds", "dim_after_seconds"), "int"),
+            ("dimBrightness", ("dimBrightness", "dim_brightness"), "int"),
             ("batteryPin", ("batteryPin", "battery_pin"), "int"),
             ("batteryDivider", ("batteryDivider", "battery_divider"), "float"),
             ("batteryEnablePin", ("batteryEnablePin", "battery_enable_pin"), "int"),

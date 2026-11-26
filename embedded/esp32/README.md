@@ -1520,6 +1520,27 @@ Silent leaves the voice chat's cues alone. Live, no restart; the plane's
 report says `sounds` (a buzzer, a codec speaker or an LED that follows the
 notes: `fos_buzzer_sounds`) and `clickSounds`.
 
+### Brightness and dimming when idle
+
+Where the display can set it (`fos_display_brightness`: the round AMOLED's
+own register, CO5300 0x51, and a backlit SPI LCD's PWM on LEDC's second-last
+timer and channel: the CrowPanel 2.01" watch's GPIO13, the CrowPanel 1.46"
+rotary's GPIO46), `brightness` (NVS,
+percent 5..100, default 100) is the glass's level, and after `dim_after`
+seconds without a tap, a key or a turn of the crown (NVS, 0 = never, the
+default) it goes down to `dim_brightness` (percent 0..100, default 10; 0 is
+dark) until the next one, which brings it back at once and still does what it
+does. The console's `set brightness|dim_after|dim_brightness <n>`, a backend's
+`brightness` / `dimAfterSeconds` / `dimBrightness` (device_config, Power),
+the cloud's `brightness` / `dim_after_seconds` / `dim_brightness`. Live, no
+restart: the render task looks every wait slice (a second at most, and in an
+animation's waits) and at every input, and sends the level only when it
+changes (`fos_power_brightness`, host-tested), so dimming costs no render.
+Screen off (`turnOff`, `toggleScreen`) still darkens the glass, and it comes
+back at the level it should have. `status` prints the settings and the level
+now. Other panels ignore it, and so does a Pi (no backlight control in the
+Linux runtime yet).
+
 ### Before a restart
 
 Every planned restart (the reboot and restart verbs, a firmware update and

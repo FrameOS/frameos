@@ -179,6 +179,7 @@ bool fos_lcd_qspi_round(void)
 #if CONFIG_IDF_TARGET_ESP32S3
 
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -453,12 +454,43 @@ static esp_err_t bus_init(void)
     return err;
 }
 
-/* The backlight of a glass that has one (the GC9309's): lit high. */
+/* The backlight of a glass that has one (the GC9309's), lit high, at
+ * s_brightness: a plain GPIO at full, an LEDC channel's PWM once a lower level
+ * was asked for (fos_lcd_qspi_brightness). The buzzer has LEDC's last timer
+ * and channel (fos_buzzer.c), this the ones before them. */
+#define BACKLIGHT_TIMER ((ledc_timer_t)(LEDC_TIMER_MAX - 2))
+#define BACKLIGHT_CHANNEL ((ledc_channel_t)(LEDC_CHANNEL_MAX - 2))
+static bool s_backlight_pwm = false;
+
 static void backlight(bool on)
 {
-    if (s_board->backlight < 0) return;
-    gpio_set_direction((gpio_num_t)s_board->backlight, GPIO_MODE_OUTPUT);
-    gpio_set_level((gpio_num_t)s_board->backlight, on);
+    int pin = s_board->backlight;
+    if (pin < 0) return;
+    uint32_t duty = on ? s_brightness : 0;
+    if (!s_backlight_pwm && duty != 0 && duty != 0xFF) {
+        ledc_timer_config_t timer = {
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .duty_resolution = LEDC_TIMER_8_BIT,
+            .timer_num = BACKLIGHT_TIMER,
+            .freq_hz = 5000,
+            .clk_cfg = LEDC_AUTO_CLK,
+        };
+        ledc_channel_config_t channel = {
+            .gpio_num = pin,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel = BACKLIGHT_CHANNEL,
+            .timer_sel = BACKLIGHT_TIMER,
+        };
+        s_backlight_pwm = ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&channel) == ESP_OK;
+    }
+    if (s_backlight_pwm) {
+        /* 256 of 8 bits is on all the time. */
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, BACKLIGHT_CHANNEL, duty == 0xFF ? 256 : duty);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, BACKLIGHT_CHANNEL);
+        return;
+    }
+    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)pin, duty != 0);
 }
 
 /* --------------------------------------------------------- the buffers */
@@ -851,10 +883,17 @@ esp_err_t fos_lcd_qspi_power(bool on)
 esp_err_t fos_lcd_qspi_brightness(uint8_t level)
 {
     if (!s_ready) return ESP_ERR_INVALID_STATE;
+    if (level == s_brightness) return ESP_OK;
+    s_brightness = level;
+    /* Dark: the level comes back with the glass (fos_lcd_qspi_power). */
+    if (!s_on) return ESP_OK;
+    if (s_board->backlight >= 0) {
+        backlight(true);
+        return ESP_OK;
+    }
     xSemaphoreTake(s_bus_lock, portMAX_DELAY);
-    esp_err_t err = s_on ? send_cmd1(DCS_BRIGHTNESS, level) : ESP_OK;
+    esp_err_t err = send_cmd1(DCS_BRIGHTNESS, level);
     xSemaphoreGive(s_bus_lock);
-    if (err == ESP_OK) s_brightness = level;
     return err;
 }
 

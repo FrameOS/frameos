@@ -325,6 +325,13 @@ export function cloudFrameSupportsEsp32ClickSounds(frameosVersion: string | null
   return cloudFrameSupportsSettingsFrom(esp32ClickSoundsCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** 2026.11.16: the glass's brightness and its dim after idle (`brightness`, `dim_after_seconds`, `dim_brightness`). Live. */
+export const esp32BrightnessCloudFrameSettingsMinVersion = '2026.11.16'
+
+export function cloudFrameSupportsEsp32Brightness(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32BrightnessCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** 2026.11.6: the click of a press on the glass (`touch_beep`). */
 export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
 
@@ -567,6 +574,9 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'rotate',
   'wake_check_seconds',
   'awake_after_input_seconds',
+  'brightness',
+  'dim_after_seconds',
+  'dim_brightness',
   'battery_pin',
   'battery_divider',
   'battery_enable_pin',

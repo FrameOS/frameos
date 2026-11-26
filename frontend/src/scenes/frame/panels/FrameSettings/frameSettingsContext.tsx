@@ -14,6 +14,8 @@ import {
   cloudFrameSupportsEsp32TouchBeep,
   cloudFrameSupportsEsp32ClickSounds,
   esp32ClickSoundsCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32Brightness,
+  esp32BrightnessCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32CpuMode,
   cloudFrameSupportsCpuMode,
   cpuModeCloudFrameSettingsMinVersion,
@@ -55,6 +57,7 @@ import type {
   RenderOnServerChoice,
 } from '../../../../components/PowerSettingsFields'
 import { backendFrameRenderMode, cloudFrameRenderMode, frameCanRenderItself } from '../../../../utils/renderOnServer'
+import { deviceCanDim } from '../../../../utils/displayBrightness'
 import { clickSoundsOf, frameHasSounds } from '../../../../utils/clickSounds'
 import type {
   ClickSounds,
@@ -299,6 +302,9 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   setEmbeddedPowerSettings: (patch: Partial<PowerSettingsValues>) => void
   /** The same on a backend ESP32-S3; undefined hides it. */
   embeddedRenderOnServer: RenderOnServerChoice | undefined
+  /** The glass's brightness and its dim after idle, on a display that can dim (utils/displayBrightness.ts); undefined hides them. */
+  cloudBrightness: { disabledReason?: string } | undefined
+  embeddedBrightness: { disabledReason?: string } | undefined
   /** Real ESP32 hardware on the backend plane: not virtual, not a pico. */
   /** Which Power controls this board's firmware implements; null = none. */
   embeddedPowerProfile: EmbeddedPowerProfile | null
@@ -447,6 +453,16 @@ export function FrameSettingsProvider({
     : frame.frameos_version
       ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
       : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+  // 2026.11.16: the glass's brightness and its dim after idle, where the
+  // display can set it (the round AMOLED, the CrowPanel watch).
+  const cloudBrightness: { disabledReason?: string } | undefined =
+    esp32CloudProfile && deviceCanDim(frame.hardware?.device)
+      ? {
+          disabledReason: cloudFrameSupportsEsp32Brightness(frame.frameos_version)
+            ? undefined
+            : `Brightness needs FrameOS ${esp32BrightnessCloudFrameSettingsMinVersion} or newer on the frame.`,
+        }
+      : undefined
   const cloudCpuModeDisabledReason =
     esp32CloudProfile && cloudFrameSupportsEsp32CpuMode(frame.frameos_version)
       ? undefined
@@ -610,6 +626,9 @@ export function FrameSettingsProvider({
       ...('deepSleepOnBattery' in patch ? { deep_sleep_on_battery: patch.deepSleepOnBattery } : {}),
       ...('wakeCheckSeconds' in patch ? { wake_check_seconds: patch.wakeCheckSeconds } : {}),
       ...('awakeAfterInputSeconds' in patch ? { awake_after_input_seconds: patch.awakeAfterInputSeconds } : {}),
+      ...('brightness' in patch ? { brightness: patch.brightness } : {}),
+      ...('dimAfterSeconds' in patch ? { dim_after_seconds: patch.dimAfterSeconds } : {}),
+      ...('dimBrightness' in patch ? { dim_brightness: patch.dimBrightness } : {}),
       ...('cpuMode' in patch ? { cpu_mode: patch.cpuMode } : {}),
       ...('renderMode' in patch ? { render_mode: patch.renderMode } : {}),
     })
@@ -622,6 +641,9 @@ export function FrameSettingsProvider({
         | 'deepSleepOnBattery'
         | 'wakeCheckSeconds'
         | 'awakeAfterInputSeconds'
+        | 'brightness'
+        | 'dimAfterSeconds'
+        | 'dimBrightness'
         | 'batteryPin'
         | 'batteryDivider'
         | 'batteryEnablePin'
@@ -632,6 +654,9 @@ export function FrameSettingsProvider({
         | 'deep_sleep_on_battery'
         | 'wake_check_seconds'
         | 'awake_after_input_seconds'
+        | 'brightness'
+        | 'dim_after_seconds'
+        | 'dim_brightness'
         | 'battery_pin'
         | 'battery_divider'
         | 'battery_enable_pin'
@@ -656,6 +681,9 @@ export function FrameSettingsProvider({
     write('deepSleepOnBattery', 'deep_sleep_on_battery')
     write('wakeCheckSeconds', 'wake_check_seconds')
     write('awakeAfterInputSeconds', 'awake_after_input_seconds')
+    write('brightness', 'brightness')
+    write('dimAfterSeconds', 'dim_after_seconds')
+    write('dimBrightness', 'dim_brightness')
     write('batteryPin', 'battery_pin')
     write('batteryDivider', 'battery_divider')
     write('batteryEnablePin', 'battery_enable_pin')
@@ -1158,6 +1186,9 @@ export function FrameSettingsProvider({
         frameForm.deep_sleep_on_battery ?? presetWakeCheckSeconds(frame.hardware?.hardwarePreset) !== undefined,
       wakeCheckSeconds: frameForm.wake_check_seconds ?? presetWakeCheckSeconds(frame.hardware?.hardwarePreset),
       awakeAfterInputSeconds: frameForm.awake_after_input_seconds,
+      brightness: frameForm.brightness,
+      dimAfterSeconds: frameForm.dim_after_seconds,
+      dimBrightness: frameForm.dim_brightness,
       // What the frame runs with until the owner picks one here.
       cpuMode: frameForm.cpu_mode ?? frame.hardware?.cpuMode ?? undefined,
       // The owner's setting, else what the frame reports running with.
@@ -1168,6 +1199,7 @@ export function FrameSettingsProvider({
     },
     setCloudPowerSettings,
     cloudRenderOnServer,
+    cloudBrightness,
     embeddedPowerSettings: {
       batteryDivider: powerDeviceConfig.batteryDivider ?? powerDeviceConfig.battery_divider,
       batteryEnablePin: powerDeviceConfig.batteryEnablePin ?? powerDeviceConfig.battery_enable_pin,
@@ -1176,6 +1208,9 @@ export function FrameSettingsProvider({
       deepSleepOnBattery: (powerDeviceConfig.deepSleepOnBattery ?? powerDeviceConfig.deep_sleep_on_battery) === true,
       wakeCheckSeconds: powerDeviceConfig.wakeCheckSeconds ?? powerDeviceConfig.wake_check_seconds,
       awakeAfterInputSeconds: powerDeviceConfig.awakeAfterInputSeconds ?? powerDeviceConfig.awake_after_input_seconds,
+      brightness: powerDeviceConfig.brightness,
+      dimAfterSeconds: powerDeviceConfig.dimAfterSeconds ?? powerDeviceConfig.dim_after_seconds,
+      dimBrightness: powerDeviceConfig.dimBrightness ?? powerDeviceConfig.dim_brightness,
       cpuMode: powerDeviceConfig.cpuMode ?? powerDeviceConfig.cpu_mode,
       renderMode: backendFrameRenderMode({
         device_config: powerDeviceConfig,
@@ -1184,6 +1219,8 @@ export function FrameSettingsProvider({
     },
     setEmbeddedPowerSettings,
     embeddedRenderOnServer,
+    // A backend frame's display, by its device: the AMOLED, the CrowPanel watch.
+    embeddedBrightness: deviceCanDim(frameForm.device ?? frame.device) ? {} : undefined,
     // Backend/on-device planes: real hardware only — a virtual frame has no
     // battery and never sleeps. The profile picks the controls: every knob on
     // an ESP32, deep sleep alone on a Pico (all its firmware implements).

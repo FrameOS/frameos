@@ -70,7 +70,9 @@ void fos_lcd_qspi_set_before_write_hook(void (*hook)(const uint8_t *buf));
 /* The glass on or off (DISPOFF keeps the controller's RAM; nothing is lit).
  * ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_qspi_power(bool on);
-/* The glass's brightness, 0..255 (the controller's 0x51). */
+/* The glass's brightness, 0..255: the controller's 0x51 (the CO5300), or the
+ * backlight's PWM (a board with a backlight pin, the GC9309's). Live; kept
+ * while the glass is off, and the level it comes back on at. */
 esp_err_t fos_lcd_qspi_brightness(uint8_t level);
 /* Before a deep sleep: the glass off and the controller in its sleep. */
 esp_err_t fos_lcd_qspi_prepare_deep_sleep(void);

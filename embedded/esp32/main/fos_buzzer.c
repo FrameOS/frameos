@@ -16,9 +16,9 @@
 #include "fos_restart.h"
 #include "fos_led.h"
 
-/* Nothing else in the firmware uses LEDC. Take the last timer and channel
- * (the C3 has six channels, the S3 eight) so a future user counting from 0
- * does not land on the buzzer. */
+/* The last LEDC timer and channel (the C3 has six channels, the S3 eight), so
+ * a user counting from 0 does not land on the buzzer; a backlit LCD's PWM
+ * takes the ones before them (lcd_qspi_amoled.c). */
 #define BUZZER_MODE LEDC_LOW_SPEED_MODE
 #define BUZZER_TIMER ((ledc_timer_t)(LEDC_TIMER_MAX - 1))
 #define BUZZER_CHANNEL ((ledc_channel_t)(LEDC_CHANNEL_MAX - 1))

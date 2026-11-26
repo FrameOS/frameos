@@ -45,6 +45,12 @@ export interface PowerSettingsValues {
   cpuMode?: CpuMode | undefined
   /** Where the scenes run (docs/server-rendering.md); undefined = on the frame. */
   renderMode?: RenderMode | undefined
+  /** The glass's brightness in percent; undefined = 100. */
+  brightness?: number | undefined
+  /** Seconds without input before the glass dims; undefined = never (0). */
+  dimAfterSeconds?: number | undefined
+  /** The glass's brightness while dimmed, percent; undefined = 10. */
+  dimBrightness?: number | undefined
 }
 
 /**
@@ -90,7 +96,93 @@ export interface PowerSettingsFieldsProps {
   reportedCpuMhz?: number | undefined
   /** Offer "Render scenes"; omitted on a board that cannot render itself. */
   renderOnServer?: RenderOnServerChoice
+  /**
+   * Offer the glass's brightness and its dim after idle (utils/displayBrightness.ts);
+   * omitted on a display that cannot dim. `disabledReason`: why not here (cloud:
+   * the frame's firmware predates the keys).
+   */
+  brightness?: { disabledReason?: string }
   className?: string
+}
+
+const brightnessChoices = [100, 80, 60, 40, 25, 15, 10, 5]
+const dimBrightnessChoices = [0, 5, 10, 20, 30, 50]
+const dimAfterChoices = [
+  { value: '0', label: 'Never (default)' },
+  { value: '15', label: 'After 15 seconds' },
+  { value: '30', label: 'After 30 seconds' },
+  { value: '60', label: 'After 1 minute' },
+  { value: '120', label: 'After 2 minutes' },
+  { value: '300', label: 'After 5 minutes' },
+  { value: '900', label: 'After 15 minutes' },
+]
+
+/** A select's options with the value it holds, when a console or an older save set one off the list. */
+function withCurrent(
+  options: { value: string; label: string }[],
+  current: number | undefined,
+  label: (value: number) => string
+): { value: string; label: string }[] {
+  return current === undefined || options.some((option) => option.value === String(current))
+    ? options
+    : [...options, { value: String(current), label: label(current) }]
+}
+
+/** "Brightness" and "Dim when idle": the glass's level, and how far it goes down while nobody touches it. */
+function BrightnessFields({
+  value,
+  onChange,
+  disabledReason,
+}: {
+  value: PowerSettingsValues
+  onChange: (patch: Partial<PowerSettingsValues>) => void
+  disabledReason?: string
+}): JSX.Element {
+  const dimAfter = value.dimAfterSeconds ?? 0
+  return (
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2" title={disabledReason}>
+      <PowerField
+        label="Brightness"
+        tooltip="How bright the screen is. Lower saves power: on an AMOLED every lit pixel costs less, on an LCD the backlight draws less."
+      >
+        <Select
+          value={String(value.brightness ?? 100)}
+          onChange={(pct) => onChange({ brightness: parseInt(pct) })}
+          options={withCurrent(
+            brightnessChoices.map((pct) => ({ value: String(pct), label: pct === 100 ? '100% (default)' : `${pct}%` })),
+            value.brightness,
+            (pct) => `${pct}%`
+          )}
+        />
+      </PowerField>
+      <PowerField
+        label="Dim when idle"
+        tooltip="Dims the screen after this long without a tap, a press or a turn of the knob, to save power. The next touch brings it back at once and still does what it does."
+      >
+        <Select
+          value={String(dimAfter)}
+          onChange={(seconds) => onChange({ dimAfterSeconds: parseInt(seconds) })}
+          options={withCurrent(dimAfterChoices, value.dimAfterSeconds, (seconds) => `After ${seconds} seconds`)}
+        />
+      </PowerField>
+      {dimAfter > 0 ? (
+        <PowerField label="Dimmed brightness" tooltip="How bright the screen is while dimmed. 0% turns it dark until the next touch.">
+          <Select
+            value={String(value.dimBrightness ?? 10)}
+            onChange={(pct) => onChange({ dimBrightness: parseInt(pct) })}
+            options={withCurrent(
+              dimBrightnessChoices.map((pct) => ({
+                value: String(pct),
+                label: pct === 0 ? 'Off (dark)' : pct === 10 ? '10% (default)' : `${pct}%`,
+              })),
+              value.dimBrightness,
+              (pct) => `${pct}%`
+            )}
+          />
+        </PowerField>
+      ) : null}
+    </fieldset>
+  )
 }
 
 const awakeAfterInputChoices = [
@@ -212,6 +304,7 @@ export function PowerSettingsFields({
   cpuModeDisabledReason,
   reportedCpuMhz,
   renderOnServer,
+  brightness,
   className,
 }: PowerSettingsFieldsProps): JSX.Element {
   const wakeCheckValue = String(value.wakeCheckSeconds ?? 0)
@@ -255,6 +348,9 @@ export function PowerSettingsFields({
 
   return (
     <div className={clsx('space-y-2', className)}>
+      {brightness ? (
+        <BrightnessFields value={value} onChange={onChange} disabledReason={brightness.disabledReason} />
+      ) : null}
       <PowerField
         label="Between renders"
         tooltip={

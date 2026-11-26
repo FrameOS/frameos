@@ -73,6 +73,10 @@ bool fos_display_round(void);
  * backlight, an AMOLED's display on/off. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
  * holds its image unpowered). */
 esp_err_t fos_display_power(bool on);
+/* The glass's brightness, 0..255, where the display can set it (the QSPI
+ * AMOLED's register, a backlit SPI LCD's PWM); ESP_ERR_NOT_SUPPORTED on every
+ * other panel. Live; screen off (fos_display_power) still darkens it. */
+esp_err_t fos_display_brightness(uint8_t level);
 /* The panel's step before a deep sleep, after the last refresh: on the
  * PhotoPainter, release the panel's lines and switch its supply (the
  * AXP2101's ALDO4) off; an AMOLED's controller off and asleep. ESP_ERR_NOT_SUPPORTED on boards whose panel supply

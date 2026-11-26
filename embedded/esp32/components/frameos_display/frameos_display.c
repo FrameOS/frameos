@@ -308,6 +308,11 @@ esp_err_t fos_display_power(bool on)
     return is_qspi() ? fos_lcd_qspi_power(on) : fos_lcd_st7701s_backlight(on);
 }
 
+esp_err_t fos_display_brightness(uint8_t level)
+{
+    return is_qspi() ? fos_lcd_qspi_brightness(level) : ESP_ERR_NOT_SUPPORTED;
+}
+
 void fos_display_boot_status(fos_lcd_splash_status_t status)
 {
     if (is_qspi()) fos_lcd_qspi_splash_status(status);

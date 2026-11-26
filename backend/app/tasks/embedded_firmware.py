@@ -2452,6 +2452,15 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     awake_after_input = _embedded_device_config_value(frame, "awakeAfterInputSeconds", "awake_after_input_seconds")
     if isinstance(awake_after_input, int) and not isinstance(awake_after_input, bool):
         settings.append(_provisioning_setting("awake_input", max(0, awake_after_input)))
+    # The glass's brightness and its idle dim, where the display can set it.
+    for console_key, camel, snake, low, high in (
+        ("brightness", "brightness", "brightness", 5, 100),
+        ("dim_after", "dimAfterSeconds", "dim_after_seconds", 0, 86400),
+        ("dim_brightness", "dimBrightness", "dim_brightness", 0, 100),
+    ):
+        level = _embedded_device_config_value(frame, camel, snake)
+        if isinstance(level, int) and not isinstance(level, bool):
+            settings.append(_provisioning_setting(console_key, min(high, max(low, level))))
     battery_pin = _embedded_device_config_value(frame, "batteryPin", "battery_pin")
     if isinstance(battery_pin, int) and not isinstance(battery_pin, bool):
         settings.append(_provisioning_setting("battery_pin", battery_pin))

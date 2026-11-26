@@ -292,6 +292,18 @@ const CloudContractSettings* = @[
     Rule(kind: rkString, strEnum: @["silent", "normal"]),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.11.15")]),
+  SettingSpec(key: "brightness", rule:
+    Rule(kind: rkInt, hasMin: true, min: 5.0, hasMax: true, max: 100.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.16")]),
+  SettingSpec(key: "dim_after_seconds", rule:
+    Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 86400.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.16")]),
+  SettingSpec(key: "dim_brightness", rule:
+    Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 100.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.16")]),
   SettingSpec(key: "cpu_mode", rule:
     Rule(kind: rkString, strEnum: @["auto", "battery", "performance"]),
   profiles: @[

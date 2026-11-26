@@ -787,6 +787,7 @@ void fos_client_wake_for_events(void)
  * after it comes back on renders at once. A panel with nothing to switch
  * (e-paper) keeps rendering; the scene still heard the event. */
 static bool s_display_dark = false;
+static void apply_brightness(void);
 
 static void display_power(bool on)
 {
@@ -798,6 +799,8 @@ static void display_power(bool on)
              on ? "on" : "off");
     frameos_nim_log_hook(line);
     if (on && was_dark) fos_client_render_now();
+    /* Back at the level it should have now: the press that woke it is input. */
+    if (on) apply_brightness();
 }
 
 void fos_client_set_display_power(int on)
@@ -888,6 +891,29 @@ static void note_input_awake(void)
     s_last_input_us = esp_timer_get_time();
     uint32_t seconds = fos_config()->awake_after_input_sec;
     if (seconds > 0) fos_client_keep_awake_ms(seconds * 1000);
+    apply_brightness();
+}
+
+/* The glass's brightness (the settings `brightness`, `dim_after_seconds`,
+ * `dim_brightness`; fos_power_brightness): looked at in every wait slice, a
+ * second at most, and at once on input, and sent only when the level changes,
+ * so dimming costs no render. A screen turned off stays off. */
+static int s_brightness_pct = -1; /* applied, percent; -1: never set */
+
+static void apply_brightness(void)
+{
+    if (s_display_dark) return;
+    const fos_config_t *config = fos_config();
+    int pct = fos_power_brightness(config->brightness, config->dim_after_sec, config->dim_brightness,
+                                   esp_timer_get_time() - s_last_input_us);
+    if (pct != s_brightness_pct && fos_display_brightness((uint8_t)(pct * 255 / 100)) == ESP_OK) {
+        s_brightness_pct = pct;
+    }
+}
+
+int fos_client_brightness_now(void)
+{
+    return s_brightness_pct;
 }
 
 static bool input_keeps_awake(void)
@@ -4236,6 +4262,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
                                   pdMS_TO_TICKS(armed ? 1000 : 100))
             : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
         if (bits & RESTART_NOTICE_BIT) serve_restart_notice();
+        apply_brightness();
         bool nim = renders_locally(config);
         /* A nudge: the link task's pull while it has the round trips, this
          * task's otherwise and for the voice relay, whose release expects
@@ -5255,6 +5282,7 @@ static void client_task(void *arg)
              * someone tapped): drawn now that they stopped. */
             if (frameos_nim_available() && !input_hold_on() && frameos_nim_chrome_owed()) fos_client_render_now();
             if (!touching) fos_display_park_if_idle(esp_timer_get_time());
+            apply_brightness();
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
                     LINK_BIT | RESTART_NOTICE_BIT,

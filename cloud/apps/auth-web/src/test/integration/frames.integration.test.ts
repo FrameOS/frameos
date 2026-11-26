@@ -2608,6 +2608,9 @@ describe("frame management API", () => {
         "buzzer_tone_hz",
         "touch_beep",
         "click_sounds",
+        "brightness",
+        "dim_after_seconds",
+        "dim_brightness",
         "cpu_mode",
         "render_mode",
         "voice_chat",
@@ -2635,6 +2638,9 @@ describe("frame management API", () => {
         "buzzer_tone_hz",
         "touch_beep",
         "click_sounds",
+        "brightness",
+        "dim_after_seconds",
+        "dim_brightness",
         "cpu_mode",
         "render_mode",
         "debug",
@@ -2685,7 +2691,8 @@ describe("frame management API", () => {
       "setting_not_allowed",
     );
 
-    // brightness is deferred until the runtime grows the setting.
+    // brightness is an ESP32 key from 2026.11.16: refused for a frame that
+    // never reported its firmware.
     const brightness = await push({ brightness: 50 });
     expect(brightness.status).toBe(400);
 

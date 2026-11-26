@@ -328,6 +328,24 @@
       "profiles": {"esp32": {"since": "2026.11.15"}},
       "parity": {"only": "esp32", "why": "The tap and button feedback lives in the ESP32 firmware's buzzer path (fos_buzzer.c, fos_touch.c, fos_buttons.c); a Pi frame has no buzzer."}
     },
+    "brightness": {
+      "$comment": "The glass's brightness in percent, on an ESP32 display whose firmware can set it (fos_display_brightness): the round AMOLED's own brightness register (CO5300 0x51) and the PWM of a backlit SPI LCD's backlight (the Elecrow CrowPanel 2.01\" watch's GPIO13, the CrowPanel 1.46\" rotary's GPIO46). Another display ignores it. Default 100. Live, no reboot; screen off (turnOff, toggleScreen) still turns the glass off, and on comes back at this level.",
+      "rule": {"type": "int", "min": 5, "max": 100},
+      "profiles": {"esp32": {"since": "2026.11.16"}},
+      "parity": {"only": "esp32", "why": "The brightness of the ESP32 displays lives in their driver (lcd_qspi_amoled.c); the Linux runtime has no backlight control yet."}
+    },
+    "dim_after_seconds": {
+      "$comment": "Seconds without a tap, a key or a turn of a knob before the glass dims to dim_brightness, to save power (fos_client.c); the next touch or press brings `brightness` back at once and still does what it does. Counted from boot until the first input. 0 = never (the default). Live, no reboot.",
+      "rule": {"type": "int", "min": 0, "max": 86400},
+      "profiles": {"esp32": {"since": "2026.11.16"}},
+      "parity": {"only": "esp32", "why": "Idle dimming follows the ESP32 firmware's own input (fos_client.c); the Linux runtime has no backlight control yet."}
+    },
+    "dim_brightness": {
+      "$comment": "The glass's brightness in percent while dimmed (dim_after_seconds); 0 is dark (on an AMOLED, no pixel lit). Default 10. Live, no reboot.",
+      "rule": {"type": "int", "min": 0, "max": 100},
+      "profiles": {"esp32": {"since": "2026.11.16"}},
+      "parity": {"only": "esp32", "why": "Idle dimming follows the ESP32 firmware's own input (fos_client.c); the Linux runtime has no backlight control yet."}
+    },
     "cpu_mode": {
       "$comment": "The processor's speed. On an ESP32 it is the chip's clock: `battery` runs it at 160 MHz, `performance` at 240 MHz, `auto` (the default) at 240 on an RGB LCD or a touch panel and 160 on any other board. An e-paper refresh is a long wait (about 20 s on a reTerminal E1002's Spectra 6 panel) that the chip spends idling at whatever clock it runs, so on a battery e-paper frame 240 costs more than the faster render saves (embedded/esp32/README.md \"Processor speed\"). Applied at the next boot: the device reboots to take it. On a Linux frame (a Raspberry Pi, on mains power) it is the kernel's CPU frequency governor, frame.json `deviceConfig.cpuMode` (where a backend keeps it for every frame): `battery` is `powersave` (the lowest clock), `performance` is `performance` (the highest), `auto` (the default) is `ondemand` (the highest while busy, the lowest while idle); a governor the kernel does not offer is left as it is. Applied live, at start and on every reload, through the privileged door where the runtime is not root (cpu_governor.nim, docs/buildroot-privileges.md). Reported as hardware.cpuMode and hardware.cpuMhz on both.",
       "rule": {"type": "string", "enum": ["auto", "battery", "performance"]},
