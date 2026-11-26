@@ -194,12 +194,13 @@ templates, logs or the Home Assistant topics.
 `frameos.getSetting(service, field?)` in an app whose config declares
 `service` (unchanged gate) answers, for the app's own scene:
 
-1. a value typed on the frame for this scene (`localKeys`, below), per field;
-2. else, when the config has `serviceKeys`: `keys[scenes[sceneId][service]].values`;
+1. when the config has `serviceKeys`: `keys[scenes[sceneId][service]].values`;
    a scene not in `scenes` or a `null` is nothing; a key id with no entry in
    `keys` (the plane has no value for it) falls back to `settings[service]`,
    which is where a Pi keeps what was typed on its own admin page;
-3. else (a frame with no plane, an older plane): `settings[service]` as before.
+2. else (a frame with no plane, an older plane): `settings[service]` as before;
+3. over either, the keys typed on the frame (below), field by field, unless
+   the binding is `null`; a typed address takes its group whole.
 
 With no field it answers the group: the bound values with the typed ones
 over them. The app's own scene is the scene its node belongs to (a split's
@@ -248,21 +249,25 @@ because a scene must run on runtimes without `secret`
 
 ### Typing a key on the frame
 
-The scene settings page (`system/sceneSettings`) lists, under **Keys**, the
-services the scene's apps declare and their fields (labels from
-`serviceKeys.services`, else the field names). A field shows "not set", or
-its last four characters (a non-secret field in full); never a whole
-secret. A tap opens the keyboard; Save writes the value for this scene on
-this frame; Clear takes it away. Only while the frame offers its settings
-page (`frame_settings_on_screen`), like the rest of that page.
+The frame page's **Service keys** (`system/sceneSettings`,
+docs/scene-settings.md "Service keys") is where a key is typed on the frame:
+one for the whole frame, as on the plane, so the same OpenAI key is typed
+once. It lists every service the frame knows of (the plane's
+`serviceKeys.services` with their labels, the services of the scene it was
+opened from, the groups it holds and those typed), no list of its own; a
+secret of the plane's shows only as "Saved". Only while the frame offers
+its page (`frame_settings_on_screen`).
 
-- Kept on the device only, never told to a plane (as the Wi-Fi network):
-  `state/local_keys.json` on a Pi (mode 0600); on an ESP32 the scene-state
-  store keeps it (one file on `/state`, under the id `__frameos/localKeys`,
-  `embedded_runtime.nim`), so it needs no C of its own; the browser preview
-  keeps none. Shape `{ sceneId: { service: { field: value } } }`, at most 8 KB.
-- It wins over what the plane sends for that scene, field by field, and
-  survives pushes and reboots; removing the scene does not remove it.
+- Kept on the device only, never told to a plane (as the Wi-Fi network): a
+  Pi's `state/service_keys.json` (0600), an ESP32's NVS (`svc_typed`), at
+  most 4 KB (`frame_service_keys.nim`).
+- Field by field it wins over what the plane gave a scene, for every scene
+  the owner did **not** refuse that service: a typed key never undoes a
+  "Don't give a key". A scene the plane does not know (made on the frame)
+  gets it too.
+- An address typed there (the service's `hostsFrom` field, else `url`)
+  takes its group whole: a plane's token never goes to an address somebody
+  at the frame typed, so the token for it is typed too.
 - It is what a frame with no plane uses for a key at all.
 
 ## What changed from "service settings"

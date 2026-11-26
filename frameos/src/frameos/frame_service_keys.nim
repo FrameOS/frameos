@@ -2,11 +2,10 @@
 ## (system/sceneSettings, docs/scene-settings.md "Service keys"). They are
 ## the frame's own: the host keeps them (a Pi's state/service_keys.json, an
 ## ESP32's NVS) and no control plane is told. Field by field they win over
-## the keys a plane sends (`frameConfig.settings`), an address with its
-## group whole, and an app reads them
-## where it reads those, `frameos.getSetting` (js_runtime/app_runtime.nim):
-## the one reader of service keys on a frame. A new one goes through
-## `withServiceKeys`.
+## the keys a plane sends, an address with its group whole, for every scene
+## the owner did not refuse that key: service_keys.nim `serviceGroup`, which
+## `frameos.getSetting` and `frameos.secret` read through (docs/service-keys.md
+## "Typing a key on the frame").
 
 import std/[json, tables]
 
@@ -63,18 +62,3 @@ proc keepServiceKeys*(): bool =
   result = text.len <= MaxServiceKeysBytes and not serviceKeysSave.isNil and serviceKeysSave(text)
   if not result:
     typed = nil
-
-proc withServiceKeys*(settings: JsonNode, group: string): JsonNode =
-  ## `settings` as an app reads `group` of them: where keys of the group were
-  ## typed on the frame, the group is a copy with those over what was sent.
-  ## An address typed here (`url`) takes the group whole: a plane's key never
-  ## goes to an address somebody at the frame typed.
-  let own = serviceKeysTyped(){group}
-  if own.isNil or own.kind != JObject:
-    return settings
-  var merged = settings{group}
-  merged = if merged.isNil or merged.kind != JObject or not own{"url"}.isNil: newJObject() else: copy(merged)
-  for key, value in own.fields:
-    merged.fields[key] = value
-  result = newJObject()
-  result.fields[group] = merged

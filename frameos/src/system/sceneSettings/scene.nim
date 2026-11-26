@@ -42,8 +42,8 @@ import frameos/ui/keyboard
 import frameos/frame_settings_hooks
 export frame_settings_hooks
 import frameos/frame_service_keys
+from frameos/service_keys import isServiceId, isFieldName
 import frameos/scene_store_hooks
-from frameos/service_keys import setLocalKey
 import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
@@ -117,13 +117,6 @@ const
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
   WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
   WifiAfter = ["", "", "", "?", "\xe2\x80\xa6"]
-  # The service keys the page offers: every field a control plane sends
-  # (apps.nim CloudServiceSettingsFields, which test_scene.nim holds this to).
-  # A field named `url` is the one that is no secret.
-  ServiceKeys* = [("openAI", "apiKey", "OpenAI API key"), ("unsplash", "accessKey", "Unsplash access key"),
-    ("homeAssistant", "url", "Home Assistant URL"), ("homeAssistant", "accessToken", "Home Assistant access token"),
-    ("immich", "url", "Immich server URL"), ("immich", "apiKey", "Immich API key"),
-    ("github", "api_key", "GitHub API key"), ("frameOS", "apiKey", "FrameOS Gallery API key")]
   KeysNote = "A key typed here stays on this frame and is used instead of the one its control plane " &
     "sends. An address typed here is sent only keys typed here. Empty a field to remove its key."
 
@@ -533,57 +526,6 @@ proc goTo(sceneId: string, state: JsonNode) =
   wentBack = true
   sendEvent(evSetCurrentScene, payload, eoScene)
 
-const
-  KeyField = "\1" ## + service.field: a key of the scene's, typed on the frame (docs/service-keys.md)
-  ForgetField = "\2" ## + service: forget what was typed for it
-
-proc addKeyFields(self: SceneSettingsScene, rows: JsonNode) =
-  ## The scene's keys under its fields (service_keys.keyRows): each a field
-  ## to type a new one in, its placeholder what it holds now, never a whole
-  ## secret; and a switch to forget what was typed here.
-  var fields = self.state{"fields"}
-  if fields.isNil or fields.kind != JArray:
-    fields = newJArray()
-    self.state.put("fields", fields)
-  let values = self.valueMap()
-  for row in arrayOf(rows).elems:
-    let
-      service = row.str("service")
-      title = row.str("title")
-    for f in arrayOf(row{"fields"}).elems:
-      let
-        name = KeyField & service & "." & f.str("name")
-        value = f.str("value")
-        entry = field(name, title & " " & f.str("label"), "string")
-      if f{"secret"}.getBool():
-        entry.put("secret", newJBool(true))
-        entry.put("placeholder", newJString(if value.len == 0: "Not set" else: value))
-      elif value.len > 0:
-        values.put(name, newJString(value))
-      fields.elems.add entry
-    if row{"typed"}.getBool():
-      fields.elems.add field(ForgetField & service, "Forget the " & title & " key typed here", "boolean")
-
-proc saveKeys(self: SceneSettingsScene): JsonNode =
-  ## The keys typed on the form, kept on this frame for the scene, and the
-  ## scene's own fields without them.
-  let
-    edited = self.formObject("edited")
-    values = self.valueMap()
-    scene = self.opener()
-  result = newJArray()
-  for f in self.fieldList().elems:
-    let name = f.str("name")
-    if name.startsWith(KeyField):
-      let dot = name.find('.')
-      if edited.hasKey(name) and dot > 1:
-        discard setLocalKey(scene, name[1 ..< dot], name[dot + 1 .. ^1], values{name}.text.strip())
-    elif name.startsWith(ForgetField):
-      if values{name}.isOn:
-        discard setLocalKey(scene, name[1 .. ^1], "", "")
-    else:
-      result.elems.add f
-
 proc collect(fields, values: JsonNode): JsonNode =
   ## The values of `fields` as their owner keeps them (`saved`), by name.
   result = newJObject()
@@ -602,7 +544,7 @@ proc save(self: SceneSettingsScene) =
   if self.opener().len == 0:
     leave()
     return
-  let values = collect(self.saveKeys(), self.valueMap())
+  let values = collect(self.fieldList(), self.valueMap())
   if self.ownWindow():
     let payload = newJObject()
     payload.put("state", values)
@@ -653,6 +595,43 @@ proc openLayoutPage(self: SceneSettingsScene) =
   settingsOf(worn, form)
   self.openSubPage("layout", "Layout settings", form)
 
+proc keyFields(self: SceneSettingsScene): seq[tuple[service, name, label: string, secret: bool]] =
+  ## The service keys the page offers (docs/service-keys.md "Typing a key on
+  ## the frame"), with no list of services of its own: those the plane named
+  ## (`serviceKeys.services`, with their labels), those the scene it was
+  ## opened from uses (`services`), those the frame holds and those typed
+  ## here. A service's fields are the plane's, else the names it holds, else
+  ## an `apiKey`; its address (`hostsFrom`, else `url`) is no secret.
+  let
+    config = self.frameConfig
+    planeSpecs = if config.serviceKeys.isNil: nil else: config.serviceKeys{"services"}
+    typed = serviceKeysTyped()
+  var ids: seq[string]
+  for source in [planeSpecs, config.settings, typed]:
+    if not source.isNil and source.kind == JObject:
+      for id in source.keys:
+        if isServiceId(id) and id notin ids: ids.add id
+  for id in arrayOf(self.state{"services"}).elems:
+    if isServiceId(id.getStr()) and id.getStr() notin ids: ids.add id.getStr()
+  for id in ids:
+    let spec = if planeSpecs.isNil: nil else: planeSpecs{id}
+    let title = if spec.isNil: id else: spec{"title"}.getStr(id)
+    let address = if spec.isNil: "url" else: spec{"hostsFrom"}.getStr("url")
+    var names: seq[string]
+    let listed = if spec.isNil: nil else: spec{"fields"}
+    if not listed.isNil and listed.kind == JArray:
+      for f in listed.elems:
+        result.add (id, f{"name"}.getStr(), title & " " & f{"label"}.getStr(f{"name"}.getStr()),
+          f{"secret"}.getBool(true))
+      continue
+    for source in [config.settings{id}, typed{id}]:
+      if not source.isNil and source.kind == JObject:
+        for name in source.keys:
+          if isFieldName(name) and name notin names: names.add name
+    if names.len == 0: names.add "apiKey"
+    for name in names:
+      result.add (id, name, title & " " & name, name != address)
+
 proc openKeysPage(self: SceneSettingsScene) =
   ## The service keys (docs/scene-settings.md "Service keys"): one field
   ## each, holding what was typed on the frame, a secret behind its eye. What
@@ -663,23 +642,18 @@ proc openKeysPage(self: SceneSettingsScene) =
     values = newJObject()
     typed = serviceKeysTyped()
     sent = self.frameConfig.settings
-  for i in 0 ..< ServiceKeys.len:
-    # A field by its label, which no two keys share. The table's strings as
-    # they are, not copies (flash).
-    template group: untyped = ServiceKeys[i][0]
-    template name: untyped = ServiceKeys[i][1]
-    template label: untyped = ServiceKeys[i][2]
+  for k in self.keyFields():
     let
-      f = field(label, label, "string")
-      given = sent{group, name}.getStr()
-      secret = name != "url"
-      own = typed{group, name}
-    if secret:
+      key = k.service & "." & k.name
+      f = field(key, k.label, "string")
+      given = sent{k.service, k.name}.getStr()
+      own = typed{k.service, k.name}
+    if k.secret:
       f.put("secret", newJBool(true))
     f.put("placeholder", newJString(if given.len == 0: "Not set"
-      elif secret: "Saved (type to change)" else: given))
+      elif k.secret: "Saved (type to change)" else: given))
     if not own.isNil:
-      values.put(label, own)
+      values.put(key, own)
     fields.elems.add f
   form.put("fields", fields)
   form.put("values", values)
@@ -690,12 +664,13 @@ proc saveKeysPage(self: SceneSettingsScene) =
   ## emptied one goes. The log says which, never a value.
   let edited = self.formObject("edited")
   var names = ""
-  for i in 0 ..< ServiceKeys.len:
-    template label: untyped = ServiceKeys[i][2]
-    if not edited{label}.isNil:
-      typeServiceKey(ServiceKeys[i][0], ServiceKeys[i][1], self.valueMap().str(label).strip())
+  for f in self.fieldList().elems:
+    let key = f.str("name")
+    let dot = key.find('.')
+    if dot > 0 and not edited{key}.isNil:
+      typeServiceKey(key[0 ..< dot], key[dot + 1 .. ^1], self.valueMap().str(key).strip())
       if names.len > 0: names.add ", "
-      names.add label
+      names.add key
   if names.len > 0 and keepServiceKeys():
     self.logger.log(%*{"event": "settings:frame:keys", "keys": names})
   self.showPage(true)
@@ -1476,14 +1451,10 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     if not payload{"state", "from"}.isNil:
       self.startAfresh()
     # What the dispatcher read off the scene it was opened from.
-    for key in ["from", "fields", "values", "opened", "layout", "noLayout", "home"]:
+    for key in ["from", "fields", "values", "services", "opened", "layout", "noLayout", "home"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
-    # Its keys, while the frame offers its own page (docs/service-keys.md).
-    let keys = payload{"state", "keys"}
-    if not keys.isNil and not frameInfo().isNil:
-      self.addKeyFields(keys)
     # It opens on the scene's form; with no scene showing there is nothing
     # on that one, and the frame page is what the status screen sent you here
     # for.

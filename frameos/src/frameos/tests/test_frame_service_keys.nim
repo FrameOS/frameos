@@ -1,9 +1,17 @@
 import std/[json, unittest]
 import frameos/frame_service_keys
+import frameos/service_keys
 
 # The service keys typed on the frame (frame_service_keys.nim, docs/scene-settings.md
 # "Service keys"): read from the host once, typed and taken away field by
-# field, kept as one JSON text, and over what a plane sent where an app reads.
+# field, kept as one JSON text, and over what a plane sent where an app reads
+# (service_keys.serviceGroup; docs/service-keys-fixtures.json has the cases
+# with a plane's per-scene keys).
+
+proc withServiceKeys(sent: JsonNode, group: string): JsonNode =
+  ## What an app of a frame with no plane's `serviceKeys` reads of `group`.
+  let values = serviceGroup(sent, nil, serviceKeysTyped(), "scene", group)
+  if values.isNil: sent else: %*{group: values}
 
 var
   stored = ""
@@ -40,7 +48,7 @@ suite "frame service keys":
       "openAI": {"apiKey": "sk-plane"}}
     check withServiceKeys(sent, "homeAssistant") ==
       %*{"homeAssistant": {"url": "http://ha.local:8123", "accessToken": "typed"}}
-    check withServiceKeys(sent, "openAI") == sent
+    check withServiceKeys(sent, "openAI") == %*{"openAI": {"apiKey": "sk-plane"}}
     check withServiceKeys(nil, "homeAssistant") == %*{"homeAssistant": {"accessToken": "typed"}}
     check sent["homeAssistant"]["accessToken"].getStr() == "plane" # not changed in place
 

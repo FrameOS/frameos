@@ -512,7 +512,8 @@ Assistant, …) never asks for its key in a field: it names the service in its
 config.json `"settings"` list (`["openAI"]`), and the owner's key for it
 reaches the app's scene. The owner types each key once and picks, per
 installed scene, which of their keys it gets; a store scene gets none until
-they say so, and someone at the frame can type one in the scene's settings.
+they say so, and someone at the frame can type one on the frame page's
+Service keys.
 
 - Send a key with `frameos.secret(service, field)`, a placeholder the frame
   fills on the way out, only towards that service's own host, in the URL's

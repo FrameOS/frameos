@@ -555,7 +555,7 @@ proc keysFilled(e: JsAppEvalEnv, url: var string, headers: var seq[SimpleHttpHea
   if e == nil or e.runtime.isNil:
     return "key not allowed: undeclared"
   let config = e.owner.frameConfig
-  let filled = fillKeys(config.settings, config.serviceKeys, localKeys(), appSceneId(e),
+  let filled = fillKeys(config.settings, config.serviceKeys, serviceKeysTyped(), appSceneId(e),
     e.runtime.settingsKeys, url, headers)
   if filled.refused.len > 0:
     result = "key not allowed: " & filled.refused & " (" & originText(url) & ")"
@@ -2366,12 +2366,12 @@ proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
   if asSecret:
     # undefined, too, when the scene has no such key: the app can say which
     # key is missing, and that is all it learns of it.
-    if not isFieldName(path[2]) or serviceValue(config.settings, config.serviceKeys, localKeys(),
+    if not isFieldName(path[2]) or serviceValue(config.settings, config.serviceKeys, serviceKeysTyped(),
         appSceneId(e), namespace, path[2]).len == 0:
       return jsUndefSentinel(ctx)
     return nimStringToJS(ctx, placeholder(namespace, path[2]))
 
-  let node = settingValue(config.settings, config.serviceKeys, localKeys(), appSceneId(e),
+  let node = settingValue(config.settings, config.serviceKeys, serviceKeysTyped(), appSceneId(e),
     e.runtime.settingsKeys, path)
   if node.isNil:
     return jsUndefSentinel(ctx)

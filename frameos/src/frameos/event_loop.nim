@@ -35,7 +35,6 @@ import ./event_map
 import ./layout_choice
 import ./scene_rhythm
 import ./frame_settings_hooks
-from ./service_keys import keyRows
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
@@ -497,14 +496,12 @@ proc settingsOf*(scene: FrameScene, state: JsonNode) =
       let value = scene.state{field.name}
       if not value.isNil:
         values.put(field.name, copy(value))
-    # Its keys (docs/service-keys.md "Typing a key on the frame"): what each
-    # service its apps declare holds for it, never a whole secret.
-    let services = InterpretedFrameScene(scene).declaredServices
-    if services.len > 0 and not scene.frameConfig.isNil:
-      state.put("keys", keyRows(scene.frameConfig.settings, scene.frameConfig.serviceKeys,
-        scene.id.string, services))
   state.put("fields", fields)
   state.put("values", values)
+  # The services its apps use, for the frame page's Service keys
+  # (docs/service-keys.md "Typing a key on the frame").
+  if scene of InterpretedFrameScene and InterpretedFrameScene(scene).declaredServices.len > 0:
+    state.put("services", %InterpretedFrameScene(scene).declaredServices)
 
 {.pop.}
 

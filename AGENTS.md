@@ -316,8 +316,9 @@
   of that name) is where a key is typed on the frame: the frame's own (a Pi's
   `state/service_keys.json`, an ESP32's NVS `svc_typed`), never told to a
   plane, and over the plane's field by field where `jsGetSetting` reads them
-  (`frame_service_keys.nim` `withServiceKeys`): a new reader of service keys
-  goes through it.
+  (`service_keys.nim` `serviceGroup`, never for a scene the owner refused):
+  a new reader of service keys goes through it. It names no vendor: its
+  fields are the services the frame knows of (docs/service-keys.md).
 - On a desktop (`builtInScenesStay`: the windows of a Pi, an ESP32 or the
   browser) every scene's settings are an instance of their own,
   `system/sceneSettings#<scene id>` (contract `scenes.settingsWindow`,
@@ -1244,7 +1245,7 @@
   gets per-scene bindings (`serviceKeys`) beside the older `settings`.
   `frameos.getSetting` answers for the app's own scene; `frameos.secret`
   hands out a placeholder the runtime fills only on the way to an allowed
-  origin. Keys typed on the frame (`state/local_keys.json`) stay there.
+  origin. Keys typed on the frame (the frame page's Service keys) stay there.
   Never put a key in a state field, scene JSON, a log or a command.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract

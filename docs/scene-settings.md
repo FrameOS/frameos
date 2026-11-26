@@ -403,25 +403,28 @@ refused: no scene takes a frame out of its owner's hands.
 **Service keys** on the frame page opens a page of its own (Back goes to the
 frame page, Save keeps what was edited and goes back there): the frame's
 service keys, the API keys and addresses the apps read with
-`frameos.getSetting`, one field each for every key a control plane may send
-(`CloudServiceSettingsFields` in `apps.nim`; `test_scene.nim` holds the page
-to it): OpenAI, Unsplash, Home Assistant's URL and access token, Immich's
-server URL and API key, GitHub, the FrameOS Gallery. A stopgap for today's
-frame-wide keys, kept small (2026-11-25): the rework of service keys
-replaces it.
+`frameos.getSetting` and send with `frameos.secret` (docs/service-keys.md
+"Typing a key on the frame"). It has no list of services of its own: one
+field for each field of every service the frame knows of, those the plane
+names with their labels (`serviceKeys.services`), those the scene it was
+opened from uses (`services`, from `settingsOf`), those the frame holds and
+those typed here. A service nobody labelled shows its fields by name, an
+`apiKey` when none is known; its address (`hostsFrom`, else `url`) is the
+field that is no secret.
 
 - **Typed here, a key is the frame's own.** It stays on the frame, never told
   to a plane (as the Wi-Fi network), and through pushes, deploys, reboots, an
   unlink and an adoption: a Pi keeps it in `state/service_keys.json` (0600;
   no deploy writes under `state/`), an ESP32 in NVS (`svc_typed`, in the
   namespace `factory-reset` erases). At most 4 KB.
-- **It wins over the plane's, field by field.** An app's `getSetting` answers
-  the key typed here, else what the plane sent (`frame_service_keys.nim`
-  `withServiceKeys`, read by `jsGetSetting`, the one reader of service keys on
-  a frame). A frame no plane holds has only these. An address typed here
-  (Home Assistant's, Immich's `url`) takes its group whole: a plane's token
-  never goes to an address typed at the frame, so its token is typed here
-  too. A token typed here for the plane's address goes there.
+- **It wins over the plane's, field by field**, for every scene the owner
+  did not refuse that service (a refused scene stays refused). An app's
+  `getSetting` answers the key typed here, else what the plane gave its scene
+  (`service_keys.nim` `serviceGroup`, the one reader of service keys on a
+  frame). A frame no plane holds has only these. An address typed here (Home
+  Assistant's, Immich's `url`) takes its group whole: a plane's token never
+  goes to an address typed at the frame, so its token is typed here too. A
+  token typed here for the plane's address goes there.
 - **What the page shows.** A field holds what was typed here, a secret behind
   the eye of a password field. What a plane sent is said in the empty field:
   an address as it is, a secret only as "Saved (type to change)", never its
