@@ -221,6 +221,10 @@ void fos_touch_print_status(void);
  * read by the touch task in place of the controller's reports, so a bench
  * times the whole of a press without a finger. */
 esp_err_t fos_touch_inject(int px, int py, int hold_ms);
+/* The console's `touch drag`: a finger from (x0, y0) to (x1, y1), panel
+ * pixels, over `ms`, along a sine of `amp` pixels and `waves` periods across
+ * it (0: straight), read at the task's own pace as the glass's reports. */
+esp_err_t fos_touch_inject_drag(int x0, int y0, int x1, int y1, int ms, int amp, int waves);
 /* When the last press was first seen and when it was lit on an LCD
  * (esp_timer us; 0: not). */
 void fos_touch_press_times(int64_t *seen_us, int64_t *lit_us);

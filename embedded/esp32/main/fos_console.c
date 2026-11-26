@@ -2361,6 +2361,15 @@ static int cmd_i2c(int argc, char **argv)
  * bench check that the GT911 is wired and which way its axes run. */
 static int cmd_touch(int argc, char **argv)
 {
+    if (argc >= 6 && strcmp(argv[1], "drag") == 0) {
+        /* `touch drag <x0> <y0> <x1> <y1> [ms] [amp] [waves]`: a finger moved
+         * through the touch task (a drawing scene's stroke, timed). */
+        esp_err_t err = fos_touch_inject_drag(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]), atoi(argv[5]),
+                                              argc >= 7 ? atoi(argv[6]) : 1000, argc >= 8 ? atoi(argv[7]) : 0,
+                                              argc >= 9 ? atoi(argv[8]) : 0);
+        printf("touch drag: %s\n", err == ESP_OK ? "started" : esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
     if (argc >= 4 && strcmp(argv[1], "tap") == 0) {
         /* `touch tap <x> <y> [ms]`: a finger at that panel pixel, through the
          * touch task as the glass's own would be (the bench's press timing),
@@ -2514,7 +2523,7 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
         {.command = "imu", .help = "imu — the accelerometer's reading, in thousandths of g", .func = cmd_imu},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
-        {.command = "touch", .help = "touch [tap <x> <y> [ms]] — the touch panel's controller and its last point; a finger made up", .func = cmd_touch},
+        {.command = "touch", .help = "touch [tap <x> <y> [ms] | drag <x0> <y0> <x1> <y1> [ms] [amp] [waves]] — the touch panel's controller and its last point; a finger made up", .func = cmd_touch},
         {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out (frames off schedule, the pixel clock), a QSPI AMOLED's pushes", .func = cmd_lcd},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
