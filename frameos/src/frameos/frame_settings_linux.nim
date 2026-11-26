@@ -46,6 +46,10 @@ const
     ## which no deploy rewrites, as the frame's own and no plane's.
   ScanFreshSeconds = 30.0 ## a scan when the page comes up, unless one is this fresh
 
+var brightnessPath* = "./state/brightness"
+  ## The backlight's percent set on the frame page, put back at every start
+  ## (the kernel forgets it): under state/, the frame's own and no plane's.
+
 type
   JobKind = enum jkStatus, jkScan, jkJoin, jkUnlink
   Job = object
@@ -344,6 +348,9 @@ proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
         f = facts
       result = %*{"rotate": config.rotate, "renderScale": config.renderScale,
         "version": installedFrameOSVersion(), "actions": ["restart"]}
+      let bright = backlightPercent()
+      if bright >= 0:
+        result["brightness"] = %bright
       let manager = managedBy(config)
       if manager.len > 0:
         result["managedBy"] = %manager
@@ -480,6 +487,11 @@ proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
       let cloudUrl = changes{"cloudUrl"}
       if not cloudUrl.isNil and cloudUrl.kind == JString:
         applyCloudUrl(cloudUrl.getStr())
+      # The backlight: at once, kept when the finger lifts (no `live`).
+      let bright = changes{"brightness"}
+      if not bright.isNil and bright.kind == JInt and setBacklightPercent(bright.getInt()) and
+          not changes{"live"}.getBool():
+        writeFile(brightnessPath, $bright.getInt())
       if not changes{"wifiSsid"}.isNil or not changes{"wifiPassword"}.isNil:
         # A password alone is for the saved network.
         var
@@ -563,6 +575,11 @@ proc installFrameSettingsHooks*(frameOS: FrameOS) =
   liveConfig = cast[pointer](frameOS.frameConfig)
   # The page is not up after a start: a link it asked for ends here.
   dropPanelLinkAtStart()
+  # The backlight as the frame page last left it.
+  try:
+    discard setBacklightPercent(parseInt(readFile(brightnessPath).strip()))
+  except CatchableError:
+    discard
   sceneSettings.frameSettingsRead = linuxFrameSettingsRead
   sceneSettings.frameSettingsApply = linuxFrameSettingsApply
   sceneSettings.frameSettingsAction = linuxFrameSettingsAction

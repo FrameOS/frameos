@@ -578,6 +578,104 @@ block the_about_card:
         doAssert image[x, y] == rim, "the round About drawn off the glass at " & $(x, y)
   frameSettingsRead = nil
 
+var
+  brightnessHeld = 60
+  brightnessApplied: seq[JsonNode]
+
+block the_brightness:
+  # docs/scene-settings.md "Brightness": a host that can dim hands its level
+  # over; the page draws a bar to drag and a step down and up beside it, and
+  # hands each level to the host as it moves (`live`), saved when the finger
+  # lifts and at each step. No level, no bar.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      %*{"rotate": 0, "renderScale": 0, "actions": [], "version": "2026.11.26", "brightness": brightnessHeld}
+  frameSettingsApply = proc (changes: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      brightnessApplied.add changes.copy()
+      brightnessHeld = changes{"brightness"}.getInt(brightnessHeld)
+  proc bar(): UiRegion =
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.handlers[uePointerDown] == 4 + 1: # HBright
+        return r
+    raise newException(ValueError, "no brightness bar")
+  proc finger(x, y: float32): JsonNode = %*{"x": x, "y": y, "pointerId": 1, "pointerType": "touch"}
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  discard scene.draw()
+  scene.scrollToEnd()
+  var words: seq[string]
+  proc texts(node: SvgNode, into: var seq[string]) =
+    if node.text.len > 0: into.add node.text
+    for child in node.children: texts(child, into)
+  texts(SceneSettingsScene(scene).tree(480, 480, false, "", info = frameSettingsRead()), words)
+  doAssert "Brightness 60%" in words, $words
+  # Dragged: down at a quarter of the way, moved to 80 %, lifted there.
+  var b = bar()
+  scene.send("pointerDown", finger(b.x + b.w * 0.25, b.y + b.h / 2))
+  scene.send("pointerMove", finger(b.x + b.w * 0.8, b.y + b.h / 2))
+  scene.send("pointerUp", finger(b.x + b.w * 0.8, b.y + b.h / 2))
+  doAssert brightnessApplied.len == 3, $brightnessApplied
+  doAssert brightnessApplied[0] == %*{"brightness": 25, "live": true}, $brightnessApplied
+  doAssert brightnessApplied[1] == %*{"brightness": 80, "live": true}, $brightnessApplied
+  doAssert brightnessApplied[2] == %*{"brightness": 80}, $brightnessApplied
+  # At its start 5 % (never dark), and a finger slid off its end 100: the bar
+  # keeps the press wherever it goes.
+  b = bar()
+  scene.send("pointerDown", finger(b.x + 1, b.y + b.h / 2))
+  scene.send("pointerUp", finger(b.x + b.w + 20, b.y + b.h / 2))
+  doAssert brightnessApplied[^2] == %*{"brightness": 5, "live": true} and brightnessApplied[^1] == %*{"brightness": 100}
+  # The steps, which the keys reach (a click each): 10 % down and up, saved.
+  discard scene.draw()
+  brightnessHeld = 95
+  scene.tap(regionWith(20000 + 16)) # HAction + ADimmer
+  doAssert brightnessApplied[^1] == %*{"brightness": 90}
+  scene.tap(regionWith(20000 + 17)) # HAction + ABrighter
+  doAssert brightnessApplied[^1] == %*{"brightness": 100}
+  brightnessHeld = 10
+  scene.tap(regionWith(20000 + 16))
+  doAssert brightnessApplied[^1] == %*{"brightness": 5}
+  # On the 2.01" watch and a round panel: on the glass, its margins clear.
+  let watch = FrameConfig(width: 240, height: 296, device: "embedded", scalingMode: "cover", saveAssets: %*false)
+  let small = settings.exportedScene.init(SceneSettingsId.SceneId, watch, logger, %*{})
+  small.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  var image = settings.exportedScene.render(small, ExecutionContext(scene: small, event: "render", payload: %*{},
+    image: newImage(240, 296), hasImage: true))
+  let target = uiTarget(SceneSettingsId, 1, create = false)
+  for r in target.regions:
+    if r.scrollY > 0:
+      target.input.scrollTo(r.key, 0, r.scrollY.float32)
+  image = settings.exportedScene.render(small, ExecutionContext(scene: small, event: "render", payload: %*{},
+    image: newImage(240, 296), hasImage: true))
+  if previews.len > 0: image.writeFile(previews / "settings-brightness-watch.png")
+  b = bar()
+  doAssert b.x >= 4 and b.x + b.w <= 236 and b.w >= 60, "the watch's bar: " & $(b.x, b.w)
+  let background = image[0, 295]
+  for y in 60 ..< 296:
+    for x in [0, 1, 2, 3, 238, 239]:
+      doAssert image[x, y] == background, "the watch's brightness reaches its margin at " & $(x, y)
+  let round = FrameConfig(width: 480, height: 480, device: "amoled.co5300_466x466", scalingMode: "cover",
+    saveAssets: %*false)
+  let disc = settings.exportedScene.init(SceneSettingsId.SceneId, round, logger, %*{})
+  disc.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  discard disc.draw()
+  disc.scrollToEnd()
+  image = disc.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-brightness-round.png")
+  let rim = image[0, 0]
+  for y in 0 ..< 480:
+    for x in 0 ..< 480:
+      if not insideRound(480, 480, x, y, RoundInset):
+        doAssert image[x, y] == rim, "the round brightness drawn off the glass at " & $(x, y)
+  # A host that cannot dim says nothing of it: no bar.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": []}
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    doAssert r.handlers[uePointerDown] != 4 + 1, "a bar without a level"
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+
 block it_opens_on_the_frame_page_with_no_scene_showing:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     %*{"rotate": 0, "renderScale": 0, "actions": []}

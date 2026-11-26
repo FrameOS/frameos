@@ -734,6 +734,29 @@ async def test_the_frame_page_click_sounds_land_in_device_config(_pub, async_cli
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_brightness_lands_in_device_config(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.device_config = {"hardwarePreset": "elecrow_crowpanel_watch_2in01"}
+    db.commit()
+    # 100 % is the default: a frame that never had one changes nothing at it.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'brightness': 100})
+    db.refresh(frame)
+    assert frame.device_config == {"hardwarePreset": "elecrow_crowpanel_watch_2in01"}
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'brightness', 'brightness': 40,
+    })
+    db.refresh(frame)
+    assert frame.device_config == {"hardwarePreset": "elecrow_crowpanel_watch_2in01", "brightness": 40}
+    # Out of range, not a whole number, or from anyone but the page: nothing.
+    for value in (4, 101, 50.5, True):
+        await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'brightness': value})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'brightness': 70})
+    db.refresh(frame)
+    assert frame.device_config["brightness"] == 40
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_the_frame_page_time_awake_lands_in_device_config(_pub, async_client, db, redis):
     frame = await _embedded_frame(async_client, db)
     frame.device_config = {"hardwarePreset": "seeed_reterminal_sticky", "awake_after_input_seconds": 300,

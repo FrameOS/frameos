@@ -709,6 +709,8 @@ const reportedFrameSettings: ReadonlyArray<readonly [string, string, unknown]> =
   // How long a tap keeps a deep-sleeping ESP32 up, set on the frame page too
   // (the firmware's default, 300 s).
   ["awakeAfterInputSeconds", "awake_after_input_seconds", 300],
+  // The glass's brightness (2026.11.16), set on the frame page too.
+  ["brightness", "brightness", 100],
 ];
 
 // The stored settings with what the frame reports, or undefined when there is
