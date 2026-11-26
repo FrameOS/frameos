@@ -894,13 +894,14 @@ static bool inject_points(fos_touch_point_t *points, int *count)
         return true;
     }
     if (s_inject_drag) {
-        float t = (float)(now - s_inject_from_us) / (float)(until - s_inject_from_us);
-        float dx = (float)(s_drag_x[1] - s_drag_x[0]), dy = (float)(s_drag_y[1] - s_drag_y[0]);
-        float len = sqrtf(dx * dx + dy * dy);
-        float w = len > 0 ? (float)s_drag_amp * sinf(6.2831853f * (float)s_drag_waves * t) / len : 0;
+        /* Doubles: the firmware's libm has them already (QuickJS's Math). */
+        double t = (double)(now - s_inject_from_us) / (double)(until - s_inject_from_us);
+        double dx = s_drag_x[1] - s_drag_x[0], dy = s_drag_y[1] - s_drag_y[0];
+        double len = sqrt(dx * dx + dy * dy);
+        double w = len > 0 ? s_drag_amp * sin(6.283185307179586 * s_drag_waves * t) / len : 0;
         int16_t x, y;
-        panel_to_raw((int)lroundf((float)s_drag_x[0] + dx * t - dy * w), (int)lroundf((float)s_drag_y[0] + dy * t + dx * w),
-                     &x, &y);
+        panel_to_raw((int)floor(s_drag_x[0] + dx * t - dy * w + 0.5), (int)floor(s_drag_y[0] + dy * t + dx * w + 0.5), &x,
+                     &y);
         s_inject_x = x;
         s_inject_y = y;
     }
