@@ -78,8 +78,12 @@ const boardChoices = [
     value: 'hw:waveshare_esp32_s3_epaper_13_3e6',
     platform: genericPlatform,
   },
-  { label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_og_diy_kit', platform: genericPlatform },
-  { label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_4in26_diy_kit', platform: genericPlatform },
+  { label: 'TRMNL 7.5" (OG) DIY Kit (ESP32-S3)', value: 'hw:trmnl_og_diy_kit', platform: genericPlatform },
+  {
+    label: 'XIAO ePaper Driver Board + 4.26" panel (XIAO ESP32-S3)',
+    value: 'hw:trmnl_4in26_diy_kit',
+    platform: genericPlatform,
+  },
   { label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)', value: 'hw:seeed_reterminal_sticky', platform: genericPlatform },
   {
     label: 'Seeed SenseCAP Indicator D1/D1S (4" LCD ESP32-S3)',
@@ -149,7 +153,7 @@ const boardChoices = [
   { label: 'TRMNL BWRY (7.5" color ESP32-C3)', value: 'hw:trmnl_bwry', platform: genericC3Platform },
   { label: 'XTEINK X4 (4.26" ESP32-C3)', value: 'hw:xteink_x4', platform: genericC3Platform },
   {
-    label: 'Seeed XIAO 7.5" ePaper Panel (ESP32-C3)',
+    label: 'XIAO 7.5" ePaper Panel (XIAO ESP32-C3)',
     value: 'hw:seeed_xiao_epaper_7in5',
     platform: genericC3Platform,
   },
