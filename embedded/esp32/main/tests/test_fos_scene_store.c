@@ -1149,6 +1149,145 @@ static fos_scene_store_err_t stage_scene(unsigned int id, const char *text, size
     return err;
 }
 
+/* Scenes added as a set is written (fos_scene_store_add_set, the usb_api
+ * `scenes-deflated put`): the index once where there is room, the scenes it
+ * does not name kept in their places, nothing dropped. */
+static void test_scenes_added_as_a_set(void)
+{
+    fresh_dir();
+    enum { SIZE = 3000 };
+    char *a1 = scene_text("a", 'x', SIZE), *b1 = scene_text("b", 'x', SIZE), *c1 = scene_text("c", 'x', SIZE);
+    char *b2 = scene_text("b", 'y', SIZE), *b3 = scene_text("b", 'z', SIZE);
+    char *d1 = scene_text("d", 'x', SIZE), *e1 = scene_text("e", 'x', SIZE), *f1 = scene_text("f", 'x', SIZE);
+    fos_scene_store_set_result_t set;
+    fos_scene_store_put_t first = {a1, SIZE};
+    /* No index yet: nothing written, the caller makes the first change. */
+    CHECK(fos_scene_store_add_set(&first, 1, NULL, &set) == FOS_SCENE_STORE_ERR_NOT_FOUND);
+    CHECK(read_entries(NULL, 0) == -1);
+
+    fos_scene_store_put_t three[3] = {{a1, SIZE}, {b1, SIZE}, {c1, SIZE}};
+    fos_scene_store_result_t result;
+    fos_scene_store_change_t all = {.puts = three, .put_count = 3, .replace_all = true, .source = "local"};
+    CHECK(fos_scene_store_apply(&all, &result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    fos_scene_store_sweep();
+
+    fos_scene_store_hooks_t hooks = {.make_room = track_room, .between = count_between, .has_room = has_room};
+    fos_scene_store_set_hooks(&hooks);
+
+    /* b replaced where it was, d and e after the others, a and c untouched. */
+    fos_scene_store_put_t add[3] = {{d1, SIZE}, {b2, SIZE}, {e1, SIZE}};
+    s_room = true;
+    s_between = 0;
+    s_writes = 0;
+    CHECK(fos_scene_store_add_set(add, 3, NULL, &set) == FOS_SCENE_STORE_OK);
+    CHECK(set.at_once && set.written == 3 && set.kept == 0 && set.dropped == 0 && set.scene_count == 5);
+    /* Three scene files, then the index and its copy: once, not once a scene. */
+    CHECK(s_writes == 5);
+    /* The lock let go after each piece, the change, and the file b left. */
+    CHECK(s_between == 5);
+    entry_t entries[FOS_SCENE_STORE_SLOTS];
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == 5);
+    CHECK(strcmp(entries[0].id, "a") == 0 && strcmp(entries[1].id, "b") == 0 && strcmp(entries[2].id, "c") == 0 &&
+          strcmp(entries[3].id, "d") == 0 && strcmp(entries[4].id, "e") == 0);
+    cJSON *index = fos_scene_store_read_index();
+    CHECK(strcmp(cJSON_GetObjectItem(index, "source")->valuestring, "local") == 0);
+    cJSON_Delete(index);
+    size_t len = 0;
+    char *body = fos_scene_store_read_scene("b", &len);
+    CHECK(body != NULL && len == SIZE && body[SIZE - 3] == 'y');
+    free(body);
+
+    /* The same scenes again: stored already, no scene written; a new source
+     * is the index alone. */
+    s_writes = 0;
+    CHECK(fos_scene_store_add_set(add, 3, "cloud", &set) == FOS_SCENE_STORE_OK);
+    CHECK(set.written == 0 && set.kept == 3 && set.scene_count == 5);
+    CHECK(s_writes == 2);
+    s_writes = 0;
+    CHECK(fos_scene_store_add_set(add, 3, "cloud", &set) == FOS_SCENE_STORE_OK && s_writes == 0);
+
+    /* Without the room: a scene at a time, to the same set. */
+    fos_scene_store_put_t more[2] = {{b3, SIZE}, {f1, SIZE}};
+    s_room = false;
+    CHECK(fos_scene_store_add_set(more, 2, NULL, &set) == FOS_SCENE_STORE_OK);
+    CHECK(!set.at_once && set.written == 2 && set.scene_count == 6);
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == 6);
+    CHECK(strcmp(entries[1].id, "b") == 0 && strcmp(entries[5].id, "f") == 0);
+    body = fos_scene_store_read_scene("b", &len);
+    CHECK(body != NULL && body[SIZE - 3] == 'z');
+    free(body);
+
+    /* A scene twice, or more scenes than the store holds: refused whole. */
+    fos_scene_store_put_t twice[2] = {{d1, SIZE}, {d1, SIZE}};
+    CHECK(fos_scene_store_add_set(twice, 2, NULL, &set) == FOS_SCENE_STORE_ERR_INVALID);
+    enum { MANY = FOS_SCENE_STORE_SCENES - 3 };
+    static char small[MANY][32];
+    fos_scene_store_put_t lots[MANY];
+    for (int i = 0; i < MANY; i++) {
+        snprintf(small[i], sizeof(small[i]), "{\"id\":\"n%d\"}", i);
+        lots[i] = (fos_scene_store_put_t){small[i], strlen(small[i])};
+    }
+    s_room = true;
+    s_writes = 0;
+    CHECK(fos_scene_store_add_set(lots, MANY, NULL, &set) == FOS_SCENE_STORE_ERR_NO_SLOTS && s_writes == 0);
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == 6);
+
+    fos_scene_store_hooks_t none = {0};
+    fos_scene_store_set_hooks(&none);
+    free(a1);
+    free(b1);
+    free(c1);
+    free(b2);
+    free(b3);
+    free(d1);
+    free(e1);
+    free(f1);
+}
+
+/* A change made before the store first lists its directory (no sweep yet: a
+ * board waiting in the Wi-Fi portal renders nothing, and the boot's sweep
+ * waits for a render) keeps the slots it emptied as spares through that
+ * listing. Here every other slot holds a file from an earlier boot that no
+ * index names, so a whole set's drop is the only room the scenes after it
+ * have: forgotten, "no free scene slot" after 54 of 105 on the reTerminal
+ * Sticky (2026-11-26). */
+static void test_spares_kept_through_the_first_listing(void)
+{
+    fresh_dir();
+    enum { N = 105, KEEP = 7, LEFT = FOS_SCENE_STORE_SLOTS - N };
+    static char text[N][32];
+    fos_scene_store_put_t all[N];
+    for (int i = 0; i < N; i++) {
+        snprintf(text[i], sizeof(text[i]), "{\"id\":\"s%d\"}", i);
+        all[i] = (fos_scene_store_put_t){text[i], strlen(text[i])};
+    }
+    fos_scene_store_result_t result;
+    fos_scene_store_change_t first = {.puts = all, .put_count = N, .replace_all = true};
+    CHECK(fos_scene_store_apply(&first, &result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    for (int i = 0; i < LEFT; i++) {
+        char path[160];
+        fos_scene_store_slot_path(FOS_SCENE_STORE_SLOTS - 1 - i, path, sizeof(path));
+        FILE *f = fopen(path, "wb");
+        fclose(f);
+    }
+    fos_scene_store_forget(); /* the next boot: nothing known */
+
+    fos_scene_store_hooks_t hooks = {.has_room = has_room};
+    fos_scene_store_set_hooks(&hooks);
+    s_room = true;
+    fos_scene_store_set_result_t set;
+    CHECK(fos_scene_store_apply_set(all, KEEP, NULL, &set, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(set.dropped == N - KEEP);
+    CHECK(fos_scene_store_add_set(all + KEEP, N - KEEP, NULL, &set) == FOS_SCENE_STORE_OK);
+    CHECK(set.written == N - KEEP && set.scene_count == N);
+    CHECK(read_entries(NULL, 0) == 0); /* an index there */
+    entry_t entries[FOS_SCENE_STORE_SLOTS];
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == N);
+
+    fos_scene_store_hooks_t none = {0};
+    fos_scene_store_set_hooks(&none);
+}
+
 /* The index entry of `scene_id` as text, its slot aside. */
 static char *entry_text(const char *scene_id)
 {
@@ -1441,6 +1580,8 @@ int main(void)
     test_a_set_file_from_its_scenes();
     test_a_whole_set_one_scene_at_a_time();
     test_a_whole_set_at_once_where_there_is_room();
+    test_scenes_added_as_a_set();
+    test_spares_kept_through_the_first_listing();
     test_a_set_staged_as_it_arrives();
 
     fresh_dir();

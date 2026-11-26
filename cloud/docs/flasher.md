@@ -196,12 +196,21 @@ the board while it has room and says how many did not fit; a set picked by
 hand that the board cannot take is refused before the flash: more than 128
 scenes, or more than 70% of the layout's `/state` (1 MB on 8 MB of flash, 8
 MB on 16, 24 MB on 32; a board the flasher has no preset for counts as 8 MB).
-The page says how long the scenes take over the cable (about 11 KB a second).
+The page says how long the scenes take (`sceneUploadSeconds`): over the cable
+at about 11 KB a second deflated to about a third, and onto the board, where
+each scene's file costs a walk of `/state` (about 1.5 s on a 32 MB board).
+Every sample, 105 scenes and 4.2 MB, took 302 s onto a reTerminal Sticky.
 
-A set over 512 KB goes as the scenes that fit one `upload-scenes` (the board
-holds a whole set in memory up to `SCENES_HELD_MAX_BYTES`), then the rest a
-scene at a time with `scene-put` (`uploadScenesOverUsbAfterFlash`, which the
-backend's flasher runs too).
+The set goes in batches of up to 512 KB of JSON (the most the board holds in
+memory at once, `FOS_SCENES_HELD_MAX_BYTES`), each deflated for
+`usb_api scenes-deflated`: the first replaces what the board held, the rest
+are added to it (`uploadScenesOverUsbAfterFlash`, which the backend's flasher
+runs too; embedded/esp32/README.md "A set over USB"). Firmware through
+2026.11.14 does not know the command: it gets the scenes that fit one
+`upload-scenes`, then the rest a scene at a time with `scene-put`, and it
+holds that first set back until it restarts when it has no network yet (all
+of them, during a setup), so the page restarts it once when it refuses a
+`scene-put` for it.
 
 On a board that takes taps (its firmware event map swipes: `fos_board.c`
 `k_event_maps`, pinned by `flasher-standalone.test.ts`) no scene is marked

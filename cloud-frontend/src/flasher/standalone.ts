@@ -241,13 +241,28 @@ export function standaloneSceneRoom(kind: StandaloneBoardKind): StandaloneSceneR
 
 /** The console reads at 115200 baud on a USB-UART bridge: about 11 KB a second. */
 const USB_UPLOAD_BYTES_PER_SECOND = 11 * 1024
-/** What each scene sent alone costs on top (`scene-put`: the slot file and the index written). */
-const USB_SCENE_PUT_SECONDS = 2
+/** Scene JSON goes deflated (`usb_api scenes-deflated`): the samples come to
+ * a third or a quarter of their size. */
+const USB_DEFLATE_RATIO = 3.5
+/** What the board takes to store each scene: its slot file made, which on
+ * SPIFFS walks the whole partition three times (half a second each on the
+ * 32 MB boards' 24 MB `/state`, embedded/esp32/README.md "What still costs"),
+ * so it grows with `/state`; and its bytes written. 105 scenes of 4.2 MB took
+ * 302 s on the reTerminal Sticky, 100 s of it on the cable (2026-11-25). */
+const USB_SCENE_STORE_SECONDS = 0.1
+const USB_SCENE_STORE_SECONDS_PER_24MB = 1.4
+const USB_STORE_SECONDS_PER_KB = 0.01
 
-/** About how long the picked scenes take over the cable, in seconds. */
-export function sceneUploadSeconds(bytes: number, scenes: number): number {
-  const alone = bytes > 512 * 1024 ? scenes : 0
-  return Math.ceil(bytes / USB_UPLOAD_BYTES_PER_SECOND + alone * USB_SCENE_PUT_SECONDS)
+/** About how long the picked scenes take over the cable and onto a board of
+ * `flashSize` (standaloneSceneRoom's), in seconds. */
+export function sceneUploadSeconds(bytes: number, scenes: number, flashSize: string): number {
+  const state = STATE_PARTITION_BYTES[flashSize] ?? STATE_PARTITION_BYTES['8MB']!
+  const perScene = USB_SCENE_STORE_SECONDS + (USB_SCENE_STORE_SECONDS_PER_24MB * state) / (24 * 1024 * 1024)
+  return Math.ceil(
+    bytes / USB_DEFLATE_RATIO / USB_UPLOAD_BYTES_PER_SECOND +
+      scenes * perScene +
+      (bytes / 1024) * USB_STORE_SECONDS_PER_KB
+  )
 }
 
 export type ScenePresetKey = 'starter' | 'interactive' | 'paper' | 'everything' | 'store'

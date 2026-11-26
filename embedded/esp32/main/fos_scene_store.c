@@ -123,13 +123,20 @@ static void retire_slot(int slot)
 
 /* The slot files there are, from one listing of the directory. Without a
  * listing (the directory cannot be opened) nothing is known and each slot is
- * asked for by name, as before. */
+ * asked for by name, as before.
+ *
+ * A spare already known stays one: a file this boot emptied before it first
+ * listed the directory (a change made before any sweep, on a board that
+ * never renders while it waits in the Wi-Fi portal). Cleared with the files,
+ * the slots a whole set's drop gave back were lost to the next put, and the
+ * browser flasher's batches after it ran out of slots: "no free scene slot"
+ * after 54 of 105 scenes on the reTerminal Sticky (2026-11-26). */
 static void learn_slot_files(void)
 {
     if (s_slot_map_known) return;
     DIR *dir = opendir(s_dir);
     if (dir == NULL) return;
-    memset(s_slot_map, 0, 2 * sizeof(s_slot_map[0])); /* the files and the spares; a staging stays */
+    memset(&s_slot_file, 0, sizeof(s_slot_file)); /* the spares and a staging stay */
     struct dirent *item;
     while ((item = readdir(dir)) != NULL) {
         if (strcmp(item->d_name, FOS_SCENE_STORE_SLOT_TMP_NAME) == 0) s_old_slot_tmp = true;
@@ -146,6 +153,10 @@ static void learn_slot_files(void)
         if (slot < FOS_SCENE_STORE_SLOTS) put_slot(&s_slot_file, slot, true);
     }
     closedir(dir);
+    /* A spare is a file that is there. */
+    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
+        if (!has(&s_slot_file, slot)) put_slot(&s_slot_spare, slot, false);
+    }
     s_slot_map_known = true;
 }
 
@@ -1058,10 +1069,12 @@ static cJSON *index_ids(const cJSON *index, const char *const *only, int only_co
     return ids;
 }
 
-fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *puts, int count,
-                                                const char *source, fos_scene_store_set_result_t *result,
-                                                void (*on_dropped)(const char *id, void *ctx),
-                                                void *ctx)
+/* fos_scene_store_apply_set, and with `add` fos_scene_store_add_set: the
+ * order is then the stored one, with the puts the index does not name yet
+ * after it, and nothing is dropped. */
+static fos_scene_store_err_t store_set(const fos_scene_store_put_t *puts, int count, const char *source, bool add,
+                                       fos_scene_store_set_result_t *result,
+                                       void (*on_dropped)(const char *id, void *ctx), void *ctx)
 {
     memset(result, 0, sizeof(*result));
     if (count <= 0) return FOS_SCENE_STORE_ERR_LAST_SCENE;
@@ -1075,7 +1088,7 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
     char(*ids)[FOS_SCENE_STORE_ID_LEN] = calloc((size_t)count, FOS_SCENE_STORE_ID_LEN);
     const char **id_list = calloc((size_t)count, sizeof(*id_list));
     bool *changed = calloc((size_t)count, sizeof(*changed));
-    cJSON *order = cJSON_CreateArray();
+    cJSON *order = add ? index_ids(old, NULL, 0) : cJSON_CreateArray();
     fos_scene_store_err_t err =
         ids && id_list && changed && order ? FOS_SCENE_STORE_OK : FOS_SCENE_STORE_ERR_NO_MEMORY;
     for (int i = 0; i < count && err == FOS_SCENE_STORE_OK; i++) {
@@ -1096,19 +1109,21 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
             const cJSON *stored = find_entry(old_scenes, id);
             changed[i] = stored == NULL || fos_scene_store_entry_slot(stored) < 0 ||
                          !entry_hash_is(stored, content_hash(json, len));
-            cJSON_AddItemToArray(order, cJSON_CreateString(id));
+            if (!add || stored == NULL) cJSON_AddItemToArray(order, cJSON_CreateString(id));
         } else {
             err = FOS_SCENE_STORE_ERR_INVALID;
         }
         cJSON_Delete(scene);
     }
+    const int scenes = cJSON_GetArraySize(order);
+    if (err == FOS_SCENE_STORE_OK && scenes > FOS_SCENE_STORE_SCENES) err = FOS_SCENE_STORE_ERR_NO_SLOTS;
 
     /* What goes: the stored scenes the set does not name. First, so their
      * room is there for the new ones, unless the set keeps none of the old
      * (a frame keeps a scene): then after the first new one. */
     cJSON *keep = NULL;
     bool drops = false;
-    if (err == FOS_SCENE_STORE_OK) {
+    if (err == FOS_SCENE_STORE_OK && !add) {
         keep = index_ids(old, id_list, count);
         if (keep == NULL) err = FOS_SCENE_STORE_ERR_NO_MEMORY;
         result->dropped = cJSON_GetArraySize(old_scenes) - cJSON_GetArraySize(keep);
@@ -1126,13 +1141,13 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
         change_bytes += puts[i].len;
     }
     if (err == FOS_SCENE_STORE_OK && changes > 1 && s_hooks.has_room != NULL &&
-        s_hooks.has_room(change_bytes + 2 * (size_t)count * AT_ONCE_INDEX_ENTRY_BYTES)) {
+        s_hooks.has_room(change_bytes + 2 * (size_t)scenes * AT_ONCE_INDEX_ENTRY_BYTES)) {
         fos_scene_store_err_t once = apply_set_at_once(puts, changed, count, order, source, on_dropped, ctx);
         if (once == FOS_SCENE_STORE_OK) {
             result->at_once = true;
             result->written = changes;
             result->written_bytes = change_bytes;
-            result->scene_count = count;
+            result->scene_count = scenes;
             result->kept = count - changes;
             cJSON_Delete(keep);
             cJSON_Delete(order);
@@ -1191,7 +1206,7 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
         cJSON_Delete(now);
     }
     if (err == FOS_SCENE_STORE_OK) {
-        result->scene_count = count;
+        result->scene_count = scenes;
         result->kept = count - result->written;
     }
     cJSON_Delete(keep);
@@ -1201,6 +1216,20 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
     free(ids);
     cJSON_Delete(old);
     return err;
+}
+
+fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *puts, int count,
+                                                const char *source, fos_scene_store_set_result_t *result,
+                                                void (*on_dropped)(const char *id, void *ctx),
+                                                void *ctx)
+{
+    return store_set(puts, count, source, false, result, on_dropped, ctx);
+}
+
+fos_scene_store_err_t fos_scene_store_add_set(const fos_scene_store_put_t *puts, int count, const char *source,
+                                              fos_scene_store_set_result_t *result)
+{
+    return store_set(puts, count, source, true, result, NULL, NULL);
 }
 
 char *fos_scene_store_read_scene(const char *scene_id, size_t *out_len)

@@ -63,6 +63,11 @@ bool fos_scenes_store_wait(uint32_t timeout_ms);
 void fos_scenes_first_render_done(void);
 bool fos_scenes_state_mounted(void);
 
+/* The most of a scene set held in memory at once: a producer's whole payload
+ * (fos_scenes_set_json_from refuses more), what a usb_api `scenes-deflated`
+ * inflates to. A bigger set goes in pieces. */
+#define FOS_SCENES_HELD_MAX_BYTES (512 * 1024)
+
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark
  * it pending. Safe from any task; trigger a render to apply.
  * fos_scenes_set_json() means FOS_SCENES_SOURCE_LOCAL; every non-local caller
@@ -84,6 +89,10 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
  * flash goes instead of paced around renders and taps. */
 esp_err_t fos_scenes_put(const char *json, size_t len, fos_scenes_source_t source, bool urgent,
                          char *out_id, size_t out_id_len);
+/* Every scene of a JSON array added or replaced as one change, the rest of the
+ * frame's scenes kept: written as a set is (fos_scene_store_add_set), so the
+ * index is written once, not once a scene. */
+esp_err_t fos_scenes_put_many(const char *json, size_t len, fos_scenes_source_t source);
 esp_err_t fos_scenes_delete(const char *scene_id, fos_scenes_source_t source);
 esp_err_t fos_scenes_apply_patch(const struct cJSON *put, const struct cJSON *order,
                                  fos_scenes_source_t source, const char *etag, bool urgent);

@@ -15,8 +15,14 @@ import {
   runEmbeddedUsbApiCommand,
   serialPortReconnectRequiresReselection,
   summarizeUsbStatusJson,
+  usbRestart,
 } from '../../models/embeddedUsbLogsModel'
-import { embeddedUsbScenesUploadPlan, embeddedUsbUploadTimeoutMs } from '../../utils/embeddedUsbUpload'
+import {
+  deflateForUsb,
+  embeddedUsbScenesBatches,
+  embeddedUsbScenesUploadPlan,
+  embeddedUsbUploadTimeoutMs,
+} from '../../utils/embeddedUsbUpload'
 import type { FrameId } from '../../types'
 import { loadEsptool } from './esptoolLoader'
 
@@ -210,14 +216,27 @@ export function recordTransportTrace(frameId: FrameId, transport: EspTransport):
   }
 }
 
+/** Firmware from before `usb_api scenes-deflated` answers this, before READY:
+ * nothing was sent, and the set goes the old way. */
+const USB_COMMAND_UNKNOWN = /unknown subcommand/i
+/** Firmware through 2026.11.14 refuses a `scene-put` while a whole set it
+ * stored waits for its render task's apply, and a board that has no network
+ * yet holds that apply until it reboots: every scene after the first upload
+ * was refused (fos_scenes.c `ensure_split_locked`). */
+const USB_SET_WAITS_FOR_APPLY = /waiting to be applied/i
+
 /** Send a frame's scenes to a board that has just come back on USB: what
  * the board's own pull would get (a backend's setup document, never the
  * workspace's list as it is). Retries: the board answers `status` before its
  * scene store is settled often enough that one attempt loses a first deploy.
- * A set bigger than one `upload-scenes` may carry
- * (EMBEDDED_USB_WHOLE_SET_MAX_BYTES) goes as the scenes that fit, which
- * replace what the board held, then the rest a scene at a time (`scene-put`).
- * Returns false when there are no scenes to send. */
+ *
+ * The set goes in batches of what the board holds in memory at once
+ * (EMBEDDED_USB_WHOLE_SET_MAX_BYTES of JSON), deflated (`scenes-deflated`,
+ * about a third of the bytes over a console that reads 11 KB a second): the
+ * first replaces what the board held, the rest are added to it. Firmware
+ * without that command gets the scenes that fit one `upload-scenes`, then the
+ * rest a scene at a time (`scene-put`), and a restart in between if it holds
+ * the first set back. Returns false when there are no scenes to send. */
 export async function uploadScenesOverUsbAfterFlash(
   frameId: FrameId,
   scenes: unknown[],
@@ -228,23 +247,33 @@ export async function uploadScenesOverUsbAfterFlash(
     return false
   }
 
-  const plan = embeddedUsbScenesUploadPlan(scenes)
   const total = scenes.length
-  const send = async (command: 'upload-scenes' | 'scene-put', sent: unknown, status: (attempt: number) => string) => {
-    const payload = new TextEncoder().encode(JSON.stringify(sent))
+  let livePort = port
+  const send = async (
+    command: string,
+    payload: Uint8Array,
+    // What the board stores: the wait for the answer is as long as for these bytes sent plain.
+    storedBytes: number,
+    status: (attempt: number) => string
+  ): Promise<void> => {
     let lastError: unknown = null
     for (let attempt = 1; attempt <= POST_FLASH_SCENE_UPLOAD_ATTEMPTS; attempt += 1) {
       onStatus(status(attempt))
       try {
         await runEmbeddedUsbApiCommand(frameId, command, {
           payload,
-          port,
-          timeoutMs: embeddedUsbUploadTimeoutMs(payload.byteLength),
+          port: livePort,
+          timeoutMs: embeddedUsbUploadTimeoutMs(storedBytes),
           keepOpen: true,
         })
         return
       } catch (error) {
         lastError = error
+        const detail = error instanceof Error ? error.message : String(error)
+        // The same bytes again would get the same answer.
+        if (USB_COMMAND_UNKNOWN.test(detail) || USB_SET_WAITS_FOR_APPLY.test(detail)) {
+          break
+        }
         if (attempt < POST_FLASH_SCENE_UPLOAD_ATTEMPTS) {
           await sleep(POST_FLASH_SCENE_UPLOAD_RETRY_MS)
         }
@@ -252,21 +281,77 @@ export async function uploadScenesOverUsbAfterFlash(
     }
     throw lastError instanceof Error ? lastError : new Error('Failed to upload scenes over USB')
   }
+  const range = (from: number, to: number): string => (from === to ? `scene ${from}` : `scenes ${from} to ${to}`)
 
-  await send('upload-scenes', plan.whole, (attempt) =>
+  const batches = embeddedUsbScenesBatches(scenes)
+  let sent = 0
+  for (const [index, batch] of batches.entries()) {
+    const json = new TextEncoder().encode(JSON.stringify(batch))
+    const body = await deflateForUsb(json)
+    const from = sent + 1
+    const to = sent + batch.length
+    try {
+      await send(
+        `scenes-deflated ${index === 0 ? 'set' : 'put'} ${json.byteLength}`,
+        body,
+        json.byteLength,
+        (attempt) =>
+          attempt === 1
+            ? batches.length === 1
+              ? `Uploading ${total} scene(s) over USB`
+              : `Uploading ${range(from, to)} of ${total} over USB`
+            : `Retrying ${range(from, to)} of ${total} over USB (${attempt}/${POST_FLASH_SCENE_UPLOAD_ATTEMPTS})`
+      )
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      if (index === 0 && USB_COMMAND_UNKNOWN.test(detail)) {
+        appendBrowserFlashLog(frameId, "The board's firmware takes scenes uncompressed: sending them as they are.")
+        break
+      }
+      throw error
+    }
+    sent = to
+  }
+  if (sent === total) {
+    return true
+  }
+
+  const plan = embeddedUsbScenesUploadPlan(scenes)
+  const plain = (scene: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(scene))
+  const whole = plain(plan.whole)
+  await send('upload-scenes', whole, whole.byteLength, (attempt) =>
     attempt === 1
       ? plan.each.length > 0
         ? `Uploading ${plan.whole.length} of ${total} scenes over USB`
         : `Uploading ${total} scene(s) over USB`
       : `Retrying scene upload over USB (${attempt}/${POST_FLASH_SCENE_UPLOAD_ATTEMPTS})`
   )
+  let restarted = false
   for (const [index, scene] of plan.each.entries()) {
     const number = plan.whole.length + index + 1
-    await send('scene-put', scene, (attempt) =>
+    const payload = plain(scene)
+    const status = (attempt: number): string =>
       attempt === 1
         ? `Uploading scene ${number} of ${total} over USB`
         : `Retrying scene ${number} of ${total} over USB (${attempt}/${POST_FLASH_SCENE_UPLOAD_ATTEMPTS})`
-    )
+    try {
+      await send('scene-put', payload, payload.byteLength, status)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      if (restarted || !USB_SET_WAITS_FOR_APPLY.test(detail)) {
+        throw error
+      }
+      // The boot loads the stored set, and the puts go on top of it.
+      restarted = true
+      // A tap or a key while it waits for Wi-Fi after this boot froze 2026.11.14 (fos_client.c s_render_parked).
+      onStatus(
+        'Restarting the board so it takes the rest of the scenes. Leave its screen and keys alone until it is done.'
+      )
+      appendBrowserFlashLog(frameId, `The board holds back the first ${plan.whole.length} scenes until it restarts.`)
+      await usbRestart(frameId, { port: livePort, keepOpen: true })
+      livePort = await waitForUsbApiReadyAfterFlash(frameId, livePort, onStatus, 'Waiting for the board to restart.')
+      await send('scene-put', payload, payload.byteLength, status)
+    }
   }
   return true
 }
