@@ -2438,6 +2438,18 @@ proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
 
 {.pop.}
 
+proc ensureCanvas(self: FrameScene, context: ExecutionContext) =
+  ## A render a host started without a canvas (the browser's preview, a
+  ## plane's render) gets a fresh one, as a Pi's runner hands in. Same
+  ## rotation contract as runner.renderSceneImage: scenes render at the
+  ## rotated dimensions; the output is rotated back to panel space afterwards
+  ## (Pi: rotateDegrees; embedded: rotation-aware packers).
+  if not context.hasImage or context.image.isNil:
+    context.image = case self.frameConfig.rotate:
+      of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+      else: newImage(self.frameConfig.width, self.frameConfig.height)
+    context.hasImage = true
+
 proc runEventInner(self: FrameScene, context: ExecutionContext) =
   if not self.ownRun.isNil:
     # A built-in scene. What happens to it is what it draws next.
@@ -2459,14 +2471,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       applyPublicStateFromPayload(scene, context.payload["state"])
   of "render":
-    if not context.hasImage or context.image.isNil:
-      # Same rotation contract as runner.renderSceneImage: scenes render at
-      # the rotated dimensions; the output is rotated back to panel space
-      # afterwards (Pi: rotateDegrees; embedded: rotation-aware packers).
-      context.image = case self.frameConfig.rotate:
-        of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-        else: newImage(self.frameConfig.width, self.frameConfig.height)
-      context.hasImage = true
+    ensureCanvas(self, context)
     # Owed, not painted: whatever draws first pays it, and a first paint
     # that covers the canvas opaquely waives it (ExecutionContext's
     # backgroundPending). Paid below when nothing draws.
@@ -2820,7 +2825,11 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
           layout.wrapsFullScreen = full
           rhythmMarkDue(layout)
         # The keyboard is the frame's then (KeyboardDock): docked, the layout
-        # is laid out in what it leaves above it.
+        # is laid out in what it leaves above it. It is placed in the frame's
+        # canvas, so a host that handed none (the browser's preview) has it
+        # made now and not in the layout's run: placed in nothing, a field
+        # drew a keyboard of its own inside its window (2026-11-26).
+        ensureCanvas(self, context)
         let
           canvas = context.image
           top = placeKeys(self, layout, canvas)

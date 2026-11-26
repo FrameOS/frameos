@@ -147,6 +147,7 @@ let scenes = %*[
     "backgroundColor": "#000000", "isLayout": true}}"""),
   jsxScene("tests/form", formUi, """{"layout": {"sceneId": "tests/bars"}}"""),
   jsxScene("tests/bareForm", formUi),
+  jsxScene("tests/canvaslessForm", formUi, """{"layout": {"sceneId": "tests/bars"}}"""),
   jsxScene("tests/backBars", backBarsLayout, """{"settings": {"execution": "interpreted", "refreshInterval": 600,
     "backgroundColor": "#000000", "isLayout": true}}""", @["back"]),
   jsxScene("tests/backForm", backFormUi, """{"layout": {"sceneId": "tests/backBars"}}""", @["back"]),
@@ -191,6 +192,15 @@ proc freshPass(scene: FrameScene, size: tuple[w, h: int]): Image =
   rhythmCanvasGeneration = nil
   result = pass(scene, size)
   rhythmCanvasGeneration = saved
+
+proc canvaslessPass(scene: FrameScene): Image =
+  ## A render a host starts with no canvas, as the browser's preview does
+  ## (wasm_main.nim previewCanvas): the scene makes its own.
+  clock += 0.01
+  rhythmClockOverride = clock
+  let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+    loopIndex: 0, loopKey: ".", nextSleep: -1)
+  render(scene, context)
 
 proc settle(): seq[string] =
   while true:
@@ -414,6 +424,31 @@ suite "the frame's keyboard on a small screen":
     let after = pass(scene, Small)
     check frameKeyboard.sceneId == ""
     check after.color(10, Small.h - 10) == colored("#0000ff")
+    check problems.len == 0
+
+  test "a host that hands no canvas (the browser's preview) docks it the same":
+    # Placed before the layout's run, in a canvas the layout's run made only
+    # later: the field drew a keyboard of its own inside the scene.
+    forgetTypedKeys()
+    let config = configOf(Small)
+    let scene = init("tests/canvaslessForm".SceneId, config, logger(config), %*{})
+    discard canvaslessPass(scene)
+    discard scene.tap(100, float(Small.h - 20 - 20))
+    check keyboardShown("tests/canvaslessForm")
+    let open = canvaslessPass(scene)
+    shot(open, "small-8-canvasless")
+    let (top, tall) = keyboardBox(Small.w, Small.h)
+    check frameKeyboard.sceneId == "tests/canvaslessForm"
+    check frameKeyboard.y == top.float32 and frameKeyboard.h == tall.float32
+    check open.color(10, top - 10) == colored("#0000ff")
+    check open.color(2, top + 2) == colored("#18181b")
+    # The frame's back puts it away again.
+    runEvent(scene, ExecutionContext(scene: scene, event: "back", payload: %*{}, loopIndex: 0, loopKey: ".",
+      nextSleep: -1))
+    discard settle()
+    check not keyboardShown("tests/canvaslessForm")
+    discard canvaslessPass(scene)
+    check frameKeyboard.sceneId == ""
     check problems.len == 0
 
 # ------------------------------------------------------------ its rows
@@ -729,4 +764,25 @@ suite "the frame's keyboard on a desktop":
     shot(kept, "desk-9-kept-gone")
     check frameKeyboard.sceneId == ""
     check same([now.x, now.y, now.w, now.h])
+    check problems.len == 0
+
+  test "a host that hands no canvas (the browser's preview) gets the same window":
+    # The playground (2026-11-26): the keyboard was in the window, the
+    # field's own, because the frame's had no canvas to be placed in.
+    forgetTypedKeys()
+    let form = hostScene("tests/windowForm")
+    discard canvaslessPass(current)
+    let win = holeOf(desk(), form)
+    discard current.tap(float(win.x + win.w div 2), float(win.y + 20))
+    check keyboardShown("tests/windowForm")
+    let open = canvaslessPass(current)
+    shot(open, "desk-10-canvasless")
+    let k = frameKeyboard
+    check k.sceneId == "tests/windowForm"
+    check k.grip > 0 and not k.svg.isNil
+    check rowsMatch("tests/windowForm")
+    # Over the desktop, not in the window: the window's field still shows,
+    # and where the keyboard is, none of the window's green.
+    check open.color(win.x + 6, win.y + 20) == colored("#fde047")
+    check open.color(int(k.x + 2), int(k.y + k.h / 2)) != colored("#22c55e")
     check problems.len == 0
