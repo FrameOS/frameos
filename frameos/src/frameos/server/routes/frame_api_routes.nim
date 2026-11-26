@@ -203,6 +203,11 @@ proc queueRuntimeControl(request: Request, action: string, eventName: string) {.
       # SVG font lookup at the assets folder through a global string, which
       # is the render thread's to write.
       discard readConfig()
+    if eventName == "restart":
+      # The restart is `quit`: it waits for this reply (settings_apply).
+      jsonResponse(request, Http200, %*{"status": "ok", "action": action})
+      restartAfterReply(eoHttpAdmin)
+      return
     sendEvent(eventName, %*{}, eoHttpAdmin)
     jsonResponse(request, Http200, %*{"status": "ok", "action": action})
   except CatchableError as e:
@@ -517,12 +522,11 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
             runtimeAction = "restart"
           elif not skipRuntimeReload:
             runtimeAction = "reload"
-        if runtimeAction == "restart":
-          # Driver setup restarts the runtime itself once it is done (it may
-          # even reboot); a restart queued here would race it.
-          if sjDriverSetup notin jobs:
-            sendEvent("restart", %*{}, eoSystem)
-        elif runtimeAction == "reload":
+        # Driver setup restarts the runtime itself once it is done (it may
+        # even reboot); a restart queued here would race it. Any other
+        # restart waits for this reply (restartAfterReply, below).
+        let restartAfter = runtimeAction == "restart" and sjDriverSetup notin jobs
+        if runtimeAction == "reload":
           sendEvent("reload", %*{}, eoSystem)
         queueSettingsJobs(jobs, $preview.next)
         let nextAction = payload{"next_action"}.getStr("")
@@ -543,6 +547,8 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
             "system": settingsJobNames(jobs),
           },
         }))
+        if restartAfter:
+          restartAfterReply()
       except CatchableError as e:
         respondInternalError(request, "frame:update:error", e, "Failed to update the frame")
   )

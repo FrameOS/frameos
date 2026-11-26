@@ -6,6 +6,7 @@ import ../../channels
 import ../../config
 import ../../scenes
 import ../rate_limit
+import ../settings_apply
 import ../state
 import ../routes/repository_api_routes
 import ./helpers/http_harness
@@ -360,12 +361,23 @@ suite "frame api route behavior":
       check runtimeReloadPayload[1] == "reload"
 
       drainEventChannel()
+      setRestartAfterReplyMsForTest(500)
       let restart = httpRequest(server.port, "POST", "/api/frames/1/restart", headers = [("Cookie", refreshedCookie)])
       check restart.status == 200
       check parseJson(restart.body)["action"].getStr() == "restart"
-      let (restartReceived, restartPayload) = eventChannel.tryRecv()
+      # The restart (`quit`) waits for its reply (settings_apply.restartAfterReply).
+      let (restartEarly, _) = eventChannel.tryRecv()
+      check not restartEarly
+      var restartReceived = false
+      var restartPayload: typeof(eventChannel.tryRecv()[1])
+      for attempt in 0 ..< 100:
+        (restartReceived, restartPayload) = eventChannel.tryRecv()
+        if restartReceived:
+          break
+        sleep(20)
       check restartReceived
       check restartPayload[1] == "restart"
+      setRestartAfterReplyMsForTest(RestartAfterReplyMs)
 
       # The frame's own admin page offers "Reboot device" beside Restart, and
       # it calls the same path the backend calls on a shell-less frame.

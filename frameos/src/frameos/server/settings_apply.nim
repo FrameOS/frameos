@@ -112,6 +112,45 @@ proc runSettingsJob(job: SettingsJob) {.gcsafe.} =
       # If setup scheduled a reboot this restart is moot, and harmless.
       sendEvent("restart", %*{}, eoSystem)
 
+const RestartAfterReplyMs* = 1500
+  ## A restart a request asked for waits this long for the request's reply.
+  ## The runner's restart is `quit`, and mummy writes a reply from its own
+  ## thread after the handler returns: a save that restarted at once cut its
+  ## own reply off (a backend's push to a Pi 5 got 108 of 165 KB and failed
+  ## the deploy the frame had applied, 2026-11-25 bench). The ESP32 waits
+  ## 750 ms for its one-line replies (fos_http.c `restart_task`); a Pi's save
+  ## answers with the whole frame, so twice that.
+
+var restartAfterReplyMs = RestartAfterReplyMs
+var restartThread: Thread[tuple[delayMs: int, origin: EventOrigin]]
+var restartLock: Lock
+initLock(restartLock)
+var restartQueued = false
+
+proc setRestartAfterReplyMsForTest*(ms: int) =
+  withLock restartLock:
+    restartAfterReplyMs = ms
+    # Each test asks for its own restart: no process quits under them.
+    if restartQueued:
+      joinThread(restartThread)
+      restartQueued = false
+
+proc restartLater(args: tuple[delayMs: int, origin: EventOrigin]) {.thread.} =
+  sleep(args.delayMs)
+  {.cast(gcsafe).}:
+    sendEvent("restart", %*{}, args.origin)
+
+proc restartAfterReply*(origin = eoSystem) {.gcsafe.} =
+  ## Restart the runtime once the reply to the request being handled is out:
+  ## call it after `request.respond`, never before. One restart is queued at
+  ## most; the process ends with it.
+  withLock restartLock:
+    {.cast(gcsafe).}:
+      if restartQueued:
+        return
+      restartQueued = true
+      createThread(restartThread, restartLater, (restartAfterReplyMs, origin))
+
 var jobRunner: SettingsJobRunner = runSettingsJob
 var jobChannel: Channel[SettingsJob]
 jobChannel.open(64)
