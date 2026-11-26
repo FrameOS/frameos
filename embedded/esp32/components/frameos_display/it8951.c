@@ -198,6 +198,24 @@ size_t fos_it8951_tile_rects(const uint8_t *dirty, fos_it8951_rect_t *rects, siz
     return count;
 }
 
+/* rects_join_cheapest, and whatever the joined rectangle now covers goes:
+ * it is sent with it. */
+static void spans_join_cheapest(fos_it8951_rect_t *rects, size_t *count)
+{
+    rects_join_cheapest(rects, count);
+    for (size_t i = 0; i < *count; i++) {
+        for (size_t j = 0; j < *count;) {
+            const fos_it8951_rect_t *a = &rects[i], *b = &rects[j];
+            if (j != i && a->x <= b->x && a->y <= b->y && a->x + a->w >= b->x + b->w && a->y + a->h >= b->y + b->h) {
+                rects_remove(rects, count, j);
+                if (i == *count) i = j; /* the last one moved into j */
+                continue;
+            }
+            j++;
+        }
+    }
+}
+
 size_t fos_it8951_tile_spans(const uint8_t *dirty, fos_it8951_rect_t *rects, size_t max)
 {
     size_t count = 0;
@@ -224,7 +242,7 @@ size_t fos_it8951_tile_spans(const uint8_t *dirty, fos_it8951_rect_t *rects, siz
                 }
             }
             if (!extended) {
-                if (count == max) return SIZE_MAX;
+                if (count == max) spans_join_cheapest(rects, &count);
                 rects[count++] = (fos_it8951_rect_t){(uint16_t)x, (uint16_t)top, (uint16_t)(right - x), (uint16_t)height};
             }
             col = end;
@@ -441,9 +459,16 @@ static bool s_waveform_pending = false;
 /* A step timed out: the rest of the pass is skipped rather than talking to
  * a controller that stopped listening, and the next one starts over. */
 static bool s_failed = false;
-/* When the waveform started last ends, about (DU_US, GC16_US). */
+/* When the waveform started last ends, about (s_du_us, GC16_US). */
 static int64_t s_waveform_due_us = 0;
 static int64_t s_waveform_started_us = 0;
+static UWORD s_waveform_mode = MODE_DU;
+/* How long a DU runs on this glass, learned from the waits for one: the
+ * controller holds HRDY until its waveform has run, so a wait that began
+ * before then ends with it. DU_US until then. 340-365 ms on an E1003 at
+ * 21 C (2026-11-26), where the 470 ms first measured would have a render
+ * timed to the glass start 120 ms late (fos_display_glass_free_at). */
+static int64_t s_du_us = DU_US;
 /* The box the next `changed` hashes, in packed pixels (fos_it8951_10in3_hint). */
 static bool s_hint_armed = false;
 static fos_it8951_rect_t s_hint;
@@ -750,7 +775,8 @@ static void start_waveform(UWORD mode, const fos_it8951_rect_t *rect)
     /* The controller took the area when the last word went: one before it
      * ran first (HRDY held the words back). */
     s_waveform_started_us = esp_timer_get_time();
-    s_waveform_due_us = s_waveform_started_us + (mode == MODE_DU ? DU_US : mode == MODE_GC16 ? GC16_US : INIT_US);
+    s_waveform_mode = mode;
+    s_waveform_due_us = s_waveform_started_us + (mode == MODE_DU ? s_du_us : mode == MODE_GC16 ? GC16_US : INIT_US);
 }
 
 /* The waveforms running finish first: putting the controller in standby
@@ -784,8 +810,16 @@ static void finish_waveforms(void)
     if (!s_waveform_pending) return;
     s_waveform_pending = false;
     int64_t start = now_ms();
+    int64_t start_us = esp_timer_get_time();
     wait_waveforms();
+    int64_t end_us = esp_timer_get_time();
     int64_t waited = now_ms() - start;
+    /* Arrived while a DU ran: it ended now, and that is how long one takes
+     * here (smoothed; HRDY is spun on, so within a fraction of a ms). */
+    int64_t ran_us = end_us - s_waveform_started_us;
+    if (s_waveform_mode == MODE_DU && end_us - start_us > 2000 && !s_failed && ran_us > 100000 && ran_us < 2000000) {
+        s_du_us = (s_du_us * 3 + ran_us) / 4;
+    }
     if (waited > 20) {
         log_line("it8951: waited %lld ms for the last waveform (it ran %lld ms)", (long long)waited,
                  (long long)((esp_timer_get_time() - s_waveform_started_us) / 1000));
@@ -980,8 +1014,7 @@ static size_t damaged_rects(const uint8_t *buf, fos_it8951_rect_t *rects)
     if (s_interactive) {
         /* One waveform covers them all, so only what goes on the wire counts:
          * the changed tiles as they are, not the box around a moved crosshair. */
-        size_t spans = fos_it8951_tile_spans(s_tiles->dirty, rects, FOS_IT8951_MAX_RECTS_INTERACTIVE);
-        if (spans != SIZE_MAX) return spans;
+        return fos_it8951_tile_spans(s_tiles->dirty, rects, FOS_IT8951_MAX_RECTS_INTERACTIVE);
     }
     return fos_it8951_tile_rects(s_tiles->dirty, rects, s_interactive ? FOS_IT8951_MAX_RECTS_INTERACTIVE : FOS_IT8951_MAX_RECTS);
 }
@@ -1110,6 +1143,11 @@ bool fos_it8951_10in3_glass_rect(const uint8_t *buf, int x, int y, int w, int h)
 void fos_it8951_10in3_wait(void)
 {
     finish_waveforms();
+}
+
+int64_t fos_it8951_10in3_free_at(void)
+{
+    return s_waveform_pending && !s_failed ? s_waveform_due_us : 0;
 }
 
 void fos_it8951_10in3_rest(void)
