@@ -66,6 +66,35 @@ def test_two_fast_frames_are_an_animation_summary():
     assert a['status'] == 'running' and a['fps'] == 20.0 and a['periodMs'] == 33 and a['avgMs'] == 35
 
 
+def test_a_scene_that_asks_for_a_longer_sleep_is_judged_by_it():
+    # The Kitchen sink runs at 0.05 s and asks for one render a second
+    # (frameos.setNextSleep) outside its Motion page: its frames a second apart
+    # are what it asked for, not "1 fps against a 20 fps target" (2026-11-25).
+    con = LinuxConsole.offline()
+    con.intervals['sink'] = 0.05
+    t = time.time() - 10
+    for at in (t - 2, t, t + 1.0):
+        journal(con, at, {'event': 'render:scene', 'sceneId': 'sink'})
+        journal(con, at + 0.005, {'event': 'render:done', 'sceneId': 'sink', 'ms': 5})
+        journal(con, at + 0.007, {'event': 'render:driver', 'ms': 2})
+        journal(con, at + 0.008, {'event': 'render:sleep', 'ms': 991.0})
+    a = summarize(con.drain())['animation'][0]
+    assert a['fps'] == 1.0 and a['periodMs'] == 998
+
+
+def test_an_animation_keeps_its_interval_as_the_target():
+    con = LinuxConsole.offline()
+    con.intervals['dvd'] = 0.05
+    t = time.time() - 10
+    for at in (t - 1, t, t + 0.05):
+        journal(con, at, {'event': 'render:scene', 'sceneId': 'dvd'})
+        journal(con, at + 0.005, {'event': 'render:done', 'sceneId': 'dvd', 'ms': 5})
+        journal(con, at + 0.007, {'event': 'render:driver', 'ms': 2})
+        journal(con, at + 0.008, {'event': 'render:sleep', 'ms': 43.0})
+    a = summarize(con.drain())['animation'][0]
+    assert a['periodMs'] == 50
+
+
 def test_a_slow_scene_is_no_animation():
     con = LinuxConsole.offline()
     con.intervals['clock'] = 60

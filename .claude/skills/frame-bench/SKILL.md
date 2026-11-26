@@ -225,7 +225,8 @@ Issue severities: `crash` (panic, abort, watchdog, brownout, reboot, OOM),
   later — then `set backend`, `set api_key`, `set frame_id`, `restart` on its
   console), run `discover`. Its kind (`local` / `thin` / `pico`), LCD, touch
   and refresh time come from `usb_api status` (`framebench/inventory.py`:
-  `TOUCH_MODULES`, `PANEL_REFRESH_S`).
+  `TOUCH_MODULES`, `PANEL_REFRESH_S`; a panel is fast when its display id starts
+  `LCD_` or `AMOLED_` or `boards.json` gives its panel `kind: lcd`).
 - **A new suite**: a function `(ctx, frame) -> {..., 'issues': [...]}` in
   `suites.py`, registered in `SUITES` and, if it should run by default, in
   `DEFAULT`. Use `ctx.console(frame)` (shared, held open), `wait_render`,

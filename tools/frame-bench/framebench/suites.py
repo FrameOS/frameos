@@ -145,16 +145,6 @@ def wait_render(con, timeout):
     return con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)), timeout)
 
 
-def wait_for_render_or_start(con, timeout):
-    """The next render's end, or its start when that comes first; returns
-    (t, line, lines), `t` None at a start or when nothing came."""
-    t, line, got = con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)) or
-                                (x.startswith('render #') and ' started: scene ' in x), timeout)
-    if line and ' started: scene ' in line:
-        return None, line, got
-    return t, line, got
-
-
 def wait_scene_render(con, timeout, shows):
     """Wait for a render whose `started: scene ...` line `shows(line)` says is
     the one wanted, to its `done` / `failed`; returns (t, line, lines)."""
@@ -388,8 +378,12 @@ def suite_scenes(ctx, frame, scene_filter=None):
         entry['warm_stats'] = stats([x['done_ms'] for x in warm])
         if entry['warm_stats'] and entry['warm_stats']['median'] > WARM_SLOW_MS:
             issues.append(issue('slow', 'render_slow', where, f"warm render median {entry['warm_stats']['median']} ms"))
-        # The fastest path: an LCD draws in its back buffer (`in place`).
-        if frame['lcd'] and any(x.get('in_place') is False for x in warm):
+        # The fastest path: an LCD draws in its back buffer (`in place`). On a
+        # Linux frame `in place` is the framebuffer's depth (linux.py: a
+        # 16 bpp one has the RGB565 panel canvas, panel_canvas.nim), not a
+        # path the render took, so a 32 bpp KMS panel (the Pi 5's HyperPixel)
+        # would be flagged on every render: nothing to judge there.
+        if frame['lcd'] and not frame.get('linux') and any(x.get('in_place') is False for x in warm):
             issues.append(issue('slow', 'not_in_place', where, 'an LCD render packed a separate image instead of drawing in the panel buffer'))
         psram = [x['freePsram'] for x in warm if x.get('freePsram')]
         if psram and min(psram) < LOW_PSRAM:
@@ -906,7 +900,7 @@ def suite_desktop(ctx, frame, layouts=None):
             st = status(con)
             entry['after'] = {k: (st.get('memory') or {}).get(k) for k in ('psramFree', 'internalFree')}
             entry['loaded'] = (st.get('scenes') or {}).get('loaded')
-            if frame['lcd'] and any(w.get('in_place') is False for w in entry['windows']):
+            if frame['lcd'] and not frame.get('linux') and any(w.get('in_place') is False for w in entry['windows']):
                 issues.append(issue('slow', 'not_in_place', where, 'a desktop render on the LCD packed a separate image'))
             missing = sorted({(event(x) or {}).get('layoutSceneId') for x in con.history_since(t0) if '"layout:missing"' in x})
             if missing:
@@ -1036,7 +1030,16 @@ def _switcher_pages(ctx, frame, rounds=2, pages=3):
             con.drain()
             t = time.time()
             drag(con, 0.5, 0.8, 0.2)
-            t_done, line, got = wait_for_render_or_start(con, drag_wait)
+            # Renders that come quickly (a list following a finger on an LCD)
+            # are summed up in one `render:burst` line, not logged one by one:
+            # the AMOLED's page was drawn five times in a second and the suite
+            # waited 60 s for a `render #N done`, until the switcher closed
+            # itself and every later step landed on the wrong scene (2026-11-25).
+            t_done, line, got = con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)) or
+                                             (x.startswith('render #') and ' started: scene ' in x) or
+                                             '"event":"render:burst"' in x, drag_wait)
+            if line and ' started: scene ' in line:
+                t_done = None
             started = [x for _, x in got if ' started: scene ' in x]
             if not t_done and started:
                 # A render that began: its end, however long the panel takes.

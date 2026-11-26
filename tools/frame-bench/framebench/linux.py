@@ -218,6 +218,7 @@ class LinuxConsole:
         self._render = None
         self._n = 0
         self._last_start = None  # the last render's start: device time, scene, cost, first of its scene?
+        self._asked_sleep_ms = None  # the runtime's `render:sleep` after the last render: the wait the scene chose
         self._bench_scenes: dict = {}
         self._upload_backup = None
         self._cfg_stale = False
@@ -347,6 +348,13 @@ class LinuxConsole:
         elif name in ('render:scene', 'render:done', 'render:driver', 'render:sleep'):
             # Logged by the runner's own logger: it is not paused.
             self.log_paused = False
+        if name == 'render:sleep':
+            # The wait the runtime chose after a render: the scene's own
+            # rhythm when it asks for more than its interval (_start).
+            try:
+                self._asked_sleep_ms = float(ev.get('ms'))
+            except (TypeError, ValueError):
+                self._asked_sleep_ms = None
         watch = self._switch_watch
         if watch is not None and now >= watch['t'] - 0.015:
             if name in ('render:sceneChange', 'event:open') and ev.get('sceneId'):
@@ -459,11 +467,22 @@ class LinuxConsole:
             interval = self.intervals.get(sid)
             if interval is None or interval < 1:
                 period = (t_dev - prev['t']) * 1000
+                # The period the scene asked for: its interval, or the longer
+                # wait it chose itself (`frameos.setNextSleep`; the runtime's
+                # `render:sleep`): the Kitchen sink renders once a second, on
+                # the second, outside its Motion page, and read as "1 fps
+                # against a 20 fps target" on both Pis (2026-11-25).
+                asked = round(interval * 1000) if interval else None
+                if asked and self._asked_sleep_ms is not None and prev['cost'] is not None:
+                    own = prev['cost'] + self._asked_sleep_ms
+                    if own > 1.5 * asked:
+                        asked = round(own)
                 self._emit(json.dumps({'event': 'render:animation', 'status': 'running', 'sceneId': sid,
                                        'frames': 1, 'fps': round(1000 / period, 1), 'avgMs': prev['cost'], 'maxMs': prev['cost'],
-                                       'periodMs': round(interval * 1000) if interval else None,
+                                       'periodMs': asked,
                                        'seconds': round(period / 1000, 3), 'via': 'linux log burst'},
                                       separators=(',', ':')), now)
+        self._asked_sleep_ms = None
         self._n += 1
         self.current_scene = sid
         self._render = {'n': self._n, 'id': sid, 'name': self.names.get(sid, sid), 't_dev': t_dev}

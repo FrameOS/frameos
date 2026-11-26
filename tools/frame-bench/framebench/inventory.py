@@ -24,6 +24,19 @@ from . import linux
 # Boards with a touch panel the bench can tap (module ids from fos_board.c).
 TOUCH_MODULES = {'seeed_sensecap_indicator_d1', 'guition_esp32_4848s040', 'sunton_esp32_8048s070', 'waveshare_esp32_s3_touch_amoled_1_75', 'seeed_reterminal_sticky', 'seeed_reterminal_e1003',
                  'waveshare_esp32s3_touch_lcd_4', 'hyperpixel'}
+BOARDS_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'boards.json')
+
+
+def _panel_kinds() -> dict:
+    """Display id -> `kind` from boards.json (`lcd` for a panel that draws at
+    once, whatever its controller is called)."""
+    try:
+        with open(BOARDS_JSON) as fh:
+            return {k: (v or {}).get('kind') for k, v in (json.load(fh).get('panels') or {}).items()}
+    except (OSError, ValueError):
+        return {}
+
+
 # Seconds a full refresh takes, for timeouts and pacing (a guess for unknown panels).
 PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_13in3e': 35, 'EPD_10in3': 4, 'EPD_3in97': 4, 'EPD_7in5_V2': 6}
 
@@ -90,7 +103,10 @@ def describe(port: str, status: dict) -> dict:
     pico = app == 'frameos-pico'
     is_linux = app == 'frameos-linux'
     render_mode = cfg.get('renderMode') or 'local'
-    lcd = display.startswith('LCD_') or bool(board.get('lcd'))
+    # A fast panel, not only one called LCD_: the AMOLED 1.75's CO5300 draws
+    # at once too, and benched as e-paper it waited 30 s a refresh and 80 s
+    # for a drag, and never ran the animation benchmark (2026-11-25).
+    lcd = display.startswith(('LCD_', 'AMOLED_')) or bool(board.get('lcd')) or _panel_kinds().get(display) == 'lcd'
     return {
         'port': port,
         'app': app,
