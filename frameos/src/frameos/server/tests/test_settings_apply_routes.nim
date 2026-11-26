@@ -224,12 +224,24 @@ suite "settings save applies on the device":
     check eventNames().len == 0
     check storedConfig()["name"].getStr() == "Renamed twice"
 
-  test "a driver-init key restarts the runtime instead of reloading it":
+  test "a driver-init key restarts the runtime instead of reloading it, after the reply":
     let cookie = resetFrame()
+    setRestartAfterReplyMsForTest(500)
     let response = save(server.port, cookie, %*{"gpio_buttons": [{"pin": 5, "label": "A"}]})
     check response.status == 200
     check parseJson(response.body)["apply"]["runtime"].getStr() == "restart"
-    check eventNames() == @["restart"]
+    # The restart is the runner's `quit`: sent while the reply was still being
+    # written, it cut the reply off (a backend's push to a Pi failed the
+    # deploy it had applied). It comes once the reply is out.
+    check eventNames().len == 0
+    var names: seq[string]
+    for attempt in 0 ..< 100:
+      names.add(eventNames())
+      if names.len > 0:
+        break
+      sleep(20)
+    check names == @["restart"]
+    setRestartAfterReplyMsForTest(RestartAfterReplyMs)
 
   test "time zone and mountpoints are queued for the settings worker":
     let cookie = resetFrame()
