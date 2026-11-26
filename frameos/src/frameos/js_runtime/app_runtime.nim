@@ -18,6 +18,7 @@ import frameos/utils/base64_field
 import frameos/utils/strict_json
 import frameos/spool
 import frameos/layout_choice
+import frameos/frame_service_keys
 import lib/tz
 from chrono import findTimeZone, findDstChanges, valid
 import frameos/utils/app_images
@@ -2298,7 +2299,8 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
     return jsNull(ctx)
 
 proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
-  ## Read a value from frameConfig.settings, e.g. getSetting("openAI", "apiKey").
+  ## Read a value from frameConfig.settings, e.g. getSetting("openAI", "apiKey"),
+  ## with the keys typed on the frame over it.
   ## Only namespaces the app declares in its config.json "settings" list are
   ## accessible; the declaration travels with the scene so access is auditable.
   let e = env(ctx)
@@ -2320,7 +2322,8 @@ proc jsGetSetting(ctx: ptr JSContext, pathJson: JSValue): JSValue {.nimcall.} =
       "\" is not declared in the app config's \"settings\" list")
     return jsUndefSentinel(ctx)
 
-  var node = e.owner.frameConfig.settings
+  # A key typed on the frame wins over the one a plane sent (frame_service_keys.nim).
+  var node = withServiceKeys(e.owner.frameConfig.settings, namespace)
   for part in path.items:
     if node.isNil:
       return jsUndefSentinel(ctx)

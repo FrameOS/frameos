@@ -27,6 +27,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_system.h"
+#include "nvs.h"
 
 #include "fos_buzzer.h"
 #include "fos_client.h"
@@ -517,6 +518,58 @@ void fos_frame_settings_action(const char *action)
         }
         if (fos_wifi_state() == FOS_WIFI_CONNECTED) fos_ota_check_start(UPDATE_CHECK_FRESH_S);
     }
+}
+
+/* The service keys typed on the frame page (frame_service_keys.nim,
+ * docs/scene-settings.md "Service keys"): the frame's own, in the namespace
+ * factory-reset erases, beside the copy of a plane's (fos_settings.c
+ * svc_cache), and never sent anywhere. At most 4 KB (MaxServiceKeysBytes), and
+ * never into the entries the settings cache keeps free for the config. */
+#define KEYS_NVS "svc_typed"
+#define KEYS_MAX_BYTES 4096
+#define KEYS_NVS_RESERVE_ENTRIES 192
+
+char *fos_service_keys_load(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return NULL;
+    size_t len = 0;
+    char *text = NULL;
+    if (nvs_get_blob(nvs, KEYS_NVS, NULL, &len) == ESP_OK && len > 0 && len <= KEYS_MAX_BYTES + 1) {
+        text = malloc(len);
+        if (text && nvs_get_blob(nvs, KEYS_NVS, text, &len) == ESP_OK) {
+            text[len - 1] = '\0';
+        } else {
+            free(text);
+            text = NULL;
+        }
+    }
+    nvs_close(nvs);
+    return text;
+}
+
+bool fos_service_keys_save(const char *json)
+{
+    size_t len = json ? strlen(json) : 0;
+    if (len > KEYS_MAX_BYTES) return false;
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("frameos", NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return false;
+    nvs_stats_t stats;
+    if (len <= 2) {
+        /* "{}": none typed. */
+        err = nvs_erase_key(nvs, KEYS_NVS);
+        if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
+    } else if (nvs_get_stats(NULL, &stats) == ESP_OK &&
+               stats.free_entries < (len + 32) / 32 + 2 + KEYS_NVS_RESERVE_ENTRIES) {
+        err = ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+    } else {
+        err = nvs_set_blob(nvs, KEYS_NVS, json, len + 1);
+    }
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    if (err != ESP_OK) ESP_LOGW(TAG, "service keys not kept: %s", esp_err_to_name(err));
+    return err == ESP_OK;
 }
 
 bool fos_frame_settings_code_pending(void)

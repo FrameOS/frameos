@@ -312,7 +312,12 @@
   a backend the `settings:frame` log line (`frame_settings_adopt.py`). The
   plane can turn the page off (`frame_settings_on_screen`); the device keeps
   the last word (a Pi's `frameos-settings-unlock` file on the boot partition,
-  an ESP32's `set settings_unlock 1`).
+  an ESP32's `set settings_unlock 1`). Its **Service keys** page (doc section
+  of that name) is where a key is typed on the frame: the frame's own (a Pi's
+  `state/service_keys.json`, an ESP32's NVS `svc_typed`), never told to a
+  plane, and over the plane's field by field where `jsGetSetting` reads them
+  (`frame_service_keys.nim` `withServiceKeys`): a new reader of service keys
+  goes through it.
 - On a desktop (`builtInScenesStay`: the windows of a Pi, an ESP32 or the
   browser) every scene's settings are an instance of their own,
   `system/sceneSettings#<scene id>` (contract `scenes.settingsWindow`,

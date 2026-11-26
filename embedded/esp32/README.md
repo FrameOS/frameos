@@ -1284,7 +1284,8 @@ deploy started since.
   at 40 ns/pixel, so the 11 µs/pixel on the S3 is the build, not the maths.
 - **Service settings survive a reboot.** Frames keep the six groups in NVS
   (`svc_cache` / `svc_etag` / `svc_at` / `svc_src`, same namespace as the
-  bearer token) and apply them before the first render
+  bearer token; the keys typed on the frame page are `svc_typed` beside them,
+  docs/scene-settings.md "Service keys") and apply them before the first render
   (`fos_settings_boot_apply_cache`, `settings:services origin=cache`). A
   deep-sleep cloud frame used to render its only pass with no service
   settings — `ready` asks for the pull after the pass has started, and the

@@ -19,7 +19,7 @@
 ## truth). The worker gets the runtime by handle (portal.nim RuntimeHandle)
 ## and hands back plain values under `factsLock`. No ref crosses.
 
-import std/[algorithm, json, locks, osproc, strutils, times]
+import std/[algorithm, json, locks, os, osproc, strutils, times]
 import frameos/types
 import frameos/channels
 import frameos/config
@@ -33,11 +33,16 @@ from frameos/cloud/device_flow import activeLinkCode, writePendingLinkCode, pend
 from frameos/cloud/hub_client import refreshLocalNetworkPolicy
 from frameos/cloud/enrollment import otherControlPlaneActive, loadPendingEnrollment
 import frameos/server/api
+import frameos/frame_service_keys
+from frameos/utils/system import readFileNoFollow, writePrivateFile
 from frameos/upgrade import installedFrameOSVersion
 import system/sceneSettings/scene as sceneSettings
 
 const
   MaxNetworks = 64 ## as many as the ESP32 lists
+  ServiceKeysPath* = "./state/service_keys.json"
+    ## The service keys typed on the frame page (frame_service_keys.nim): under state/,
+    ## which no deploy rewrites, as the frame's own and no plane's.
   ScanFreshSeconds = 30.0 ## a scan when the page comes up, unless one is this fresh
 
 type
@@ -519,6 +524,25 @@ proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     except Exception as error:
       log(%*{"event": "settings:frame:error", "origin": "panel", "error": error.msg})
 
+proc linuxServiceKeysLoad*(): string {.nimcall, gcsafe, raises: [].} =
+  try:
+    if fileExists(ServiceKeysPath):
+      result = readFileNoFollow(ServiceKeysPath, 4 * MaxServiceKeysBytes)
+  except Exception:
+    result = ""
+
+proc linuxServiceKeysSave*(text: string): bool {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    try:
+      createDir(parentDir(ServiceKeysPath))
+      writePrivateFile(ServiceKeysPath, text)
+      result = true
+    except Exception as error:
+      try:
+        log(%*{"event": "settings:frame:keys:error", "origin": "panel", "error": error.msg})
+      except Exception:
+        discard
+
 proc setLiveConfigForTest*(config: FrameConfig) =
   liveConfig = cast[pointer](config)
 
@@ -532,3 +556,5 @@ proc installFrameSettingsHooks*(frameOS: FrameOS) =
   sceneSettings.frameSettingsRead = linuxFrameSettingsRead
   sceneSettings.frameSettingsApply = linuxFrameSettingsApply
   sceneSettings.frameSettingsAction = linuxFrameSettingsAction
+  serviceKeysLoad = linuxServiceKeysLoad
+  serviceKeysSave = linuxServiceKeysSave

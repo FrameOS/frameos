@@ -50,6 +50,16 @@ proc logged(event: string): seq[JsonNode] =
       result.add parseJson(line.line)
 
 suite "the frame page on a Linux frame":
+  test "service keys typed on the frame: under state/, for the frame's user alone":
+    # docs/scene-settings.md "Service keys": no deploy rewrites state/.
+    removeFile(ServiceKeysPath)
+    check linuxServiceKeysLoad() == ""
+    check linuxServiceKeysSave("""{"openAI":{"apiKey":"sk-1"}}""")
+    check linuxServiceKeysLoad() == """{"openAI":{"apiKey":"sk-1"}}"""
+    check getFilePermissions(ServiceKeysPath) == {fpUserRead, fpUserWrite}
+    check linuxServiceKeysSave("{}")
+    check linuxServiceKeysLoad() == "{}"
+
   test "the page's facts: rotation, scale, Restart FrameOS, no password held":
     writeConfig(true)
     let facts = linuxFrameSettingsRead()

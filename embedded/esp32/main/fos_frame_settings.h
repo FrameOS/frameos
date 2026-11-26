@@ -26,3 +26,7 @@ void fos_frame_settings_apply(const char *json);
 void fos_frame_settings_action(const char *action);
 /* A link code is on the frame page (or on its way): no picture is kept. */
 bool fos_frame_settings_code_pending(void);
+/* The service keys typed on the frame page (frame_service_keys.nim), as JSON text:
+ * a malloc'd string, NULL for none; and keeping them ("{}" for none). */
+char *fos_service_keys_load(void);
+bool fos_service_keys_save(const char *json);

@@ -4,6 +4,7 @@ import zippy
 
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/burrito
+import frameos/frame_service_keys
 import frameos/types
 import frameos/utils/asset_colors
 import frameos/utils/dither
@@ -2122,6 +2123,42 @@ suite "js app runtime":
     check payload["namespaceKey"].getStr() == "sk-test"
     check payload["denied"].kind == JNull
     check payload["missing"].kind == JNull
+
+  test "getSetting answers a key typed on the frame over the one a plane sent":
+    # docs/scene-settings.md "Service keys": field by field, and only in a
+    # namespace the app declares.
+    serviceKeysLoad = proc (): string {.nimcall, gcsafe, raises: [].} =
+      """{"openAI": {"apiKey": "sk-typed"}, "unsplash": {"accessKey": "u-typed"}}"""
+    forgetServiceKeys()
+    defer:
+      serviceKeysLoad = nil
+      forgetServiceKeys()
+    let config = testConfig()
+    config.settings = %*{"openAI": {"apiKey": "sk-plane", "organization": "org-plane"}}
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-typed-keys".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 25.NodeId, nodeName: "jsTypedKeys", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          const group = frameos.getSetting("openAI")
+          return {
+            key: frameos.getSetting("openAI", "apiKey") ?? null,
+            organization: group.organization ?? null,
+            groupKey: group.apiKey ?? null,
+            denied: frameos.getSetting("unsplash", "accessKey") ?? null,
+          }
+        }"""
+      , settingsKeys = @["openAI"]
+    )
+    let payload = runtime.get(owner, %*{}, context).asJson()
+    check payload["key"].getStr() == "sk-typed"
+    check payload["groupKey"].getStr() == "sk-typed"
+    check payload["organization"].getStr() == "org-plane"
+    check payload["denied"].kind == JNull
+    check config.settings["openAI"]["apiKey"].getStr() == "sk-plane"
 
   test "releases overwritten dynamic field image refs":
     let config = testConfig()
