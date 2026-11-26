@@ -26,6 +26,11 @@ export type LegalEntity = {
   country: string;
   /** Where data-protection and legal notices should be sent. */
   contactEmail: string;
+  /**
+   * Dun & Bradstreet D-U-N-S number. Optional: no law asks for it, so an
+   * unset one is left off the imprint rather than shown as a placeholder.
+   */
+  dunsNumber?: string | undefined;
   /** Legal form + name, e.g. "Example Frames BV". */
   name: string;
   /** Natural person(s) representing the company. */
@@ -46,6 +51,7 @@ export function getLegalEntity(): LegalEntity {
     companyNumber: entityValue("FRAMEOS_LEGAL_COMPANY_NUMBER"),
     contactEmail: entityValue("FRAMEOS_LEGAL_CONTACT_EMAIL"),
     country: process.env.FRAMEOS_LEGAL_ENTITY_COUNTRY?.trim() || "Belgium",
+    dunsNumber: optionalEntityValue("FRAMEOS_LEGAL_DUNS_NUMBER"),
     name: entityValue("FRAMEOS_LEGAL_ENTITY_NAME"),
     representative: entityValue("FRAMEOS_LEGAL_REPRESENTATIVE"),
     vatNumber: entityValue("FRAMEOS_LEGAL_VAT_NUMBER"),

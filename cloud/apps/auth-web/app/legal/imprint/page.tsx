@@ -57,6 +57,13 @@ export default function ImprintPage() {
         <dt>VAT number</dt>
         <dd>{entity.vatNumber}</dd>
 
+        {entity.dunsNumber ? (
+          <>
+            <dt>D-U-N-S number</dt>
+            <dd>{entity.dunsNumber}</dd>
+          </>
+        ) : null}
+
         <dt>Email</dt>
         <dd>
           <a href={`mailto:${entity.contactEmail}`}>{entity.contactEmail}</a>

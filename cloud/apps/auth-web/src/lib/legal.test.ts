@@ -39,6 +39,14 @@ describe("legal entity", () => {
     expect(getLegalEntity().country).toBe("Netherlands");
   });
 
+  it("leaves the optional D-U-N-S number out until it is set", () => {
+    // Not a legal requirement, so no placeholder: the imprint hides the row.
+    expect(getLegalEntity().dunsNumber).toBeUndefined();
+
+    process.env.FRAMEOS_LEGAL_DUNS_NUMBER = " 123456789 ";
+    expect(getLegalEntity().dunsNumber).toBe("123456789");
+  });
+
   it("counts as configured once the entity name is set", () => {
     process.env.FRAMEOS_LEGAL_ENTITY_NAME = "Example Frames BV";
 
