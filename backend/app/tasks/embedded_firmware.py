@@ -213,6 +213,17 @@ EMBEDDED_WAVESHARE_AMOLED_1_75_SD_CARD_PINS = {
     "pwr": -1,
     "det": -1,
 }
+# The Elecrow CrowPanel 5.79"'s TF slot on a bus of its own: CS GPIO10, SCK
+# GPIO39, MISO GPIO13, MOSI GPIO40, no power switch and no card-detect contact
+# (Elecrow's demo, main.ino). fos_board.c's k_sd_pins is the device copy.
+EMBEDDED_ELECROW_CROWPANEL_5IN79_SD_CARD_PINS = {
+    "cs": 10,
+    "sck": 39,
+    "miso": 13,
+    "mosi": 40,
+    "pwr": -1,
+    "det": -1,
+}
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -236,6 +247,7 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "seeed_reterminal_e1004": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     "sunton_esp32_8048s070": EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS,
     "waveshare_esp32_s3_touch_amoled_1_75": EMBEDDED_WAVESHARE_AMOLED_1_75_SD_CARD_PINS,
+    "elecrow_crowpanel_5in79": EMBEDDED_ELECROW_CROWPANEL_5IN79_SD_CARD_PINS,
     # The Sticky's pins are defined further down; filled in after the table.
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
@@ -414,6 +426,61 @@ EMBEDDED_WAVESHARE_AMOLED_1_75_TOUCH = {"touchPins": "sda=15,scl=14,int=11,rst=4
 EMBEDDED_WAVESHARE_AMOLED_1_75_CODEC = {
     "codecPins": "mclk=42,bclk=9,ws=45,din=10,dout=8,pa=46",
     "i2cBuses": "sda=15,scl=14",
+}
+# Elecrow CrowPanel 2.01" watch (ESP32-S3R8, 16 MB flash, 8 MB PSRAM): the
+# 240x296 IPS glass, a GC9309 on one SPI lane that keeps its own picture. Its
+# wiring (CS9, SCLK7, MOSI8, D/C10, reset 6, backlight 13) is the same
+# driver's board table as the AMOLED 1.75's
+# (embedded/esp32/components/frameos_display/lcd_qspi_amoled.c), so the EPD
+# pin slots carry nothing; its supplies (GPIO47 high, GPIO40 low) are the
+# firmware's own (fos_board_rails). One I2C bus, SDA4/SCL3: the AXS5106L touch
+# controller (0x63, INT GPIO2, reset GPIO5), the PCF8563 clock and an SC7A20H
+# accelerometer. BOOT is GPIO0 and the crown's press GPIO18; its turns (A
+# GPIO20, B GPIO19) are NEXT and PREV presses the firmware makes itself
+# (fos_board_encoder_pins: no setting names them). Parity with fos_board.c,
+# nothing provisions the touch and bus strings.
+EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": -1,
+    "mosi": -1,
+    "pwr": -1,
+}
+EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_GPIO_BUTTONS = [
+    {"pin": 0, "label": "BOOT"},
+    {"pin": 18, "label": "OK"},
+]
+# BOOT works like the Indicator's key (pressed the screen off and on, pressed
+# twice the scene switcher), the crown held talks, the edges swipe.
+# fos_board.c's CROWPANEL_WATCH_KEYS + ONE_KEY_VOICE("OK") is the device copy.
+EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP = [
+    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
+]
+EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_TOUCH = {
+    "touchPins": "sda=4,scl=3,int=2,rst=5,en=-1",
+    "i2cBuses": "sda=4,scl=3",
+}
+# Its LMD3526 PDM microphone on clock GPIO12, data GPIO11, on the board's
+# peripheral rail (no switch of its own); fos_board.c's k_mics is the device
+# copy. The speaker's I2S port is the microphone's, so the linear vibration
+# motor (GPIO45, enabled high) plays the buzzer's notes; the LED on GPIO16 is
+# lit high; the cell on GPIO1 behind 100k / 137k.
+EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PERIPHERALS = {
+    "micClkPin": 12,
+    "micDataPin": 11,
+    "micPwrPin": -1,
+    "buzzerPin": 45,
+    "buzzerToneHz": 2000,
+    "ledPin": 16,
+    "ledType": "gpio",
+    "batteryPin": 1,
+    "batteryDivider": 1.73,
 }
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
@@ -639,6 +706,8 @@ EMBEDDED_SOUND_PRESETS = frozenset({
     "seeed_reterminal_e1004",
     "waveshare_esp32_s3_photopainter",
     "waveshare_esp32_s3_epaper_13_3e6",
+    # Its vibration motor plays the notes: a click is a tick on the wrist.
+    "elecrow_crowpanel_watch_2in01",
 })
 EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
     "ledPin": 6,
@@ -722,8 +791,10 @@ EMBEDDED_SEEED_RETERMINAL_E1004_PINS = {
     "pwr": 12,
 }
 # Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8): dual-SSD1683 792x272 panel
-# on SCK12/MOSI11, CS45, DC46, RST47, BUSY48 (vendor demo code spi.h).
-# Buttons: HOME=2, EXIT=1, rotary NEXT=4, OK=5, PREV=6.
+# on SCK12/MOSI11, CS45, DC46, RST47, BUSY48 (vendor demo code spi.h), its
+# supply switched on by GPIO7 high (main.ino's "screen power": without it the
+# panel never leaves BUSY). Buttons: HOME=2, EXIT=1, rotary NEXT=4, OK=5,
+# PREV=6. Its power LED on GPIO41 is lit high.
 EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS = {
     "rst": 47,
     "dc": 46,
@@ -732,7 +803,7 @@ EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS = {
     "busy": 48,
     "sck": 12,
     "mosi": 11,
-    "pwr": -1,
+    "pwr": 7,
 }
 EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
     {"pin": 2, "label": "HOME"},
@@ -740,6 +811,25 @@ EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
     {"pin": 4, "label": "NEXT"},
     {"pin": 5, "label": "OK"},
     {"pin": 6, "label": "PREV"},
+]
+# HOME pressed opens the scene switcher and held the scene's settings; the
+# rocker held walks the scene list. fos_board.c's CROWPANEL_5IN79_KEYS is the
+# device copy.
+EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP = [
+    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
+    {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
+    {
+        "event": "button",
+        "match": {"label": "PREV", "action": "longPress"},
+        "emit": "setCurrentScene",
+        "as": {"direction": "prev"},
+    },
+    {
+        "event": "button",
+        "match": {"label": "NEXT", "action": "longPress"},
+        "emit": "setCurrentScene",
+        "as": {"direction": "next"},
+    },
 ]
 # Pimoroni Inky Frame (all sizes share the carrier wiring): EPD on SPI0
 # SCK18/MOSI19, CS17, DC28, RST27; BUSY and the five front buttons read
@@ -964,6 +1054,18 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
             "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
         },
     },
+    # Elecrow CrowPanel 2.01" watch: the 240x296 GC9309 IPS on one SPI lane;
+    # see EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS.
+    "elecrow_crowpanel_watch_2in01": {
+        "device": "lcd.gc9309_240x296",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS,
+        "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP,
+        **EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_TOUCH,
+        **EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PERIPHERALS,
+    },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
@@ -1113,11 +1215,21 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "gpioButtons": [{"pin": 9, "label": "BOOT"}],
     },
     "elecrow_crowpanel_5in79": {
-        "device": "waveshare.EPD_5in79",
+        "device": "waveshare.EPD_5in79_BW",
         "flashSize": "8MB",
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
         "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP,
+        "ledPin": 41,
+        "ledType": "gpio",
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "elecrow_crowpanel_5in79",
+            "mountPath": "/srv/assets",
+            "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_SD_CARD_PINS,
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+        },
     },
     # Pimoroni Inky Frame family: Pico W (originals) / Pico 2 W (2025
     # refresh) carrier with the EPD on SPI0 and BUSY + buttons behind a
@@ -1224,6 +1336,11 @@ EMBEDDED_EXTRA_PANELS = {
     "LCD_EK9716_800x480": FOS_PIXEL_RGB565,
     # The Waveshare 1.75" round CO5300 AMOLED on QSPI (lcd_qspi_amoled.c).
     "AMOLED_CO5300_466x466": FOS_PIXEL_RGB565,
+    # The Elecrow CrowPanel 2.01" watch's GC9309 on one SPI lane, the same driver.
+    "LCD_GC9309_240x296": FOS_PIXEL_RGB565,
+    # The Elecrow CrowPanel 5.79"'s glass in black and white on its own
+    # waveforms, with partial updates (the Waveshare driver's file).
+    "EPD_5in79_BW": FOS_PIXEL_1BPP,
 }
 EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
 # Device keys for those panels (the `waveshare.<key>` convention does not fit).
@@ -1232,6 +1349,8 @@ EMBEDDED_DEVICE_PANELS = {
     "lcd.st7701s_480x480": "LCD_ST7701S_480x480",
     "lcd.ek9716_800x480": "LCD_EK9716_800x480",
     "amoled.co5300_466x466": "AMOLED_CO5300_466x466",
+    "lcd.gc9309_240x296": "LCD_GC9309_240x296",
+    "waveshare.EPD_5in79_BW": "EPD_5in79_BW",
 }
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"

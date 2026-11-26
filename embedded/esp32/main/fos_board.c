@@ -74,6 +74,11 @@ static const struct {
     {"seeed_reterminal_e1003", 45, 2000},
     {"seeed_reterminal_e1004", 45, 2000},
     {"seeed_reterminal_sticky", 48, 4000},
+    /* The Elecrow CrowPanel 2.01" watch has a speaker on I2S, whose port the
+     * PDM microphone takes; its linear vibration motor (enabled high on
+     * GPIO45, Elecrow's config.h) plays the buzzer's notes instead: a tap's
+     * click is a tick on the wrist. */
+    {"elecrow_crowpanel_watch_2in01", 45, 2000},
 };
 
 static int buzzer_index(const char *hardware_preset)
@@ -161,6 +166,22 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
  * board's IO expander) and BOOT, a touch screen and two microphones. PWR
  * works like the Indicator's key; BOOT held talks. */
 #define AMOLED_175_KEYS ONE_BUTTON_TOGGLE("PWR")
+/* The Elecrow CrowPanel 2.01" watch: BOOT works like the Indicator's key, the
+ * crown's knob turns the keys' ring (NEXT / PREV, fos_buttons.c) and its
+ * press is Enter (OK), and held it talks; the edges swipe. */
+#define CROWPANEL_WATCH_KEYS ONE_BUTTON_TOGGLE("BOOT")
+/* The Elecrow CrowPanel 5.79": HOME, EXIT and a rocker that tilts NEXT and
+ * PREV and presses OK. HOME pressed opens the scene switcher, held the
+ * scene's settings; the rocker held walks the scene list. */
+#define CROWPANEL_5IN79_KEYS \
+    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"longPress\"}," \
+    "\"emit\":\"sceneSettings\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"PREV\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"NEXT\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}"
 
 /* Each group of rules once, joined when a frame needs its map: whole maps
  * spelled out per preset held the arrows three times and the swipes three. */
@@ -186,6 +207,8 @@ static const struct {
      * GPIO0, is the glass's R4 data line), so the edges are the whole map. */
     {"guition_esp32_4848s040", "", NULL, true},
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
+    {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS, ONE_KEY_VOICE("OK"), true},
+    {"elecrow_crowpanel_5in79", CROWPANEL_5IN79_KEYS, NULL, false},
 };
 
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
@@ -225,6 +248,9 @@ static const struct {
     {"seeed_reterminal_e1001", 42, 41, 38},
     {"seeed_reterminal_e1002", 42, 41, 38},
     {"seeed_reterminal_e1003", 42, 41, 38},
+    /* The Elecrow CrowPanel 2.01" watch's LMD3526 on PDM clock GPIO12, data
+     * GPIO11, powered by the board's peripheral rail (fos_board_rails). */
+    {"elecrow_crowpanel_watch_2in01", 12, 11, -1},
 };
 
 /* Chargers with no bus, strapped by resistors, whose charge-enable input
@@ -295,6 +321,10 @@ static const struct {
     {"seeed_reterminal_e1002", 6, 1},
     {"seeed_reterminal_e1003", 16, 1},
     {"seeed_reterminal_e1004", 48, 0},
+    /* The Elecrow boards' lit high: the watch's on GPIO16, the 5.79"'s power
+     * LED on GPIO41 (Elecrow's config.h and demo). */
+    {"elecrow_crowpanel_watch_2in01", 16, 0},
+    {"elecrow_crowpanel_5in79", 41, 0},
 };
 
 bool fos_board_led(const char *hardware_preset, int *pin, int *type)
@@ -317,6 +347,26 @@ static const struct {
 } k_expander_keys[] = {
     {"waveshare_esp32_s3_touch_amoled_1_75", {4, "PWR"}},
 };
+
+/* The Elecrow CrowPanel 2.01" watch powers its peripherals from two rails
+ * (Elecrow's config.h and lessons): GPIO47 high for the touch controller,
+ * the microphone and the sensors, GPIO40 low for the LCD, its backlight and
+ * the touch panel. -1 ends the list. */
+static const fos_board_rail_t k_watch_rails[] = {{47, 1}, {40, 0}, {-1, 0}};
+
+const fos_board_rail_t *fos_board_rails(const char *hardware_preset)
+{
+    return hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_watch_2in01") == 0 ? k_watch_rails : NULL;
+}
+
+bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b)
+{
+    /* The watch's crown: phase A GPIO20, B GPIO19, pulled up. */
+    bool watch = hardware_preset && strcmp(hardware_preset, "elecrow_crowpanel_watch_2in01") == 0;
+    *a = watch ? 20 : -1;
+    *b = watch ? 19 : -1;
+    return watch;
+}
 
 size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out, size_t max)
 {
@@ -364,6 +414,10 @@ static const struct {
     /* The XIAO EE03's SHT40 (0x44), which its IT8951 needs for the panel
      * temperature: SDA GPIO42 / SCL GPIO41 (Seeed's schematic). */
     {"seeed_xiao_ee03", "sda=42,scl=41"},
+    /* The Elecrow CrowPanel 2.01" watch's one bus, SDA4/SCL3: the PCF8563
+     * clock (0x51), the AXS5106L touch controller (0x63) and an SC7A20H
+     * accelerometer (0x19, not read). */
+    {"elecrow_crowpanel_watch_2in01", "sda=4,scl=3"},
 };
 
 const char *fos_board_i2c_buses(const char *hardware_preset)
@@ -423,6 +477,9 @@ static const struct {
      * D0 GPIO3 and D3 GPIO41, read in SPI mode as Waveshare's wiki table
      * gives it (CS = D3, MOSI = CMD, MISO = D0). */
     {"waveshare_esp32_s3_touch_amoled_1_75", "cs=41,sck=2,miso=3,mosi=1"},
+    /* The Elecrow CrowPanel 5.79"'s TF slot on its own bus: CS10, SCK39,
+     * MISO13, MOSI40 (Elecrow's demo). */
+    {"elecrow_crowpanel_5in79", "cs=10,sck=39,miso=13,mosi=40"},
 };
 
 const char *fos_board_sd_pins(const char *hardware_preset)
@@ -467,6 +524,10 @@ static const struct {
      * the board's one bus (SDA15/SCL14, which fos_i2c.c lends it), INT
      * GPIO11, reset GPIO40 (Waveshare's BSP). */
     {"waveshare_esp32_s3_touch_amoled_1_75", "sda=15,scl=14,int=11,rst=40,en=-1"},
+    /* The Elecrow CrowPanel 2.01" watch's AXS5106L (0x63, FocalTech's
+     * registers) on the board's bus, INT GPIO2, reset GPIO5; its supply is
+     * the board's rails (fos_board_rails). */
+    {"elecrow_crowpanel_watch_2in01", "sda=4,scl=3,int=2,rst=5,en=-1"},
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap

@@ -473,6 +473,18 @@ const WAVESHARE_AMOLED_1_75_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 41, sck: 2, miso: 3, mosi: 1, pwr: -1, det: -1 },
   maxFrequencyKHz: 20000,
 }
+// The Elecrow CrowPanel 2.01" watch's GC9309 is wired by the firmware's board
+// table too.
+const ELECROW_CROWPANEL_WATCH_2IN01_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
 // The SenseCAP Indicator's LCD is wired by the firmware's board table: no EPD pins.
 const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: -1,
@@ -504,6 +516,16 @@ const WAVESHARE_AMOLED_1_75_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'PWR', action: 'press' }, emit: 'toggleScreen', as: {} },
   { event: 'button', match: { label: 'PWR', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
   { event: 'button', match: { label: 'BOOT', action: 'longPress' }, emit: 'voiceChat', as: {} },
+  ...TOUCH_EDGE_SWIPES,
+]
+// The CrowPanel 2.01" watch's BOOT works like the Indicator's key, its crown
+// held talks into its microphone (the crown's turns are NEXT / PREV presses
+// the firmware makes itself), the edges swipe. Mirrors
+// EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP.
+const ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
+  { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
+  { event: 'button', match: { label: 'OK', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
@@ -559,6 +581,8 @@ const SEEED_RETERMINAL_E1004_PINS: NonNullable<NonNullable<NewFrameFormType['dev
   mosi: 9,
   pwr: 12,
 }
+// The CrowPanel 5.79"'s panel supply is GPIO7 (high); its TF slot is on a bus
+// of its own. Mirrors EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS.
 const ELECROW_CROWPANEL_5IN79_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 47,
   dc: 46,
@@ -567,8 +591,25 @@ const ELECROW_CROWPANEL_5IN79_PINS: NonNullable<NonNullable<NewFrameFormType['de
   busy: 48,
   sck: 12,
   mosi: 11,
-  pwr: -1,
+  pwr: 7,
 }
+const ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  enabled: true,
+  preset: 'elecrow_crowpanel_5in79',
+  mountPath: '/srv/assets',
+  pins: { cs: 10, sck: 39, miso: 13, mosi: 40, pwr: -1, det: -1 },
+  maxFrequencyKHz: 20000,
+}
+// HOME pressed opens the scene switcher and held the scene's settings; the
+// rocker held walks the scene list. Mirrors EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
+const ELECROW_CROWPANEL_5IN79_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSwitcher', as: {} },
+  { event: 'button', match: { label: 'HOME', action: 'longPress' }, emit: 'sceneSettings', as: {} },
+  { event: 'button', match: { label: 'PREV', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+  { event: 'button', match: { label: 'NEXT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+]
 // Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py.
 // All Inky Frame sizes share the carrier wiring; BUSY and the five front
 // buttons sit behind a shift register (sr_* keys, busy_bit) that only the
@@ -732,6 +773,19 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     eventMap: WAVESHARE_AMOLED_1_75_EVENT_MAP,
     sdCardAssets: WAVESHARE_AMOLED_1_75_SD_CARD_ASSETS,
   },
+  elecrow_crowpanel_watch_2in01: {
+    label: 'Elecrow CrowPanel 2.01" watch (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.gc9309_240x296',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ELECROW_CROWPANEL_WATCH_2IN01_PINS,
+    gpioButtons: [
+      { pin: 0, label: 'BOOT' },
+      { pin: 18, label: 'OK' },
+    ],
+    eventMap: ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP,
+  },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
@@ -865,7 +919,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
-    device: 'waveshare.EPD_5in79',
+    device: 'waveshare.EPD_5in79_BW',
     flashSize: '8MB',
     psramMB: 8,
     pins: ELECROW_CROWPANEL_5IN79_PINS,
@@ -876,6 +930,8 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 5, label: 'OK' },
       { pin: 6, label: 'PREV' },
     ],
+    eventMap: ELECROW_CROWPANEL_5IN79_EVENT_MAP,
+    sdCardAssets: ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS,
   },
   // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
   // BOOTSEL and are provisioned via USB serial — no backend firmware builds.

@@ -772,6 +772,48 @@ def test_embedded_hardware_preset_for_waveshare_esp32_s3_touch_amoled_1_75():
     assert "touch_pins" not in settings
 
 
+def test_embedded_hardware_preset_for_elecrow_crowpanel_watch_2in01():
+    frame = Frame(id=19, embedded={"hardwarePreset": "elecrow_crowpanel_watch_2in01"})
+    ensure_embedded_frame_defaults(frame)
+    # The 2.01" 240x296 GC9309 IPS on one SPI lane: 16-bit colour, rendered
+    # on-device on the S3R8's 8 MB (16 MB of flash).
+    assert frame.device == "lcd.gc9309_240x296"
+    assert embedded_panel_for_frame(frame) == "LCD_GC9309_240x296"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("LCD_GC9309_240x296") == FOS_PIXEL_RGB565
+    # The glass's wiring is the driver's own board table: no EPD pins.
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    # BOOT and the crown's press; its turns are the firmware's own presses.
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (18, "OK")]
+    assert frame.event_map[:3] == [
+        {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    ]
+    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "LCD_GC9309_240x296"
+    assert settings["gpio_buttons"] == "0:BOOT,18:OK"
+    # The PDM microphone, the vibration motor as the buzzer, the LED, the cell.
+    assert settings["battery_pin"] == "1"
+    assert float(settings["battery_divider"]) == pytest.approx(1.73)
+    assert settings["buzzer_pin"] == "45"
+    assert settings["led_pin"] == "16"
+    assert settings["led_type"] == "gpio"
+    assert frame.device_config["micClkPin"] == 12
+    assert frame.device_config["micDataPin"] == 11
+    # The touch panel and the bus are the board's own (fos_board.c).
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["elecrow_crowpanel_watch_2in01"]
+    assert preset["touchPins"] == "sda=4,scl=3,int=2,rst=5,en=-1"
+    assert preset["i2cBuses"] == "sda=4,scl=3"
+    assert "touch_pins" not in settings
+    assert "elecrow_crowpanel_watch_2in01" in embedded_firmware_module.EMBEDDED_SOUND_PRESETS
+
+
 def test_embedded_panel_for_lcd_device_without_preset():
     frame = Frame(id=14, device="lcd.st7701s_480x480", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
@@ -779,6 +821,8 @@ def test_embedded_panel_for_lcd_device_without_preset():
     assert embedded_panel_for_frame(frame) == "LCD_EK9716_800x480"
     frame = Frame(id=18, device="amoled.co5300_466x466", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "AMOLED_CO5300_466x466"
+    frame = Frame(id=20, device="lcd.gc9309_240x296", embedded={"platform": "esp32-s3"})
+    assert embedded_panel_for_frame(frame) == "LCD_GC9309_240x296"
 
 
 def test_embedded_hardware_preset_for_trmnl_bwry():
@@ -1178,17 +1222,41 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
 
     ensure_embedded_frame_defaults(frame)
 
-    assert embedded_panel_for_frame(frame) == "EPD_5in79"
+    assert embedded_panel_for_frame(frame) == "EPD_5in79_BW"
     assert embedded_platform_for_frame(frame) == "esp32-s3"
     assert embedded_flash_size_for_frame(frame) == "8MB"
     assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
     check_embedded_panel_fits_memory(frame)
+    # GPIO7 is the panel's supply: without it the panel never leaves BUSY.
     assert embedded_pins_for_frame(frame) == {
         "rst": 47, "dc": 46, "cs": 45, "cs2": -1,
-        "busy": 48, "sck": 12, "mosi": 11, "pwr": -1,
+        "busy": 48, "sck": 12, "mosi": 11, "pwr": 7,
     }
     assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
     assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
+    # HOME opens the scene switcher (held: the settings), the rocker held walks the scenes.
+    assert frame.event_map == [
+        {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
+        {
+            "event": "button",
+            "match": {"label": "PREV", "action": "longPress"},
+            "emit": "setCurrentScene",
+            "as": {"direction": "prev"},
+        },
+        {
+            "event": "button",
+            "match": {"label": "NEXT", "action": "longPress"},
+            "emit": "setCurrentScene",
+            "as": {"direction": "next"},
+        },
+    ]
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["pins"] == "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=7"
+    # Its TF slot on a bus of its own, and the power LED lit high.
+    assert settings["assets_sd_pins"] == "cs=10,sck=39,miso=13,mosi=40"
+    assert settings["led_pin"] == "41"
+    assert settings["led_type"] == "gpio"
 
 
 def test_embedded_hardware_preset_for_inky_frames():

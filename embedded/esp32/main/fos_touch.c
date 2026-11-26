@@ -289,8 +289,8 @@ static const char *TAG = "fos_touch";
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
 
-typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1, CTRL_CST92XX = 2 } controller_t;
-static const char *const k_controller_names[] = {"gt911", "ft6x36", "cst92xx"};
+typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1, CTRL_CST92XX = 2, CTRL_AXS5106 = 3 } controller_t;
+static const char *const k_controller_names[] = {"gt911", "ft6x36", "cst92xx", "axs5106l"};
 
 static bool s_present = false;
 static i2c_master_bus_handle_t s_bus = NULL;
@@ -647,6 +647,22 @@ static void reset_cst92(const fos_touch_pins_t *pins)
     vTaskDelay(pdMS_TO_TICKS(50));
 }
 
+/* The AXS5106L (the CrowPanel 2.01" watch) at 0x63: FocalTech's report one
+ * byte on, from register 0x01 (Elecrow's driver). Its INT held low through a reset, as the Goodix strap does, it answered a
+ * finger at 0,0 forever and never raised INT (the bench, 2026-11-26), so it
+ * is looked for first, by its address alone (up since the board's rails came
+ * on), and reset the CST92xx's way, then given Elecrow's 300 ms. */
+#define TOUCH_AXS_ADDR 0x63
+#define TOUCH_AXS_REG_REPORT 0x01
+
+static bool probe_axs(const fos_touch_pins_t *pins)
+{
+    if (i2c_master_probe(s_bus, TOUCH_AXS_ADDR, TOUCH_I2C_TIMEOUT_MS) != ESP_OK) return false;
+    reset_cst92(pins);
+    vTaskDelay(pdMS_TO_TICKS(250));
+    return attach(TOUCH_AXS_ADDR, TOUCH_I2C_HZ);
+}
+
 static bool probe_cst92(void)
 {
     if (i2c_master_probe(s_bus, TOUCH_CST92_ADDR, TOUCH_I2C_TIMEOUT_MS) != ESP_OK) return false;
@@ -674,10 +690,15 @@ static int read_points(fos_touch_point_t *points)
         reg_write_byte(FOS_TOUCH_CST92_REG_REPORT, FOS_TOUCH_CST92_ACK);
         return count;
     }
-    if (s_controller == CTRL_FT6X36) {
-        uint8_t report[FOS_TOUCH_FT_REPORT_BYTES];
-        if (ft_read(FOS_TOUCH_FT_REG_TOUCHES, report, sizeof(report)) != ESP_OK) return -1;
-        return fos_touch_decode_ft(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
+    if (s_controller == CTRL_FT6X36 || s_controller == CTRL_AXS5106) {
+        /* The AXS5106L's report starts a byte earlier. */
+        bool axs = s_controller == CTRL_AXS5106;
+        uint8_t report[1 + FOS_TOUCH_FT_REPORT_BYTES];
+        if (ft_read(axs ? TOUCH_AXS_REG_REPORT : FOS_TOUCH_FT_REG_TOUCHES, report, sizeof(report) - !axs) != ESP_OK) {
+            return -1;
+        }
+        memcpy(s_last_report, report, sizeof(s_last_report) < sizeof(report) ? sizeof(s_last_report) : sizeof(report));
+        return fos_touch_decode_ft(report + axs, FOS_TOUCH_FT_REPORT_BYTES, points, FOS_TOUCH_POINTS_MAX);
     }
     /* The status and the first finger, and the other fingers only when there
      * are others: 9 bytes on the wire instead of 41 (at 100 kHz ~1 ms instead
@@ -1066,10 +1087,16 @@ esp_err_t fos_touch_start(void)
     static const uint8_t gt_addresses[] = {0x5d, 0x14};
     static const uint8_t ft_addresses[] = {0x48, 0x38};
     int attempts = pins->rst >= 0 ? 3 : 1;
-    /* A Hynitron CST92xx first, after a reset of its own: the Goodix one
-     * below holds INT low through the reset to pick an address. */
-    reset_cst92(pins);
-    if (probe_cst92()) {
+    /* An AXS5106L first (probe_axs), then a Hynitron CST92xx, each after a
+     * reset of its own: the Goodix one below holds INT low through the reset
+     * to pick an address. */
+    if (probe_axs(pins)) {
+        s_addr = TOUCH_AXS_ADDR;
+        s_controller = CTRL_AXS5106;
+    } else {
+        reset_cst92(pins);
+    }
+    if (s_addr == 0 && probe_cst92()) {
         s_addr = TOUCH_CST92_ADDR;
         s_controller = CTRL_CST92XX;
     }
@@ -1089,7 +1116,7 @@ esp_err_t fos_touch_start(void)
         }
     }
     if (s_addr == 0) {
-        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x5a, 0x5d, 0x14, 0x48 or 0x38\"}");
+        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x63, 0x5a, 0x5d, 0x14, 0x48 or 0x38\"}");
         drop_bus();
         return ESP_ERR_NOT_FOUND;
     }
@@ -1245,7 +1272,7 @@ void fos_touch_print_status(void)
            s_mirror ? " (mirrored " : "", s_mirror ? mirror_name() : "", s_mirror ? ")" : "",
            (int)pins->irq, s_polled ? " (polled)" : "", (unsigned)s_down_mask,
            s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped);
-    if (s_controller == CTRL_CST92XX) {
+    {
         printf("touch_report:");
         for (size_t i = 0; i < sizeof(s_last_report); i++) printf(" %02x", s_last_report[i]);
         printf(" (int GPIO %d reads %d)\n", (int)pins->irq, pins->irq >= 0 ? gpio_get_level((gpio_num_t)pins->irq) : -1);

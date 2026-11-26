@@ -26,6 +26,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'sunton_esp32_8048s070'
   | 'guition_esp32_4848s040'
   | 'waveshare_esp32_s3_touch_amoled_1_75'
+  | 'elecrow_crowpanel_watch_2in01'
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
@@ -444,6 +445,7 @@ export interface FrameType {
         | 'seeed_reterminal_sticky'
         | 'sunton_esp32_8048s070'
         | 'waveshare_esp32_s3_touch_amoled_1_75'
+        | 'elecrow_crowpanel_5in79'
       pins?: {
         cs?: number
         sck?: number

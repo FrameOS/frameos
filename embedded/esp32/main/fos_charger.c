@@ -56,6 +56,12 @@ void fos_charger_enable(const char *hardware_preset)
 
 void fos_charger_latch_power(const char *hardware_preset)
 {
+    /* The supplies of the board's peripherals (the CrowPanel watch's), on
+     * before anything probes them. */
+    for (const fos_board_rail_t *rail = fos_board_rails(hardware_preset); rail && rail->pin >= 0; rail++) {
+        gpio_set_direction((gpio_num_t)rail->pin, GPIO_MODE_OUTPUT);
+        gpio_set_level((gpio_num_t)rail->pin, rail->level);
+    }
     int hold = -1, lock = -1;
     if (!fos_board_power_latch_pins(hardware_preset, &hold, &lock) || hold < 0 || lock < 0) return;
     /* D high, then CP from low to high: the flip-flop's Q goes high and keeps

@@ -789,6 +789,7 @@ describe("Esp32CloudFlasher", () => {
         "hw:guition_esp32_4848s040",
         "hw:sunton_esp32_8048s070",
         "hw:waveshare_esp32_s3_touch_amoled_1_75",
+        "hw:elecrow_crowpanel_watch_2in01",
         "hw:seeed_reterminal_e1001",
         "hw:seeed_reterminal_e1002",
         "hw:seeed_reterminal_e1003",

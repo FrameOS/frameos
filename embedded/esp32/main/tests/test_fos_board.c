@@ -211,7 +211,6 @@ static void test_event_maps(void)
           "one key: no scene walking");
     /* A board without bindings, and no board at all: none. */
     CHECK(strcmp(event_map("trmnl_og"), "") == 0, "trmnl has no map");
-    CHECK(strcmp(event_map("elecrow_crowpanel_5in79"), "") == 0, "crowpanel has no map");
     CHECK(strcmp(event_map(""), "") == 0, "no preset");
     CHECK(strcmp(event_map(NULL), "") == 0, "NULL preset");
 }
@@ -459,8 +458,54 @@ static void test_amoled_1_75(void)
     CHECK(strstr(map, "\"edgeSwipe\"") != NULL, "the edges swipe");
 }
 
+/* The Elecrow CrowPanel 2.01" watch: its rails, its crown, its bus and
+ * glass, and its keys' rules; the CrowPanel 5.79"'s slot, LED and keys. */
+static void test_crowpanel_boards(void)
+{
+    const char *watch = "elecrow_crowpanel_watch_2in01";
+    const fos_board_rail_t *rails = fos_board_rails(watch);
+    CHECK(rails && rails[0].pin == 47 && rails[0].level == 1, "GPIO47 high powers the peripherals");
+    CHECK(rails && rails[1].pin == 40 && rails[1].level == 0, "GPIO40 low powers the LCD");
+    CHECK(rails && rails[2].pin == -1, "two rails");
+    CHECK(fos_board_rails("waveshare_esp32_s3_touch_amoled_1_75") == NULL, "no rails elsewhere");
+    CHECK(fos_board_rails(NULL) == NULL, "no preset, no rails");
+    int a = 0, b = 0;
+    CHECK(fos_board_encoder_pins(watch, &a, &b) && a == 20 && b == 19, "the crown on 20/19");
+    CHECK(!fos_board_encoder_pins("elecrow_crowpanel_5in79", &a, &b) && a == -1 && b == -1, "no crown elsewhere");
+    CHECK(strcmp(fos_board_touch_pins(watch), "sda=4,scl=3,int=2,rst=5,en=-1") == 0, "touch pins");
+    CHECK(fos_board_touch_mirror(watch) == 0, "the glass as mounted");
+    CHECK(strcmp(fos_board_i2c_buses(watch), "sda=4,scl=3") == 0, "one bus");
+    CHECK(strcmp(fos_board_rtc_chip(watch), "pcf8563") == 0, "a PCF8563");
+    int clk, data, pwr;
+    CHECK(fos_board_mic_pins(watch, &clk, &data, &pwr) && clk == 12 && data == 11 && pwr == -1, "PDM mic");
+    int pin, type;
+    CHECK(fos_board_led(watch, &pin, &type) && pin == 16 && type == 0, "LED lit high on 16");
+    CHECK(fos_board_buzzer_pin(watch) == 45 && fos_board_buzzer_tone_hz(watch) == 2000, "the motor buzzes");
+    CHECK(strcmp(fos_board_sd_pins(watch), "") == 0, "no TF slot");
+    char map[1024];
+    fos_board_event_map(watch, map, sizeof(map));
+    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
+          "BOOT pressed toggles the screen");
+    CHECK(strstr(map, "\"label\":\"OK\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+          "the crown held talks");
+    CHECK(strstr(map, "\"edgeSwipe\"") != NULL && map[strlen(map) - 1] == ']', "the edges swipe");
+
+    const char *epd = "elecrow_crowpanel_5in79";
+    CHECK(strcmp(fos_board_sd_pins(epd), "cs=10,sck=39,miso=13,mosi=40") == 0, "the 5.79's TF slot");
+    CHECK(fos_board_led(epd, &pin, &type) && pin == 41 && type == 0, "the 5.79's LED lit high on 41");
+    CHECK(fos_board_rails(epd) == NULL, "its panel supply is the EPD pwr pin");
+    fos_board_event_map(epd, map, sizeof(map));
+    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"press\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "HOME opens the switcher");
+    CHECK(strstr(map, "\"label\":\"NEXT\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\"") != NULL,
+          "NEXT held walks the scenes");
+    CHECK(strstr(map, "edgeSwipe") == NULL && strstr(map, "voiceChat") == NULL, "no glass, no microphone");
+    CHECK(map[0] == '[' && map[strlen(map) - 1] == ']', "a JSON list");
+}
+
 int main(void)
 {
+    test_crowpanel_boards();
     test_amoled_1_75();
     test_touch_pins();
     test_codec_pins();

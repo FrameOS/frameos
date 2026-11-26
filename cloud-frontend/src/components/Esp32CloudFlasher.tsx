@@ -105,6 +105,11 @@ const boardChoices = [
     value: 'hw:waveshare_esp32_s3_touch_amoled_1_75',
     platform: genericPlatform,
   },
+  {
+    label: 'Elecrow CrowPanel 2.01" watch (ESP32-S3)',
+    value: 'hw:elecrow_crowpanel_watch_2in01',
+    platform: genericPlatform,
+  },
   { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
   {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',

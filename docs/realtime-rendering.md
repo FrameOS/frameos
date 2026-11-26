@@ -1014,7 +1014,8 @@ minutes, past every render's own deadline, on both.
 
 A panel with a partial waveform (`PARTIAL_PANELS` in
 `components/frameos_display/generate_panel_table.py`; the reTerminal Sticky's
-SSD1677 is the first) updates without the full-screen flash. Three layers make
+SSD1677 is the first, the Elecrow CrowPanel 5.79"'s two
+SSD1683s, `EPD_5in79_BW`, the second) updates without the full-screen flash. Three layers make
 a small change cost what it should:
 
 - **The glass.** `fos_display_update` (`frameos_display.c`) sends the picture

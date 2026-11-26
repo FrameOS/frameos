@@ -30,7 +30,10 @@ GPIO41/42 are the J2 header's UART there), but a PDM microphone on J2 pins
 **PhotoPainter and 13.3E6** have no PDM microphone but an **ES7210 codec
 ADC** on I2S (`codec_pins`, `fos_codec.c`), which the same session reads;
 their voice key is the one user key each has (KEY1, BOOT), and their ES8311
-speaker plays the cues a buzzer would. Only the ESP32 runtime has this: a Pi
+speaker plays the cues a buzzer would. The Elecrow **CrowPanel 2.01" watch**
+carries an LMD3526 PDM microphone (clock GPIO12, data GPIO11, on the board's
+peripheral rail); its voice key is the crown (label `OK`, GPIO18): hold the
+crown to talk. Only the ESP32 runtime has this: a Pi
 frame has no key hold and no microphone path (yet).
 
 ## On the frame (`embedded/esp32/main`)

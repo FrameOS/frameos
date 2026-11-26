@@ -189,8 +189,8 @@
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
-  and the E1003, the Sticky, the SenseCAP Indicator, the Guition 4848S040
-  and the Sunton S070 the edge swipes (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset
+  and the E1003, the Sticky, the SenseCAP Indicator, the Guition 4848S040,
+  the Sunton S070 and the CrowPanel 2.01" watch the edge swipes (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset
   table: keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
   own, never a scene switch: the switcher moves a screenful on them), up from the bottom
@@ -544,7 +544,8 @@
 - Holding the voice key — the key whose long press the frame's event map
   binds to `voiceChat`: REFRESH on the reTerminal E1001/E1002/E1003 presets
   (PDM microphone; the E1004 has none), AI (the Action key) on the reTerminal Sticky (PDM
-  microphone on the S3's USB pads), KEY1 / BOOT on the Waveshare PhotoPainter
+  microphone on the S3's USB pads), the crown (OK) on the Elecrow CrowPanel
+  2.01" watch (PDM microphone), KEY1 / BOOT on the Waveshare PhotoPainter
   / 13.3E6 (an ES7210 codec microphone, `fos_codec.c`, whose ES8311 speaker
   plays the buzzer's notes) — streams speech to the frame's control
   plane and runs one turn of the AI chat with the frame in context and only

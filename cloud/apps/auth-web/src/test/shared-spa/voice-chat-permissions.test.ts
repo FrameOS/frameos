@@ -66,10 +66,14 @@ describe("which frames have a microphone", () => {
       "seeed_reterminal_e1001",
       "seeed_reterminal_e1002",
       "seeed_reterminal_e1003",
+      "elecrow_crowpanel_watch_2in01",
       "waveshare_esp32_s3_photopainter",
       "waveshare_esp32_s3_epaper_13_3e6",
     ]);
     expect(boardMicrophonePins({ hardwarePreset: "seeed_reterminal_sticky" })).toEqual({ clk: 19, data: 20, pwr: 38 });
+    // The CrowPanel 2.01" watch's PDM microphone is on the board's own rail.
+    expect(boardMicrophonePins({ hardwarePreset: "elecrow_crowpanel_watch_2in01" })).toEqual({ clk: 12, data: 11, pwr: -1 });
+    expect(backendFrameHasMicrophone({}, "elecrow_crowpanel_watch_2in01")).toBe(true);
     expect(backendFrameHasMicrophone({}, "seeed_reterminal_sticky")).toBe(true);
     expect(backendFrameHasMicrophone({}, "seeed_reterminal_e1001")).toBe(true);
     expect(backendFrameHasMicrophone({}, "seeed_reterminal_e1002")).toBe(true);

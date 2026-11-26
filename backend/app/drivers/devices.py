@@ -125,6 +125,12 @@ NATIVE_DEVICE_DIMENSIONS = {
     # The Waveshare ESP32-S3-Touch-AMOLED-1.75's round QSPI AMOLED (embedded/esp32
     # AMOLED_CO5300_466x466); no Pi driver.
     "amoled.co5300_466x466": (466, 466),
+    # The Elecrow CrowPanel 2.01" watch's GC9309 IPS on one SPI lane (embedded/esp32
+    # LCD_GC9309_240x296); no Pi driver.
+    "lcd.gc9309_240x296": (240, 296),
+    # The Elecrow CrowPanel 5.79"'s glass in black and white (embedded/esp32
+    # EPD_5in79_BW); on a Pi the Waveshare 5.79" driver, four greys.
+    "waveshare.EPD_5in79_BW": (792, 272),
     "pimoroni.inky_impression_7_3": (800, 480),
     "pimoroni.inky_impression_7_color": (800, 480),
     "pimoroni.inky_impression_5_7": (600, 448),

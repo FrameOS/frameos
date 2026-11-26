@@ -1,5 +1,7 @@
-/* QSPI AMOLED panels that keep their own picture: the CO5300 466x466 of the
- * Waveshare ESP32-S3-Touch-AMOLED-1.75. See lcd_qspi_amoled.h. */
+/* Panels that keep their own picture, behind an SPI controller: the CO5300
+ * 466x466 AMOLED of the Waveshare ESP32-S3-Touch-AMOLED-1.75 on QSPI, and the
+ * GC9309 240x296 IPS of the Elecrow CrowPanel 2.01" watch on one lane with a
+ * D/C line. See lcd_qspi_amoled.h. */
 #include "lcd_qspi_amoled.h"
 
 #include <stdbool.h>
@@ -13,6 +15,10 @@
 
 /* ---------------------------------------------------------------- boards */
 
+/* A controller's setup as bytes: the command, the count of its parameters
+ * (with INIT_WAIT: then 120 ms, the time a SLPOUT wants), the parameters. */
+#define INIT_WAIT 0x80
+
 typedef struct {
     const char *preset;
     const char *panel; /* the panel table's key for this glass */
@@ -22,8 +28,45 @@ typedef struct {
     int x_gap, y_gap;
     bool round; /* only the circle inside the square is glass */
     int cs, sclk, data[4], rst;
+    /* -1: QSPI, the CO5300's framing (an opcode and the command in an
+     * address); else one lane, `data[0]`, and this GPIO low for a command. */
+    int dc;
+    int backlight; /* lit high; -1: the glass lights its own pixels */
     uint32_t spi_hz;
+    const uint8_t *init;
+    uint16_t init_len;
 } qspi_board_t;
+
+/* Waveshare's BSP (esp32_s3_touch_amoled_1_75.c lcd_init_cmds), less the
+ * display-on: the glass is lit once it holds the splash, not the controller's
+ * power-on noise. 0xFE pages the vendor registers in and out; 0xC4 0x80 is
+ * the SPI mode, 0x3A 0x55 RGB565, 0x35 the tearing line on, 0x53 0x20 the
+ * brightness control on, 0x51 / 0x63 the normal and high brightness. The
+ * column window is the glass's 6..471. */
+static const uint8_t k_co5300_init[] = {
+    0xFE, 1, 0x20, 0x19, 1, 0x10, 0x1C, 1, 0xA0, 0xFE, 1, 0x00, 0xC4, 1, 0x80, 0x3A, 1, 0x55,
+    0x35, 1, 0x00, 0x53, 1, 0x20, 0x51, 1, 0xFF, 0x63, 1, 0xFF,
+    0x2A, 4, 0x00, 0x06, 0x01, 0xD7, 0x2B, 4, 0x00, 0x00, 0x01, 0xD1, 0x11, INIT_WAIT,
+};
+
+/* Elecrow's GC9309 sequence (their ESP-IDF lesson 3, "copied from the
+ * validated Arduino_GFX driver behavior"), less its display-on and RAMWR:
+ * 0xFE 0xEF open the vendor registers, 0x36 0x48 mirrors X in BGR order,
+ * 0x3A 0x05 RGB565, 0xF0 / 0xF1 the gammas, the window the whole 240x296. */
+static const uint8_t k_gc9309_init[] = {
+    0xFE, 0, 0xEF, 0, 0x80, 1, 0xC0, 0x81, 1, 0x01, 0x82, 1, 0x07, 0x83, 1, 0x38, 0x88, 1, 0x64,
+    0x89, 1, 0x86, 0x8B, 1, 0x3C, 0x8D, 1, 0x51, 0x8E, 1, 0x70, 0x35, 1, 0x00, 0x36, 1, 0x48,
+    0x3A, 1, 0x05, 0xBF, 1, 0x1F, 0x7D, 2, 0x45, 0x06, 0xEE, 2, 0x00, 0x06, 0xF4, 1, 0x53,
+    0xF6, 2, 0x17, 0x08, 0x70, 2, 0x4F, 0x4F, 0x71, 2, 0x12, 0x20, 0x72, 2, 0x12, 0x20,
+    0xB5, 1, 0x50, 0xBA, 1, 0x00, 0xEC, 1, 0x71, 0x7B, 2, 0x00, 0x0D, 0x7C, 2, 0x0D, 0x03,
+    0xF5, 3, 0x02, 0x10, 0x12,
+    0xF0, 12, 0x0C, 0x11, 0x0B, 0x0A, 0x05, 0x32, 0x44, 0x8E, 0x9A, 0x29, 0x2E, 0x5F,
+    0xF1, 12, 0x0B, 0x11, 0x0B, 0x07, 0x07, 0x32, 0x45, 0xBD, 0x8D, 0x21, 0x28, 0xAF,
+    0x2A, 4, 0x00, 0x00, 0x00, 0xEF, 0x2B, 4, 0x00, 0x00, 0x01, 0x27,
+    0x66, 1, 0x2C, 0x67, 1, 0x18, 0x68, 1, 0x3E, 0xCA, 1, 0x0E, 0xE8, 1, 0xF0, 0xCB, 1, 0x06,
+    0xB6, 3, 0x5C, 0x40, 0x40, 0xCC, 1, 0x33, 0xCD, 1, 0x33, 0x11, INIT_WAIT,
+    0xE8, 1, 0xA0, 0xE8, 1, 0xF0, 0xFE, 0, 0xEE, 0,
+};
 
 /* Waveshare ESP32-S3-Touch-AMOLED-1.75 (Waveshare's ESP-IDF BSP,
  * esp32_s3_touch_amoled_1_75.h): CS GPIO12, SCLK GPIO38, D0..D3 GPIO4..7,
@@ -31,7 +74,12 @@ typedef struct {
  * the controller's columns 6..471 (`esp_lcd_panel_set_gap(panel, 6, 0)`).
  * The tearing-effect line (GPIO13) is not used: a push of only what changed
  * is over before the scan reaches most of it, and Waveshare's BSP leaves it
- * off too. 40 MHz is the clock of the CO5300's esp_lcd component. */
+ * off too. 40 MHz is the clock of the CO5300's esp_lcd component.
+ *
+ * Elecrow CrowPanel 2.01" watch (Elecrow's wiki and lessons): the GC9309 on
+ * CS GPIO9, SCLK GPIO7, MOSI GPIO8, D/C GPIO10, reset GPIO6, the backlight
+ * on GPIO13; its supply (GPIO40, low) is the board's (fos_board_rails), the
+ * tearing line (GPIO21) unused as on the AMOLED. 80 MHz is Elecrow's. */
 static const qspi_board_t k_boards[] = {
     {
         .preset = "waveshare_esp32_s3_touch_amoled_1_75",
@@ -40,7 +88,18 @@ static const qspi_board_t k_boards[] = {
         .x_gap = 6, .y_gap = 0,
         .round = true,
         .cs = 12, .sclk = 38, .data = {4, 5, 6, 7}, .rst = 39,
+        .dc = -1, .backlight = -1,
         .spi_hz = 40 * 1000 * 1000,
+        .init = k_co5300_init, .init_len = sizeof(k_co5300_init),
+    },
+    {
+        .preset = "elecrow_crowpanel_watch_2in01",
+        .panel = "LCD_GC9309_240x296",
+        .width = 240, .height = 296,
+        .cs = 9, .sclk = 7, .data = {8, -1, -1, -1}, .rst = 6,
+        .dc = 10, .backlight = 13,
+        .spi_hz = 80 * 1000 * 1000,
+        .init = k_gc9309_init, .init_len = sizeof(k_gc9309_init),
     },
 };
 
@@ -153,8 +212,31 @@ static int buffer_index(const uint8_t *buf)
 
 /* ------------------------------------------------------------- the bus */
 
+/* One lane: bytes with the D/C line at `level` (low: a command), the chip
+ * select held after them when `keep` (the bus acquired). */
+static esp_err_t dc_write(int level, const uint8_t *data, size_t len, bool keep)
+{
+    gpio_set_level((gpio_num_t)s_board->dc, level);
+    /* Four bytes or fewer ride in the transaction itself: no DMA copy. */
+    spi_transaction_t t = {
+        .flags = (keep ? SPI_TRANS_CS_KEEP_ACTIVE : 0) | (len <= 4 ? SPI_TRANS_USE_TXDATA : 0),
+        .length = len * 8,
+        .tx_buffer = len <= 4 ? NULL : data,
+    };
+    if (len <= 4) memcpy(t.tx_data, data, len);
+    return spi_device_polling_transmit(s_dev, &t);
+}
+
 static esp_err_t send_cmd(uint8_t cmd, const uint8_t *data, size_t len)
 {
+    if (s_board->dc >= 0) {
+        esp_err_t err = spi_device_acquire_bus(s_dev, portMAX_DELAY);
+        if (err != ESP_OK) return err;
+        err = dc_write(0, &cmd, 1, len > 0);
+        if (err == ESP_OK && len) err = dc_write(1, data, len, false);
+        spi_device_release_bus(s_dev);
+        return err;
+    }
     spi_transaction_t t = {
         .cmd = OP_WRITE_CMD,
         .addr = (uint32_t)cmd << 8,
@@ -196,6 +278,14 @@ static esp_err_t push_box_locked(const uint8_t *frame, const fos_lcd_qspi_box_t 
     if (err != ESP_OK) return err;
     err = spi_device_acquire_bus(s_dev, portMAX_DELAY);
     if (err != ESP_OK) return err;
+    /* One lane: RAMWR as a command, the pixels after it as data, one chip
+     * select over both. */
+    bool one_lane = s_board->dc >= 0;
+    if (one_lane) {
+        const uint8_t ramwr = DCS_RAMWR;
+        err = dc_write(0, &ramwr, 1, true);
+        gpio_set_level((gpio_num_t)s_board->dc, 1);
+    }
     /* Under the bus lock, so one push at a time uses them. */
     static spi_transaction_ext_t t[2];
     int queued = 0;
@@ -213,8 +303,10 @@ static esp_err_t push_box_locked(const uint8_t *frame, const fos_lcd_qspi_box_t 
         fos_lcd_qspi_copy_swapped((const uint16_t *)frame, s_board->width, box, box->y0 + row, rows, s_chunk[which]);
         spi_transaction_ext_t *x = &t[which];
         memset(x, 0, sizeof(*x));
-        x->base.flags = SPI_TRANS_MODE_QIO | (last ? 0 : SPI_TRANS_CS_KEEP_ACTIVE);
-        if (row == 0) {
+        x->base.flags = (one_lane ? 0 : SPI_TRANS_MODE_QIO) | (last ? 0 : SPI_TRANS_CS_KEEP_ACTIVE);
+        if (one_lane) {
+            /* data only */
+        } else if (row == 0) {
             x->base.cmd = OP_WRITE_PIXELS;
             x->base.addr = (uint32_t)DCS_RAMWR << 8;
         } else {
@@ -256,33 +348,6 @@ static void push_all(const uint8_t *frame)
 
 /* -------------------------------------------------------- the controller */
 
-/* Waveshare's BSP (esp32_s3_touch_amoled_1_75.c lcd_init_cmds), less the
- * display-on: the glass is lit once it holds the splash, not the controller's
- * power-on noise. 0xFE pages the vendor registers in and out; 0xC4 0x80 is
- * the SPI mode, 0x3A 0x55 RGB565, 0x35 the tearing line on, 0x53 0x20 the
- * brightness control on, 0x51 / 0x63 the normal and high brightness. The
- * column window is the glass's 6..471. */
-static const struct {
-    uint8_t cmd;
-    uint8_t len;
-    uint8_t data[4];
-    uint16_t delay_ms;
-} k_init[] = {
-    {0xFE, 1, {0x20}, 0},
-    {0x19, 1, {0x10}, 0},
-    {0x1C, 1, {0xA0}, 0},
-    {0xFE, 1, {0x00}, 0},
-    {0xC4, 1, {0x80}, 0},
-    {0x3A, 1, {0x55}, 0},
-    {0x35, 1, {0x00}, 0},
-    {0x53, 1, {0x20}, 0},
-    {DCS_BRIGHTNESS, 1, {0xFF}, 0},
-    {0x63, 1, {0xFF}, 0},
-    {DCS_CASET, 4, {0x00, 0x06, 0x01, 0xD7}, 0},
-    {DCS_RASET, 4, {0x00, 0x00, 0x01, 0xD1}, 0},
-    {DCS_SLPOUT, 0, {0}, 120},
-};
-
 static esp_err_t controller_init(void)
 {
     const qspi_board_t *b = s_board;
@@ -296,10 +361,16 @@ static esp_err_t controller_init(void)
         gpio_set_level((gpio_num_t)b->rst, 1);
         vTaskDelay(pdMS_TO_TICKS(120));
     }
-    for (size_t i = 0; i < sizeof(k_init) / sizeof(k_init[0]); i++) {
-        esp_err_t err = send_cmd(k_init[i].cmd, k_init[i].data, k_init[i].len);
+    if (b->dc >= 0) {
+        gpio_reset_pin((gpio_num_t)b->dc);
+        gpio_set_direction((gpio_num_t)b->dc, GPIO_MODE_OUTPUT);
+    }
+    for (const uint8_t *p = b->init, *end = b->init + b->init_len; p < end;) {
+        uint8_t n = p[1] & (uint8_t)~INIT_WAIT;
+        esp_err_t err = send_cmd(p[0], p + 2, n);
         if (err != ESP_OK) return err;
-        if (k_init[i].delay_ms) vTaskDelay(pdMS_TO_TICKS(k_init[i].delay_ms));
+        if (p[1] & INIT_WAIT) vTaskDelay(pdMS_TO_TICKS(120));
+        p += 2 + n;
     }
     return ESP_OK;
 }
@@ -307,6 +378,7 @@ static esp_err_t controller_init(void)
 static esp_err_t bus_init(void)
 {
     const qspi_board_t *b = s_board;
+    bool one_lane = b->dc >= 0;
     spi_bus_config_t bus = {
         .data0_io_num = b->data[0],
         .data1_io_num = b->data[1],
@@ -318,16 +390,16 @@ static esp_err_t bus_init(void)
         .data7_io_num = -1,
         .sclk_io_num = b->sclk,
         .max_transfer_sz = QSPI_CHUNK_BYTES,
-        .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_QUAD,
+        .flags = SPICOMMON_BUSFLAG_MASTER | (one_lane ? 0 : SPICOMMON_BUSFLAG_QUAD),
     };
     esp_err_t err = spi_bus_initialize(QSPI_HOST, &bus, SPI_DMA_CH_AUTO);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "QSPI bus: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "bus: %s", esp_err_to_name(err));
         return err;
     }
     spi_device_interface_config_t dev = {
-        .command_bits = 8,
-        .address_bits = 24,
+        .command_bits = one_lane ? 0 : 8,
+        .address_bits = one_lane ? 0 : 24,
         .mode = 0,
         .clock_speed_hz = (int)b->spi_hz,
         .spics_io_num = b->cs,
@@ -335,8 +407,16 @@ static esp_err_t bus_init(void)
         .flags = SPI_DEVICE_HALFDUPLEX,
     };
     err = spi_bus_add_device(QSPI_HOST, &dev, &s_dev);
-    if (err != ESP_OK) ESP_LOGE(TAG, "QSPI device: %s", esp_err_to_name(err));
+    if (err != ESP_OK) ESP_LOGE(TAG, "device: %s", esp_err_to_name(err));
     return err;
+}
+
+/* The backlight of a glass that has one (the GC9309's): lit high. */
+static void backlight(bool on)
+{
+    if (s_board->backlight < 0) return;
+    gpio_set_direction((gpio_num_t)s_board->backlight, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)s_board->backlight, on);
 }
 
 /* --------------------------------------------------------- the buffers */
@@ -631,6 +711,7 @@ int fos_lcd_qspi_init(void)
     s_front = 0;
     push_all(s_fbs[0]);
     send_cmd(DCS_DISPON, NULL, 0);
+    backlight(true);
     if (xTaskCreatePinnedToCore(push_task, "fos_qspi_push", QSPI_PUSH_STACK, NULL, QSPI_PUSH_PRIORITY, &s_push_task,
                                 QSPI_PUSH_CORE) != pdPASS) {
         s_push_task = NULL;
@@ -641,8 +722,8 @@ int fos_lcd_qspi_init(void)
     s_ready = true;
     s_splash_on = true;
     if (xTaskCreate(splash_task, "fos_splash", 2560, NULL, 1, NULL) != pdPASS) s_splash_on = false;
-    ESP_LOGI(TAG, "%s %dx%d up: RGB565 over QSPI at %lu Hz", b->preset, b->width, b->height,
-             (unsigned long)b->spi_hz);
+    ESP_LOGI(TAG, "%s %dx%d up: RGB565 on %d lane(s) at %lu Hz", b->preset, b->width, b->height,
+             b->dc >= 0 ? 1 : 4, (unsigned long)b->spi_hz);
     return 0;
 }
 
@@ -717,9 +798,10 @@ esp_err_t fos_lcd_qspi_power(bool on)
     /* DISPOFF alone left this glass lit (the bench, 2026-11-23): its
      * brightness goes to 0 with it, and comes back with DISPON. */
     xSemaphoreTake(s_bus_lock, portMAX_DELAY);
-    esp_err_t err = send_cmd1(DCS_BRIGHTNESS, on ? s_brightness : 0);
+    esp_err_t err = s_board->backlight >= 0 ? ESP_OK : send_cmd1(DCS_BRIGHTNESS, on ? s_brightness : 0);
     if (err == ESP_OK) err = send_cmd(on ? DCS_DISPON : DCS_DISPOFF, NULL, 0);
     xSemaphoreGive(s_bus_lock);
+    backlight(on && err == ESP_OK);
     if (err == ESP_OK) s_on = on;
     return err;
 }
@@ -739,6 +821,7 @@ esp_err_t fos_lcd_qspi_prepare_deep_sleep(void)
     if (!s_ready) return ESP_ERR_NOT_SUPPORTED;
     /* The last picture into the controller's RAM before it sleeps. */
     wait_for_push();
+    backlight(false);
     xSemaphoreTake(s_bus_lock, portMAX_DELAY);
     esp_err_t err = send_cmd(DCS_DISPOFF, NULL, 0);
     if (err == ESP_OK) err = send_cmd(DCS_SLPIN, NULL, 0);
