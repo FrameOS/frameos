@@ -18,11 +18,15 @@ type
     ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
     ## rssi, ip, networks: [name…], scanning, password}, rotate,
     ## renderScale, battery: {percent}, managedBy, version,
-    ## actions: ["restart"…], note}: `battery` absent without one; `wifi`
+    ## actions: ["restart"…], note, about: {chip, soc, cores, mhz, board,
+    ## system, display, psram, memory, flash, storage, card, uptime, mac,
+    ## hostname, frameId, server, build}}: `battery` absent without one; `wifi`
     ## absent, no network to set here; `state` one of connected, connecting,
     ## notFound, auth, hotspot, unset, off; `password` a password is saved;
     ## `actions` the device commands this host runs besides render and
-    ## reboot; `note` what the last Save could not do.
+    ## reboot; `note` what the last Save could not do; `about` what the
+    ## frame is, each fact absent where the host does not know it, bytes as
+    ## bytes and [total, free] for what fills (docs/scene-settings.md "About").
   FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
     ## for the same network, none for another), rotate, renderScale.

@@ -118,7 +118,7 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (a plane's render of a board) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (a plane's render of a board) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`; `about`, what the frame is (below, "About") |
 | `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `linkCloud`, `adopt`, `cancelLink` |
 
@@ -213,6 +213,7 @@ What the page holds, top to bottom:
   and the words stay on the page. It asks for a second tap, as Install update
   does. One only the owner may take is counted and left to the owner. A
   frame with no plane, or whose plane does not list updates, shows neither.
+- **About**, last: what the frame is (below).
 
 Save is lit only while there is something to save, on either page, and goes
 quiet once it is pressed: that is how the page says it took it. On the frame
@@ -246,6 +247,42 @@ was off can still be fixed at the frame, the device has the last word:
   `/boot/firmware`), while it is there (`frame_settings_lock.nim`);
 - an ESP32: `set settings_unlock 1` on the USB console, until `set
   settings_unlock 0`.
+
+### About
+
+The last card on the page says what the frame is, for somebody at the frame
+who wants to know (or is asked) what it runs on. It is read, never set. The
+host hands the facts over as `about` in `frameSettingsRead`, numbers as they
+are: bytes as bytes, `[total, free]` for what fills, seconds for the uptime.
+The page has every word and every unit (`AboutRows`, `addAbout` and
+`addBytes` in the scene, in 1024s: "5.2 MB free of 8 MB"), so a fact means the
+same on every host, and a fact the host leaves out is a row the page leaves
+out.
+
+| Fact | Row | ESP32 (`put_about`, `fos_frame_settings.c`) | Linux (`about_linux.nim`) |
+|---|---|---|---|
+| `chip`, `soc`, `cores`, `mhz` | Chip | the target (`fos_board_target`: "ESP32-S3"), its cores and clock (`fos_cpu_mhz`) | uname's machine (aarch64 is "ARM 64-bit", armv7l "ARMv7 32-bit", armv6l "ARMv6 32-bit") after a Pi's SoC (the device tree's `brcm,bcm…`), the cores, cpufreq's clock |
+| `board` | Board | the hardware preset (`hardware_preset`), absent on a board nobody provisioned | the device tree's model ("Raspberry Pi 4 Model B Rev 1.4") |
+| `system` | System | | /etc/os-release's PRETTY_NAME |
+| `display` | Display | the panel (`panel`) | none: the page takes the frame's `device`; either way with the panel's size from the frame's config |
+| `psram` | PSRAM | the PSRAM heap, `[total, free]` | |
+| `memory` | Memory | internal RAM, `[total, free]` | MemTotal and MemAvailable |
+| `flash` | Flash | the chip's flash | |
+| `storage` | Storage | `/state` (SPIFFS), `[total, free]` | the filesystem the frame runs from |
+| `card` | SD card | the card's size, while one is mounted (not its free space: a FAT card can take seconds to count it) | |
+| `uptime` | Uptime | since boot | /proc/uptime |
+| `mac` | MAC address | the station's | the Wi-Fi device's, else wlan0, eth0, end0 |
+| `hostname` | Host name | the DHCP host name, when one is set | /etc/hostname (`systemHostname`) |
+| `frameId` | Frame ID | the backend's id for it, as text | |
+| `server` | Server | the backend's URL, or the cloud's while the cloud manages it | the backend's address, or the cloud provider's while the cloud manages it |
+| `build` | Build | the first 8 hex digits of the ELF's SHA-256 (as `usb_api status` has it whole) | |
+
+The browser preview says `chip: "wasm"` ("WebAssembly") alone. The version is
+the first card's. Each value sits beside its name where the two fit, and
+under it where they do not (`flex-wrap`), wrapped rather than cut: on the
+2.01" watch (240x296) and inside a round panel's circle every word stays on
+the glass (`test_scene.nim` "the_about_card"). A JS app with `frame` reads
+the same facts (`frameos.frame("read")`, `docs/terminal.md`).
 
 ### Connecting the frame
 

@@ -284,7 +284,8 @@
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
 - A gear left of Save opens the **frame page** (doc section "The frame page"):
   Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot (under the
-  card), and on a frame no plane holds Link to cloud / Link to backend beside them:
+  card), an About card last (what the frame is: the host's `about` facts as
+  numbers, every word and unit the scene's; doc section "About"), and on a frame no plane holds Link to cloud / Link to backend beside them:
   one page for FrameOS Cloud (the device flow) or a backend (scope `adopt`,
   exchanged at the frame's `POST /api/adopt`), each its code, a QR code and
   Cancel, the cloud's also its server and a Cloud address to change, and a
