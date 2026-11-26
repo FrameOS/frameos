@@ -1039,6 +1039,23 @@ describe("a set in parts", () => {
     return row;
   }
 
+  // A row the hub fails, then its deploy progress: two writes
+  // (failUnsentCommand, moveDeployProgress), so a read made the moment the
+  // row shows failed can still find the bar running. Waits for the bar
+  // itself, and says what it last was if it never gets there.
+  async function progressFailed(frameId: string, commandId: string | undefined, error: string) {
+    let last: unknown;
+    await waitFor(async () => {
+      last = (await frameRow(frameId))?.deployProgress;
+      const record = last as { error?: unknown; id?: unknown; status?: unknown } | null | undefined;
+      return record?.status === "error" && record.error === error && (!commandId || record.id === commandId)
+        ? true
+        : undefined;
+    }, `the deploy progress failed with ${error}`).catch((cause: unknown) => {
+      throw new Error(`${String(cause)}; it was ${JSON.stringify(last)}`);
+    });
+  }
+
   async function settled(frameId: string, commandId: string | undefined, checksum: string) {
     await waitFor(async () => ((await commandRow(commandId))?.status === "acked" ? true : undefined), "the row acked");
     await waitFor(
@@ -1274,7 +1291,7 @@ describe("a set in parts", () => {
     // checksum: out of sync with the push, which is the truth.
     const frameNow = await frameRow(frame.id);
     expect(frameNow?.scenesChecksum).toBe(scratch.checksum);
-    expect(frameNow?.deployProgress).toMatchObject({ error: "no_room", id: push?.id, status: "error" });
+    await progressFailed(frame.id, push?.id, "no_room");
     expect(board.scenes).toEqual(scratch.scenes);
     expect(board.scenes.every((entry) => big.some((wanted) => wanted.id === entry.id))).toBe(true);
 
@@ -1394,7 +1411,7 @@ describe("a set in parts", () => {
       return row?.status === "failed" ? row : undefined;
     }, "the row failed");
     expect(failed.error).toBe("scenes_not_applied");
-    expect((await frameRow(frame.id))?.deployProgress).toMatchObject({ error: "scenes_not_applied", status: "error" });
+    await progressFailed(frame.id, undefined, "scenes_not_applied");
     await expect(device.next(isSceneMessage, "another part", 300)).rejects.toThrow();
     device.ws.close();
   });
@@ -1417,7 +1434,7 @@ describe("a set in parts", () => {
         return row?.status === "failed" ? row : undefined;
       }, `the row failed: ${error}`);
       expect(failed.error).toBe(error);
-      expect((await frameRow(frame.id))?.deployProgress).toMatchObject({ error, id: push?.id, status: "error" });
+      await progressFailed(frame.id, push?.id, error);
     }
     await expect(device.next(isSceneMessage, "a scene message", 300)).rejects.toThrow();
     expect((await frameRow(frame.id))?.scenesChecksum).toBe("set-1");
