@@ -229,7 +229,9 @@ describe("uploadScenesOverUsbAfterFlash", () => {
       "scene-put",
       "scene-put",
     ]);
-    expect(statuses).toContain("Restarting the board so it takes the rest of the scenes");
+    expect(statuses).toContain(
+      "Restarting the board so it takes the rest of the scenes. Leave its screen and keys alone until it is done.",
+    );
     expect(logLines.some((line) => line.includes("holds back the first 2 scenes"))).toBe(true);
   });
 

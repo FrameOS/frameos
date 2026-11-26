@@ -343,7 +343,10 @@ export async function uploadScenesOverUsbAfterFlash(
       }
       // The boot loads the stored set, and the puts go on top of it.
       restarted = true
-      onStatus('Restarting the board so it takes the rest of the scenes')
+      // A tap or a key while it waits for Wi-Fi after this boot froze 2026.11.14 (fos_client.c s_render_parked).
+      onStatus(
+        'Restarting the board so it takes the rest of the scenes. Leave its screen and keys alone until it is done.'
+      )
       appendBrowserFlashLog(frameId, `The board holds back the first ${plan.whole.length} scenes until it restarts.`)
       await usbRestart(frameId, { port: livePort, keepOpen: true })
       livePort = await waitForUsbApiReadyAfterFlash(frameId, livePort, onStatus, 'Waiting for the board to restart.')

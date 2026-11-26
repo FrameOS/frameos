@@ -123,13 +123,20 @@ static void retire_slot(int slot)
 
 /* The slot files there are, from one listing of the directory. Without a
  * listing (the directory cannot be opened) nothing is known and each slot is
- * asked for by name, as before. */
+ * asked for by name, as before.
+ *
+ * A spare already known stays one: a file this boot emptied before it first
+ * listed the directory (a change made before any sweep, on a board that
+ * never renders while it waits in the Wi-Fi portal). Cleared with the files,
+ * the slots a whole set's drop gave back were lost to the next put, and the
+ * browser flasher's batches after it ran out of slots: "no free scene slot"
+ * after 54 of 105 scenes on the reTerminal Sticky (2026-11-26). */
 static void learn_slot_files(void)
 {
     if (s_slot_map_known) return;
     DIR *dir = opendir(s_dir);
     if (dir == NULL) return;
-    memset(s_slot_map, 0, 2 * sizeof(s_slot_map[0])); /* the files and the spares; a staging stays */
+    memset(&s_slot_file, 0, sizeof(s_slot_file)); /* the spares and a staging stay */
     struct dirent *item;
     while ((item = readdir(dir)) != NULL) {
         if (strcmp(item->d_name, FOS_SCENE_STORE_SLOT_TMP_NAME) == 0) s_old_slot_tmp = true;
@@ -146,6 +153,10 @@ static void learn_slot_files(void)
         if (slot < FOS_SCENE_STORE_SLOTS) put_slot(&s_slot_file, slot, true);
     }
     closedir(dir);
+    /* A spare is a file that is there. */
+    for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
+        if (!has(&s_slot_file, slot)) put_slot(&s_slot_spare, slot, false);
+    }
     s_slot_map_known = true;
 }
 

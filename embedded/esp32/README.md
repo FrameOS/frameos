@@ -1920,6 +1920,29 @@ payload a producer stored (`producer_split_done`): the split lets the lock
 go between files, and a put that came then split the same file again
 beside it.
 
+**No chore waits for input while the render task waits out the portal.** A
+store write is paced around taps (`store_pace`, `fos_client_input_held`),
+and input that is queued counts as a tap until the render task takes it.
+Parked in the portal, it takes none (what came is kept for the pass after
+it), so one tap or key there held every store write, and the console with
+it, until a reset: a reTerminal Sticky on 2026.11.14, which still waited in
+the portal on e-paper, froze after a tap during the flasher's setup.
+`fos_client_input_held` is false while the render task is parked
+(`s_render_parked`); a board of keys alone still waits there. (A touch board
+never does: with no network saved it opens on its own screen, where the
+frame page joins one.)
+
+**The boot's sweep runs when the render task parks in the portal**, not
+only after a first picture that will not come before the portal ends: a
+setup's scenes come while it waits, and the slot files an earlier boot left
+unnamed were no put's to take, so a board whose `/state` held an earlier set
+ran out of slots part way. The spares a change makes before the store first
+lists its directory are kept through that listing (`learn_slot_files`): the
+slots the flasher's first set gave back by dropping the scenes before it
+were forgotten, and its batches stopped at 54 of 105 with "no free scene
+slot" (the reTerminal Sticky, 2026-11-26). With the old slot files spares,
+the same 105 scenes took 203 s, no file made.
+
 **Making room is one walk of the partition** (`fos_spiffs_gc.c`). Flash is
 erased a 4 KB block at a time before it is written, and the blocks that hold
 nothing but deleted pages are found by walking the partition's lookup

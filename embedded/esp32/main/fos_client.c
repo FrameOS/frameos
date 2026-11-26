@@ -834,9 +834,19 @@ static bool input_hold_on(void)
            (fos_input_hold_engaged(&s_input_hold) || input_queued());
 }
 
+/* This task waits out the provisioning portal (the loop's first step): it
+ * drains no input meanwhile, and keeps what was queued for the pass after it. */
+static volatile bool s_render_parked = false;
+
+/* For the chores off this task (a scene store write's pace, the scene state
+ * writer). Not while it is parked: a tap queued then is nobody tapping, and
+ * nothing would take it before the portal ends. A scene store write waited
+ * for it with no end, and the console with it: one tap on a button board
+ * waiting in the portal (a reTerminal Sticky on 2026.11.14, during the
+ * flasher's setup) froze it until a reset. */
 bool fos_client_input_held(void)
 {
-    return input_hold_on();
+    return !s_render_parked && input_hold_on();
 }
 
 /* A tap or a key waiting, or one a moment ago (its handler's frame is next):
@@ -4371,9 +4381,17 @@ static void client_task(void *arg)
                 portal_screen_shown = true;
                 show_portal_screen();
             }
+            /* No scene renders before the portal ends: the boot's sweep, put
+             * off for the first picture, goes now, so the slot files no index
+             * names are spares for what a setup sends over USB (the browser
+             * flasher's batches ran out of slots on a board whose /state held
+             * an earlier set's). Nothing holds a scene file yet. */
+            if (!s_render_parked) fos_scenes_first_render_done();
+            s_render_parked = true;
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
+        s_render_parked = false;
         portal_screen_shown = false;
         if (s_join_first) {
             s_join_first = false;
