@@ -14,14 +14,23 @@ import frameos/scenes
 # kept there (or past its end), and a freed object left in the main thread's
 # list. A Pi Zero died with SIGSEGV a second or two after its backend's second
 # settings push, at the first reclaim of the generation it booted with (the
-# hardware bench, 2026-11-24). The exports are acyclic now, so no thread ever
-# keeps them as candidates. Here a fresh thread (no candidates of its own: on
+# hardware bench, 2026-11-24). The exports are acyclic now, and so is the
+# graph they hold (DiagramNode, DiagramEdge), so no thread ever keeps them as
+# candidates. Here a fresh thread (no candidates of its own: on
 # the old types its list is nil) does the runner's part.
 
 proc makeCandidate(scene: ExportedScene) {.noinline.} =
   ## Takes a reference and gives it back while the registry still holds one:
   ## on a cyclic type, that makes the object a cycle candidate of THIS thread.
   var held = scene
+  held = nil
+
+proc makeNodeCandidate(node: DiagramNode) {.noinline.} =
+  var held = node
+  held = nil
+
+proc makeEdgeCandidate(edge: DiagramEdge) {.noinline.} =
+  var held = edge
   held = nil
 
 proc mainThreadGeneration() {.noinline.} =
@@ -33,10 +42,24 @@ proc mainThreadGeneration() {.noinline.} =
       publicStateFields: @[StateField(name: "a", label: "A", fieldType: "string", value: %"x")],
       persistedStateKeys: @[],
       apps: %*{},
+      nodes: @[DiagramNode(id: NodeId(1), nodeType: "event", data: %*{"keyword": "render"}),
+               DiagramNode(id: NodeId(2), nodeType: "app", data: %*{"keyword": "jsxUi"})],
+      edges: @[DiagramEdge(id: NodeId(3), source: NodeId(1), target: NodeId(2), sourceHandle: "next",
+                           targetHandle: "prev", edgeType: "appNodeEdge", data: %*{})],
     )
   updateUploadedScenes(uploaded)
   for id in uploaded.keys:
-    makeCandidate(findExportedScene(id).get())
+    let scene = findExportedScene(id).get()
+    makeCandidate(scene)
+    # What the export holds goes with it: the graph of a scene the main
+    # thread read at boot (155 nodes and edges on a Pi 5) was let go on the
+    # runner at the same reclaim, and crashed it the same way after the
+    # bench's second desktop push (2026-11-25, the release 2026.11.15).
+    let interpreted = ExportedInterpretedScene(scene)
+    for node in interpreted.nodes:
+      makeNodeCandidate(node)
+    for edge in interpreted.edges:
+      makeEdgeCandidate(edge)
 
 proc reloadTwiceAndReclaim() {.thread.} =
   {.cast(gcsafe).}:
@@ -56,3 +79,32 @@ suite "Scene registry across threads":
     # The main thread's own cycle collection finds nothing it may not touch.
     GC_fullCollect()
     check true
+
+  test "the graph an export holds is never a cycle candidate":
+    # The property the crash came from, measured where ORC keeps it: a thread
+    # that takes a reference to a node or an edge and gives it back while
+    # the export still holds one must not file it in its candidates (this
+    # thread's list is `GC_prepareOrc()` long). The main thread filed 155 of
+    # a Pi 5's nodes and edges at boot, the runner freed them at its second
+    # reload, and the runner's list was written at the main thread's places.
+    var holders: seq[ExportedInterpretedScene]
+    for index in 0 ..< 4:
+      holders.add ExportedInterpretedScene(
+        name: "Graph " & $index, apps: %*{},
+        nodes: @[DiagramNode(id: NodeId(index), nodeType: "app", data: %*{"keyword": "jsxUi"})],
+        edges: @[DiagramEdge(id: NodeId(index + 10), source: NodeId(index), target: NodeId(index),
+                             edgeType: "appNodeEdge", data: %*{})],
+      )
+    var copies: seq[DiagramNode]
+    var edgeCopies: seq[DiagramEdge]
+    for holder in holders:
+      copies.add holder.nodes[0]      # a copy, as a scene's graph is copied
+      edgeCopies.add holder.edges[0]  # while a generation is built
+    GC_fullCollect()
+    let before = GC_prepareOrc()
+    for holder in holders:
+      makeNodeCandidate(holder.nodes[0])
+      makeEdgeCandidate(holder.edges[0])
+    copies.setLen(0)
+    edgeCopies.setLen(0)
+    check GC_prepareOrc() == before

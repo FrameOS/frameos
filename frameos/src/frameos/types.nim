@@ -620,14 +620,19 @@ type
     fullScreenSetting*: bool ## see FrameScene.fullScreenSetting
     backgroundColorKey*: string ## see FrameScene.backgroundColorKey
 
-  # Imported node from scenes.json
-  DiagramNode* = ref object of RootObj
+  # Imported node from scenes.json. Acyclic like the export that holds it
+  # (ExportedScene, above): an inheritable ref is a cycle candidate unless it
+  # says otherwise, and a Pi 5's main thread filed 155 nodes and edges of the
+  # scenes it read at boot, which the runner freed at its second reload and
+  # took out of its OWN list at the main thread's places: SIGSEGV a quarter
+  # second after the bench's second desktop push (2026-11-25, 2026.11.15).
+  DiagramNode* {.acyclic.} = ref object of RootObj
     id*: NodeId
     data*: JsonNode
     nodeType*: string
 
-  # Imported edge from scenes.json
-  DiagramEdge* = ref object of RootObj
+  # Imported edge from scenes.json (acyclic: see DiagramNode)
+  DiagramEdge* {.acyclic.} = ref object of RootObj
     id*: NodeId
     source*: NodeId
     sourceHandle*: string
