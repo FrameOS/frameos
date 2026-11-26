@@ -454,11 +454,14 @@ EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_GPIO_BUTTONS = [
     {"pin": 18, "label": "OK"},
 ]
 # BOOT works like the Indicator's key (pressed the screen off and on, pressed
-# twice the scene switcher), the crown held talks, the edges swipe.
-# fos_board.c's CROWPANEL_WATCH_KEYS + ONE_KEY_VOICE("OK") is the device copy.
+# twice the scene switcher), the power key is HOME and opens the scene switcher
+# (the firmware's own presses, fos_board_toggle_key), the crown held talks, the
+# edges swipe. fos_board.c's CROWPANEL_WATCH_KEYS + CROWPANEL_WATCH_HOME +
+# ONE_KEY_VOICE("OK") is the device copy.
 EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP = [
     {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
     {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
     {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
     *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]

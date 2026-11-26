@@ -471,6 +471,9 @@ static void test_crowpanel_boards(void)
     CHECK(fos_board_rails(NULL) == NULL, "no preset, no rails");
     int a = 0, b = 0;
     CHECK(fos_board_encoder_pins(watch, &a, &b) && a == 19 && b == 20, "the crown on 19/20 (reversed on the bench)");
+    CHECK(fos_board_toggle_key(watch) == 14, "the power key flips GPIO14");
+    CHECK(fos_board_toggle_key("elecrow_crowpanel_rotary_1in46") == -1 && fos_board_toggle_key(NULL) == -1,
+          "no toggle key elsewhere");
     CHECK(!fos_board_encoder_pins("elecrow_crowpanel_5in79", &a, &b) && a == -1 && b == -1, "no crown elsewhere");
     CHECK(strcmp(fos_board_touch_pins(watch), "sda=4,scl=3,int=2,rst=5,en=-1") == 0, "touch pins");
     CHECK(fos_board_touch_mirror(watch) == 0, "the glass as mounted");
@@ -488,6 +491,8 @@ static void test_crowpanel_boards(void)
           "BOOT pressed toggles the screen");
     CHECK(strstr(map, "\"label\":\"OK\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
           "the crown held talks");
+    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"press\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "the power key opens the switcher");
     CHECK(strstr(map, "\"edgeSwipe\"") != NULL && map[strlen(map) - 1] == ']', "the edges swipe");
 
     const char *rotary = "elecrow_crowpanel_rotary_1in46";

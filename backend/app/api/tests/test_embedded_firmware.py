@@ -818,12 +818,14 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_watch_2in01():
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     # BOOT and the crown's press; its turns are the firmware's own presses.
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (18, "OK")]
-    assert frame.event_map[:3] == [
+    # The power key is HOME: the firmware's own presses (fos_board_toggle_key).
+    assert frame.event_map[:4] == [
         {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
         {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
     ]
-    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    assert [rule["event"] for rule in frame.event_map[4:]] == ["edgeSwipe"] * 4
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["panel"] == "LCD_GC9309_240x296"
     assert settings["gpio_buttons"] == "0:BOOT,18:OK"

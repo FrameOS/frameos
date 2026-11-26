@@ -169,8 +169,12 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 #define AMOLED_175_KEYS ONE_BUTTON_TOGGLE("PWR")
 /* The Elecrow CrowPanel 2.01" watch: BOOT works like the Indicator's key, the
  * crown's knob turns the keys' ring (NEXT / PREV, fos_buttons.c) and its
- * press is Enter (OK), and held it talks; the edges swipe. */
+ * press is Enter (OK), and held it talks; the edges swipe. Its power key is
+ * HOME (fos_board_toggle_key) and opens the scene switcher. */
 #define CROWPANEL_WATCH_KEYS ONE_BUTTON_TOGGLE("BOOT")
+#define CROWPANEL_WATCH_HOME \
+    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
 /* The Elecrow CrowPanel 5.79": HOME, EXIT and a rocker that tilts NEXT and
  * PREV and presses OK. With the picture turned to its keys, HOME (GPIO2) is
  * the top key and opens the scene's settings, EXIT (GPIO1) the bottom one
@@ -210,7 +214,7 @@ static const struct {
      * GPIO0, is the glass's R4 data line), so the edges are the whole map. */
     {"guition_esp32_4848s040", "", NULL, true},
     {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
-    {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS, ONE_KEY_VOICE("OK"), true},
+    {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS "," CROWPANEL_WATCH_HOME, ONE_KEY_VOICE("OK"), true},
     /* The CrowPanel 1.46" rotary: the watch's keys (BOOT, the knob pressed
      * OK and turned NEXT / PREV) and no microphone; the edges swipe. */
     {"elecrow_crowpanel_rotary_1in46", CROWPANEL_WATCH_KEYS, NULL, true},
@@ -373,13 +377,15 @@ static const fos_board_rail_t k_rotary_1in46_rails[] = {{1, 1}, {-1, 0}};
  * walked the ring backwards, the bench 2026-11-26); the 1.46" rotary's
  * Elecrow labels the other way round (their A GPIO45, B GPIO42), and turned
  * that way NEXT and PREV came out reversed (the bench, 2026-11-26). */
+/* The watch's power key (SW3) is its STC8G1K08 power chip's, which flips
+ * GPIO14 (Elecrow's LCD_POWER_DET) while the key is down: the toggle key. */
 static const struct {
     const char *preset;
     const fos_board_rail_t *rails;
-    int8_t a, b;
+    int8_t a, b, toggle;
 } k_elecrow_rounds[] = {
-    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 19, 20},
-    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 42, 45},
+    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 19, 20, 14},
+    {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 42, 45, -1},
 };
 
 static int elecrow_round(const char *hardware_preset)
@@ -425,6 +431,12 @@ bool fos_board_encoder_pins(const char *hardware_preset, int *a, int *b)
     *a = i < 0 ? -1 : k_elecrow_rounds[i].a;
     *b = i < 0 ? -1 : k_elecrow_rounds[i].b;
     return i >= 0;
+}
+
+int fos_board_toggle_key(const char *hardware_preset)
+{
+    int i = elecrow_round(hardware_preset);
+    return i < 0 ? -1 : k_elecrow_rounds[i].toggle;
 }
 
 size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out, size_t max)
