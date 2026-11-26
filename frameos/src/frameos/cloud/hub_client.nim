@@ -325,13 +325,18 @@ proc persistScenesChecksum(checksum: string) {.gcsafe.} =
       state["scenes_checksum"] = %checksum
       saveCloudLinkState(state)
 
-proc persistProviderScopes*(scopes: seq[string]): bool {.gcsafe.} =
+proc persistProviderScopes*(scopes: seq[string], accessToken: string): bool {.gcsafe.} =
   ## Union the scopes the provider announced in its `ready` message into the
   ## link state. Additive on purpose (removals arrive as a fresh enroll or a
   ## link reset, never silently): older enroll responses under-reported the
   ## grant as just frame:managed, so this is how an already-enrolled frame
   ## learns it may send telemetry. Returns true when anything changed; the
   ## save bumps the link generation, which the session loop already watches.
+  ##
+  ## Only into the link the session was opened for (`accessToken`, still
+  ## managed): a `ready` that lands after the local admin unlinked the frame
+  ## mid-handshake adds nothing, where it used to write the provider's scopes
+  ## into the disconnected link file.
   ##
   ## Only the scopes this frame takes from a provider
   ## (link_state.scopesTakenFromProvider): what its local admin asked for
@@ -344,6 +349,8 @@ proc persistProviderScopes*(scopes: seq[string]): bool {.gcsafe.} =
     var refused: seq[string]
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
+      if not isManagedLink(state) or state{"access_token"}.getStr("") != accessToken:
+        return false
       let existing = state{"scope"}.getStr("")
       let taken = scopesTakenFromProvider(state, scopes, managed = true)
       for scope in scopes:
@@ -2130,17 +2137,22 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
     # finally learn they may push telemetry. The generation-watch below picks
     # up the persisted change; the in-memory flags update here so the very
     # first session already forwards logs.
+    #
+    # `generation` stays the one this session was dialed on: the watch's
+    # first pass re-reads the link, and so ends the session if the frame was
+    # unlinked during the handshake. Taking the generation read here made a
+    # session opened just before an unlink adopt the unlinked state's
+    # generation and stay connected (test_hub_session, 2026-11-26).
     let readyScopes = ready{"scopes"}
     if readyScopes != nil and readyScopes.kind == JArray:
       var announced: seq[string] = @[]
       for scope in readyScopes:
         if scope.kind == JString and scope.getStr("").len > 0:
           announced.add(scope.getStr(""))
-      if persistProviderScopes(announced):
+      if persistProviderScopes(announced, link.accessToken):
         # Re-read rather than add the announced scopes as they are: the
         # local telemetry switch may hold some of them back.
         let merged = snapshotLink()
-        generation = merged.generation
         ctx.scopes = merged.scopes
         logsGranted = "telemetry:logs" in ctx.scopes
         metricsGranted = "telemetry:metrics" in ctx.scopes

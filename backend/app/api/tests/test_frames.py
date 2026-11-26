@@ -1231,14 +1231,28 @@ async def test_api_frame_states_response_does_not_wait_for_refresh(async_client,
 
     started = asyncio.Event()
     release = asyncio.Event()
+    loaded = asyncio.Event()
 
     async def slow_load_states(_redis, _frame):
         started.set()
         await release.wait()
+        loaded.set()
         return fresh_state
 
+    async def cache_refreshed():
+        while True:
+            refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
+            if refreshed and refreshed["states"] == fresh_state["states"]:
+                return
+            await asyncio.sleep(0.02)
+
+    # The load cannot finish before `release`, which is set only once the
+    # response is in, so a route that waited for the refresh would never
+    # answer. The timeouts turn such a hang into a failure; they are not a
+    # latency budget (0.5 s was one, and a loaded CI runner missed it).
     with patch("app.api.frames._load_frame_states", new=AsyncMock(side_effect=slow_load_states)) as load_states:
-        response = await asyncio.wait_for(async_client.get(f'/api/frames/{frame.id}/states'), timeout=0.5)
+        response = await asyncio.wait_for(async_client.get(f'/api/frames/{frame.id}/states'), timeout=10)
+        assert not loaded.is_set()
 
         assert response.status_code == 200
         payload = response.json()
@@ -1247,16 +1261,13 @@ async def test_api_frame_states_response_does_not_wait_for_refresh(async_client,
         assert payload["cache"]["cached"] is False
         assert payload["cache"]["refreshing"] is True
 
-        await asyncio.wait_for(started.wait(), timeout=0.5)
+        await asyncio.wait_for(started.wait(), timeout=10)
         load_states.assert_awaited_once()
         release.set()
 
-        for _ in range(10):
-            refreshed = await frames_api._read_frame_states_cache(redis, cache_key)
-            if refreshed and refreshed["states"] == fresh_state["states"]:
-                break
-            await asyncio.sleep(0.05)
-        else:
+        try:
+            await asyncio.wait_for(cache_refreshed(), timeout=10)
+        except TimeoutError:
             pytest.fail("states cache was not refreshed after the response returned")
 
 
