@@ -73,8 +73,43 @@
           "description": "A built-in app the scene's program runs itself, as JavaScript (frameos/scene_compiler.nim `ProgramApps`): no Nim app on a frame",
           "type": "boolean"
         },
+        "services": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "fields": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "secret": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["name"],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "description": "Services the registry (repo/services.json) does not know, defined by the app: title and fields.",
+          "type": "object"
+        },
         "settings": {
-          "description": "List of top level settings exported for this app",
+          "description": "The services (settings namespaces) this app reads keys of: docs/service-keys.md",
           "items": {
             "type": "string"
           },

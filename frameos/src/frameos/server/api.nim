@@ -11,6 +11,7 @@ import httpcore
 import assets/apps as appsAsset
 import drivers/drivers as drivers
 import frameos/apps
+import frameos/service_keys
 import frameos/channels
 import frameos/local_access
 import frameos/types
@@ -192,16 +193,17 @@ proc writeTextFileAtomically(path: string, body: string) =
 var frameConfigWriteLock*: Lock
 initLock(frameConfigWriteLock)
 
-const frameAdminEditableSettingsFields = [
-  ("frameOS", "apiKey"),
-  ("openAI", "apiKey"),
-  ("homeAssistant", "url"),
-  ("homeAssistant", "accessToken"),
-  ("github", "api_key"),
-  ("immich", "url"),
-  ("immich", "apiKey"),
-  ("unsplash", "accessKey"),
-]
+proc serviceStringFields(group: JsonNode): seq[tuple[field: string, value: JsonNode]] =
+  ## A settings group's string fields with a field's name: what the admin
+  ## page edits (docs/service-keys.md). Any service id is a group; no list of
+  ## vendors here. A `backend…` field is a plane's own key kept in a vendor's
+  ## group (`openAI.backendApiKey`, which older backends wrote to frame.json):
+  ## never the frame's to show.
+  if group == nil or group.kind != JObject:
+    return
+  for field, value in group.pairs:
+    if isFieldName(field) and value.kind == JString and not field.startsWith("backend"):
+      result.add((field, value))
 
 proc frameAdminSettingsSource(configJson: JsonNode): JsonNode =
   ## frame.json's `settings`, and only frame.json's: this runs on the HTTP
@@ -229,12 +231,13 @@ proc frameAdminEditableSettingsPayload*(settings: JsonNode = nil): JsonNode =
     else:
       frameAdminSettingsSource(loadConfigJson())
   result = %*{}
-  for (section, field) in frameAdminEditableSettingsFields:
-    let sectionNode = source{section}
-    if sectionNode != nil and sectionNode.kind == JObject and sectionNode.hasKey(field):
-      if result{section} == nil or result{section}.kind != JObject:
+  for section, group in source.pairs:
+    if not isServiceId(section):
+      continue
+    for (field, value) in serviceStringFields(group):
+      if result{section} == nil:
         result[section] = %*{}
-      result[section][field] = copy(sectionNode[field])
+      result[section][field] = copy(value)
 
 proc persistFrameAdminSettingsUpdate*(payload: JsonNode): JsonNode =
   if payload == nil or payload.kind != JObject:
@@ -251,16 +254,43 @@ proc persistFrameAdminSettingsUpdate*(payload: JsonNode): JsonNode =
       configJson = %*{}
 
     settings = frameAdminSettingsSource(configJson)
-    for (section, field) in frameAdminEditableSettingsFields:
-      let sectionPayload = payload{section}
-      if sectionPayload != nil and sectionPayload.kind == JObject and sectionPayload.hasKey(field):
+    for section, sectionPayload in payload.pairs:
+      if not isServiceId(section):
+        continue
+      if sectionPayload.kind == JNull:
+        # A group the plane no longer sends (frame_sync's push), or one the
+        # admin cleared: gone.
+        if settings.hasKey(section):
+          settings.delete(section)
+        continue
+      for (field, value) in serviceStringFields(sectionPayload):
         if settings{section} == nil or settings{section}.kind != JObject:
           settings[section] = %*{}
-        settings[section][field] = copy(sectionPayload[field])
+        settings[section][field] = copy(value)
+
+    # Which scene gets which key (docs/service-keys.md): an object replaces
+    # it, `null` takes it away, absent leaves it.
+    var keysChanged = false
+    var keys: JsonNode = nil
+    if payload.hasKey("serviceKeys"):
+      let incoming = payload["serviceKeys"]
+      keys = if incoming.kind == JObject: copy(incoming) else: nil
+      keysChanged = configJson{"serviceKeys"} != keys
+      if keys == nil:
+        if configJson.hasKey("serviceKeys"): configJson.delete("serviceKeys")
+      else:
+        configJson["serviceKeys"] = keys
 
     configJson["settings"] = settings
     writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
     publishLiveSettings(settings)
+    if keysChanged:
+      proc fresh(): JsonNode = (if keys == nil: nil else: copy(keys))
+      if globalFrameConfig != nil:
+        replaceFrameConfigServiceKeys(globalFrameConfig, fresh())
+      if globalFrameOS != nil and globalFrameOS.frameConfig != nil and
+          cast[pointer](globalFrameOS.frameConfig) != cast[pointer](globalFrameConfig):
+        replaceFrameConfigServiceKeys(globalFrameOS.frameConfig, fresh())
 
   frameAdminEditableSettingsPayload(settings)
 
@@ -501,48 +531,19 @@ proc persistScenesPayload*(scenes: JsonNode) =
   let body = if target.compressed: compress(prettyScenes, dataFormat = dfGzip) else: prettyScenes
   writeTextFileAtomically(target.path, body)
 
-# The settings groups a cloud provider owns on a cloud-managed frame
-# (docs/cloud-frames.md, "Service settings"): exactly the sections of
-# frameAdminEditableSettingsFields, which the static block below pins. Every
-# other settings key stays under local control and is never touched by a cloud
-# service-settings pull.
-const frameCloudServiceSettingsGroups* = [
-  "frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash",
-]
-
-static:
-  for (section, _) in frameAdminEditableSettingsFields:
-    doAssert section in frameCloudServiceSettingsGroups,
-      "frameCloudServiceSettingsGroups is out of sync with " &
-      "frameAdminEditableSettingsFields: " & section
-
-proc cloudServiceSettingsGroup(group: string, payload: JsonNode): JsonNode =
-  ## One group as the device will store it: only the fields this frame knows
-  ## for that group, only non-empty strings. nil when nothing usable is left —
-  ## the caller then deletes the group, exactly as it treats an absent one
-  ## (the provider omits empty values for the same reason).
-  if payload == nil or payload.kind != JObject:
-    return nil
-  var fields = newJObject()
-  for (section, field) in frameAdminEditableSettingsFields:
-    if section != group:
-      continue
-    let value = payload{field}
-    if value != nil and value.kind == JString and value.getStr("").len > 0:
-      fields[field] = %value.getStr("")
-  if fields.len == 0: nil else: fields
-
-proc persistCloudServiceSettingsUpdate*(settings: JsonNode): bool {.discardable.} =
-  ## Applies one cloud service-settings pull (docs/cloud-frames.md) to
+proc persistCloudServiceSettingsUpdate*(payload: JsonNode): bool {.discardable.} =
+  ## Applies one cloud service-settings pull (docs/service-keys.md) to
   ## frame.json and to the live config, and reports whether anything changed.
   ##
-  ## `settings` is the pull's `settings` object (group → field → value). The six
-  ## groups above are cloud-owned: each one present is REPLACED wholesale and
-  ## each one absent is DELETED — revoking a key in the provider account, or
-  ## dropping the last scene that used it, has to take the key off the device.
-  ## `nil` (or a non-object) clears all six, which is what the provider's
-  ## `403 insufficient_scope` means. Nothing else in `settings`, and nothing
-  ## else in frame.json, is read or written.
+  ## `payload` is the pull's body (`{settings, serviceKeys, groups}`), or a
+  ## bare `settings` object. What the plane owns is REPLACED: each group it
+  ## sends replaces the frame's copy, and each it sent last time
+  ## (`serviceSettingsOwned` in frame.json), or one of the legacy six, that
+  ## it no longer sends is DELETED — revoking a key in the provider account,
+  ## or dropping the last scene that used it, has to take the key off the
+  ## device. `serviceKeys` is replaced whole, and goes with a pull that has
+  ## none. `nil` (or a non-object) clears it all, which is what the
+  ## provider's `403 insufficient_scope` means. Other settings stay.
   withLock frameConfigWriteLock:
     let configPath = getConfigFilename()
     var configJson = loadConfigJson()
@@ -552,12 +553,19 @@ proc persistCloudServiceSettingsUpdate*(settings: JsonNode): bool {.discardable.
     if current == nil or current.kind != JObject:
       current = %*{}
 
-    let incoming = if settings != nil and settings.kind == JObject: settings else: nil
+    let pull = servicePull(payload)
+    var owned: seq[string] = @LegacyPlaneServiceGroups
+    let before = configJson{"serviceSettingsOwned"}
+    if before != nil and before.kind == JArray:
+      for group in before.elems:
+        if group.kind == JString and isServiceId(group.getStr()) and group.getStr() notin owned:
+          owned.add group.getStr()
+    for group in pull.owned:
+      if group notin owned:
+        owned.add group
     var changed = false
-    for group in frameCloudServiceSettingsGroups:
-      let desired =
-        if incoming == nil: nil
-        else: cloudServiceSettingsGroup(group, incoming{group})
+    for group in owned:
+      let desired = if pull.settings == nil: nil else: deliveredServiceGroup(pull.settings{group})
       let existing = current{group}
       if desired == nil:
         if existing != nil:
@@ -566,12 +574,35 @@ proc persistCloudServiceSettingsUpdate*(settings: JsonNode): bool {.discardable.
       elif existing == nil or existing.kind != JObject or existing != desired:
         current[group] = desired
         changed = true
-    if not changed:
+    let ownedNow = %pull.owned
+    if configJson{"serviceSettingsOwned"} != ownedNow:
+      configJson["serviceSettingsOwned"] = ownedNow
+    let keysBefore = configJson{"serviceKeys"}
+    let keysChanged = (if pull.serviceKeys == nil: keysBefore != nil else: keysBefore != pull.serviceKeys)
+    if keysChanged:
+      if pull.serviceKeys == nil: configJson.delete("serviceKeys")
+      else: configJson["serviceKeys"] = copy(pull.serviceKeys)
+    if not changed and not keysChanged:
+      # A group listed with no value yet is kept in the owned list for the
+      # next pull; nothing for the scenes to reload.
+      var newlyOwned = false
+      for group in pull.owned:
+        if group notin LegacyPlaneServiceGroups and (before == nil or before.kind != JArray or %group notin before.elems):
+          newlyOwned = true
+      if newlyOwned:
+        writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
       return false
 
     configJson["settings"] = current
     writeTextFileAtomically(configPath, pretty(configJson, indent = 4) & "\n")
     publishLiveSettings(current)
+    if keysChanged:
+      proc fresh(): JsonNode = (if pull.serviceKeys == nil: nil else: copy(pull.serviceKeys))
+      if globalFrameConfig != nil:
+        replaceFrameConfigServiceKeys(globalFrameConfig, fresh())
+      if globalFrameOS != nil and globalFrameOS.frameConfig != nil and
+          cast[pointer](globalFrameOS.frameConfig) != cast[pointer](globalFrameConfig):
+        replaceFrameConfigServiceKeys(globalFrameOS.frameConfig, fresh())
     result = true
 
 proc configuredServerAddress(config: JsonNode): tuple[host: string, port: int, scheme: string] =

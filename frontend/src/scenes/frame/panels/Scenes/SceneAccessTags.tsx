@@ -1,6 +1,9 @@
 import clsx from 'clsx'
+import { useValues } from 'kea'
+import type { FrameId } from '../../../../types'
+import { sceneKeysLogic } from './sceneKeysLogic'
 import { Tag } from '../../../../components/Tag'
-import { SceneAccessFlag, sceneAccessTags, type SceneAccessTag } from '../../../../utils/sceneAccess'
+import { SceneAccessFlag, keyFlagNamespace, sceneAccessTags, type SceneAccessTag } from '../../../../utils/sceneAccess'
 
 interface SceneAccessTagsProps {
   /** From sceneAccessFlags / templateAccessFlags (utils/sceneAccess.ts), in display order. */
@@ -8,6 +11,14 @@ interface SceneAccessTagsProps {
   className?: string
   /** Applied to every chip, for tight rows. */
   tagClassName?: string
+  /** An installed scene's key choices, service → what the tag adds ("Work", "not given"): docs/service-keys.md. */
+  keyChoices?: Record<string, string>
+}
+
+function tagLabel(tag: SceneAccessTag, keyChoices: Record<string, string> | undefined): string {
+  const service = tag.flags.length === 1 ? keyFlagNamespace(tag.flags[0]) : null
+  const choice = service !== null ? keyChoices?.[service] : undefined
+  return choice ? `${tag.label}: ${choice}` : tag.label
 }
 
 // Red for what reaches past the scene's own reading of your photos (shell
@@ -25,7 +36,12 @@ function tagColor(tag: SceneAccessTag): 'red' | 'orange' | 'gray' {
  * own JSON (or the store's flags for a catalog entry), so they say the same
  * thing wherever the scene shows up.
  */
-export function SceneAccessTags({ flags, className, tagClassName }: SceneAccessTagsProps): JSX.Element | null {
+export function SceneAccessTags({
+  flags,
+  className,
+  tagClassName,
+  keyChoices,
+}: SceneAccessTagsProps): JSX.Element | null {
   if (flags.length === 0) {
     return null
   }
@@ -38,9 +54,19 @@ export function SceneAccessTags({ flags, className, tagClassName }: SceneAccessT
           title={tag.description}
           className={clsx('whitespace-nowrap normal-case', tagClassName)}
         >
-          {tag.label}
+          {tagLabel(tag, keyChoices)}
         </Tag>
       ))}
     </span>
   )
+}
+
+/** An installed scene's tags, each key tag saying which key the install gets ("uses OpenAI key: Work"). */
+export function InstalledSceneAccessTags({
+  frameId,
+  sceneId,
+  ...props
+}: SceneAccessTagsProps & { frameId: FrameId; sceneId: string }): JSX.Element | null {
+  const { keyChoiceLabels } = useValues(sceneKeysLogic({ frameId, sceneId }))
+  return <SceneAccessTags {...props} keyChoices={keyChoiceLabels} />
 }

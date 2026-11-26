@@ -27,6 +27,33 @@ function maskSettings(
 ): Record<string, unknown> {
   const masked: Record<string, unknown> = {};
   for (const [group, value] of Object.entries(settings)) {
+    // The named keys (docs/service-keys.md): every value of each is masked
+    // the way the cloud masks a credential it has no rule for.
+    if (group === "serviceCredentials" && value && typeof value === "object" && !Array.isArray(value)) {
+      masked[group] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([id, entry]) => {
+          const values = (entry as { values?: unknown } | null)?.values;
+          if (!entry || typeof entry !== "object" || !values || typeof values !== "object" || Array.isArray(values)) {
+            return [id, entry];
+          }
+          return [
+            id,
+            {
+              ...(entry as Record<string, unknown>),
+              values: Object.fromEntries(
+                Object.entries(values as Record<string, unknown>).map(([field, fieldValue]) => [
+                  field,
+                  typeof fieldValue === "string" && fieldValue && !fieldValue.startsWith("•") && field !== "url"
+                    ? maskSecret(fieldValue)
+                    : fieldValue,
+                ]),
+              ),
+            },
+          ];
+        }),
+      );
+      continue;
+    }
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const fields: Record<string, unknown> = {};
       for (const [field, fieldValue] of Object.entries(
@@ -94,7 +121,7 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Account-level service settings that scenes and the AI use: openAI (apiKey, backendApiKey, chatModel, chatReasoningEffort), unsplash.accessKey, homeAssistant (url, accessToken), immich (url, apiKey), github.api_key, frameOS.apiKey, ssh_keys. Secrets are always masked (`••••••••cdef`): the cloud never reveals a stored key to an API token. account_settings_update can replace one.",
+        "Account-level service settings that scenes and the AI use: one group per service holding its default key (openAI: apiKey plus the AI's own backendApiKey, chatModel, chatReasoningEffort; unsplash.accessKey; homeAssistant url + accessToken; immich url + apiKey; github.api_key; frameOS.apiKey; or any other service a scene's apps name), serviceCredentials (the account's further named keys: id → {service, name, values}, which frame_scenes_set / frame_scene_install service_keys can pick per scene), and ssh_keys. Secrets are always masked (`••••••••cdef`): the cloud never reveals a stored key to an API token. account_settings_update can replace a service's default key.",
       inputSchema: {},
     },
     async () =>
@@ -114,11 +141,18 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: false, idempotentHint: true },
       description:
-        "Set account-level service settings. Pass only the groups and fields to change, e.g. {\"openAI\": {\"apiKey\": \"sk-…\"}} or {\"unsplash\": {\"accessKey\": \"…\"}}; other fields in a group are preserved. Cloud-managed frames re-pull the keys automatically.",
+        "Set account-level service settings: a service's default key. Pass only the groups and fields to change, e.g. {\"openAI\": {\"apiKey\": \"sk-…\"}} or {\"unsplash\": {\"accessKey\": \"…\"}}; any service a scene's apps name is a group; other fields in a group are preserved. Cloud-managed frames re-pull the keys automatically.",
       inputSchema: {
         settings: z
-          .record(z.string(), z.record(z.string(), z.string()))
-          .describe("{group: {field: value}} — string values only; an empty string clears a field."),
+          .record(
+            // A settings group is a service id (docs/service-keys.md): the
+            // backend's settings_update takes the same pattern.
+            z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,40}$/),
+            z.record(z.string(), z.string()),
+          )
+          .describe(
+            "{group: {field: value}} — a group is a service id (openAI, unsplash, homeAssistant, … or any other service a scene's apps name); string values only; an empty string clears a field.",
+          ),
       },
     },
     async ({ settings }) =>

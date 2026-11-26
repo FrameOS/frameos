@@ -8,6 +8,7 @@ from typing import Any, Iterable, Literal
 
 from app.models.apps import get_app_configs
 from app.utils.repo_apps import repo_app_configs
+from app.utils.service_keys import service_registry
 
 MAX_DESCRIPTION_LENGTH = 220
 MAX_COMPACT_ITEMS_PER_SECTION = 120
@@ -22,12 +23,16 @@ CORE_CONTEXT_PATHS = {
     "repo/scenes/samples/Split agenda",
 }
 
-SERVICE_SECRET_FIELDS: dict[str, dict[str, Any]] = {
-    "openAI": {"fields": ("apiKey",)},
-    "unsplash": {"fields": ("accessKey",)},
-    "homeAssistant": {"fields": ("accessToken",)},
-    "github": {"fields": ("api_key",), "free_limited_usage": True},
-}
+def _service_secret_fields() -> dict[str, dict[str, Any]]:
+    """Per registered service (repo/services.json, docs/service-keys.md), the
+    secret fields a key needs, and whether it works without one (`optional`)."""
+    return {
+        service_id: {
+            "fields": tuple(field["name"] for field in spec["fields"] if field["secret"]),
+            "free_limited_usage": bool(spec.get("optional")),
+        }
+        for service_id, spec in service_registry().items()
+    }
 
 
 @dataclass(frozen=True)
@@ -64,7 +69,7 @@ def _has_value(value: Any) -> bool:
 
 def missing_service_keys(settings: dict[str, Any]) -> set[str]:
     missing: set[str] = set()
-    for service_key, details in SERVICE_SECRET_FIELDS.items():
+    for service_key, details in _service_secret_fields().items():
         fields = details.get("fields", ())
         service_settings = settings.get(service_key) or {}
         if any(not _has_value(service_settings.get(field)) for field in fields):
@@ -74,7 +79,7 @@ def missing_service_keys(settings: dict[str, Any]) -> set[str]:
 
 def _settings_available(required_settings: list[str], missing_keys: set[str]) -> bool:
     return not any(
-        setting in missing_keys and not SERVICE_SECRET_FIELDS.get(setting, {}).get("free_limited_usage")
+        setting in missing_keys and not _service_secret_fields().get(setting, {}).get("free_limited_usage")
         for setting in required_settings
     )
 

@@ -318,7 +318,12 @@ async def test_push_carries_service_keys_extra_keys_and_explicit_off_states(asyn
         pushed = await push_backend_state_to_device(frame, db, redis, card.fetch)
 
     settings_posts = [entry["__settings__"] for entry in card.posted if "__settings__" in entry]
-    assert settings_posts == [{"openAI": {"apiKey": "sk-test"}, "unsplash": {"accessKey": ""}}]
+    assert len(settings_posts) == 1
+    posted = dict(settings_posts[0])
+    # Each scene's own keys ride along (docs/service-keys.md); a runtime that
+    # does not read them takes the groups.
+    assert posted.pop("serviceKeys")["scenes"] == {"scene-keys": {"openAI": "openAI"}}
+    assert posted == {"openAI": {"apiKey": "sk-test"}, "unsplash": {"accessKey": ""}}
     # Settings land before the config save, whose reload re-reads frame.json.
     assert "__settings__" in card.posted[0]
     saved = next(entry for entry in card.posted if "name" in entry)
@@ -479,3 +484,25 @@ async def test_scene_snapshot_is_pulled_from_the_frame_once(async_client, db, re
             )
             assert missing.status_code == 200
         assert [path for _m, path in card.calls if "scene-9" in path] == ["/api/frames/1/scene_images/scene-9"]
+
+
+@pytest.mark.asyncio
+async def test_push_lets_go_of_a_service_the_registry_does_not_know(async_client, db, redis):
+    """A service no scene uses any more is blanked field by field when the
+    registry knows its fields, and sent as null (deleted by a runtime that
+    reads serviceKeys) when it does not; `serviceKeys` goes the same way."""
+    from app.api.frame_sync import service_settings_push_payload
+
+    card = FakeCard(_card_payload(device="framebuffer"))
+    frame = await _adopt(async_client, db, card)
+    frame.scenes = []
+    frame.last_successful_deploy = {
+        **frame.last_successful_deploy,
+        "settings_fingerprints": {"unsplash": "fp", "acmeWeather": "fp", "serviceKeys": "fp"},
+    }
+    db.commit()
+    assert service_settings_push_payload(frame, db) == {
+        "acmeWeather": None,
+        "unsplash": {"accessKey": ""},
+        "serviceKeys": None,
+    }

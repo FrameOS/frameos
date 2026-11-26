@@ -1,3 +1,4 @@
+import { sceneKeysOf } from './serviceKeys'
 import type { CloudSceneSource, EventMapRule, FrameScene, SceneLayoutRef } from '../types'
 import { cloudSceneHeldVersion, cloudSceneUpdateVersion, type CloudFrameSceneRow } from './cloudFrameScenes'
 import {
@@ -126,6 +127,8 @@ interface AssignmentPlan {
   event_maps?: Record<string, EventMapRule[]> | null | undefined
   /** The layout each runtime scene wears, the same way. */
   layouts?: Record<string, SceneLayoutRef> | null | undefined
+  /** The key each runtime scene gets per service (docs/service-keys.md), the same way. */
+  service_keys?: Record<string, Record<string, string | null>> | null | undefined
 }
 
 // The button maps the form holds for one pack's runtime scenes: what this
@@ -164,6 +167,57 @@ function formLayouts(
     return layouts
   }
   return row?.layouts && Object.keys(row.layouts).length > 0 ? null : undefined
+}
+
+// The key choices, the same way (docs/service-keys.md "Which key a scene
+// gets"): the install's `keys` on each runtime scene of the pack.
+function formServiceKeys(
+  formScenes: readonly Partial<FrameScene>[],
+  row?: Pick<CloudFrameSceneRow, 'service_keys'>
+): Record<string, Record<string, string | null>> | null | undefined {
+  const keys: Record<string, Record<string, string | null>> = {}
+  for (const scene of formScenes) {
+    const bindings = scene?.id ? sceneKeysOf(scene) : {}
+    if (scene?.id && Object.keys(bindings).length > 0) {
+      keys[scene.id] = bindings
+    }
+  }
+  if (Object.keys(keys).length > 0) {
+    return keys
+  }
+  return row?.service_keys && Object.keys(row.service_keys).length > 0 ? null : undefined
+}
+
+/**
+ * The grant a save posts for a pack whose scenes carry key choices: a
+ * service is granted unless every choice for it refuses it, and a service no
+ * choice names keeps the grant it had (`fallback`). The grant stays the
+ * permission the server narrows to what the scene declares; `service_keys`
+ * says which key.
+ */
+function grantWithServiceKeys(
+  fallback: string[] | undefined,
+  serviceKeys: Record<string, Record<string, string | null>> | null | undefined
+): string[] | undefined {
+  if (!serviceKeys) {
+    return fallback
+  }
+  const given = new Set<string>()
+  const refused = new Set<string>()
+  for (const bindings of Object.values(serviceKeys)) {
+    for (const [service, ref] of Object.entries(bindings)) {
+      if (ref === null) {
+        refused.add(service)
+      } else {
+        given.add(service)
+      }
+    }
+  }
+  const grant = new Set((fallback ?? []).filter((service) => !refused.has(service) || given.has(service)))
+  for (const service of given) {
+    grant.add(service)
+  }
+  return [...grant].sort()
 }
 
 // Every save re-posts each kept assignment's grant explicitly, so a row
@@ -210,21 +264,23 @@ function rawSceneUnchanged(stored: FrameScene, form: FrameScene): boolean {
 
 /**
  * The scene without the install's bookkeeping: `origin` (where it came from)
- * `eventMap` (the owner's button map, docs/events.md "Event map") and
- * `layout` (the layout it wears, docs/scene-layouts.md). All three belong to the installed copy and never to a published version: an
+ * `eventMap` (the owner's button map, docs/events.md "Event map"),
+ * `layout` (the layout it wears, docs/scene-layouts.md) and `keys` (which
+ * key of each service it gets, docs/service-keys.md). All four belong to the installed copy and never to a published version: an
  * `eventMap` inside scene content would be an edit on every save and would
  * remap every other install of the scene.
  */
 export function withoutSceneOrigin<T extends Partial<FrameScene>>(scene: T): T {
-  if (!scene || (!('origin' in scene) && !('eventMap' in scene) && !('layout' in scene))) {
+  if (!scene || (!('origin' in scene) && !('eventMap' in scene) && !('layout' in scene) && !('keys' in scene))) {
     return scene
   }
   const {
     origin: _origin,
     eventMap: _eventMap,
     layout: _layout,
+    keys: _keys,
     ...rest
-  } = scene as T & { origin?: unknown; eventMap?: unknown; layout?: unknown }
+  } = scene as T & { origin?: unknown; eventMap?: unknown; layout?: unknown; keys?: unknown }
   return rest as T
 }
 
@@ -361,13 +417,19 @@ async function persistAndPushCloudFrameScenesNow(
       presentIds.map((id) => formById.get(id)!),
       row
     )
+    const service_keys = formServiceKeys(
+      presentIds.map((id) => formById.get(id)!),
+      row
+    )
+    const grant = grantWithServiceKeys(keptGrant(row), service_keys)
     if (!edited) {
       assignments.push({
         scene_id: row.scene_id,
         ...keptVersion(row, options.updateStoreSceneIds, updatedToLatest),
-        settings_groups: keptGrant(row),
+        settings_groups: grant,
         event_maps,
         layouts,
+        service_keys,
       })
       continue
     }
@@ -382,9 +444,10 @@ async function persistAndPushCloudFrameScenesNow(
         // this push that moves, the rest stay at the version the frame holds.
         scene_version: row.scene_version ? (version ?? null) : null,
         latest: true,
-        settings_groups: keptGrant(row),
+        settings_groups: grant,
         event_maps,
         layouts,
+        service_keys,
       })
     } catch (error) {
       // Not ours to edit (public install), name clash, moderation… — fork the
@@ -397,9 +460,10 @@ async function persistAndPushCloudFrameScenesNow(
         // the edited copy still declares (the server intersects).
         assignments.push({
           scene_id: newSceneId,
-          settings_groups: keptGrant(row) ?? grantForNew(updated),
+          settings_groups: grant ?? grantForNew(updated),
           event_maps,
           layouts,
+          service_keys,
         })
         notes.push(`Saved the edited "${name}" as a new private cloud scene`)
       } catch (forkError) {
@@ -408,9 +472,10 @@ async function persistAndPushCloudFrameScenesNow(
         assignments.push({
           scene_id: row.scene_id,
           scene_version: row.scene_version ?? null,
-          settings_groups: keptGrant(row),
+          settings_groups: grant,
           event_maps,
           layouts,
+          service_keys,
         })
       }
     }
@@ -435,11 +500,13 @@ async function persistAndPushCloudFrameScenesNow(
     changedStoreSceneIds.push(newSceneId)
     // A scene the owner built here is granted what its apps declare — that
     // is the owner choosing it, the same consent as picking a template.
+    const service_keys = formServiceKeys([scene])
     assignments.push({
       scene_id: newSceneId,
-      settings_groups: grantForNew([scene]),
+      settings_groups: grantWithServiceKeys(grantForNew([scene]), service_keys),
       event_maps: formEventMaps([scene]),
       layouts: formLayouts([scene]),
+      ...(service_keys ? { service_keys } : {}),
     })
   }
 

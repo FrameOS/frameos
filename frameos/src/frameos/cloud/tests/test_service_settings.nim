@@ -144,7 +144,7 @@ suite "cloud service settings body parsing":
     # every group, not an error.
     let (empty, error) = parseServiceSettingsBody("""{"settings": {}, "groups": []}""")
     check error == ""
-    check empty != nil and empty.len == 0
+    check empty != nil and empty{"settings"}.len == 0
 
   test "the URL is the contract's path with an encoded frame id":
     check serviceSettingsUrl("https://cloud.example.com", "frame-1") ==
@@ -260,25 +260,46 @@ suite "cloud service settings apply":
       check persistCloudServiceSettingsUpdate(nil) == false
     )
 
-  test "unknown fields, empty strings and non-strings never reach frame.json":
+  test "empty strings and non-strings never reach frame.json; any service does":
     withTempConfig(proc(configPath: string) =
       writeConfig(configPath, %*{})
       check persistCloudServiceSettingsUpdate(%*{
-        "unsplash": {"accessKey": "real", "secretKey": "not-deliverable"},
+        "unsplash": {"accessKey": "real", "secretKey": "kept"},
         "openAI": {"apiKey": ""},
         "github": {"api_key": 42},
         "immich": {"url": "http://immich", "apiKey": "k"},
-        "notAGroup": {"whatever": "x"},
+        "acmeWeather": {"apiKey": "x"},
+        "defaults": {"wifiPassword": "never"},
       })
       let settings = readSettings(configPath)
-      check settings{"unsplash"}{"accessKey"}.getStr("") == "real"
-      check settings{"unsplash"}{"secretKey"} == nil
+      check settings{"unsplash"} == %*{"accessKey": "real", "secretKey": "kept"}
       # Empty string means "not configured"; so does a non-string value.
       check settings{"openAI"} == nil
       check settings{"github"} == nil
       check settings{"immich"}{"apiKey"}.getStr("") == "k"
-      # A group outside the six is never created from a pull.
-      check settings{"notAGroup"} == nil
+      # No list of vendors: a service nobody listed arrives like the rest.
+      check settings{"acmeWeather"}{"apiKey"}.getStr("") == "x"
+      # A plane's own group is never a service.
+      check settings{"defaults"} == nil
+    )
+
+  test "a group sent last time goes, and serviceKeys land in frame.json":
+    withTempConfig(proc(configPath: string) =
+      writeConfig(configPath, %*{"local": {"a": "b"}})
+      let keys = %*{"v": 1, "keys": {"acmeWeather": {"service": "acmeWeather", "values": {"apiKey": "x"}}},
+        "scenes": {"weather": {"acmeWeather": "acmeWeather"}}, "services": {}}
+      check persistCloudServiceSettingsUpdate(%*{
+        "settings": {"acmeWeather": {"apiKey": "x"}}, "serviceKeys": keys, "groups": ["acmeWeather"]})
+      var configJson = parseJson(readFile(configPath))
+      check configJson{"serviceKeys"} == keys
+      check configJson{"serviceSettingsOwned"} == %*["acmeWeather"]
+      check globalFrameConfig.serviceKeys == keys
+      check persistCloudServiceSettingsUpdate(%*{"settings": {}, "groups": []})
+      configJson = parseJson(readFile(configPath))
+      check configJson{"settings"}{"acmeWeather"} == nil
+      check configJson{"settings"}{"local"}{"a"}.getStr("") == "b"
+      check configJson{"serviceKeys"} == nil
+      check globalFrameConfig.serviceKeys.isNil
     )
 
   test "the fetch decision and the real apply agree end to end":

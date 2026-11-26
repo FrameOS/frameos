@@ -134,6 +134,68 @@ async def test_settings_mask_posted_back_keeps_the_stored_secret(async_client):
 
 
 @pytest.mark.asyncio
+async def test_settings_take_any_service_and_mask_all_of_an_unknown_one(async_client):
+    """Any service id is a settings group (docs/service-keys.md): every field
+    of one the registry does not know is a secret, and a registered one's
+    fields say so themselves (Home Assistant's URL is not one)."""
+    response = await async_client.post('/api/settings', json={
+        "acmeWeather": {"apiKey": "acme-secret-123456", "region": "eu-west-12345"},
+        "homeAssistant": {"url": "http://ha.local:8123", "accessToken": "token-1234567890"},
+    })
+    assert response.status_code == 200, response.text
+    form = response.json()
+    assert form["acmeWeather"] == {"apiKey": "••••••••3456", "region": "••••••••2345"}
+    assert form["homeAssistant"]["url"] == "http://ha.local:8123"
+    assert form["homeAssistant"]["accessToken"] == "••••••••7890"
+    # The form posts the masks back: the stored values stay.
+    response = await async_client.post('/api/settings', json={"acmeWeather": {**form["acmeWeather"], "region": "us"}})
+    assert response.status_code == 200, response.text
+    stored = (await async_client.get('/api/settings?reveal=1')).json()
+    assert stored["acmeWeather"] == {"apiKey": "acme-secret-123456", "region": "us"}
+
+
+@pytest.mark.asyncio
+async def test_settings_refuse_what_is_no_service_group(async_client):
+    for payload in (
+        {"acmeWeather": {"apiKey": 3}},
+        {"acme-weather": {"apiKey": "x"}},
+        {"k_abcdefgh12": {"apiKey": "x"}},
+        {"acmeWeather": {"bad name": "x"}},
+    ):
+        response = await async_client.post('/api/settings', json=payload)
+        assert response.status_code == 422, (payload, response.text)
+
+
+@pytest.mark.asyncio
+async def test_settings_service_credentials_are_masked_and_kept(async_client):
+    response = await async_client.post('/api/settings', json={"serviceCredentials": {
+        "k_work00000001": {"service": "openAI", "name": "Work", "values": {"apiKey": "sk-work-1234567890"}},
+        "k_cabin0000001": {"service": "homeAssistant", "name": "Cabin", "values": {"url": "https://cabin.example.com", "accessToken": "cabin-token-0000"}},
+        "not-an-id": {"service": "openAI", "values": {"apiKey": "dropped"}},
+    }})
+    assert response.status_code == 200, response.text
+    creds = response.json()["serviceCredentials"]
+    assert set(creds) == {"k_work00000001", "k_cabin0000001"}
+    assert creds["k_work00000001"] == {"service": "openAI", "name": "Work", "values": {"apiKey": "••••••••7890"}}
+    assert creds["k_cabin0000001"]["values"] == {"url": "https://cabin.example.com", "accessToken": "••••••••0000"}
+
+    # Renamed, its mask posted back: the key stays; the other one is removed.
+    response = await async_client.post('/api/settings', json={"serviceCredentials": {
+        "k_work00000001": {**creds["k_work00000001"], "name": "Office"},
+    }})
+    assert response.status_code == 200, response.text
+    stored = (await async_client.get('/api/settings?reveal=1')).json()["serviceCredentials"]
+    assert stored == {"k_work00000001": {"service": "openAI", "name": "Office", "values": {"apiKey": "sk-work-1234567890"}}}
+
+    # A mask moved onto another service's key keeps nothing.
+    response = await async_client.post('/api/settings', json={"serviceCredentials": {
+        "k_work00000001": {"service": "unsplash", "name": "Office", "values": {"accessKey": "••••••••7890"}},
+    }})
+    stored = (await async_client.get('/api/settings?reveal=1')).json()["serviceCredentials"]
+    assert stored["k_work00000001"]["values"] == {}
+
+
+@pytest.mark.asyncio
 async def test_settings_ssh_private_keys_are_masked_and_kept(async_client):
     keys = [
         {"id": "k1", "name": "one", "private": "-----BEGIN PRIVATE KEY----- one", "public": "ssh-ed25519 AAAA one"},

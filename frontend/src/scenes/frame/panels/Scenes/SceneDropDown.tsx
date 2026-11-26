@@ -13,6 +13,7 @@ import {
   CursorArrowRippleIcon,
   DocumentDuplicateIcon,
   FolderPlusIcon,
+  KeyIcon,
   TagIcon,
 } from '@heroicons/react/24/outline'
 import { templatesLogic } from '../Templates/templatesLogic'
@@ -22,6 +23,8 @@ import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
 import { ButtonMapModal } from './ButtonMapModal'
 import { buttonMapLogic } from './buttonMapLogic'
+import { SceneKeysModal } from './SceneKeysModal'
+import { sceneKeysLogic } from './sceneKeysLogic'
 import { sceneLayoutLogic } from './sceneLayoutLogic'
 import { SceneLayoutSettingsModal } from './SceneLayoutSettingsModal'
 
@@ -42,10 +45,12 @@ export function SceneDropDown(props: SceneDropDownProps) {
   const { frameId } = useValues(frameLogic)
   const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId, sceneId: props.sceneId }))
   const { settingsOpen: layoutSettingsOpen } = useValues(sceneLayoutLogic({ frameId, sceneId: props.sceneId }))
+  const { isOpen: sceneKeysOpen } = useValues(sceneKeysLogic({ frameId, sceneId: props.sceneId }))
   return (
     <>
       <SceneDropDownMenu {...props} />
       {buttonMapOpen ? <ButtonMapModal frameId={frameId} sceneId={props.sceneId} /> : null}
+      {sceneKeysOpen ? <SceneKeysModal frameId={frameId} sceneId={props.sceneId} /> : null}
       {layoutSettingsOpen ? <SceneLayoutSettingsModal frameId={frameId} sceneId={props.sceneId} /> : null}
     </>
   )
@@ -60,6 +65,8 @@ function SceneDropDownMenu({ sceneId, className, horizontal, buttonColor }: Scen
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
   const { hasDriveScope } = useValues(cloudDriveLogic)
   const { openButtonMap } = useActions(buttonMapLogic({ frameId, sceneId }))
+  const { rows: keyRows } = useValues(sceneKeysLogic({ frameId, sceneId }))
+  const { openSceneKeys } = useActions(sceneKeysLogic({ frameId, sceneId }))
   const { current: currentLayout } = useValues(sceneLayoutLogic({ frameId, sceneId }))
   const { openLayoutSettings } = useActions(sceneLayoutLogic({ frameId, sceneId }))
   const scene = scenes.find((s) => s.id === sceneId)
@@ -102,6 +109,14 @@ function SceneDropDownMenu({ sceneId, className, horizontal, buttonColor }: Scen
           onClick: () => openButtonMap(),
           icon: <CursorArrowRippleIcon className="w-5 h-5" />,
         },
+        keyRows.length > 0
+          ? {
+              // Which key of each service this install gets (docs/service-keys.md).
+              label: 'Keys',
+              onClick: () => openSceneKeys(),
+              icon: <KeyIcon className="w-5 h-5" />,
+            }
+          : null,
         currentLayout
           ? {
               // The chosen layout's fields, for this install (docs/scene-layouts.md).

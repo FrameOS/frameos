@@ -53,6 +53,7 @@ from .embedded_device import (
     SPECTRA6_PALETTE,
     _active_scene_id,
     embedded_diagnostic_image,
+    embedded_service_keys_payload,
     embedded_settings_payload,
     next_render_seconds,
 )
@@ -336,6 +337,7 @@ async def _virtual_frame_render(
         height,
         scene_id=scene_id_override or await _active_scene_id(redis, frame),
         settings=embedded_settings_payload(db, frame),
+        service_keys=embedded_service_keys_payload(db, frame),
         scenes_override=scenes_override,
         scene_states=scene_states,
         assets_dir=str(assets_dir),

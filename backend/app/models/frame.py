@@ -21,6 +21,7 @@ from app.drivers.devices import (
 )
 from app.models.apps import get_app_configs
 from app.utils.retired_apps import retired_app_config
+from app.utils.service_keys import DEFAULT_KEY_REF, app_service_definitions, build_service_keys_wire, is_service_id
 from app.models.settings import get_settings_dict
 from app.utils.events_contract_gen import BUTTON_ROLES, DEFAULT_KEYBOARD_LAYOUT, KEYBOARD_LAYOUTS
 from app.utils.render_scale import normalize_render_scale
@@ -619,7 +620,9 @@ class Frame(Base):
             session = object_session(self)
             if session is not None:
                 result['settings_fingerprints'] = shipped_settings_fingerprints(
-                    shipped_frame_settings(self, get_settings_dict(session, project_id=self.project_id), cached_app_configs())
+                    shipped_settings_fingerprint_source(
+                        self, get_settings_dict(session, project_id=self.project_id), cached_app_configs()
+                    )
                 )
         except Exception:  # noqa: BLE001 — the baseline must never break serialisation
             pass
@@ -974,44 +977,74 @@ def scene_declared_setting_groups(scene: Any, app_configs: dict) -> set[str]:
     return declared
 
 
-# The service settings groups a scene's apps can be granted: the six every
-# runtime knows (CloudServiceSettingsGroups in frameos/src/frameos/apps.nim,
-# the SPA's settingsDetails, which its install grants from).
-SERVICE_SETTING_GROUPS = ("frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash")
+def scene_app_service_definitions(scene: Any) -> dict[str, dict[str, Any]]:
+    """The services a scene's own apps define for themselves (config.json
+    `services`, docs/service-keys.md "A service the registry does not know"):
+    the labels a frame's Keys page and the settings form draw."""
+    definitions: dict[str, dict[str, Any]] = {}
+    if not isinstance(scene, dict):
+        return definitions
+    sources_list = []
+    for app in (scene.get('apps') or {}).values() if isinstance(scene.get('apps'), dict) else []:
+        if isinstance(app, dict) and isinstance(app.get('sources'), dict):
+            sources_list.append(app['sources'])
+    for node in scene.get('nodes', []) or []:
+        data = node.get('data') if isinstance(node, dict) else None
+        if isinstance(data, dict) and isinstance(data.get('sources'), dict):
+            sources_list.append(data['sources'])
+    for sources in sources_list:
+        try:
+            config = json.loads(sources.get('config.json', '{}'))
+        except (TypeError, ValueError):
+            continue
+        for service_id, definition in app_service_definitions(config).items():
+            definitions.setdefault(service_id, definition)
+    return definitions
 
 
 def grant_store_scene_setting_groups(frame: "Frame", scenes: list, app_configs: Optional[dict] = None) -> list[str]:
-    """Grant the frame (``service_setting_groups``) the service groups the
-    store-origin scenes among ``scenes`` declare, as installing them from the
-    store does; returns the groups newly granted. For the scenes an adoption
-    takes over with the frame: the owner adopted it, at the frame, with the
-    code it showed, and a scene of the owner's own gets what it declares
-    without a grant. Only the six service groups, whatever a scene declares."""
+    """Bind the store-origin scenes among ``scenes`` to the default key of
+    each service they declare (their install's `keys`, docs/service-keys.md),
+    as installing them from the store does; returns the services newly bound.
+    For the scenes an adoption takes over with the frame: the owner adopted
+    it, at the frame, with the code it showed, and a scene of the owner's own
+    gets what it declares without a binding. A service the install already
+    binds (or refuses) is left as it is. Writes the bindings onto the matching
+    entries of ``frame.scenes``."""
     app_configs = app_configs if app_configs is not None else cached_app_configs()
-    declared: set[str] = set()
-    for scene in scenes or []:
-        if scene_is_from_store(scene):
-            declared |= scene_declared_setting_groups(scene, app_configs)
-    granted = [str(group) for group in (frame.service_setting_groups or []) if isinstance(group, str) and group]
-    granting = [group for group in SERVICE_SETTING_GROUPS if group in declared and group not in granted]
-    if granting:
-        frame.service_setting_groups = granted + granting
-    return granting
+    store_ids = {scene.get("id") for scene in scenes or [] if scene_is_from_store(scene)}
+    if not store_ids:
+        return []
+    bound: set[str] = set()
+    updated = []
+    changed = False
+    for entry in frame.scenes or []:
+        if not isinstance(entry, dict) or entry.get("id") not in store_ids:
+            updated.append(entry)
+            continue
+        raw_keys = entry.get("keys")
+        keys = dict(raw_keys) if isinstance(raw_keys, dict) else {}
+        adding = [
+            service for service in sorted(scene_declared_setting_groups(entry, app_configs))
+            if is_service_id(service) and service not in keys
+        ]
+        if adding:
+            entry = {**entry, "keys": {**keys, **{service: DEFAULT_KEY_REF for service in adding}}}
+            bound.update(adding)
+            changed = True
+        updated.append(entry)
+    if changed:
+        frame.scenes = updated
+    return sorted(bound)
 
 
-def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None) -> dict:
-    """The service settings groups frame.json carries for this frame, by
-    provenance: what the owner's scenes declare, plus what store-origin
-    scenes declare AND the owner granted (service_setting_groups). The same
-    walk feeds the deploy baseline (``settings_fingerprints`` in to_dict), so
-    a key added or rotated after a deploy shows up as a pending change."""
-    # Which groups the frame's scenes declare — split by provenance. A scene
-    # the owner authored is granted what it declares; a scene from the public
-    # store (origin.storeSceneId, stamped by the cloud when it was read) only
-    # gets a group the owner granted on this frame (service_setting_groups).
-    # Declaration is a request, not a permission (docs/security-todo.md).
-    setting_keys = set()
-    store_scene_setting_keys = set()
+def frame_service_key_scenes(frame: "Frame", app_configs: dict, extra_scenes: Optional[list] = None) -> list[dict]:
+    """The scenes `build_service_keys_wire` binds keys for: every scene on the
+    frame with its install's `keys` and the older grant (a scene the owner
+    made: all it declares; a store scene: the frame's
+    `service_setting_groups`), plus ``extra_scenes`` the frame shows without
+    holding them (the standing preview), bound by the older rule with no
+    `keys` (a store scene gets nothing there)."""
     # getattr: the generic release-image build hands this a Frame stand-in
     # that carries only the columns a generic image needs.
     granted_to_store_scenes = {
@@ -1019,27 +1052,75 @@ def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Opti
         for group in (getattr(frame, "service_setting_groups", None) or [])
         if isinstance(group, str) and group
     }
+    result: list[dict] = []
+    seen: set = set()
+    for scene in list(getattr(frame, "scenes", None) or []):
+        if not isinstance(scene, dict) or scene.get("id") in seen:
+            continue
+        seen.add(scene.get("id"))
+        declared = sorted(scene_declared_setting_groups(scene, app_configs))
+        legacy = [g for g in declared if g in granted_to_store_scenes] if scene_is_from_store(scene) else declared
+        result.append({
+            "id": str(scene.get("id")),
+            "declared": declared,
+            "keys": scene.get("keys"),
+            "legacyGranted": legacy,
+            "appDefinitions": scene_app_service_definitions(scene),
+        })
+    for scene in extra_scenes or []:
+        if not isinstance(scene, dict) or scene.get("id") in seen:
+            continue
+        seen.add(scene.get("id"))
+        declared = sorted(scene_declared_setting_groups(scene, app_configs))
+        result.append({
+            "id": str(scene.get("id")),
+            "declared": declared,
+            "legacyGranted": [] if scene_is_from_store(scene) else declared,
+            "appDefinitions": scene_app_service_definitions(scene),
+        })
+    return result
+
+
+def shipped_service_keys(
+    frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None, extra_scenes: Optional[list] = None
+) -> dict:
+    """What a frame is sent about keys (docs/service-keys.md "On the wire"):
+    ``{"serviceKeys": …, "settings": …}``, `settings` being the older groups
+    for runtimes that do not read `serviceKeys`. Every frame-facing path
+    (frame.json, the embedded settings pull, a render on this backend, the
+    admin-API push) takes it from here."""
     app_configs = app_configs if app_configs is not None else get_app_configs()
-    for scene in list(frame.scenes):
-        declared = scene_declared_setting_groups(scene, app_configs)
-        if scene_is_from_store(scene):
-            store_scene_setting_keys |= declared
-        else:
-            setting_keys |= declared
+    return build_service_keys_wire(frame_service_key_scenes(frame, app_configs, extra_scenes), all_settings)
 
-    for key in store_scene_setting_keys:
-        if key in granted_to_store_scenes:
-            setting_keys.add(key)
 
-    final_settings = {}
-    for key in setting_keys:
-        value = all_settings.get(key, None)
-        if key == "homeAssistant" and isinstance(value, dict):
-            # Frame apps only need the URL + token; keep the backend sync
-            # internals (MQTT credentials, sync flags) off the devices.
-            value = {k: v for k, v in value.items() if k in ("url", "accessToken")}
-        final_settings[key] = value
-    return final_settings
+def shipped_frame_settings(
+    frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None, extra_scenes: Optional[list] = None
+) -> dict:
+    """The older `settings` groups a frame is sent: one set of values per
+    service its scenes are bound to (`shipped_service_keys`)."""
+    return shipped_service_keys(frame, all_settings, app_configs, extra_scenes)["settings"]
+
+
+def service_keys_for_frame_json(shipped: dict) -> Optional[dict]:
+    """`serviceKeys` as frame.json and the other payloads carry it: absent
+    when no scene declares a service (the runtime then reads `settings` as
+    before, and a frame that uses no keys is not a pending change)."""
+    wire = shipped.get("serviceKeys") if isinstance(shipped, dict) else None
+    return wire if isinstance(wire, dict) and wire.get("scenes") else None
+
+
+def shipped_settings_fingerprint_source(
+    frame: "Frame", all_settings: dict, app_configs: Optional[dict] = None, extra_scenes: Optional[list] = None
+) -> dict:
+    """What the deploy baseline fingerprints (`settings_fingerprints`): the
+    older groups plus `serviceKeys` as one entry, so a key added, rotated or
+    bound to another scene after a deploy is a pending change."""
+    shipped = shipped_service_keys(frame, all_settings, app_configs, extra_scenes)
+    source: dict = dict(shipped["settings"])
+    wire = service_keys_for_frame_json(shipped)
+    if wire is not None:
+        source["serviceKeys"] = wire
+    return source
 
 
 def ensure_agent_shared_secret(agent: Any, previous: Any = None) -> dict:
@@ -1201,7 +1282,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             schedule['events'] = events
     frame_json["schedule"] = schedule
 
-    final_settings = shipped_frame_settings(frame, all_settings)
+    shipped_keys = shipped_service_keys(frame, all_settings)
+    final_settings = shipped_keys["settings"]
 
     frame_admin_auth = normalize_frame_admin_auth(frame.frame_admin_auth)
 
@@ -1228,6 +1310,10 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         frame_json["eventMap"] = normalize_event_map(event_map)
 
     frame_json['settings'] = final_settings
+    # Each scene's own keys (docs/service-keys.md "On the wire").
+    service_keys = service_keys_for_frame_json(shipped_keys)
+    if service_keys is not None:
+        frame_json['serviceKeys'] = service_keys
     return frame_json
 
 def get_interpreted_scenes_json(frame: Frame, runtime_version: str | None = None) -> list[dict]:

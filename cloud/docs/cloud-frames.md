@@ -364,6 +364,22 @@ touch it), `null` clears it, and the workspace posts the current maps with
 every save. The GET lists it as `event_maps`; the workspace hydrates each
 runtime scene's `eventMap` from it, and "Map buttons" in the scene's menu
 edits it.
+**Per scene, not per frame** (docs/service-keys.md, migration 0086). The
+grant used to reach the frame as a union, so a scene nobody granted OpenAI
+read the key anyway when another scene on the same frame was granted it. The
+pull now also answers `serviceKeys`, each runtime scene's own bindings, and
+the runtime answers `getSetting` from its own scene's. Two more columns on
+the assignment make that answerable without unzipping: `scene_services`
+(what each runtime scene of the version declares, settled where
+`declared_settings_groups` is, and once by the pull for an older row) and
+`service_keys` (the owner's key per runtime scene and service:
+`"default"`, a named key from the account's `serviceCredentials` group, or
+`null`; kept like `event_maps`). The account keeps a default key per
+service (the group of its name, any service id) and named keys in
+`serviceCredentials`, sealed per value by the service's rule
+(`account-settings.ts`). Server renders and the hub's virtual device hand
+the same `serviceKeys` to the runtime (`frameos_wasm_set_service_keys`).
+
 The response also lists the granted groups that are *not* configured, so the
 UI can say "this frame needs an Unsplash key" — and so the device knows those
 six groups are cloud-owned: a group absent from `settings` is deleted

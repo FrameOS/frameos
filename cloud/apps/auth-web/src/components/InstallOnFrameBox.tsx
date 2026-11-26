@@ -1,7 +1,12 @@
 "use client";
 
 import { MonitorUp } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  credentialsForService,
+  DEFAULT_KEY_REF,
+  keyRefLabel,
+} from "../../../../../frontend/src/utils/serviceKeys";
 
 export type InstallableFrame = {
   connected: boolean;
@@ -14,20 +19,27 @@ export type InstallableFrame = {
 // cloud-managed frames, POST /api/frames/{id}/scenes/add, and the scene is
 // assigned and pushed. Pending/revoked frames are listed but disabled, so
 // the owner sees why a frame is missing rather than wondering.
+//
+// The services a store scene declares are each a choice of key
+// (docs/service-keys.md "Which key a scene gets"): the account's default
+// key, one of its named keys of that service, or none. A scene only asks;
+// the owner's choice is the install's, sent as `service_keys` per runtime
+// scene, and every service not refused as the grant (`settings_groups`).
 export function InstallOnFrameBox({
   declaredSettingsGroups = [],
   frames,
   framesUrl,
   sceneId,
   sceneName,
+  sceneServices = {},
   sceneVersion,
 }: {
-  // The service-settings groups the scene's apps declare (preview-settings'
-  // requiredSettingsForScenes), offered as pre-ticked checkboxes: a scene
-  // only asks for a key, the owner grants it per install
-  // (docs/cloud-frames.md, "Service settings"). Ticked = sent as
-  // settings_groups; the frame is served nothing the owner unticked.
+  // The services the scene's apps declare (scene-services.ts
+  // declaredServicesWithTitles), one key choice each.
   declaredSettingsGroups?: { key: string; title: string }[];
+  // What each runtime scene of the version declares (scene-services.ts
+  // sceneServicesOf): where the key choices land as `service_keys`.
+  sceneServices?: Record<string, string[]>;
   frames: InstallableFrame[];
   // The workspace URL for a frame id, minus the id (…/frames/).
   framesUrl: string;
@@ -37,9 +49,32 @@ export function InstallOnFrameBox({
 }) {
   const installable = frames.filter((frame) => frame.status === "active");
   const [frameId, setFrameId] = useState(installable[0]?.id ?? "");
-  const [granted, setGranted] = useState<string[]>(() =>
-    declaredSettingsGroups.map((group) => group.key),
+  // Service → "default", a named key's id, or null (no key). Default first:
+  // installing is the consent, as the ticked checkbox was.
+  const [refs, setRefs] = useState<Record<string, string | null>>(() =>
+    Object.fromEntries(declaredSettingsGroups.map((group) => [group.key, DEFAULT_KEY_REF])),
   );
+  // The account's named keys (their names only: GET /api/settings masks the
+  // values), for the choices beside the default. None when it cannot be read.
+  const [credentials, setCredentials] = useState<unknown>(null);
+  const asksForKeys = declaredSettingsGroups.length > 0;
+  useEffect(() => {
+    if (!asksForKeys) {
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/settings")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((settings: unknown) => {
+        if (!cancelled && settings && typeof settings === "object") {
+          setCredentials((settings as { serviceCredentials?: unknown }).serviceCredentials ?? null);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [asksForKeys]);
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "busy" }
@@ -53,13 +88,22 @@ export function InstallOnFrameBox({
     }
     setState({ kind: "busy" });
     try {
+      const declared = declaredSettingsGroups.map((group) => group.key);
+      const serviceKeys: Record<string, Record<string, string | null>> = {};
+      for (const [runtimeSceneId, services] of Object.entries(sceneServices)) {
+        const bindings = Object.fromEntries(
+          services.filter((service) => declared.includes(service)).map((service) => [service, refs[service] ?? null]),
+        );
+        if (Object.keys(bindings).length > 0) {
+          serviceKeys[runtimeSceneId] = bindings;
+        }
+      }
       const response = await fetch(`/api/frames/${frameId}/scenes/add`, {
         body: JSON.stringify({
           scene_id: sceneId,
           scene_version: sceneVersion,
-          settings_groups: granted.filter((key) =>
-            declaredSettingsGroups.some((group) => group.key === key),
-          ),
+          settings_groups: declared.filter((key) => refs[key] !== null && refs[key] !== undefined),
+          ...(Object.keys(serviceKeys).length > 0 ? { service_keys: serviceKeys } : {}),
         }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -104,24 +148,32 @@ export function InstallOnFrameBox({
             <fieldset className="install-box__grants">
               <legend>This scene asks for your API keys</legend>
               <p className="copy">
-                Tick what it may use on the frame. Keys come from your account settings; the
-                frame is never sent one you untick.
+                Pick which of your keys it may use on the frame, or none. Keys come from your
+                account settings; this scene is never sent one you do not give it.
               </p>
               {declaredSettingsGroups.map((group) => (
                 <label className="install-box__grant" key={group.key}>
-                  <input
-                    checked={granted.includes(group.key)}
+                  {group.title}{" "}
+                  <select
+                    aria-label={group.title}
+                    className="input"
                     disabled={state.kind === "busy"}
                     onChange={(event) =>
-                      setGranted((current) =>
-                        event.target.checked
-                          ? [...current.filter((key) => key !== group.key), group.key]
-                          : current.filter((key) => key !== group.key),
-                      )
+                      setRefs((current) => ({
+                        ...current,
+                        [group.key]: event.target.value === "" ? null : event.target.value,
+                      }))
                     }
-                    type="checkbox"
-                  />{" "}
-                  {group.title}
+                    value={refs[group.key] ?? ""}
+                  >
+                    <option value={DEFAULT_KEY_REF}>{keyRefLabel(DEFAULT_KEY_REF)}</option>
+                    {credentialsForService(credentials, group.key).map((credential) => (
+                      <option key={credential.id} value={credential.id}>
+                        {credential.name}
+                      </option>
+                    ))}
+                    <option value="">Don&apos;t give a key</option>
+                  </select>
                 </label>
               ))}
             </fieldset>

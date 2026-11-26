@@ -498,6 +498,10 @@ proc settingsOf*(scene: FrameScene, state: JsonNode) =
         values.put(field.name, copy(value))
   state.put("fields", fields)
   state.put("values", values)
+  # The services its apps use, for the frame page's Service keys
+  # (docs/service-keys.md "Typing a key on the frame").
+  if scene of InterpretedFrameScene and InterpretedFrameScene(scene).declaredServices.len > 0:
+    state.put("services", %InterpretedFrameScene(scene).declaredServices)
 
 {.pop.}
 

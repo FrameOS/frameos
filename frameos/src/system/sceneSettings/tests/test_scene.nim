@@ -14,8 +14,8 @@ import system/sceneSettings/scene as settings
 import frameos/layout_choice
 import frameos/scene_store_hooks
 import frameos/frame_service_keys
-from frameos/apps import CloudServiceSettingsFields
 import frameos/ui/theme
+import frameos/service_keys
 from frameos/events import settingsWindowId
 
 # The scene settings (docs/scene-settings.md): the form it builds of a
@@ -1380,10 +1380,11 @@ block on_a_desktop_save_keeps_a_scenes_settings_window:
 
 block the_frame_page_types_service_keys:
   # The service keys (docs/scene-settings.md "Service keys"): a button on the
-  # frame page where the host keeps keys typed there, a field for every key a
-  # plane may send, what a plane sent said in the placeholder and a secret of
-  # it never on the page, and Save keeping what was edited, an emptied key
-  # taken away.
+  # frame page where the host keeps keys typed there, a field for every key
+  # of the services the frame knows of (the plane's, the opened scene's, those
+  # held or typed: no list of its own), what a plane sent said in the
+  # placeholder and a secret of it never on the page, and Save keeping what
+  # was edited, an emptied key taken away.
   var kept: seq[string]
   serviceKeysLoad = proc (): string {.nimcall, gcsafe, raises: [].} = """{"openAI": {"apiKey": "sk-typed"}}"""
   serviceKeysSave = nil
@@ -1391,9 +1392,14 @@ block the_frame_page_types_service_keys:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}: %*{"rotate": 0, "renderScale": 0, "version": "2026.11.25"}
   let config = FrameConfig(width: 480, height: 480, device: "pimoroni.hyperpixel4sq_touch", scalingMode: "cover",
-    saveAssets: %*false, settings: %*{"homeAssistant": {"url": "http://ha.local:8123", "accessToken": "plane-token"}})
+    saveAssets: %*false, settings: %*{"homeAssistant": {"url": "http://ha.local:8123", "accessToken": "plane-token"}},
+    serviceKeys: %*{"v": 1, "keys": {}, "scenes": {}, "services": {
+      "unsplash": {"title": "Unsplash", "fields": [{"name": "accessKey", "label": "access key"}]},
+      "homeAssistant": {"title": "Home Assistant", "hostsFrom": "url", "fields": [
+        {"name": "url", "label": "URL", "secret": false}, {"name": "accessToken", "label": "access token"}]}}})
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, config, logger, %*{})
-  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame",
+    "services": ["acmeWeather"]}})
   discard scene.draw()
   doAssert (try: (discard regionWith(20015); true) except ValueError: false) == false,
     "no Service keys where the host keeps none"
@@ -1412,36 +1418,42 @@ block the_frame_page_types_service_keys:
     scene.draw().writeFile(previews / "settings-service-keys-end.png")
   doAssert scene.state{"page"}.getStr() == "keys", $scene.state
   let form = scene.state["pageForm"]
-  # Every key a plane may send, so a frame with no plane can have each one.
-  doAssert form["fields"].len == CloudServiceSettingsFields.len
-  for (group, name) in CloudServiceSettingsFields:
-    doAssert settings.ServiceKeys.anyIt(it[0] == group and it[1] == name), group & "." & name
-  doAssert form["values"] == %*{"OpenAI API key": "sk-typed"}, $form["values"]
+  # The plane's services with its labels, the typed one, and the opened
+  # scene's, whose fields nobody named: an API key.
+  var names: seq[string]
+  for field in form["fields"].elems: names.add field["name"].getStr()
+  doAssert names == @["unsplash.accessKey", "homeAssistant.url", "homeAssistant.accessToken", "openAI.apiKey",
+    "acmeWeather.apiKey"], $names
+  doAssert form["values"] == %*{"openAI.apiKey": "sk-typed"}, $form["values"]
   for field in form["fields"].elems:
     let placeholder = field["placeholder"].getStr()
     case field["name"].getStr()
-    of "Home Assistant access token": doAssert placeholder == "Saved (type to change)" and field["secret"].getBool()
-    of "Home Assistant URL": doAssert placeholder == "http://ha.local:8123" and field{"secret"}.isNil
-    of "Unsplash access key": doAssert placeholder == "Not set" and field["secret"].getBool()
+    of "homeAssistant.accessToken":
+      doAssert placeholder == "Saved (type to change)" and field["secret"].getBool()
+      doAssert field["label"].getStr() == "Home Assistant access token"
+    of "homeAssistant.url": doAssert placeholder == "http://ha.local:8123" and field{"secret"}.isNil
+    of "unsplash.accessKey": doAssert placeholder == "Not set" and field["secret"].getBool()
+    of "acmeWeather.apiKey": doAssert field["label"].getStr() == "acmeWeather apiKey" and field["secret"].getBool()
     else: discard
   doAssert "plane-token" notin $scene.state, "a plane's secret is never on the page"
   # The OpenAI key emptied, an Unsplash key typed: those two alone are kept.
-  form["values"]["OpenAI API key"] = %""
-  form["values"]["Unsplash access key"] = %"  u-typed "
-  form["edited"] = %*{"OpenAI API key": true, "Unsplash access key": true}
+  form["values"]["openAI.apiKey"] = %""
+  form["values"]["unsplash.accessKey"] = %"  u-typed "
+  form["edited"] = %*{"openAI.apiKey": true, "unsplash.accessKey": true}
   discard scene.draw()
   scene.tap(regionWith(1))
   doAssert kept.len == 1 and parseJson(kept[0]) == %*{"unsplash": {"accessKey": "u-typed"}}, $kept
   doAssert scene.state{"page"}.getStr() == "frame", "Save goes back to the frame page"
-  doAssert withServiceKeys(config.settings, "unsplash") == %*{"unsplash": {"accessKey": "u-typed"}}
+  doAssert serviceValue(config.settings, config.serviceKeys, serviceKeysTyped(), "scenes/weather", "unsplash",
+    "accessKey") == "u-typed"
   # Back from the page keeps nothing.
   discard scene.draw()
   scene.scrollTo(0)
   discard scene.draw()
   scene.tap(regionWith(20015))
   discard scene.draw()
-  scene.state["pageForm"]["values"]["GitHub API key"] = %"gh"
-  scene.state["pageForm"]["edited"] = %*{"GitHub API key": true}
+  scene.state["pageForm"]["values"]["homeAssistant.accessToken"] = %"t"
+  scene.state["pageForm"]["edited"] = %*{"homeAssistant.accessToken": true}
   scene.tap(regionWith(0))
   doAssert kept.len == 1 and scene.state{"page"}.getStr() == "frame", $kept
   frameSettingsRead = nil

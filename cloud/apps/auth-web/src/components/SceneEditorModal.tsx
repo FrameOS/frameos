@@ -23,7 +23,7 @@ import {
 import { storeCategories } from "../lib/categories";
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from "../../../../../frontend/src/sceneWorkspace/lib/ai-scenes-apply";
 import type { AiListingChanges } from "../../../../../frontend/src/sceneWorkspace/lib/ai-chat-client";
-import { requiredSettingsForScenes } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
+import { declaredServicesWithTitles, sceneServicesOf } from "../lib/scene-services";
 import { clearSceneDraft, readSceneDraft, writeSceneDraft } from "../lib/scene-draft";
 import { storeEmbedReadyMessage } from "../lib/store-embed";
 import { ownerActionErrorMessage } from "./ownerActionError";
@@ -1485,13 +1485,9 @@ export function SceneEditorModal({
       {installOpen && info ? (
         <SceneInstallDialog
           declaredSettingsGroups={
-            previewScenes
-              ? requiredSettingsForScenes(previewScenes).map((group) => ({
-                  key: group.key,
-                  title: group.title,
-                }))
-              : []
+            previewScenes ? declaredServicesWithTitles(previewScenes) : []
           }
+          sceneServices={previewScenes ? sceneServicesOf(previewScenes) : {}}
           framesUrl={info.framesUrl}
           installVersion={installVersion}
           installableFrames={info.installableFrames}

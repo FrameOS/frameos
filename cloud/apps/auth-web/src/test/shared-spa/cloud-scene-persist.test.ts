@@ -378,6 +378,31 @@ describe("cloud scene persistence", () => {
     ]);
   });
 
+  it("posts the install's key choices beside the scene and never as scene content", async () => {
+    // docs/service-keys.md: which key a scene gets is the install's, like
+    // the button map. The grant follows: a service the choices give is
+    // granted, one they refuse is not.
+    const store = fakeStore();
+    store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Abstract Architecture")], owned: false, version: 3 });
+    store.assignments = [{ scene_id: "public-1", granted_settings_groups: ["unsplash"] } as never];
+    installFetch(store);
+
+    const chosen = {
+      ...sanitizedCopy(storedScene("rt-1", "Abstract Architecture")),
+      keys: { openAI: "k_work00000001", unsplash: null },
+    };
+    await persistAndPushCloudFrameScenes(frameId, [chosen], null, { sceneUnchanged: workspaceEquality });
+    expect(store.created).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([
+      {
+        scene_id: "public-1",
+        settings_groups: ["openAI"],
+        service_keys: { "rt-1": { openAI: "k_work00000001", unsplash: null } },
+      },
+    ]);
+  });
+
   it("posts the install's layout beside the scene and never as scene content", async () => {
     // docs/scene-layouts.md: the layout is the install's, like the button map.
     const store = fakeStore();

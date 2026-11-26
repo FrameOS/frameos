@@ -75,7 +75,7 @@ _CODE_CALLS = (
 _STREAM_CALL = re.compile(r"\bopenAssetStream\s*\(([^)]*)\)")
 _READ_STREAM = re.compile(r"^[^,]*,\s*([\"'`])r\1\s*(,|$)")
 # What the saved copy of a scene keeps when the frame sends it back.
-KEPT_KEYS = ("default", "eventMap", "layout", "origin")
+KEPT_KEYS = ("default", "eventMap", "layout", "keys", "origin")
 
 
 def _object(value: Any) -> dict[str, Any]:

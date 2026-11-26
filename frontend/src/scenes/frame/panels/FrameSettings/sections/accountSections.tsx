@@ -22,8 +22,17 @@ import {
   setCloudFrameTelemetryEnabled,
 } from '../../../../../utils/cloudFrameApi'
 import type { CloudFrameSceneRow } from '../../../../../utils/cloudFrameScenes'
-import { collectSecretSettingsFromScenes, getSettingsValue, settingsDetails } from '../../secretSettings'
+import {
+  appServiceDefinitionsFromScenes,
+  collectSecretSettingsFromScenes,
+  getSettingsValue,
+  settingsDetailsFor,
+} from '../../secretSettings'
+import { SERVICE_REGISTRY } from '../../../../../generated/services.gen'
+import { storedServiceIds } from '../../../../../utils/serviceKeys'
 import { frameLogic } from '../../../frameLogic'
+import { SceneKeySelects } from '../../Scenes/SceneKeysModal'
+import { isStoreScene, serviceKeysFollowingGrant } from '../../../../../utils/sceneKeyBindings'
 import { frameAdminUpgradeLogic } from '../frameAdminUpgradeLogic'
 import {
   displayVersion,
@@ -46,11 +55,26 @@ import {
  * them needs the Settings context.
  */
 
-const FRAME_ADMIN_SERVICE_SETTING_KEYS = ['frameOS', 'openAI', 'homeAssistant', 'github', 'immich', 'unsplash'] as const
+/**
+ * The services the frame's own admin page offers keys for: the registry's
+ * (repo/services.json), any the frame's settings hold, and any its scenes
+ * declare (docs/service-keys.md).
+ */
+function frameAdminServiceIds(savedSettings: unknown, declared: readonly string[]): string[] {
+  const registered = Object.keys(SERVICE_REGISTRY)
+  const others = [...new Set([...storedServiceIds(savedSettings), ...declared])].filter(
+    (id) => !registered.includes(id)
+  )
+  return [...registered, ...others.sort()]
+}
 
 export function FrameAdminServiceSecretsSection(): JSX.Element {
   const { settings, savedSettings, settingsChanged, isSettingsSubmitting } = useValues(settingsLogic)
   const { setSettingsValue, submitSettings } = useActions(settingsLogic)
+  const { frame } = useValues(frameLogic)
+  const { apps } = useValues(appsModel)
+  const declared = collectSecretSettingsFromScenes(frame?.scenes ?? [], apps)
+  const definitions = appServiceDefinitionsFromScenes(frame?.scenes ?? [], apps)
 
   return (
     <>
@@ -60,8 +84,8 @@ export function FrameAdminServiceSecretsSection(): JSX.Element {
       <div className="pl-2 @md:pl-8 space-y-3">
         <div className="frameos-muted text-sm">Credentials stored on this frame and used by scene apps.</div>
         <div className="grid grid-cols-1 gap-3 @2xl:grid-cols-2">
-          {FRAME_ADMIN_SERVICE_SETTING_KEYS.map((settingsKey) => {
-            const details = settingsDetails[settingsKey]
+          {frameAdminServiceIds(savedSettings, declared).map((settingsKey) => {
+            const details = settingsDetailsFor(settingsKey, definitions, savedSettings?.[settingsKey])
             const saved = details.fields.every((field) =>
               hasSettingsFieldValue(getSettingsValue(savedSettings, field.path))
             )
@@ -167,65 +191,41 @@ function NoKeyScenesLine({
 }
 
 /**
- * Self-hosted frames: the service keys a scene from the public scene store
- * may read on this frame. A scene the owner authored gets what its apps
- * declare, as it always has; a store scene is anyone's code, so its
- * declaration is a request the owner grants here, per group — the backend's
- * get_frame_json ships a group a store scene declares only when it is in
- * frame.service_setting_groups (the same field and meaning as the cloud's
- * per-frame grant). Saved with the frame form; a deploy follows because it is
- * a frame.json change.
+ * Self-hosted frames: which key a scene from the public scene store gets on
+ * this frame, per service its apps declare (docs/service-keys.md). A scene
+ * the owner authored gets the default of what its apps declare; a store
+ * scene is anyone's code, so it gets what the owner picks here: the install's
+ * `keys`, saved with the frame form (the frame's older frame-wide grant,
+ * `service_setting_groups`, only answers for store scenes nobody chose for).
+ * A deploy follows because it is a frame.json change.
  */
 export function StoreSceneServiceSettingsSection(): JSX.Element | null {
-  const { frameForm } = useValues(frameLogic)
-  const { setFrameFormValues } = useActions(frameLogic)
+  const { frameId, frameForm } = useValues(frameLogic)
   const { apps } = useValues(appsModel)
-  const storeScenes = (frameForm.scenes ?? []).filter(
-    (scene) => typeof (scene as { origin?: { storeSceneId?: unknown } }).origin?.storeSceneId === 'string'
-  )
+  const storeScenes = (frameForm.scenes ?? []).filter((scene) => isStoreScene(scene))
   if (storeScenes.length === 0) {
     return null
   }
-  const granted = frameForm.service_setting_groups ?? []
-  const setGranted = (next: string[]): void => setFrameFormValues({ service_setting_groups: next })
   return (
     <>
       {/* First child of the frame form on the on-device panel, where the
           form's own vertical rhythm gives it nothing above: carry the gap. */}
       <H6 id="frame-settings-store-scene-services" className="mt-4">
-        Secrets shared with scenes
+        Keys given to store scenes
       </H6>
       <div className="pl-2 @md:pl-8 space-y-2">
         <div className="frameos-muted text-xs">
-          Store scenes are someone else&apos;s code. Untick a key to take it away. Applied on the next deploy.
+          Store scenes are someone else&apos;s code. Pick which of your keys each one gets, or none. Applied on the next
+          deploy.
         </div>
-        {storeScenes.map((scene) => {
-          const declared = collectSecretSettingsFromScenes([scene], apps)
-          if (declared.length === 0) {
-            return null
-          }
-          return (
+        {storeScenes.map((scene) =>
+          collectSecretSettingsFromScenes([scene], apps).length === 0 ? null : (
             <div key={scene.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="text-sm">{scene.name || scene.id}</span>
-              {declared.map((group) => (
-                <label key={group} className="inline-flex items-center gap-1 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={granted.includes(group)}
-                    onChange={(e) =>
-                      setGranted(
-                        e.target.checked
-                          ? [...granted.filter((g) => g !== group), group]
-                          : granted.filter((g) => g !== group)
-                      )
-                    }
-                  />
-                  {settingsDetails[group]?.title ?? group}
-                </label>
-              ))}
+              <SceneKeySelects frameId={frameId} sceneId={scene.id} />
             </div>
           )
-        })}
+        )}
         <NoKeyScenesLine
           scenes={storeScenes.map((scene) => ({
             id: scene.id,
@@ -283,11 +283,16 @@ export function CloudServiceSettingsSection(): JSX.Element {
     try {
       await setCloudFrameScenes(
         frameId,
-        rows.map((row) => ({
-          scene_id: row.scene_id,
-          scene_version: row.scene_version ?? null,
-          settings_groups: draftGrants[row.scene_id] ?? [],
-        })),
+        rows.map((row) => {
+          const granted = draftGrants[row.scene_id] ?? []
+          const serviceKeys = serviceKeysFollowingGrant(row.service_keys, granted)
+          return {
+            scene_id: row.scene_id,
+            scene_version: row.scene_version ?? null,
+            settings_groups: granted,
+            ...(serviceKeys ? { service_keys: serviceKeys } : {}),
+          }
+        }),
         frame?.active_scene_id
       )
       await loadRows()
@@ -341,7 +346,7 @@ export function CloudServiceSettingsSection(): JSX.Element {
             ) : (
               <div className="flex flex-wrap gap-2">
                 {groups.map((group) => {
-                  const details = settingsDetails[group]
+                  const details = settingsDetailsFor(group, null, savedSettings?.[group])
                   const saved = details
                     ? details.fields.every((field) =>
                         hasSettingsFieldValue(getSettingsValue(savedSettings, field.path))
@@ -361,8 +366,8 @@ export function CloudServiceSettingsSection(): JSX.Element {
         <Field name="_noop" label="Granted per scene">
           <div className="w-full space-y-2">
             <div className="frameos-muted text-xs">
-              A scene only asks for a key; you decide which scenes get which. Untick a service to keep that key away
-              from a scene, even if the scene declares it.
+              A scene only asks for a key; you decide which scenes get one. Untick a service to keep its keys away from
+              a scene, even if the scene declares it. Which key a scene gets is under Keys in its menu.
             </div>
             {rowsError ? <div className="text-red-300 text-xs">{rowsError}</div> : null}
             {rows === null && !rowsError ? <Spinner /> : null}
@@ -393,7 +398,7 @@ export function CloudServiceSettingsSection(): JSX.Element {
                           }))
                         }
                       />
-                      {settingsDetails[group]?.title ?? group}
+                      {settingsDetailsFor(group).title}
                     </label>
                   ))}
                 </div>

@@ -323,6 +323,7 @@ COPY backend/app backend/app
 COPY embedded embedded
 COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
+COPY repo/services.json repo/services.json
 COPY --from=app-builder /app/frameos /app/frameos
 
 FROM ${PYTHON_IMAGE} AS python-deps
@@ -422,6 +423,8 @@ COPY backend backend
 COPY embedded/esp32/partitions*.csv embedded/esp32/
 COPY repo/apps repo/apps
 COPY repo/scenes repo/scenes
+# The services registry (docs/service-keys.md): read at run time by app/utils/service_keys.py.
+COPY repo/services.json repo/services.json
 COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json
 COPY --from=app-builder /app/frontend/dist frontend/dist
 COPY --from=app-builder /app/frontend/dist-editor frontend/dist-editor

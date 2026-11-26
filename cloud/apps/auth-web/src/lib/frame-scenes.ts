@@ -38,6 +38,8 @@ import {
 import { copySceneCoversIntoFrameCache } from "./scene-images";
 import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
 import { sceneLayoutsOf, type SceneLayouts } from "./scene-layouts";
+import { canonicalJson } from "./frame-service-settings";
+import { readSceneServices, sceneServiceKeysOf, type SceneServiceKeys } from "./scene-services";
 import { reportError } from "./log";
 import { esp32PushedStateMinVersion } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
@@ -86,16 +88,20 @@ export type RequestedScene = {
   // The layout each runtime scene of this install wears (scene-layouts.ts;
   // docs/scene-layouts.md), the same way: omitted keeps, null clears.
   layouts?: SceneLayouts | null | undefined;
+  // Which key of each service it declares every runtime scene of this
+  // install gets (scene-services.ts; docs/service-keys.md): "default", a
+  // named key's id, or null (refused). The same way: omitted keeps, null
+  // clears (the grant, settingsGroups, decides again).
+  serviceKeys?: SceneServiceKeys | null | undefined;
 };
 
-// The most groups one assignment may name. Six are deliverable today; the
-// bound only stops a body from carrying a novel.
-export const maxSettingsGroupsPerScene = 16;
+// The most groups one assignment may name. Any service id is one
+// (docs/service-keys.md); the bound only stops a body from carrying a novel.
+export const maxSettingsGroupsPerScene = 32;
 
-// Narrow a caller's group list to names the device can be served at all.
-// Unknown names are dropped, not refused: the SPA posts whatever the scene
-// declared, and a group that has since left the deliverable list must not
-// break the owner's save.
+// Narrow a caller's group list to names that are services at all. Other
+// names are dropped, not refused: the SPA posts whatever the scene declared,
+// and a name that is no service must not break the owner's save.
 export function normalizeSettingsGroups(groups: readonly string[]): string[] {
   return readServiceSettingGroups([...groups]) ?? [];
 }
@@ -250,6 +256,7 @@ export async function currentSceneAssignments(
       layouts: frameSceneAssignments.layouts,
       sceneId: frameSceneAssignments.sceneId,
       sceneVersion: frameSceneAssignments.sceneVersion,
+      serviceKeys: frameSceneAssignments.serviceKeys,
     })
     .from(frameSceneAssignments)
     .where(eq(frameSceneAssignments.frameId, frameId))
@@ -262,6 +269,7 @@ export async function currentSceneAssignments(
     // "omitted", which re-assignment keeps as-is.
     ...(row.eventMaps === null ? {} : { eventMaps: sceneEventMapsOf(row.eventMaps) }),
     ...(row.layouts === null ? {} : { layouts: sceneLayoutsOf(row.layouts) }),
+    ...(row.serviceKeys === null ? {} : { serviceKeys: sceneServiceKeysOf(row.serviceKeys) }),
     // The effective grant, so a caller that feeds this list back in (the
     // add route, a provisioning copy onto another frame) carries it. A row
     // from before grants existed with nothing computed yet stays "omitted",
@@ -407,6 +415,39 @@ async function checkScenesAssignable(
   return null;
 }
 
+// What the rows say a frame's service-settings pull answers, apart from the
+// values: the runtime scenes that declare a service, with what they declare,
+// their install's key choices and grant. Order-insensitive, so a reorder is
+// no change, and an install that declares nothing is none.
+function serviceKeysSignature(
+  rows: readonly {
+    declaredSettingsGroups: unknown;
+    grantedSettingsGroups: unknown;
+    sceneId: string;
+    sceneServices: unknown;
+    serviceKeys: unknown;
+  }[],
+): string {
+  const entries: [string, unknown][] = [];
+  for (const row of rows) {
+    const declaring = Object.fromEntries(
+      Object.entries(readSceneServices(row.sceneServices) ?? {}).filter(([, services]) => services.length > 0),
+    );
+    if (Object.keys(declaring).length === 0) {
+      continue;
+    }
+    entries.push([
+      row.sceneId,
+      {
+        granted: grantedSettingsGroupsForAssignment(row),
+        sceneServices: declaring,
+        serviceKeys: sceneServiceKeysOf(row.serviceKeys),
+      },
+    ]);
+  }
+  return canonicalJson(Object.fromEntries(entries));
+}
+
 /**
  * Replace the frame's scene assignments and enqueue the set_scenes push that
  * deploys them. `requested` is the complete list in render order — this is a
@@ -486,22 +527,31 @@ export async function assignScenesToFrame(
   // and reported to the caller — group names only.
   const grantedByScene: Record<string, string[]> = {};
   let serviceSettingGroups: string[] = [];
+  let keysBefore = "";
+  let keysAfter = "";
   try {
     payload = await db.transaction(async (tx) => {
       // The grants the scenes had on this frame before the replacement: a
       // caller that omits settings_groups for a scene keeps them.
       const existingRows = await tx
         .select({
+          declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
           eventMaps: frameSceneAssignments.eventMaps,
           grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
           layouts: frameSceneAssignments.layouts,
           sceneId: frameSceneAssignments.sceneId,
+          sceneServices: frameSceneAssignments.sceneServices,
+          serviceKeys: frameSceneAssignments.serviceKeys,
         })
         .from(frameSceneAssignments)
         .where(eq(frameSceneAssignments.frameId, frame.id));
       const existingByScene = new Map(
         existingRows.map((row) => [row.sceneId, row]),
       );
+      // What the frame's pull answered before this write, as far as the rows
+      // say: compared below with what it answers after, to know whether the
+      // frame must re-pull its keys.
+      keysBefore = serviceKeysSignature(existingRows);
       await tx
         .delete(frameSceneAssignments)
         .where(eq(frameSceneAssignments.frameId, frame.id));
@@ -525,6 +575,11 @@ export async function assignScenesToFrame(
               entry.layouts !== undefined
                 ? entry.layouts
                 : sceneLayoutsOf(existingByScene.get(entry.sceneId)?.layouts),
+            // The owner's key choices, by the same rule.
+            serviceKeys:
+              entry.serviceKeys !== undefined
+                ? entry.serviceKeys
+                : sceneServiceKeysOf(existingByScene.get(entry.sceneId)?.serviceKeys),
           })),
         );
       }
@@ -540,6 +595,9 @@ export async function assignScenesToFrame(
       const settled: {
         declaredSettingsGroups: string[];
         grantedSettingsGroups: string[] | null;
+        sceneId: string;
+        sceneServices: unknown;
+        serviceKeys: unknown;
       }[] = [];
       for (const assignment of built.assignments) {
         const entry = requested.find((r) => r.sceneId === assignment.sceneId);
@@ -554,11 +612,15 @@ export async function assignScenesToFrame(
             declaredSettingsGroups: assignment.declaredSettingsGroups,
             grantedSettingsGroups: granted,
             isLayout: assignment.isLayout,
+            sceneServices: assignment.sceneServices,
           })
           .where(eq(frameSceneAssignments.id, assignment.id));
         const row = {
           declaredSettingsGroups: assignment.declaredSettingsGroups,
           grantedSettingsGroups: granted,
+          sceneId: assignment.sceneId,
+          sceneServices: assignment.sceneServices,
+          serviceKeys: assignment.serviceKeys,
         };
         settled.push(row);
         grantedByScene[assignment.sceneId] =
@@ -571,6 +633,7 @@ export async function assignScenesToFrame(
       // assigned scene version (32 MiB apiece at the store's cap) per
       // request. Group NAMES only — no credential ever lands in a frames row.
       serviceSettingGroups = grantedServiceSettingGroupsUnion(settled);
+      keysAfter = serviceKeysSignature(settled);
       return built;
     });
   } catch (error) {
@@ -657,7 +720,10 @@ export async function assignScenesToFrame(
     });
   }
 
-  if (groupsChanged) {
+  // Which key each scene is bound to is in the same answer
+  // (docs/service-keys.md), so a change of binding, or of which runtime
+  // scenes declare what, wakes the frame the same way.
+  if (groupsChanged || keysBefore !== keysAfter) {
     await enqueueServiceSettingsRefreshIfScoped(db, frame.id);
   }
 

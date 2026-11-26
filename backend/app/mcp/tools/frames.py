@@ -17,6 +17,12 @@ import uuid
 from typing import Any
 
 from app.models.frame import cached_app_configs, scene_declared_setting_groups, scene_is_from_store
+from app.utils.service_keys import (
+    DEFAULT_KEY_REF,
+    read_scene_key_bindings,
+    read_service_credentials,
+    resolve_scene_key_bindings,
+)
 
 from ..client import ToolContext, segment, segments
 from ..protocol import McpServer
@@ -153,6 +159,7 @@ def compact_scene(scene: dict[str, Any]) -> dict[str, Any]:
         "origin": scene.get("origin"),
         **({"eventMap": scene["eventMap"]} if scene.get("eventMap") else {}),
         **({"layout": scene["layout"]} if scene.get("layout") else {}),
+        **({"keys": scene["keys"]} if scene.get("keys") else {}),
     }
 
 
@@ -566,6 +573,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         project_id: int | None = None,
         layout: dict[str, Any] | None = None,
         settings_groups: list[str] | None = None,
+        keys: dict[str, Any] | None = None,
     ):
         async def go():
             new_scenes, origin = await resolve_scene_source(scenes, template_id, repository, template, url, project_id)
@@ -589,25 +597,53 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                         scene["layout"] = layout
             if not new_scenes:
                 raise McpInputError(f"Nothing to install: these scene ids are already on the frame ({', '.join(map(str, skipped))}).")
-            # A store scene gets only the service keys the owner granted on
-            # the frame (shipped_frame_settings); `settings_groups` grants it
-            # what it declares among them, as the cloud's tool of the same
-            # name does and the SPA's install does ("installing is consent").
+            # Which key each new scene uses is the install's (docs/service-keys.md
+            # "Which key a scene gets"): `keys` binds every new scene's declared
+            # services ("default", a key id from serviceCredentials, or null);
+            # without it a scene the owner made gets the defaults and a store
+            # scene only what `settings_groups` grants it here (as the cloud's
+            # tool of the same name does and the SPA's install does,
+            # "installing is consent") or the frame's older grant.
             app_configs = cached_app_configs()
-            declared = sorted(set().union(*(
-                scene_declared_setting_groups(scene, app_configs) for scene in new_scenes if scene_is_from_store(scene)
-            )))
+            chosen = read_scene_key_bindings(keys) if isinstance(keys, dict) else None
+            credentials: dict[str, Any] = {}
+            if chosen and any(ref not in (None, DEFAULT_KEY_REF) for ref in chosen.values()):
+                stored = await api.json("GET", "/api/settings", project_id=project_id)
+                credentials = read_service_credentials(stored.get("serviceCredentials"))
+                unknown = sorted(
+                    f"{service}: {ref}" for service, ref in chosen.items()
+                    if ref not in (None, DEFAULT_KEY_REF) and (credentials.get(ref) or {}).get("service") != service
+                )
+                if unknown:
+                    raise McpInputError(f"No such key for that service ({', '.join(unknown)}); see settings_get group=serviceCredentials.")
             frame_groups = [str(group) for group in (frame.get("service_setting_groups") or []) if isinstance(group, str)]
-            granting = [group for group in declared if settings_groups and group in settings_groups and group not in frame_groups]
+            declared_all: set[str] = set()
+            granted_all: set[str] = set()
+            for scene in new_scenes:
+                declared = sorted(scene_declared_setting_groups(scene, app_configs))
+                from_store = scene_is_from_store(scene)
+                binding: dict[str, Any] = {}
+                if chosen is not None:
+                    binding = {service: ref for service, ref in chosen.items() if service in declared}
+                elif from_store and settings_groups:
+                    binding = {service: DEFAULT_KEY_REF for service in declared if service in settings_groups}
+                if binding:
+                    scene["keys"] = binding
+                else:
+                    scene.pop("keys", None)
+                if from_store:
+                    declared_all.update(declared)
+                    resolved = resolve_scene_key_bindings(
+                        declared, scene.get("keys"), [g for g in declared if g in frame_groups], credentials,
+                    )
+                    granted_all.update(service for service, ref in resolved.items() if ref is not None)
             body: dict[str, Any] = {"scenes": existing + new_scenes}
-            if granting:
-                body["service_setting_groups"] = frame_groups + granting
             await api.json("POST", f"/api/frames/{frame_id}", project_id=project_id, json=body)
             result: dict[str, Any] = {
                 "installed": [{"id": scene.get("id"), "name": scene.get("name")} for scene in new_scenes],
                 "skipped_existing": skipped,
-                "declared_settings_groups": declared,
-                "granted_settings_groups": [group for group in declared if group in frame_groups or group in granting],
+                "declared_settings_groups": sorted(declared_all),
+                "granted_settings_groups": sorted(granted_all),
                 **origin,
             }
             if activate:
@@ -656,9 +692,18 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                 "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
                 "maxItems": 16,
                 "description": (
-                    "Service-settings groups to GRANT store scenes (unsplash, openAI, homeAssistant, immich, github, "
-                    "frameOS); only groups the scenes declare take effect. A store scene gets no key without a grant; "
-                    "the answer's declared_settings_groups / granted_settings_groups say what it asked for and has."
+                    "Services whose DEFAULT key to give the store scenes installed (openAI, unsplash, homeAssistant, "
+                    "or any service id); only services a scene declares take effect. A store scene gets no key "
+                    "without one; the answer's declared_settings_groups / granted_settings_groups say what it asked "
+                    "for and has."
+                ),
+            },
+            "keys": {
+                "type": "object",
+                "description": (
+                    "Which key each installed scene uses, per service: {\"openAI\": \"default\"}, a further key's id "
+                    "from settings_get group=serviceCredentials ({\"openAI\": \"k_…\"}), or null to give none. "
+                    "Applies to every new scene, for the services it declares; overrides settings_groups."
                 ),
             },
             "deploy": DEPLOY,
@@ -689,6 +734,9 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             # So is the layout it wears (docs/scene-layouts.md).
             if "layout" not in new_scene and scenes[index].get("layout"):
                 new_scene["layout"] = scenes[index]["layout"]
+            # And which key it uses of each service (docs/service-keys.md).
+            if "keys" not in new_scene and scenes[index].get("keys"):
+                new_scene["keys"] = scenes[index]["keys"]
             scenes[index] = new_scene
             await save_scenes(frame_id, scenes, project_id)
             return text({"updated": {"id": new_scene.get("id"), "name": new_scene.get("name")}, **(await deploy_after(frame_id, deploy, project_id))})

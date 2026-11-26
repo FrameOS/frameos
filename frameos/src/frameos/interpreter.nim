@@ -2111,6 +2111,9 @@ proc initScene(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       scene.appsByNodeId[node.id] = app
       if app.dynamicJsAppSubscribes():
         scene.eventApps.add(node.id)
+      for service in app.dynamicJsAppServices():
+        if service notin scene.declaredServices:
+          scene.declaredServices.add service
     elif node.nodeType == "scene":
       let childSceneId = node.data{"keyword"}.getStr().SceneId
       let exportedChild = resolveSceneExport(childSceneId)

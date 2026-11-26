@@ -79,17 +79,40 @@ suite "frameos app helpers":
       "homeAssistant": {"url": "https://ha.local", "accessToken": "token"},
     }) == false
 
-  test "applyServiceSettings drops unknown and empty fields":
+  test "applyServiceSettings keeps any service, its string fields only":
     let config = FrameConfig(settings: %*{})
     check config.applyServiceSettings(%*{
-      "unsplash": {"accessKey": "key", "secretKey": "nope"},
+      "unsplash": {"accessKey": "key", "secretKey": "kept", "n": 3, "bad-name": "x"},
       "immich": {"url": "", "apiKey": ""},
-      "notAGroup": {"apiKey": "nope"},
+      "acmeWeather": {"apiKey": "acme"},
+      "defaults": {"wifiPassword": "never"},
     })
-    check config.settings["unsplash"] == %*{"accessKey": "key"}
+    check config.settings["unsplash"] == %*{"accessKey": "key", "secretKey": "kept"}
     # every field empty → nothing usable, the group is not stored at all
     check config.settings{"immich"} == nil
-    check config.settings{"notAGroup"} == nil
+    # no list of services: a vendor nobody listed is one
+    check config.settings["acmeWeather"] == %*{"apiKey": "acme"}
+    # a plane's own group is never a service
+    check config.settings{"defaults"} == nil
+
+  test "applyServiceSettings takes away a group it sent last time":
+    let config = FrameConfig(settings: %*{"local": {"keep": "me"}})
+    check config.applyServiceSettings(%*{"settings": {"acmeWeather": {"apiKey": "a"}}})
+    check config.serviceSettingsOwned == @["acmeWeather"]
+    check config.applyServiceSettings(%*{"settings": {"openAI": {"apiKey": "o"}}})
+    check config.settings{"acmeWeather"} == nil
+    check config.settings["openAI"]["apiKey"].getStr == "o"
+    check config.settings["local"]["keep"].getStr == "me"
+
+  test "applyServiceSettings keeps the plane's serviceKeys, and lets them go":
+    let config = FrameConfig(settings: %*{})
+    let keys = %*{"v": 1, "keys": {}, "scenes": {"art": {"openAI": nil}}, "services": {}}
+    check config.applyServiceSettings(%*{"settings": {}, "serviceKeys": keys, "groups": ["openAI"]})
+    check config.serviceKeys == keys
+    check config.serviceSettingsOwned == @["openAI"]
+    check config.applyServiceSettings(%*{"settings": {}, "serviceKeys": keys, "groups": ["openAI"]}) == false
+    check config.applyServiceSettings(%*{"settings": {}})
+    check config.serviceKeys.isNil
 
   test "applyServiceSettings clears every cloud-owned group on nil or {}":
     let config = FrameConfig(settings: %*{

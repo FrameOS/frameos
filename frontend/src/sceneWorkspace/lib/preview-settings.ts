@@ -1,7 +1,8 @@
-// Which frame settings a scene's apps need to actually render — so the live
+// Which service keys a scene's apps need to actually render — so the live
 // preview can ask for them instead of drawing "please provide an API key".
-// Mirrors frameos' settings groups (frontend/src/scenes/frame/panels/
-// secretSettings.ts) and the `settings` lists in the apps' config.json files.
+// The services are the registry's (repo/services.json, docs/service-keys.md)
+// and any an app defines for itself; the `settings` lists in the apps'
+// config.json files say which.
 // Keys TYPED into the preview stay in the browser: they go straight into the
 // wasm runtime and out with its requests, never to our server — except for
 // hosts that need the CORS fallback proxy (/api/store/preview-proxy), which
@@ -12,6 +13,13 @@
 // (account_settings) and seed the preview automatically.
 
 import { keyedRepoAppSources } from "../../generated/keyedRepoApps";
+import { SERVICE_REGISTRY } from "../../generated/services.gen";
+import {
+  type ServiceDefinition,
+  appServiceDefinitions,
+  isServiceId,
+  serviceDefinition,
+} from "../../utils/serviceKeys";
 
 export type PreviewSettingsField = {
   label: string;
@@ -28,56 +36,42 @@ export type PreviewSettingsGroup = {
   paid?: boolean;
 };
 
-// Also the source of truth for which settings an ACCOUNT may persist
-// (account-settings.ts derives its allow-list from these groups) — one list,
-// two consumers, so the preview and the stored settings cannot drift.
+// The services the registry knows (repo/services.json, docs/service-keys.md),
+// as the preview draws them. Also what the cloud's account-settings.ts
+// derives the registered groups' storable fields from. A service the registry
+// does not know is drawn by previewSettingsGroupFor from the scene's own
+// app definitions.
+//
+// `paid` is the preview's own rule, not the registry's: OpenAI bills every
+// render, so the preview waits for a click before calling it.
+const PAID_SERVICES: ReadonlySet<string> = new Set(["openAI"]);
+
+function groupOf(definition: ServiceDefinition): PreviewSettingsGroup {
+  return {
+    key: definition.id,
+    title: definition.title,
+    fields: definition.fields.map((field) => ({
+      label: field.label,
+      path: [definition.id, field.name] as [string, string],
+      ...(field.secret ? { secret: true } : {}),
+    })),
+    ...(PAID_SERVICES.has(definition.id) ? { paid: true } : {}),
+  };
+}
+
 export const previewSettingsGroups: Readonly<
   Record<string, PreviewSettingsGroup>
-> = {
-  frameOS: {
-    key: "frameOS",
-    title: "FrameOS Gallery",
-    fields: [{ label: "API key", path: ["frameOS", "apiKey"], secret: true }],
-  },
-  github: {
-    key: "github",
-    title: "GitHub",
-    fields: [{ label: "API key", path: ["github", "api_key"], secret: true }],
-  },
-  homeAssistant: {
-    key: "homeAssistant",
-    title: "Home Assistant",
-    fields: [
-      { label: "Server URL", path: ["homeAssistant", "url"] },
-      {
-        label: "Access token",
-        path: ["homeAssistant", "accessToken"],
-        secret: true,
-      },
-    ],
-  },
-  immich: {
-    key: "immich",
-    title: "Immich",
-    fields: [
-      { label: "Server URL", path: ["immich", "url"] },
-      { label: "API key", path: ["immich", "apiKey"], secret: true },
-    ],
-  },
-  openAI: {
-    key: "openAI",
-    title: "OpenAI",
-    fields: [{ label: "API key", path: ["openAI", "apiKey"], secret: true }],
-    paid: true,
-  },
-  unsplash: {
-    key: "unsplash",
-    title: "Unsplash",
-    fields: [
-      { label: "Access key", path: ["unsplash", "accessKey"], secret: true },
-    ],
-  },
-};
+> = Object.fromEntries(
+  Object.keys(SERVICE_REGISTRY).map((id) => [id, groupOf(serviceDefinition(id))]),
+);
+
+/** Any service's group: the registry's, else what the scene's apps define. */
+export function previewSettingsGroupFor(
+  id: string,
+  appDefinitions?: Record<string, ServiceDefinition> | null,
+): PreviewSettingsGroup {
+  return previewSettingsGroups[id] ?? groupOf(serviceDefinition(id, appDefinitions));
+}
 
 // App keyword → settings groups, from the apps' config.json `settings` lists.
 // Retired Nim apps (retired-apps.ts: data/immich, data/unsplash, …) stay
@@ -106,6 +100,18 @@ type SceneJson = {
 // STRING under sources["config.json"] — on the node, or on the scene's apps
 // map. Reading `.config.settings` (an object that never exists in real scene
 // JSON) silently missed every custom app.
+function definitionsFromSources(sources?: AppSources): Record<string, ServiceDefinition> {
+  const raw = sources?.["config.json"];
+  if (typeof raw !== "string" || raw === "") {
+    return {};
+  }
+  try {
+    return appServiceDefinitions(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+
 function settingsFromSources(sources?: AppSources): string[] {
   const raw = sources?.["config.json"];
   if (typeof raw !== "string" || raw === "") {
@@ -113,9 +119,7 @@ function settingsFromSources(sources?: AppSources): string[] {
   }
   try {
     const settings = (JSON.parse(raw) as { settings?: unknown })?.settings;
-    return Array.isArray(settings)
-      ? settings.filter((key): key is string => typeof key === "string")
-      : [];
+    return Array.isArray(settings) ? settings.filter(isServiceId) : [];
   } catch {
     // A scene with unparseable sources must not break the settings form.
     return [];
@@ -135,6 +139,7 @@ export function requiredSettingsForScenes(
 ): PreviewSettingsGroup[] {
   const scenes = rawScenes as SceneJson[];
   const keys = new Set<string>();
+  const definitions: Record<string, ServiceDefinition> = {};
   for (const scene of scenes) {
     for (const node of scene.nodes ?? []) {
       if (node.type !== "app") {
@@ -148,6 +153,9 @@ export function requiredSettingsForScenes(
         for (const key of settingsFromSources(sources)) {
           keys.add(key);
         }
+        for (const [id, definition] of Object.entries(definitionsFromSources(sources))) {
+          definitions[id] ??= definition;
+        }
       } else if (keyword) {
         for (const key of appSettings[keyword] ?? []) {
           keys.add(key);
@@ -155,9 +163,9 @@ export function requiredSettingsForScenes(
       }
     }
   }
-  return Object.values(previewSettingsGroups).filter((group) =>
-    keys.has(group.key),
-  );
+  return [...keys]
+    .sort()
+    .map((key) => previewSettingsGroupFor(key, definitions));
 }
 
 // The pay-per-request services the given scenes call (see `paid` above). The
@@ -226,6 +234,7 @@ export function embeddedSourceSettingsForScenes(
 ): PreviewSettingsGroup[] {
   const scenes = rawScenes as SceneJson[];
   const keys = new Set<string>();
+  const definitions: Record<string, ServiceDefinition> = {};
   for (const scene of scenes) {
     for (const node of scene.nodes ?? []) {
       if (node.type !== "app") {
@@ -241,11 +250,14 @@ export function embeddedSourceSettingsForScenes(
       for (const key of settingsFromSources(sources)) {
         keys.add(key);
       }
+      for (const [id, definition] of Object.entries(definitionsFromSources(sources))) {
+        definitions[id] ??= definition;
+      }
     }
   }
-  return Object.values(previewSettingsGroups).filter((group) =>
-    keys.has(group.key),
-  );
+  return [...keys]
+    .sort()
+    .map((key) => previewSettingsGroupFor(key, definitions));
 }
 
 // What the live preview must wait for a click on before rendering: paid

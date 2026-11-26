@@ -34,14 +34,13 @@ import {
   defaultAssetStorages,
 } from "../../auth-web/src/lib/frame-asset-storages";
 import { cloudFramesContract } from "../../auth-web/src/lib/cloud-frames-contract.gen";
-import { buildServiceSettingsPayload } from "../../auth-web/src/lib/frame-service-settings";
+import { buildServiceSettingsPayload, frameServiceKeysScenes } from "../../auth-web/src/lib/frame-service-settings";
 import {
   frameImageAssetPath,
   frameRenderScale,
   frameServiceSettingsScope,
   frameTelemetryLogsScope,
   readFrameSettings,
-  readServiceSettingGroups,
   scheduleDevicePayload,
   storeFrameAssetFile,
   validateFrameSchedule,
@@ -638,33 +637,35 @@ export class VirtualDevice {
     })();
   }
 
-  // The keys the owner granted this frame's scenes, when the frame may have
+  // The keys the owner bound this frame's scenes to, when the frame may have
   // them at all (`settings:services`, the owner's switch) and this process
-  // can open them. Hardware pulls the same answer over HTTP.
+  // can open them: the older `settings` and each scene's own `serviceKeys`
+  // (docs/service-keys.md). Hardware pulls the same answer over HTTP.
   private async serviceSettings(
     frame: typeof frames.$inferSelect,
     linkedClient: typeof linkedClients.$inferSelect,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{ settings: Record<string, unknown>; serviceKeys?: unknown }> {
     if (!linkedClientScopes(linkedClient).includes(frameServiceSettingsScope)) {
-      return {};
-    }
-    const groups = readServiceSettingGroups(frame.serviceSettingGroups) ?? [];
-    if (groups.length === 0) {
-      return {};
+      return { settings: {} };
     }
     if (!process.env.FRAMEOS_CLOUD_ENCRYPTION_KEY) {
       logWarn("virtual.service_settings_unavailable", {
         frameId: this.frameId,
         hint: "set FRAMEOS_CLOUD_ENCRYPTION_KEY for the frame hub (cloud/docs/deployment.md)",
       });
-      return {};
+      return { settings: {} };
     }
     try {
-      return buildServiceSettingsPayload(groups, await revealedServiceSettings(this.db, frame.accountId)).settings;
+      const scenes = await frameServiceKeysScenes(this.db, frame);
+      if (scenes.length === 0) {
+        return { settings: {} };
+      }
+      const payload = buildServiceSettingsPayload(scenes, await revealedServiceSettings(this.db, frame.accountId));
+      return { serviceKeys: payload.serviceKeys, settings: payload.settings };
     } catch (error) {
       // Never the values: which account, and that it failed.
       logError("virtual.service_settings_failed", { error: errorField(error), frameId: this.frameId });
-      return {};
+      return { settings: {} };
     }
   }
 
@@ -686,6 +687,7 @@ export class VirtualDevice {
     const events = this.pendingEvents.splice(0);
     const size = virtualFrameSize(frame.hardware);
     const settings = readFrameSettings(frame.settings);
+    const keys = await this.serviceSettings(frame, linkedClient);
     const startedAt = Date.now();
     const lines: unknown[] = [{ event: "render:scene", height: size.height, sceneId: active, width: size.width }];
     let result: SceneRenderResult;
@@ -698,7 +700,8 @@ export class VirtualDevice {
         renderScale: frameRenderScale(frame),
         sceneId: active,
         scenes,
-        settings: await this.serviceSettings(frame, linkedClient),
+        ...(keys.serviceKeys ? { serviceKeys: keys.serviceKeys } : {}),
+        settings: keys.settings,
         states: statesRecord(virtual.states),
         thumbnailMaxDimension,
         ...(typeof settings.timezone === "string" ? { timeZone: settings.timezone } : {}),

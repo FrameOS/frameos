@@ -316,8 +316,9 @@
   of that name) is where a key is typed on the frame: the frame's own (a Pi's
   `state/service_keys.json`, an ESP32's NVS `svc_typed`), never told to a
   plane, and over the plane's field by field where `jsGetSetting` reads them
-  (`frame_service_keys.nim` `withServiceKeys`): a new reader of service keys
-  goes through it.
+  (`service_keys.nim` `serviceGroup`, never for a scene the owner refused):
+  a new reader of service keys goes through it. It names no vendor: its
+  fields are the services the frame knows of (docs/service-keys.md).
 - On a desktop (`builtInScenesStay`: the windows of a Pi, an ESP32 or the
   browser) every scene's settings are an instance of their own,
   `system/sceneSettings#<scene id>` (contract `scenes.settingsWindow`,
@@ -1225,6 +1226,27 @@
   the states a resumed handshake skips, so a connection that offers a session
   is stepped by `tls_handshake_resuming`: a new way to offer one goes through
   it, never `mbedtls_ssl_set_session` alone. No connection is kept open.
+
+## Service keys: `docs/service-keys.md` is the contract
+
+- Third-party keys (OpenAI, Unsplash, Home Assistant, …) are **services**
+  named in `repo/services.json` (data only, never in a frame; run
+  `python3 frameos/tools/generate_services.py`, whose `--check` is in the
+  backend suite). **No code names a vendor**: a new one is a registry entry,
+  an app's own `services` definition for one the registry lacks. The rules
+  are `frontend/src/utils/serviceKeys.ts` (SPA + cloud server) and
+  `backend/app/utils/service_keys.py`, pinned by
+  `docs/service-keys-fixtures.json` with the frame's half (`runtime`,
+  `inject`) in `test_service_keys.nim`: change them and the corpus together.
+- A service's default key is the settings group of its name; more keys live
+  in `serviceCredentials`. Which key a scene gets is **the install's**
+  (`keys` beside `eventMap`: the backend's `frame.scenes` entry, the cloud's
+  `frame_scene_assignments.service_keys`), never the scene's, and a frame
+  gets per-scene bindings (`serviceKeys`) beside the older `settings`.
+  `frameos.getSetting` answers for the app's own scene; `frameos.secret`
+  hands out a placeholder the runtime fills only on the way to an allowed
+  origin. Keys typed on the frame (the frame page's Service keys) stay there.
+  Never put a key in a state field, scene JSON, a log or a command.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 

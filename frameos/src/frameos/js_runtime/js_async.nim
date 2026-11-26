@@ -389,7 +389,13 @@ when jsAsyncOn:
         request.headers = streamHeaders(wait.options)
         request.maxBytes = StreamMaxBytes
         request.maxSeconds = StreamMaxSeconds
-      if not submitJsIo(request):
+      let refused = keysFilled(e, request.url, request.headers)
+      if refused.len > 0:
+        if wait.kind == akStream:
+          return nimIntToJS(ctx, 0)
+        wait.ready = true
+        wait.answer = $(%*{"status": 0, "error": refused})
+      elif not submitJsIo(request):
         if wait.kind == akStream:
           return nimIntToJS(ctx, 0)
         wait.ready = true
@@ -665,14 +671,17 @@ else:
     ## so a get() that asked has the whole answer when its fetch() call is
     ## over. The body comes whole and is cut up (an ESP32, above, takes the
     ## pieces as they come off the socket).
-    let urlStr = toNimString(ctx, url)
+    var urlStr = toNimString(ctx, url)
     var call = StreamCall(ctx: ctx, id: toNimFloat(ctx, id).int)
     try:
+      var headers = streamHeaders(optionsArg(ctx, optionsJson))
+      let refused = keysFilled(env(ctx), urlStr, headers)
+      if refused.len > 0:
+        raise newException(ValueError, refused)
       let
         options = optionsArg(ctx, optionsJson)
         httpMethod = options{"method"}.getStr("GET").toUpperAscii()
         body = options{"body"}.getStr("")
-        headers = streamHeaders(options)
         pieceBytes = streamPieceBytes(options)
         timeoutMs = capToRenderDeadline(clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs))
       call.text.slim = slimAsked(options)

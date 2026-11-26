@@ -103,8 +103,28 @@ extension FrameOSService {
         }
     }
 
-    /// The account's service-key groups (`/api/settings`, cloud/docs: frames' "Service settings").
+    /// The services every plane's registry had from the start (repo/services.json,
+    /// docs/service-keys.md): what an install grants when it cannot read the scenes.
     public static let serviceSettingGroups = ["unsplash", "openAI", "homeAssistant", "immich", "github", "frameOS"]
+
+    /// What an install grants (the planes narrow it to what the scenes declare):
+    /// the services above and every one the scenes' own apps name in their
+    /// config.json `settings` — a service is any name, not only these six.
+    public static func declaredServiceSettingGroups(_ scenes: JSONValue?) -> [String] {
+        var groups = serviceSettingGroups
+        func add(_ sources: JSONValue?) {
+            guard let text = sources?["config.json"]?.stringValue, let data = text.data(using: .utf8),
+                  let config = try? JSONDecoder().decode(JSONValue.self, from: data) else { return }
+            for name in config["settings"]?.arrayValue?.compactMap(\.stringValue) ?? [] where !groups.contains(name) {
+                groups.append(name)
+            }
+        }
+        for scene in scenes?.arrayValue ?? [] {
+            for app in (scene["apps"]?.objectValue ?? [:]).values { add(app["sources"]) }
+            for node in scene["nodes"]?.arrayValue ?? [] { add(node["data"]?["sources"]) }
+        }
+        return groups
+    }
 
     /// `./x` in a repository index is relative to the index (the SPA's resolveRepositoryUrl).
     static func resolveRepositoryURL(_ value: String, _ repositoryURL: String) -> String {
@@ -122,16 +142,15 @@ extension FrameOSService {
             // scene gets the API keys it declares. The route grants only what
             // the scene declares (`settings_groups` ∩ declared), so naming
             // every group grants exactly that.
-            let groups = grantSettings ?? Self.serviceSettingGroups
+            let added = try? await client.get("/api/store/scenes/\(ApiPaths.segment(storeId))/scenes.json")
+            let groups = grantSettings ?? Self.declaredServiceSettingGroups(added)
             var body: [String: JSONValue] = [
                 "scene_id": .string(storeId), "activate": .bool(activate),
                 "settings_groups": .array(groups.map { .string($0) }),
             ]
             // A frame with an active layout has it on what joins (the SPA's layoutsWornBy).
             let installed = (try? await installedScenes(frame).map(\.scene)) ?? []
-            if let active = SceneLayouts.active(installed),
-               let added = try? await client.get("/api/store/scenes/\(ApiPaths.segment(storeId))/scenes.json")
-            {
+            if let active = SceneLayouts.active(installed), let added {
                 var layouts: [String: JSONValue] = [:]
                 for scene in added.arrayValue ?? [] where scene["settings"]?["isLayout"]?.boolValue != true {
                     if let id = scene["id"]?.stringValue, SceneLayouts.ref(scene["layout"]) == nil { layouts[id] = active }
@@ -193,7 +212,7 @@ extension FrameOSService {
         var arguments = source
         // As on the cloud: a store scene is granted the keys it declares
         // (the tool grants only what the scenes declare among these).
-        arguments["settings_groups"] = .array(Self.serviceSettingGroups.map { .string($0) })
+        arguments["settings_groups"] = .array(Self.declaredServiceSettingGroups(source["scenes"]).map { .string($0) })
         // A frame with an active layout has it on what joins.
         if let active = SceneLayouts.active(frame["scenes"]?.arrayValue ?? []) { arguments["layout"] = active }
         arguments["confirm"] = true

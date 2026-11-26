@@ -235,49 +235,82 @@ static void log_service_settings_event(const char *origin, const char *status,
     frameos_nim_log_hook(line);
 }
 
-/* The six cloud-owned settings groups (docs/cloud-frames.md, "Service
- * settings"). Kept in sync with CloudServiceSettingsGroups in
- * frameos/src/frameos/apps.nim, which does the actual merge. */
-static const char *const k_service_settings_groups[] = {
-    "frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash",
-};
+/* The most a pull's service settings may be, as handed to the runtime: the
+ * keys a frame's scenes are bound to, their labels and which scene gets
+ * which (docs/service-keys.md). A bigger one keeps the copy the frame has. */
+#define SERVICE_SETTINGS_MAX_BYTES (16 * 1024)
 
-/* Hand the six groups to the Nim runtime, which replaces the ones present and
- * DELETES the ones absent.
+/* The names of a pull's `settings` (or an older flat blob's groups), comma
+ * separated, for the log. Names only: never a value. */
+static void group_names(const cJSON *groups, char *names, size_t size)
+{
+    size_t used = 0;
+    names[0] = '\0';
+    const cJSON *group = NULL;
+    cJSON_ArrayForEach(group, groups) {
+        if (!cJSON_IsObject(group) || group->string == NULL) continue;
+        int written = snprintf(names + used, size - used, "%s%s", used ? "," : "", group->string);
+        if (written <= 0 || (size_t)written >= size - used) break;
+        used += (size_t)written;
+    }
+}
+
+/* The backend's own keys at the root of its pull: never a service. */
+static bool backend_key(const char *name)
+{
+    static const char *const keys[] = {"frame", "schedule", "settings", "serviceSettings", "serviceKeys", "groups"};
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        if (strcmp(name, keys[i]) == 0) return true;
+    }
+    return false;
+}
+
+/* Hand a pull's service settings to the Nim runtime as
+ * {"settings": {…}, "serviceKeys": {…}, "groups": […]}; it replaces what the
+ * plane owns and deletes what it no longer sends (docs/service-keys.md).
  *
- * One parser, two payload shapes:
- *   backend  {"homeAssistant": {…}, "openAI": {…}, "frame": {…}, "schedule": …}
- *            — the groups sit at the ROOT, next to `frame`/`schedule`.
- *   cloud    {"settings": {"homeAssistant": {…}}, "groups": [...]}
- *            — the groups sit under `settings`, and `groups` lists what the
- *              frame's scenes declare (advisory; not a source of values).
- * So: use `settings` when the payload has one, else scan the root for the
- * known group names. Only those names are ever forwarded — `frame`,
- * `schedule` and `groups` never reach the Nim side. */
+ * One parser, three payload shapes, and no list of services:
+ *   cloud    {"settings": {…}, "serviceKeys": {…}, "groups": [...]}
+ *   backend  {"serviceSettings": {…}, "serviceKeys": {…}, "frame": {…}, "schedule": …}
+ *   an older backend: the groups at the ROOT, next to `frame`/`schedule`:
+ *            every object there but the backend's own keys.
+ * The runtime keeps only names a service may have. */
 static void apply_service_settings(const cJSON *root, const char *origin, const char *etag)
 {
     const cJSON *settings = cJSON_GetObjectItem(root, "settings");
-    if (!cJSON_IsObject(settings)) settings = root;
+    if (!cJSON_IsObject(settings)) settings = cJSON_GetObjectItem(root, "serviceSettings");
 
     cJSON *out = cJSON_CreateObject();
-    if (out == NULL) return; /* no memory: keep the current copy, retry later */
-    char names[160] = "";
-    size_t names_len = 0;
-    for (size_t i = 0; i < sizeof(k_service_settings_groups) / sizeof(k_service_settings_groups[0]); i++) {
-        const char *name = k_service_settings_groups[i];
-        const cJSON *group = cJSON_GetObjectItem(settings, name);
-        if (!cJSON_IsObject(group)) continue;
-        /* A reference: cJSON_Delete(out) below will not free the parsed tree. */
-        if (!cJSON_AddItemReferenceToObject(out, name, (cJSON *)group)) continue;
-        int written = snprintf(names + names_len, sizeof(names) - names_len,
-                               "%s%s", names_len ? "," : "", name);
-        if (written > 0 && (size_t)written < sizeof(names) - names_len) {
-            names_len += (size_t)written;
-        }
+    cJSON *groups = out ? cJSON_AddObjectToObject(out, "settings") : NULL;
+    if (groups == NULL) {
+        cJSON_Delete(out);
+        return; /* no memory: keep the current copy, retry later */
     }
+    const cJSON *source = cJSON_IsObject(settings) ? settings : root;
+    const cJSON *group = NULL;
+    cJSON_ArrayForEach(group, source) {
+        if (!cJSON_IsObject(group) || group->string == NULL) continue;
+        if (!cJSON_IsObject(settings) && backend_key(group->string)) continue;
+        /* A reference: cJSON_Delete(out) below will not free the parsed tree. */
+        cJSON_AddItemReferenceToObject(groups, group->string, (cJSON *)group);
+    }
+    const char *const passed[] = {"serviceKeys", "groups"};
+    for (size_t i = 0; i < 2; i++) {
+        cJSON *item = cJSON_GetObjectItem(root, passed[i]);
+        if (item != NULL) cJSON_AddItemReferenceToObject(out, passed[i], item);
+    }
+    char names[160];
+    group_names(groups, names, sizeof(names));
     char *printed = cJSON_PrintUnformatted(out);
     cJSON_Delete(out);
     if (printed == NULL) return; /* same: an OOM must not read as a revocation */
+    if (strlen(printed) > SERVICE_SETTINGS_MAX_BYTES) {
+        ESP_LOGW(TAG, "service settings: %u bytes, over %u; keeping the current copy",
+                 (unsigned)strlen(printed), (unsigned)SERVICE_SETTINGS_MAX_BYTES);
+        memset(printed, 0, strlen(printed));
+        cJSON_free(printed);
+        return;
+    }
     frameos_nim_apply_service_settings(printed);
     cache_store(printed, etag, origin);
     /* These are the account's credentials; do not leave them in freed heap. */
@@ -411,15 +444,11 @@ bool fos_settings_boot_apply_cache(void)
         fos_settings_forget_cache(); /* a corrupt cache is not a copy to keep */
         return false;
     }
-    /* Names only in the log, never a value (see apply_service_settings). */
-    char names[160] = "";
-    size_t names_len = 0;
-    for (size_t i = 0; i < sizeof(k_service_settings_groups) / sizeof(k_service_settings_groups[0]); i++) {
-        if (!cJSON_IsObject(cJSON_GetObjectItem(root, k_service_settings_groups[i]))) continue;
-        int written = snprintf(names + names_len, sizeof(names) - names_len, "%s%s",
-                               names_len ? "," : "", k_service_settings_groups[i]);
-        if (written > 0 && (size_t)written < sizeof(names) - names_len) names_len += (size_t)written;
-    }
+    /* Names only in the log, never a value (see apply_service_settings). A
+     * blob from before service keys is the groups alone. */
+    char names[160];
+    const cJSON *cached = cJSON_GetObjectItem(root, "settings");
+    group_names(cJSON_IsObject(cached) ? cached : root, names, sizeof(names));
     cJSON_Delete(root);
     frameos_nim_apply_service_settings(blob);
     memset(blob, 0, len);

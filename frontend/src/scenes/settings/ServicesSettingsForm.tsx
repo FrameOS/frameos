@@ -12,6 +12,9 @@ import { TextInput } from '../../components/TextInput'
 import { sceneLogic } from '../sceneLogic'
 import { globalSettingsSectionIsAllowed, workspaceMode } from '../workspace/workspaceSurfaces'
 import { settingsLogic } from './settingsLogic'
+import { Tag } from '../../components/Tag'
+import { serviceKeysSettingsLogic } from './serviceKeysSettingsLogic'
+import { SERVICE_CREDENTIALS_GROUP } from '../../utils/serviceKeys'
 
 export function SettingsGroupDivider({ label }: { label: string }): JSX.Element {
   return (
@@ -21,8 +24,10 @@ export function SettingsGroupDivider({ label }: { label: string }): JSX.Element 
   )
 }
 
-// The "Services" part of the global settings: the API keys the apps on the
-// frames use (gallery, OpenAI, Home Assistant, GitHub, Immich, Unsplash).
+// The "Services" part of the global settings: the keys the apps on the frames
+// use (Service keys: every service of the registry, repo/services.json, and
+// any the frames' scenes define; docs/service-keys.md), and the control
+// plane's own (OpenAI for AI features, PostHog, the Home Assistant sync).
 // One form over settingsLogic's `settings`, saved by the page's Save button.
 // Self-hosted it is one group of the long settings page (with the divider);
 // on the cloud it is the whole "Service keys" page.
@@ -49,44 +54,19 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
     <>
       {divider ? <SettingsGroupDivider label="Services" /> : null}
       <Form logic={settingsLogic} formKey="settings" props={{}} onSubmit={submitSettings} className="space-y-4">
-        {showSection('settings-gallery') ? (
-          <Group name="frameOS">
-            <H6 id="settings-gallery" className="pt-4">
-              FrameOS Gallery
-            </H6>
-            <Box className="p-2 space-y-2">
-              <p className="text-sm leading-loose">
-                <a className="frameos-link hover:underline" target="_blank" href="https://gallery.frameos.net/">
-                  Premium AI slop
-                </a>{' '}
-                to get you started.
-              </p>
-              <Field
-                name="apiKey"
-                label="API key"
-                secret={!!savedSettings?.frameOS?.apiKey}
-                tooltip="Just use 2024 for now. We might add custom accounts in the future"
-              >
-                <TextInput />
-              </Field>
-            </Box>
-          </Group>
-        ) : null}
+        {showSection('settings-service-keys') ? <ServiceKeysCards /> : null}
         {showSection('settings-openai') ? (
           <Group name="openAI">
             <H6 id="settings-openai" className="pt-4">
-              OpenAI
+              OpenAI for AI features
             </H6>
             <Box className="p-2 space-y-2">
               <p className="text-sm leading-loose">
-                The OpenAI API key is used within OpenAI apps on frames.
                 {showBackendOnlyFields
-                  ? ' The backend key powers AI features in the control plane.'
-                  : ' The AI chat key powers scene chat here in the workspace; it stays on your account and is never sent to frames.'}
+                  ? 'The backend key powers AI features in the control plane.'
+                  : 'The AI chat key powers scene chat here in the workspace; it stays on your account and is never sent to frames.'}{' '}
+                The key the OpenAI apps on frames use is under Service keys.
               </p>
-              <Field name="apiKey" label="API key for frames" secret={!!savedSettings?.openAI?.apiKey}>
-                <TextInput name="apiKey" />
-              </Field>
               {!showBackendOnlyFields ? (
                 <>
                   <Field
@@ -219,24 +199,14 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
             </Box>
           </Group>
         ) : null}
-        {showSection('settings-home-assistant') ? (
+        {showSection('settings-home-assistant') && showBackendOnlyFields ? (
           <Group name="homeAssistant">
             <H6 id="settings-home-assistant" className="pt-4">
-              Home Assistant
+              Home Assistant sync
             </H6>
             <Box className="p-2 space-y-2">
-              <Field name="url" label="Home assistant URL">
-                <TextInput placeholder="http://homeassistant.local:8123" />
-              </Field>
-              <Field
-                name="accessToken"
-                label="Access token (Profile → Long-Lived Access Tokens)"
-                secret={!!savedSettings?.homeAssistant?.accessToken}
-              >
-                <TextInput />
-              </Field>
               {showBackendOnlyFields ? (
-                <div className="space-y-2 border-t border-slate-500/20 pt-3">
+                <div className="space-y-2">
                   <Field
                     name="syncEnabled"
                     label="Share frames with Home Assistant"
@@ -256,7 +226,7 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
                     <p className="frameos-muted text-sm leading-loose">
                       Running as a Home Assistant add-on: the Home Assistant connection and the MQTT broker (Mosquitto
                       add-on) are discovered automatically. The URL and access token above are only needed by Home
-                      Assistant apps running on your frames.
+                      Assistant apps running on your frames (under Service keys).
                     </p>
                   ) : null}
                   {!isHassioIngress && settings?.homeAssistant?.syncEnabled ? (
@@ -300,50 +270,110 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
             </Box>
           </Group>
         ) : null}
-        {showSection('settings-github') ? (
-          <Group name="github">
-            <H6 id="settings-github" className="pt-4">
-              GitHub
-            </H6>
-            <Box className="p-2 space-y-2">
-              <Field name="api_key" label="API key" secret={!!savedSettings?.github?.api_key}>
-                <TextInput />
-              </Field>
-            </Box>
-          </Group>
-        ) : null}
-        {showSection('settings-immich') ? (
-          <Group name="immich">
-            <H6 id="settings-immich" className="pt-4">
-              Immich
-            </H6>
-            <Box className="p-2 space-y-2">
-              <Field name="url" label="Server URL">
-                <TextInput placeholder="https://immich.example.com" />
-              </Field>
-              <Field
-                name="apiKey"
-                label="API key (Account Settings → API Keys)"
-                secret={!!savedSettings?.immich?.apiKey}
-              >
-                <TextInput />
-              </Field>
-            </Box>
-          </Group>
-        ) : null}
-        {showSection('settings-unsplash') ? (
-          <Group name="unsplash">
-            <H6 id="settings-unsplash" className="pt-4">
-              Unsplash API
-            </H6>
-            <Box className="p-2 space-y-2">
-              <Field name="accessKey" label="Access key" secret={!!savedSettings?.unsplash?.accessKey}>
-                <TextInput />
-              </Field>
-            </Box>
-          </Group>
-        ) : null}
       </Form>
+    </>
+  )
+}
+
+/**
+ * One card per service (docs/service-keys.md): the default key — the one
+ * every scene gets unless you pick another for it under "Keys" in the scene's
+ * menu — and the named keys beyond it. Inside the settings form: each field
+ * is a path into `settings` (the group named after the service, or
+ * `serviceCredentials.<id>`), saved with the page.
+ */
+function ServiceKeysCards(): JSX.Element {
+  const { savedSettings } = useValues(settingsLogic)
+  const { cards } = useValues(serviceKeysSettingsLogic)
+  const { addServiceCredential, removeServiceCredential } = useActions(serviceKeysSettingsLogic)
+  return (
+    <>
+      <H6 id="settings-service-keys" className="pt-4">
+        Service keys
+      </H6>
+      <p className="frameos-muted text-sm leading-loose">
+        The keys the apps on your frames use. Each scene gets a service&apos;s default key; add another key to give some
+        scenes a different one (Keys, in the scene&apos;s menu). A scene from the scene store gets a key only when you
+        give it one.
+      </p>
+      {/* One container after the heading: the page's section card (index.css `form > h6 + p + div`). */}
+      <div className="space-y-3">
+        {cards.map(({ definition, anchor, credentials }) => (
+          <div key={definition.id} id={anchor}>
+            <Box className="p-2 space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="frameos-strong font-semibold">{definition.title}</span>
+                {definition.optional ? <Tag>Optional</Tag> : null}
+                {!definition.registered ? <Tag>Custom</Tag> : null}
+              </div>
+              {definition.description || definition.help ? (
+                <p className="frameos-muted text-sm">
+                  {definition.description}
+                  {definition.help ? (
+                    <>
+                      {definition.description ? ' ' : null}
+                      <a
+                        className="frameos-link hover:underline"
+                        target="_blank"
+                        rel="noreferrer"
+                        href={definition.help}
+                      >
+                        Get a key
+                      </a>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+              <Group name={definition.id}>
+                {definition.fields.map((field) => (
+                  <Field
+                    key={field.name}
+                    name={field.name}
+                    label={credentials.length > 0 ? `${field.label} (default)` : field.label}
+                    hint={field.hint}
+                    secret={field.secret && !!savedSettings?.[definition.id]?.[field.name]}
+                  >
+                    <TextInput placeholder={field.placeholder} />
+                  </Field>
+                ))}
+              </Group>
+              {credentials.map(({ id, credential }) => (
+                <div key={id} className="space-y-2 border-t border-slate-500/20 pt-3">
+                  <Group name={[SERVICE_CREDENTIALS_GROUP, id]}>
+                    <Field name="name" label="Name of this key">
+                      <TextInput />
+                    </Field>
+                    <Group name="values">
+                      {definition.fields.map((field) => (
+                        <Field
+                          key={field.name}
+                          name={field.name}
+                          label={field.label}
+                          secret={
+                            field.secret && !!savedSettings?.[SERVICE_CREDENTIALS_GROUP]?.[id]?.values?.[field.name]
+                          }
+                        >
+                          <TextInput placeholder={field.placeholder} />
+                        </Field>
+                      ))}
+                    </Group>
+                  </Group>
+                  <div className="flex justify-end">
+                    <Button size="small" color="secondary" onClick={() => removeServiceCredential(id)}>
+                      Remove {credential.name}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <div className="pt-1">
+                <Button size="small" color="secondary" onClick={() => addServiceCredential(definition.id)}>
+                  Add another key
+                </Button>
+              </div>
+            </Box>
+          </div>
+        ))}
+      </div>
     </>
   )
 }

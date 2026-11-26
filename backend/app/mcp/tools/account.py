@@ -5,6 +5,7 @@ from typing import Any
 
 from app.schemas.settings import SettingsUpdateRequest
 from app.utils.scene_guide_gen import SCENE_GUIDE_SECTIONS
+from app.utils.service_keys import is_service_id, service_registry
 from app.utils.settings_secrets import MASK_BULLETS
 from app.utils.versions import current_frameos_version
 
@@ -14,6 +15,20 @@ from ..registry import ID_PATTERN, Tool
 from ..result import McpInputError, run, text
 
 SETTINGS_GROUPS = tuple(SettingsUpdateRequest.model_fields)
+# Beyond those: any service's default key, a group named after its id
+# (docs/service-keys.md; repo/services.json lists the known services).
+SETTINGS_GROUP_PATTERN = "^[A-Za-z][A-Za-z0-9_]{0,40}$"
+
+
+def _known_group(group: str) -> bool:
+    return group in SETTINGS_GROUPS or is_service_id(group)
+
+
+def _unknown_group(group: str) -> McpInputError:
+    return McpInputError(
+        f"Unknown settings group {group}; one of: {', '.join(SETTINGS_GROUPS)}, or a service id "
+        f"({', '.join(sorted(service_registry()))}, …)"
+    )
 
 # What the guide leaves to each server: the tools that look things up and
 # check a scene here.
@@ -97,8 +112,8 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
         async def go():
             settings = await api.json("GET", "/api/settings", project_id=project_id)
             if group:
-                if group not in SETTINGS_GROUPS:
-                    raise McpInputError(f"Unknown settings group {group}; one of: {', '.join(SETTINGS_GROUPS)}")
+                if not _known_group(group):
+                    raise _unknown_group(group)
                 return text({group: settings.get(group)})
             return text(settings)
 
@@ -107,20 +122,21 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
     server.tool(Tool(
         name="settings_get",
         description=(
-            "The project's settings: service API keys scenes use (openAI, unsplash, homeAssistant, immich, "
-            "github, frameOS), defaults for new frames, posthog, repositories, ssh_keys, the legacy build "
-            "environment. Secrets are always masked (bullets plus the last four characters); the backend "
-            "never reveals a stored key. Groups: " + ", ".join(SETTINGS_GROUPS) + "."
+            "The project's settings: the default key of each service scenes use (a group named after the "
+            "service: openAI, unsplash, homeAssistant, immich, github, frameOS or any other service id), further "
+            "named keys (serviceCredentials), defaults for new frames, posthog, repositories, ssh_keys, the legacy "
+            "build environment. Secrets are always masked (bullets plus the last four characters); the backend "
+            "never reveals a stored key. Groups: " + ", ".join(SETTINGS_GROUPS) + ", and any service id."
         ),
-        properties={"group": {"type": "string", "enum": list(SETTINGS_GROUPS)}},
+        properties={"group": {"type": "string", "pattern": SETTINGS_GROUP_PATTERN}},
         annotations={"readOnlyHint": True},
         handler=settings_get,
     ))
 
     async def settings_update(group: str, values: dict[str, Any], project_id: int | None = None):
         async def go():
-            if group not in SETTINGS_GROUPS:
-                raise McpInputError(f"Unknown settings group {group}; one of: {', '.join(SETTINGS_GROUPS)}")
+            if not _known_group(group):
+                raise _unknown_group(group)
             current = await api.json("GET", "/api/settings", project_id=project_id)
             existing = current.get(group)
             if isinstance(existing, dict):
@@ -138,10 +154,11 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
         description=(
             "Set keys in one settings group, merged over the current values (only the keys you pass change; "
             "a masked secret posted back keeps the stored one). E.g. group=openAI values={apiKey: 'sk-…'}; "
-            "group=unsplash values={accessKey: '…'}; group=homeAssistant values={url, accessToken}."
+            "group=unsplash values={accessKey: '…'}; group=homeAssistant values={url, accessToken}; any other "
+            "service id is a group of its own (group=acmeWeather values={apiKey: '…'})."
         ),
         properties={
-            "group": {"type": "string", "enum": list(SETTINGS_GROUPS)},
+            "group": {"type": "string", "pattern": SETTINGS_GROUP_PATTERN},
             "values": {"type": "object"},
         },
         required=["group", "values"],

@@ -5,6 +5,7 @@ import math
 import os
 import checksums/md5
 import frameos/types
+import frameos/service_keys
 import frameos/utils/memory
 import frameos/utils/system
 
@@ -104,61 +105,62 @@ proc maxImageResponseBytes*(self: AppRoot): int {.inline.} =
 ## Service settings on embedded frames arrive ONE way: the firmware's ETag'd
 ## settings poll (embedded/esp32/main/fos_settings.c) hands the payload to
 ## `applyServiceSettings` below, for backend and cloud sources alike. There is
-## deliberately no Nim-side fetch — apps read `config.settings` and never go
-## looking for keys themselves.
+## deliberately no Nim-side fetch — apps read their keys through
+## service_keys.nim and never go looking for them themselves.
 
-const CloudServiceSettingsGroups* = [
+const LegacyPlaneServiceGroups* = [
   "frameOS", "github", "homeAssistant", "immich", "openAI", "unsplash",
 ]
-  ## The settings groups a cloud provider owns on a cloud-managed frame
-  ## (docs/cloud-frames.md, "Service settings"). Everything else in
-  ## `config.settings` stays under local control and is never touched here.
-  ## The Linux runtime keeps the same list in server/api.nim
-  ## (`frameCloudServiceSettingsGroups`, pinned to the admin-editable fields
-  ## by a static block); this copy exists because that module — and the whole
-  ## frame.json persistence layer under it — is not part of the embedded
-  ## build, where settings live in RAM and are re-pulled every boot.
+  ## The groups every plane owned before service keys (docs/service-keys.md):
+  ## a pull takes them away when it no longer sends them, whatever the frame
+  ## kept of the last one. Any other group a plane sends is owned by name
+  ## (`FrameConfig.serviceSettingsOwned`); no list of services otherwise.
 
-const CloudServiceSettingsFields* = [
-  ("frameOS", "apiKey"),
-  ("openAI", "apiKey"),
-  ("homeAssistant", "url"),
-  ("homeAssistant", "accessToken"),
-  ("github", "api_key"),
-  ("immich", "url"),
-  ("immich", "apiKey"),
-  ("unsplash", "accessKey"),
-]
-  ## Every field a provider may deliver, per group. Mirrors
-  ## `frameAdminEditableSettingsFields` in server/api.nim and the field list in
-  ## docs/cloud-frames.md; anything else in a delivered group is dropped.
-
-proc cloudServiceSettingsGroup(group: string, payload: JsonNode): JsonNode =
-  ## One group as the device will store it: only the fields this frame knows
-  ## for that group, only non-empty strings. nil when nothing usable is left —
-  ## the caller then deletes the group, exactly as it treats an absent one (the
-  ## provider omits empty values for the same reason).
+proc deliveredServiceGroup*(payload: JsonNode): JsonNode =
+  ## One group as the device keeps it: its string fields with a field's name,
+  ## non-empty. nil when nothing usable is left — the caller then deletes the
+  ## group, as it treats an absent one (the planes omit empty values too).
   if payload == nil or payload.kind != JObject:
     return nil
   var fields = newJObject()
-  for (section, field) in CloudServiceSettingsFields:
-    if section != group:
-      continue
-    let value = payload{field}
-    if value != nil and value.kind == JString and value.getStr("").len > 0:
+  for field, value in payload.pairs:
+    if isFieldName(field) and value.kind == JString and value.getStr("").len > 0:
       fields[field] = %value.getStr("")
   if fields.len == 0: nil else: fields
 
-proc applyServiceSettings*(config: FrameConfig, settings: JsonNode): bool {.discardable.} =
-  ## Applies one cloud service-settings pull (docs/cloud-frames.md) to the live
+proc servicePull*(payload: JsonNode): tuple[settings, serviceKeys: JsonNode, owned: seq[string]] =
+  ## A pull's parts: `{"settings", "serviceKeys", "groups"}` (what the
+  ## firmware hands over since service keys, the cloud's body), or an older
+  ## flat map of groups (an NVS cache from before). `owned`: the groups the
+  ## plane says are its own, sent or listed.
+  if payload == nil or payload.kind != JObject:
+    return
+  let wrapped = payload{"settings"}
+  result.settings = if wrapped != nil and wrapped.kind == JObject: wrapped else: payload
+  if wrapped != nil and wrapped.kind == JObject:
+    let keys = payload{"serviceKeys"}
+    if keys != nil and keys.kind == JObject:
+      result.serviceKeys = keys
+    let groups = payload{"groups"}
+    if groups != nil and groups.kind == JArray:
+      for group in groups.elems:
+        if group.kind == JString and isServiceId(group.getStr()) and group.getStr() notin result.owned:
+          result.owned.add group.getStr()
+  for group, _ in result.settings.pairs:
+    if isServiceId(group) and group notin result.owned:
+      result.owned.add group
+
+proc applyServiceSettings*(config: FrameConfig, payload: JsonNode): bool {.discardable.} =
+  ## Applies one service-settings pull (docs/service-keys.md) to the live
   ## config, and reports whether anything changed.
   ##
-  ## `settings` is the pull's `settings` object (group → field → value). The six
-  ## groups above are cloud-owned: each one present is REPLACED wholesale and
-  ## each one absent is DELETED — revoking a key in the provider account, or
-  ## dropping the last scene that used it, has to take the key off the device.
-  ## `nil` or an empty object clears all six, which is what the provider's
-  ## `403 insufficient_scope` means. No other settings key is read or written.
+  ## What the plane owns is REPLACED: each group it sends now replaces the
+  ## frame's copy, and each it sent last time, or one of the legacy six, that
+  ## it no longer sends is DELETED — revoking a key in the account, or
+  ## dropping the last scene that used it, has to take the key off the
+  ## device. `serviceKeys` is replaced whole, and goes when the pull has
+  ## none. `nil` or an empty object clears it all, which is what the
+  ## provider's `403 insufficient_scope` means. Other settings stay.
   ##
   ## The Linux counterpart is `persistCloudServiceSettingsUpdate` in
   ## server/api.nim, which does the same thing to frame.json. On embedded there
@@ -168,11 +170,15 @@ proc applyServiceSettings*(config: FrameConfig, settings: JsonNode): bool {.disc
     return false
   if config.settings == nil or config.settings.kind != JObject:
     config.settings = %*{}
-  let incoming = if settings != nil and settings.kind == JObject: settings else: nil
-  for group in CloudServiceSettingsGroups:
-    let desired =
-      if incoming == nil: nil
-      else: cloudServiceSettingsGroup(group, incoming{group})
+  let pull = servicePull(payload)
+  var owned: seq[string]
+  for group in LegacyPlaneServiceGroups:
+    owned.add group
+  for group in config.serviceSettingsOwned & pull.owned:
+    if group notin owned:
+      owned.add group
+  for group in owned:
+    let desired = if pull.settings == nil: nil else: deliveredServiceGroup(pull.settings{group})
     let existing = config.settings{group}
     if desired == nil:
       if existing != nil:
@@ -181,6 +187,10 @@ proc applyServiceSettings*(config: FrameConfig, settings: JsonNode): bool {.disc
     elif existing == nil or existing.kind != JObject or existing != desired:
       config.settings[group] = desired
       result = true
+  config.serviceSettingsOwned = pull.owned
+  if config.serviceKeys != pull.serviceKeys:
+    config.serviceKeys = if pull.serviceKeys == nil: nil else: copy(pull.serviceKeys)
+    result = true
 
 proc applyServiceSettings*(config: FrameConfig, json: string): bool {.discardable.} =
   ## String entrypoint for the firmware (embedded_main.fos_nim_apply_service_settings_impl).

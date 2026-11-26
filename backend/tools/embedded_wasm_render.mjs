@@ -6,7 +6,7 @@
 // instead of on the device.
 //
 // Protocol: a single JSON object on stdin
-//   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
+//   {assetsDir, width, height, name, timeZone, settingsJson, serviceKeysJson?, scenesJson,
 //    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget,
 //    controlEventsJson, deviceInputJson, nowMs, frameJson, keptStateJson}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
@@ -435,6 +435,17 @@ const ok = call(
   [width, height, request.name || 'thin client', request.timeZone || 'UTC', request.settingsJson || '{}']
 )
 if (!ok) fail(`init failed: ${lastError()}`)
+
+// Each scene's own keys (docs/service-keys.md "On the wire"): a runtime that
+// reads `serviceKeys` answers getSetting per scene from them; an older bundle
+// has no export and keeps reading the settings from init.
+if (request.serviceKeysJson && typeof Module._frameos_wasm_set_service_keys === 'function') {
+  try {
+    call('frameos_wasm_set_service_keys', 'boolean', ['string'], [request.serviceKeysJson])
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: service keys unavailable (${error})\n`)
+  }
+}
 
 // A device's memory ceiling (app/utils/device_limits.py), set after init like
 // the preview worker does: module startup lives in a frame's flash, not in its

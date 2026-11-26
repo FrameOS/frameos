@@ -136,7 +136,9 @@ save on the backend for a `frame_deploy` later).
 - **account** — `account_info` (who, how authenticated, projects, backend
   version and URL), `projects_list`, `api_tokens_list`, `api_token_revoke`,
   `settings_get` (secrets always masked), `settings_update` (merges over the
-  current group; a masked value posted back keeps the stored key),
+  current group; a masked value posted back keeps the stored key; a group is
+  one of the plane's own or any service id, docs/service-keys.md, and
+  `serviceCredentials` holds the further named keys),
   `system_info`, `apps_list` (built-in apps and the repo JS app templates,
   `repo/apps/<folder>/<name>`), `app_source_get`, `fonts_list`, and
   `scene_guide`.
@@ -149,11 +151,14 @@ save on the backend for a `frame_deploy` later).
   saved scene, a catalog slug pair, or a URL — a scenes.json, a zip or a
   scene store page; ids are regenerated unless `preserve_ids`;
   `activate=true` makes it the boot default and shows it;
-  `settings_groups` grants store scenes the service keys they declare among
-  those named, as the cloud tool of the same name does — without it a store
-  scene gets none, and the answer's `declared_settings_groups` /
-  `granted_settings_groups` say what it asked for and has),
-  `frame_scene_update`, `frame_scene_remove`, `frame_scene_activate`,
+  `settings_groups` gives store scenes the default key of the services they
+  declare among those named, as the cloud tool of the same name does —
+  without it a store scene gets none, and the answer's
+  `declared_settings_groups` / `granted_settings_groups` say what it asked
+  for and has; `keys` (`{service: "default" | "k_…" | null}`) binds every new
+  scene to a key of its own instead, docs/service-keys.md "Which key a scene
+  gets"; both are the install's, written on the scene's entry),
+  `frame_scene_update` (keeps the install's `eventMap`, `layout` and `keys`), `frame_scene_remove`, `frame_scene_activate`,
   `frame_scene_state_set`, `frame_render`, `frame_event`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (search and
   type filters), `frame_metrics`, `frame_restart`, `frame_reboot`,

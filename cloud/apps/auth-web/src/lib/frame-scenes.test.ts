@@ -53,9 +53,10 @@ describe("resolveGrantedSettingsGroups", () => {
     ).toBeNull();
   });
 
-  it("drops names no device can be served", () => {
-    expect(normalizeSettingsGroups(["unsplash", "toString", "posthog"])).toEqual([
+  it("drops names that are no service", () => {
+    expect(normalizeSettingsGroups(["unsplash", "toString", "posthog", "acmeWeather"])).toEqual([
       "unsplash",
+      "acmeWeather",
     ]);
   });
 });
@@ -108,6 +109,6 @@ describe("readSettingsGroupsField", () => {
     expect(readSettingsGroupsField("unsplash")).toBe(false);
     expect(readSettingsGroupsField([1])).toBe(false);
     expect(readSettingsGroupsField(["a b"])).toBe(false);
-    expect(readSettingsGroupsField(Array.from({ length: 17 }, () => "x"))).toBe(false);
+    expect(readSettingsGroupsField(Array.from({ length: 33 }, () => "x"))).toBe(false);
   });
 });

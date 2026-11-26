@@ -18,7 +18,8 @@ export function get(app, context) {
     throw new Error(`Error fetching image from Unsplash: ${m}`)
   }
 
-  const key = str(frameos.getSetting('unsplash', 'accessKey'))
+  // A placeholder the frame fills towards Unsplash alone (docs/service-keys.md); the key on older frames.
+  const key = str((frameos.secret ?? frameos.getSetting)('unsplash', 'accessKey'))
   if (!key) throw new Error('Please provide an Unsplash API key in the settings.')
   const o = c.orientation
   const orientation = o === 'auto' ? (h > w ? 'portrait' : w > h ? 'landscape' : 'squarish') : o === 'any' ? '' : o

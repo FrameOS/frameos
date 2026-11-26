@@ -127,7 +127,8 @@ export function get(app) {
     .trim()
     .replace(/\/+$/, '')
   if (!server) throw new Error('Please provide an Immich server URL in the settings.')
-  const key = String(frameos.getSetting('immich', 'apiKey') ?? '')
+  // A placeholder the frame fills towards that server alone (docs/service-keys.md); the key on older frames.
+  const key = String((frameos.secret ?? frameos.getSetting)('immich', 'apiKey') ?? '')
   if (!key) throw new Error('Please provide an Immich API key in the settings.')
   const albumId = c.albumId.trim()
   if (c.mode === 'album' && !albumId) {

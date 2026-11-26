@@ -1,99 +1,118 @@
 import { describe, expect, it } from "vitest";
-import { storableAccountSettingsFields } from "./account-settings";
+import type { ServiceKeysScene } from "../../../../../frontend/src/utils/serviceKeys";
 import {
   buildServiceSettingsPayload,
   canonicalJson,
-  deviceDeliverableFields,
+  previewServiceKeysScene,
+  serviceKeysScenesForAssignments,
   serviceSettingsResponseBody,
 } from "./frame-service-settings";
 
-describe("deviceDeliverableFields", () => {
-  it("is a subset of what an account may store", () => {
-    // A device must never receive more of a group than the account stores,
-    // and this list exists precisely so that adding, say, Home Assistant MQTT
-    // credentials to the account form does not silently ship them to frames.
-    for (const [group, fields] of deviceDeliverableFields) {
-      const storable = storableAccountSettingsFields.get(group);
-      expect(storable, `${group} is not a storable account group`).toBeDefined();
-      for (const field of fields) {
-        expect(
-          storable?.has(field),
-          `${group}.${field} is deliverable but not storable`,
-        ).toBe(true);
-      }
-    }
-  });
-
-  it("keeps Home Assistant to url + token", () => {
-    expect([...(deviceDeliverableFields.get("homeAssistant") ?? [])].sort()).toEqual([
-      "accessToken",
-      "url",
-    ]);
-  });
-});
+// One runtime scene that declares `declared` and is granted the default of
+// what `granted` covers (the older rule), optionally bound with `keys`.
+function scene(
+  id: string,
+  declared: string[],
+  granted: string[] = declared,
+  keys?: Record<string, string | null>,
+): ServiceKeysScene {
+  return { declared, id, legacyGranted: granted, ...(keys ? { keys } : {}) };
+}
 
 describe("buildServiceSettingsPayload", () => {
   const stored = {
+    homeAssistant: { accessToken: "ha-token", url: "https://ha.local" },
+    openAI: { apiKey: "openai-key", backendApiKey: "plane-only" },
+    serviceCredentials: {
+      k_work00000001: { name: "Work", service: "openAI", values: { apiKey: "work-key" } },
+    },
     unsplash: { accessKey: "unsplash-key" },
-    openAI: { apiKey: "openai-key" },
-    homeAssistant: { url: "https://ha.local", accessToken: "ha-token" },
   };
 
-  it("sends only the groups the owner granted", () => {
-    const payload = buildServiceSettingsPayload(["unsplash"], stored);
+  it("sends only what the scenes were granted", () => {
+    const payload = buildServiceSettingsPayload([scene("photos", ["unsplash"])], stored);
     expect(payload.groups).toEqual(["unsplash"]);
     expect(payload.settings).toEqual({ unsplash: { accessKey: "unsplash-key" } });
+    expect(payload.serviceKeys.scenes).toEqual({ photos: { unsplash: "unsplash" } });
+    expect(payload.serviceKeys.keys).toEqual({
+      unsplash: { service: "unsplash", values: { accessKey: "unsplash-key" } },
+    });
   });
 
-  it("never mentions a group a scene declared but was not granted", () => {
-    // The caller passes the GRANTED union (frames.service_setting_groups), so
-    // a scene that declares openAI without a grant leaves no trace here — not
-    // in settings, not in groups (which the device reads as "cloud-owned").
-    const granted = ["unsplash"];
-    const declaredByScene = ["unsplash", "openAI"];
-    const payload = buildServiceSettingsPayload(granted, stored);
-    expect(declaredByScene).toContain("openAI");
-    expect(payload.groups).not.toContain("openAI");
+  it("names a declared but refused service for its scene, and sends no key for it", () => {
+    const payload = buildServiceSettingsPayload([scene("store-art", ["unsplash", "openAI"], ["unsplash"])], stored);
+    expect(payload.groups).toEqual(["unsplash"]);
     expect(payload.settings).not.toHaveProperty("openAI");
+    expect(payload.serviceKeys.scenes["store-art"]).toEqual({ openAI: null, unsplash: "unsplash" });
+    expect(payload.serviceKeys.keys).not.toHaveProperty("openAI");
   });
 
-  it("lists a declared group with no stored key, but sends no settings for it", () => {
-    // groups is what the UI shows as "this frame needs"; settings is what
-    // exists. A declared-but-unset group must not appear as {}.
-    const payload = buildServiceSettingsPayload(["unsplash", "immich"], stored);
-    expect(payload.groups).toEqual(["immich", "unsplash"]);
-    expect(payload.settings).not.toHaveProperty("immich");
+  it("keeps a store scene refused while an own scene on the same frame uses the key", () => {
+    // The hole this closes: the frame used to be sent the union, and every
+    // scene whose app declared openAI read it.
+    const payload = buildServiceSettingsPayload(
+      [scene("art", ["openAI"]), scene("store-art", ["openAI"], [])],
+      stored,
+    );
+    expect(payload.serviceKeys.scenes).toEqual({ art: { openAI: "openAI" }, "store-art": { openAI: null } });
+    // Older runtimes still get the one frame-wide copy.
+    expect(payload.settings).toEqual({ openAI: { apiKey: "openai-key" } });
+  });
+
+  it("sends a named key to the one scene bound to it", () => {
+    const payload = buildServiceSettingsPayload(
+      [scene("art", ["openAI"]), scene("work-art", ["openAI"], [], { openAI: "k_work00000001" })],
+      stored,
+    );
+    expect(payload.serviceKeys.scenes).toEqual({ art: { openAI: "openAI" }, "work-art": { openAI: "k_work00000001" } });
+    expect(payload.serviceKeys.keys.k_work00000001).toEqual({ service: "openAI", values: { apiKey: "work-key" } });
+    expect(payload.settings.openAI).toEqual({ apiKey: "openai-key" });
+  });
+
+  it("never sends the plane's own fields of a group", () => {
+    const payload = buildServiceSettingsPayload([scene("art", ["openAI"])], stored);
+    expect(JSON.stringify(payload)).not.toContain("plane-only");
   });
 
   it("drops fields the device may not receive", () => {
-    const payload = buildServiceSettingsPayload(["homeAssistant"], {
+    const payload = buildServiceSettingsPayload([scene("ha", ["homeAssistant"])], {
       homeAssistant: {
-        url: "https://ha.local",
         accessToken: "ha-token",
         // Hand-inserted, as a stray DB row or a future account field would be.
         mqttPassword: "nope",
+        url: "https://ha.local",
       },
     });
-    expect(payload.settings.homeAssistant).toEqual({
-      url: "https://ha.local",
-      accessToken: "ha-token",
+    expect(payload.settings.homeAssistant).toEqual({ accessToken: "ha-token", url: "https://ha.local" });
+  });
+
+  it("delivers a service the registry does not know, every string field of it", () => {
+    const payload = buildServiceSettingsPayload([scene("weather", ["acmeWeather"])], {
+      acmeWeather: { apiKey: "acme-1", region: "eu" },
     });
+    expect(payload.groups).toEqual(["acmeWeather"]);
+    expect(payload.serviceKeys.keys.acmeWeather).toEqual({
+      service: "acmeWeather",
+      values: { apiKey: "acme-1", region: "eu" },
+    });
+    expect(payload.serviceKeys.services.acmeWeather?.title).toBe("acmeWeather");
   });
 
   it("treats an empty string as not configured", () => {
-    const payload = buildServiceSettingsPayload(["unsplash", "openAI"], {
-      unsplash: { accessKey: "" },
+    const payload = buildServiceSettingsPayload([scene("x", ["unsplash", "openAI"])], {
       openAI: { apiKey: "openai-key" },
+      unsplash: { accessKey: "" },
     });
     expect(payload.settings).toEqual({ openAI: { apiKey: "openai-key" } });
-    // Still declared — the frame needs it, the account just has not set it.
+    // Still bound — the frame needs it, the account just has not set it.
     expect(payload.groups).toEqual(["openAI", "unsplash"]);
+    expect(payload.serviceKeys.scenes.x).toEqual({ openAI: "openAI", unsplash: "unsplash" });
   });
 
-  it("ignores groups no device can receive, and dedupes", () => {
+  it("ignores names that are no service", () => {
     const payload = buildServiceSettingsPayload(
-      ["unsplash", "unsplash", "ssh_keys", "buildEnvironment"],
-      { ...stored, ssh_keys: { keys: "secret" } } as never,
+      [scene("x", ["unsplash", "ssh_keys", "buildEnvironment"])],
+      { ...stored, ssh_keys: { keys: "secret" } },
     );
     expect(payload.groups).toEqual(["unsplash"]);
     expect(payload.settings).not.toHaveProperty("ssh_keys");
@@ -101,24 +120,86 @@ describe("buildServiceSettingsPayload", () => {
 
   it("sends nothing for a frame whose scenes declare nothing", () => {
     expect(buildServiceSettingsPayload([], stored)).toEqual({
-      settings: {},
       groups: [],
+      serviceKeys: { keys: {}, scenes: {}, services: {}, v: 1 },
+      settings: {},
     });
+  });
+});
+
+describe("serviceKeysScenesForAssignments", () => {
+  it("lists each runtime scene that declares something, with the install's keys and grant", () => {
+    expect(
+      serviceKeysScenesForAssignments([
+        {
+          declaredSettingsGroups: ["openAI", "unsplash"],
+          grantedSettingsGroups: ["unsplash"],
+          sceneServices: { a: ["openAI"], b: ["unsplash"], c: [] },
+          serviceKeys: { a: { openAI: "k_work00000001" } },
+        },
+      ]),
+    ).toEqual([
+      { declared: ["openAI"], id: "a", keys: { openAI: "k_work00000001" }, legacyGranted: ["unsplash"] },
+      { declared: ["unsplash"], id: "b", legacyGranted: ["unsplash"] },
+    ]);
+  });
+
+  it("reads a NULL grant as all the install declares, and keeps a re-ided single scene's keys", () => {
+    expect(
+      serviceKeysScenesForAssignments([
+        {
+          declaredSettingsGroups: ["openAI"],
+          grantedSettingsGroups: null,
+          sceneServices: { renamed: ["openAI"] },
+          serviceKeys: { old: { openAI: null } },
+        },
+      ]),
+    ).toEqual([{ declared: ["openAI"], id: "renamed", keys: { openAI: null }, legacyGranted: ["openAI"] }]);
+  });
+
+  it("lists nothing for a row never settled", () => {
+    expect(
+      serviceKeysScenesForAssignments([
+        { declaredSettingsGroups: null, grantedSettingsGroups: null, sceneServices: null, serviceKeys: null },
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("previewServiceKeysScene", () => {
+  const preview = {
+    id: "preview-1",
+    nodes: [
+      {
+        data: { keyword: "x", sources: { "config.json": JSON.stringify({ settings: ["unsplash"] }) } },
+        type: "app",
+      },
+    ],
+  };
+
+  it("gives the account's own preview the defaults, a stranger's nothing", () => {
+    expect(previewServiceKeysScene(preview, true)).toEqual({
+      declared: ["unsplash"],
+      id: "preview-1",
+      legacyGranted: ["unsplash"],
+    });
+    expect(previewServiceKeysScene(preview, false)).toEqual({ declared: ["unsplash"], id: "preview-1", legacyGranted: [] });
+    expect(previewServiceKeysScene({ id: "x", nodes: [] }, true)).toBeNull();
   });
 });
 
 describe("the response body and ETag", () => {
   it("is stable under key order", () => {
     const a = serviceSettingsResponseBody(
-      buildServiceSettingsPayload(["unsplash", "openAI"], {
-        unsplash: { accessKey: "u" },
+      buildServiceSettingsPayload([scene("x", ["unsplash", "openAI"])], {
         openAI: { apiKey: "o" },
+        unsplash: { accessKey: "u" },
       }),
     );
     const b = serviceSettingsResponseBody(
-      buildServiceSettingsPayload(["openAI", "unsplash"], {
-        openAI: { apiKey: "o" },
+      buildServiceSettingsPayload([scene("x", ["openAI", "unsplash"])], {
         unsplash: { accessKey: "u" },
+        openAI: { apiKey: "o" },
       }),
     );
     expect(a.body).toBe(b.body);
@@ -127,33 +208,29 @@ describe("the response body and ETag", () => {
 
   it("changes when any value changes", () => {
     const before = serviceSettingsResponseBody(
-      buildServiceSettingsPayload(["unsplash"], { unsplash: { accessKey: "u" } }),
+      buildServiceSettingsPayload([scene("x", ["unsplash"])], { unsplash: { accessKey: "u" } }),
     );
     const after = serviceSettingsResponseBody(
-      buildServiceSettingsPayload(["unsplash"], { unsplash: { accessKey: "u2" } }),
+      buildServiceSettingsPayload([scene("x", ["unsplash"])], { unsplash: { accessKey: "u2" } }),
     );
     expect(after.etag).not.toBe(before.etag);
   });
 
-  it("changes when a declared-but-unset group appears", () => {
-    // The device clears groups absent from `settings`, so `groups` alone
-    // changing is still a change it must see.
-    const before = serviceSettingsResponseBody(
-      buildServiceSettingsPayload(["unsplash"], { unsplash: { accessKey: "u" } }),
-    );
+  it("changes when a scene's binding changes", () => {
+    const stored = {
+      openAI: { apiKey: "o" },
+      serviceCredentials: { k_work00000001: { name: "Work", service: "openAI", values: { apiKey: "o" } } },
+    };
+    const before = serviceSettingsResponseBody(buildServiceSettingsPayload([scene("x", ["openAI"])], stored));
     const after = serviceSettingsResponseBody(
-      buildServiceSettingsPayload(["unsplash", "immich"], {
-        unsplash: { accessKey: "u" },
-      }),
+      buildServiceSettingsPayload([scene("x", ["openAI"], [], { openAI: "k_work00000001" })], stored),
     );
     expect(after.etag).not.toBe(before.etag);
   });
 
   it("quotes the etag and sorts nested keys", () => {
-    const { etag } = serviceSettingsResponseBody({ settings: {}, groups: [] });
+    const { etag } = serviceSettingsResponseBody(buildServiceSettingsPayload([], {}));
     expect(etag).toMatch(/^"[0-9a-f]{64}"$/);
-    expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe(
-      '{"a":{"c":3,"d":2},"b":1}',
-    );
+    expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe('{"a":{"c":3,"d":2},"b":1}');
   });
 });

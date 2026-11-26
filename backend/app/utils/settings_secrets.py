@@ -21,10 +21,20 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from app.utils.service_keys import (
+    SERVICE_CREDENTIALS_GROUP,
+    is_credential_id,
+    is_service_id,
+    service_field_secrecy,
+)
+
 MASK_BULLETS = "••••••••"
 
 # Secret leaves by group, mirroring the `secret` markers on the settings form
-# (frontend/src/scenes/settings/Settings.tsx) and secretSettings.ts.
+# (frontend/src/scenes/settings/Settings.tsx) and secretSettings.ts. For a
+# service group the registry (repo/services.json) decides the fields it
+# describes and every field of an unregistered service is a secret
+# (`is_secret_setting_field`); this list answers for the plane's own fields.
 SECRET_SETTING_FIELDS: dict[str, frozenset[str]] = {
     "defaults": frozenset({"wifiPassword"}),
     "homeAssistant": frozenset({"accessToken", "mqttPassword"}),
@@ -53,7 +63,25 @@ def is_masked_setting_value(value: Any) -> bool:
 
 
 def is_secret_setting_field(group: str, field: str) -> bool:
+    """A plane group's own list; for a service group (docs/service-keys.md
+    "Keys on the control plane") the registry's word on the field, and the
+    plane's list only where the registry does not describe it (`openAI.
+    backendApiKey`, Home Assistant's MQTT settings). Every field of a service
+    the registry does not know is a secret."""
+    if is_service_id(group):
+        secrecy = service_field_secrecy(group, field)
+        if secrecy is not None:
+            return secrecy
     return field in SECRET_SETTING_FIELDS.get(group, frozenset())
+
+
+def _service_group_names(settings: dict[str, Any]) -> list[str]:
+    return [group for group, value in settings.items() if is_service_id(group) and isinstance(value, dict)]
+
+
+def _credential_service(entry: Any) -> str | None:
+    service = entry.get("service") if isinstance(entry, dict) else None
+    return service if is_service_id(service) else None
 
 
 def _mask_ssh_keys(group: Any) -> Any:
@@ -73,16 +101,70 @@ def mask_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """The GET view: every secret leaf replaced by its mask. Non-string
     secret values (nothing stores those) pass through untouched."""
     masked = copy.deepcopy(settings)
-    for group, fields in SECRET_SETTING_FIELDS.items():
+    for group in set(SECRET_SETTING_FIELDS) | set(_service_group_names(masked)):
         value = masked.get(group)
         if not isinstance(value, dict):
             continue
-        for field in fields:
-            if isinstance(value.get(field), str):
+        for field in list(value):
+            if isinstance(value.get(field), str) and is_secret_setting_field(group, field):
                 value[field] = mask_setting_value(value[field])
     if SSH_KEYS_GROUP in masked:
         masked[SSH_KEYS_GROUP] = _mask_ssh_keys(masked[SSH_KEYS_GROUP])
+    if SERVICE_CREDENTIALS_GROUP in masked:
+        masked[SERVICE_CREDENTIALS_GROUP] = _mask_service_credentials(masked[SERVICE_CREDENTIALS_GROUP])
     return masked
+
+
+def _mask_service_credentials(group: Any) -> Any:
+    """`serviceCredentials`: each key's values masked by the rule of its service."""
+    if not isinstance(group, dict):
+        return group
+    masked: dict[str, Any] = {}
+    for credential_id, entry in group.items():
+        service = _credential_service(entry)
+        if service is None or not isinstance(entry.get("values"), dict):
+            masked[credential_id] = entry
+            continue
+        masked[credential_id] = {
+            **entry,
+            "values": {
+                field: mask_setting_value(value)
+                if isinstance(value, str) and is_secret_setting_field(service, field)
+                else value
+                for field, value in entry["values"].items()
+            },
+        }
+    return masked
+
+
+def _resolve_service_credentials(posted: Any, stored: Any) -> Any:
+    """A key's value posted as its mask keeps what that key (same id, same
+    service) stores; a mask with nothing behind it is dropped."""
+    if not isinstance(posted, dict):
+        return posted
+    stored_group = stored if isinstance(stored, dict) else {}
+    resolved: dict[str, Any] = {}
+    for credential_id, entry in posted.items():
+        if not is_credential_id(credential_id) or not isinstance(entry, dict) or not isinstance(entry.get("values"), dict):
+            resolved[credential_id] = entry
+            continue
+        previous = stored_group.get(credential_id)
+        previous_raw = (
+            previous.get("values")
+            if isinstance(previous, dict) and previous.get("service") == entry.get("service")
+            else None
+        )
+        previous_values: dict[str, Any] = previous_raw if isinstance(previous_raw, dict) else {}
+        values: dict[str, Any] = {}
+        for field, value in entry["values"].items():
+            if is_masked_setting_value(value):
+                current = previous_values.get(field)
+                if isinstance(current, str) and current != "":
+                    values[field] = current
+                continue
+            values[field] = value
+        resolved[credential_id] = {**entry, "values": values}
+    return resolved
 
 
 def _resolve_ssh_keys(posted: Any, stored: Any) -> Any:
@@ -112,13 +194,14 @@ def resolve_masked_settings(payload: dict[str, Any], stored: dict[str, Any]) -> 
     """The POST side: a secret posted as its own mask keeps the stored value
     (or is dropped when nothing is stored). Returns a new payload."""
     resolved = copy.deepcopy(payload)
-    for group, fields in SECRET_SETTING_FIELDS.items():
+    for group in set(SECRET_SETTING_FIELDS) | set(_service_group_names(resolved)):
         value = resolved.get(group)
         if not isinstance(value, dict):
             continue
-        current_group = stored.get(group) if isinstance(stored.get(group), dict) else {}
-        for field in fields:
-            if not is_masked_setting_value(value.get(field)):
+        stored_value = stored.get(group)
+        current_group: dict[str, Any] = stored_value if isinstance(stored_value, dict) else {}
+        for field in list(value):
+            if not is_secret_setting_field(group, field) or not is_masked_setting_value(value.get(field)):
                 continue
             current = current_group.get(field)
             if isinstance(current, str) and current != "":
@@ -127,6 +210,10 @@ def resolve_masked_settings(payload: dict[str, Any], stored: dict[str, Any]) -> 
                 value.pop(field, None)
     if SSH_KEYS_GROUP in resolved:
         resolved[SSH_KEYS_GROUP] = _resolve_ssh_keys(resolved[SSH_KEYS_GROUP], stored.get(SSH_KEYS_GROUP))
+    if SERVICE_CREDENTIALS_GROUP in resolved:
+        resolved[SERVICE_CREDENTIALS_GROUP] = _resolve_service_credentials(
+            resolved[SERVICE_CREDENTIALS_GROUP], stored.get(SERVICE_CREDENTIALS_GROUP)
+        )
     return resolved
 
 

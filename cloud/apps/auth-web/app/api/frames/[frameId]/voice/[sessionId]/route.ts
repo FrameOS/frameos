@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createAccountScene } from "../../../../../../src/lib/account-scene-create";
-import { storedAccountSettings } from "../../../../../../src/lib/account-settings";
+import { revealedServiceSettings } from "../../../../../../src/lib/account-settings";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { resolveAiAccess } from "../../../../../../src/lib/ai/api-key";
 import { appendChatMessage, chatMessages, ensureChat } from "../../../../../../src/lib/ai/chat-store";
@@ -57,17 +57,15 @@ import {
   frameHoldsAssignedScenes,
   redeployAssignedScenesToFrame,
 } from "../../../../../../src/lib/frame-scenes";
-import { buildServiceSettingsPayload } from "../../../../../../src/lib/frame-service-settings";
+import { buildServiceSettingsPayload, frameServiceKeysScenes } from "../../../../../../src/lib/frame-service-settings";
 import {
   buildScenesPayloadForFrame,
-  computeAndStoreServiceSettingGroups,
   enqueueFrameCommand,
   enqueueFrameSettingsPush,
   frameContractProfile,
   frameSettingsRefusal,
   mergeFrameSettings,
   readFrameSettings,
-  readServiceSettingGroups,
   scenePreviewScene,
   scenePreviewsByFrame,
   supersedePendingCommands,
@@ -374,29 +372,19 @@ export async function POST(
       return { command_id: command?.id, ok: true, type: "render" };
     };
     // Which picture sources the frame can draw: the service keys the owner
-    // granted its scenes (the same answer the device's service-settings pull
-    // gives), and no others. The voice turn never widens a grant.
-    let grantedGroups = readServiceSettingGroups(frame.serviceSettingGroups);
-    if (!grantedGroups) {
-      try {
-        grantedGroups = await computeAndStoreServiceSettingGroups(db, frame.id);
-      } catch (error) {
-        reportError("frames.voice_service_settings_failed", error, { accountId, frameId: frame.id });
-        grantedGroups = [];
+    // bound its installed scenes to (the same answer the device's
+    // service-settings pull gives, the standing preview left out), and no
+    // others. The voice turn never widens a grant.
+    let frameSettings: Record<string, Record<string, string>> = {};
+    try {
+      const scenes = await frameServiceKeysScenes(db, frame, { preview: false });
+      if (scenes.length > 0) {
+        frameSettings = buildServiceSettingsPayload(scenes, await revealedServiceSettings(db, accountId)).settings;
       }
+    } catch (error) {
+      reportError("frames.voice_service_settings_failed", error, { accountId, frameId: frame.id });
     }
-    const revealed = await storedAccountSettings(db, accountId, { reveal: true });
-    const stored: Record<string, Record<string, string>> = {};
-    for (const [group, value] of Object.entries(revealed)) {
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        stored[group] = Object.fromEntries(
-          Object.entries(value as Record<string, unknown>).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        );
-      }
-    }
-    const imageSources = imageSourcesForSettings(buildServiceSettingsPayload(grantedGroups, stored).settings);
+    const imageSources = imageSourcesForSettings(frameSettings);
 
     // The editor's "Preview on frame" (the event route's uploadScenes): a
     // set_scenes push of the assigned scenes with the picture in them

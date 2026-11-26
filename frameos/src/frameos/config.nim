@@ -522,6 +522,25 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
       retiredFrameConfigs.add(retired)
       noteFrameConfigChanged()
 
+proc swapConfigNode(field: ptr JsonNode, value: sink JsonNode) =
+  ## `field[] = value` with no destructor run: see replaceFrameConfigSettings.
+  {.gcsafe.}:
+    withLock retiredConfigLock:
+      var incoming = move(value)
+      if incoming != nil:
+        # The list's own reference, taken before any other thread can see the
+        # node: racing readers then never hold the last one.
+        retiredSettingsNodes.add(incoming)
+      var outgoing: JsonNode
+      copyMem(addr outgoing, field, sizeof(pointer))
+      copyMem(field, addr incoming, sizeof(pointer))
+      # `incoming`'s reference now belongs to the field, the field's old one
+      # to `outgoing`.
+      wasMoved(incoming)
+      if outgoing != nil:
+        retiredSettingsNodes.add(move(outgoing))
+      noteFrameConfigChanged()
+
 proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
   ## `target.settings = settings` for a config other threads are reading.
   ##
@@ -538,19 +557,11 @@ proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
   ## below happens before another thread can see the node and none after.
   if target == nil:
     return
-  {.gcsafe.}:
-    withLock retiredConfigLock:
-      var incoming = move(settings)
-      if incoming != nil:
-        # The list's own reference, taken before any other thread can see the
-        # node: racing readers then never hold the last one.
-        retiredSettingsNodes.add(incoming)
-      var outgoing: JsonNode
-      copyMem(addr outgoing, addr target.settings, sizeof(pointer))
-      copyMem(addr target.settings, addr incoming, sizeof(pointer))
-      # `incoming`'s reference now belongs to the field, the field's old one
-      # to `outgoing`.
-      wasMoved(incoming)
-      if outgoing != nil:
-        retiredSettingsNodes.add(move(outgoing))
-      noteFrameConfigChanged()
+  swapConfigNode(addr target.settings, settings)
+
+proc replaceFrameConfigServiceKeys*(target: FrameConfig, serviceKeys: sink JsonNode) =
+  ## `target.serviceKeys = serviceKeys`, the same way and for the same
+  ## readers as replaceFrameConfigSettings (docs/service-keys.md).
+  if target == nil:
+    return
+  swapConfigNode(addr target.serviceKeys, serviceKeys)
