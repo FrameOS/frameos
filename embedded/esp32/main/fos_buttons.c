@@ -336,6 +336,51 @@ static int button_level(const fos_gpio_button_t *button)
     return (s_expander_in >> bit) & 1 ? 0 : 1;
 }
 
+/* A board's rotary encoder (fos_board_encoder_pins: the CrowPanel watch's
+ * crown). Both phases are read on every edge and each quarter step of the
+ * quadrature counted (Elecrow's lesson 4 table); back at rest, both phases
+ * high, two or more steps one way are a detent. A detent is a `button` press
+ * of NEXT (one way) or PREV (the other), said as a press and not as edges:
+ * no double-press window holds it back, and two quick detents are two
+ * presses (input_state.nim takes a `button` that is no edge as it is). The
+ * roles, next and prev, move the keys' ring (docs/jsx-ui.md "Keys"). */
+static int s_enc_pin[2] = {-1, -1};
+static uint8_t s_enc_state = 3;
+static int s_enc_steps = 0;
+static int s_enc_detents = 0; /* signed, the render task takes them */
+static int s_enc_moves = 0;   /* every detent, for the task's tick */
+
+static void encoder_isr(void *arg)
+{
+    (void)arg;
+    static const int8_t k_step[16] = {0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0};
+    uint8_t now = (uint8_t)((gpio_get_level(s_enc_pin[0]) << 1) | gpio_get_level(s_enc_pin[1]));
+    s_enc_steps += k_step[(s_enc_state << 2) | now];
+    s_enc_state = now;
+    if (now != 3) return;
+    int detent = s_enc_steps >= 2 ? 1 : s_enc_steps <= -2 ? -1 : 0;
+    s_enc_steps = 0;
+    if (!detent) return;
+    __atomic_fetch_add(&s_enc_detents, detent, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&s_enc_moves, 1, __ATOMIC_RELAXED);
+}
+
+static void encoder_start(const char *hardware_preset)
+{
+    if (!fos_board_encoder_pins(hardware_preset, &s_enc_pin[0], &s_enc_pin[1])) return;
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << s_enc_pin[0]) | (1ULL << s_enc_pin[1]),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
+    };
+    gpio_install_isr_service(0); /* ESP_ERR_INVALID_STATE when installed: fine */
+    if (gpio_config(&io) != ESP_OK || gpio_isr_handler_add(s_enc_pin[0], encoder_isr, NULL) != ESP_OK ||
+        gpio_isr_handler_add(s_enc_pin[1], encoder_isr, NULL) != ESP_OK) {
+        s_enc_pin[0] = s_enc_pin[1] = -1;
+    }
+}
+
 static void buttons_task(void *arg)
 {
     fos_config_t *config = fos_config();
@@ -376,9 +421,17 @@ static void buttons_task(void *arg)
     }
 
     for (size_t i = 0; i < s_button_count; i++) fos_voice_hold_init(&s_hold[i]);
+    int enc_moves = 0;
 
     while (true) {
         int64_t now = now_ms();
+        /* The crown turned: a tick, and the render task woken to take it. */
+        int moves = __atomic_load_n(&s_enc_moves, __ATOMIC_RELAXED);
+        if (moves != enc_moves) {
+            enc_moves = moves;
+            fos_buzzer_click_down();
+            fos_client_wake_for_events();
+        }
         /* The voice keys first, on the levels the last poll accepted: a
          * release seen this poll is queued claimed, and the next poll ends
          * the session. */
@@ -506,6 +559,7 @@ esp_err_t fos_buttons_start(void)
         frameos_nim_log_hook(line);
     }
 
+    encoder_start(config->hardware_preset);
     BaseType_t created = xTaskCreate(buttons_task, "fos_buttons", 3072, NULL, 4, NULL);
     if (created != pdPASS) {
         vQueueDelete(s_queue);
@@ -519,6 +573,13 @@ esp_err_t fos_buttons_start(void)
 void fos_buttons_process_events(void)
 {
     if (!s_queue) return;
+    /* The crown's detents, one press each (encoder_isr). */
+    for (int n = __atomic_exchange_n(&s_enc_detents, 0, __ATOMIC_RELAXED); n != 0; n += n > 0 ? -1 : 1) {
+        char payload[64];
+        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\",\"action\":\"press\"}",
+                 s_enc_pin[n > 0 ? 0 : 1], n > 0 ? "NEXT" : "PREV");
+        fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload);
+    }
 
     fos_button_event_t event;
     while (xQueueReceive(s_queue, &event, 0) == pdTRUE) {
@@ -672,7 +733,8 @@ bool fos_buttons_busy(void)
 
 bool fos_buttons_pending(void)
 {
-    return s_queue != NULL && uxQueueMessagesWaiting(s_queue) > 0;
+    return s_queue != NULL &&
+           (uxQueueMessagesWaiting(s_queue) > 0 || __atomic_load_n(&s_enc_detents, __ATOMIC_RELAXED) != 0);
 }
 
 bool fos_buttons_present(void)

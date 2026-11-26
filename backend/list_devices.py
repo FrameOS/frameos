@@ -73,6 +73,13 @@ def build_groups():
             "label": f'Waveshare {v.size}"{code} {dim} {color}',
         }
         waveshare_devices.append(output)
+        if v.key == "EPD_5in79":
+            # Its glass in black and white with partial updates: the ESP32
+            # panel EPD_5in79_BW (Elecrow's CrowPanel 5.79").
+            waveshare_devices.append({
+                "value": "waveshare.EPD_5in79_BW",
+                "label": 'Good Display 5.79" 792x272 Black/White (ESP32, Elecrow CrowPanel 5.79")',
+            })
         if v.key == "EPD_7in3e":
             waveshare_devices.append({
                 "value": WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE,
@@ -90,6 +97,10 @@ def build_groups():
         {
             "value": "amoled.co5300_466x466",
             "label": 'CO5300 1.75" round AMOLED 466x466 (ESP32 QSPI, Waveshare ESP32-S3-Touch-AMOLED-1.75)',
+        },
+        {
+            "value": "lcd.gc9309_240x296",
+            "label": 'GC9309 2.01" IPS LCD 240x296 (ESP32 SPI, Elecrow CrowPanel 2.01" watch)',
         },
     ]
 
@@ -149,6 +160,8 @@ def build_esp32_panels():
             "key": v.key,
             "label": f'{brand} {v.size}"{code} {dim} {color}',
         })
+        if v.key == "EPD_5in79":
+            panels.append({"key": "EPD_5in79_BW", "label": 'Good Display 5.79" 792x272 Black/White (Elecrow CrowPanel)'})
     return panels
 
 

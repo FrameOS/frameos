@@ -569,6 +569,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "height": 272
       },
       {
+        "value": "waveshare.EPD_5in79_BW",
+        "label": "Good Display 5.79\" 792x272 Black/White (ESP32, Elecrow CrowPanel 5.79\")",
+        "width": 792,
+        "height": 272
+      },
+      {
         "value": "waveshare.EPD_5in79b",
         "label": "Waveshare 5.79\" (B) 792x272 Black/White/Red",
         "width": 792,
@@ -799,6 +805,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "label": "CO5300 1.75\" round AMOLED 466x466 (ESP32 QSPI, Waveshare ESP32-S3-Touch-AMOLED-1.75)",
         "width": 466,
         "height": 466
+      },
+      {
+        "value": "lcd.gc9309_240x296",
+        "label": "GC9309 2.01\" IPS LCD 240x296 (ESP32 SPI, Elecrow CrowPanel 2.01\" watch)",
+        "width": 240,
+        "height": 296
       }
     ]
   }
@@ -1041,6 +1053,10 @@ export const esp32Panels: { key: string; label: string }[] = [
   {
     "key": "EPD_5in79",
     "label": "Waveshare 5.79\" 792x272 4 Grayscale"
+  },
+  {
+    "key": "EPD_5in79_BW",
+    "label": "Good Display 5.79\" 792x272 Black/White (Elecrow CrowPanel)"
   },
   {
     "key": "EPD_5in79b",

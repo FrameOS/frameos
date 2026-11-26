@@ -102,15 +102,18 @@ export const NO_MICROPHONE_PINS: MicrophonePins = { clk: -1, data: -1, pwr: -1 }
 /**
  * Boards whose preset carries a PDM microphone (docs/voice-chat.md "Boards"):
  * the reTerminal E1001, E1002 and E1003 (clock GPIO42, data GPIO41, power
- * GPIO38) and the reTerminal Sticky (clock GPIO19, data GPIO20, power GPIO38).
- * Mirrors the backend's EMBEDDED_SEEED_RETERMINAL_MIC / _STICKY_MIC and
- * fos_board.c's k_mics table; the E1004 and every other preset have none.
+ * GPIO38), the reTerminal Sticky (clock GPIO19, data GPIO20, power GPIO38) and
+ * the Elecrow CrowPanel 2.01" watch (clock GPIO12, data GPIO11, on the board's
+ * own rail). Mirrors the backend's EMBEDDED_SEEED_RETERMINAL_MIC / _STICKY_MIC /
+ * EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PERIPHERALS and fos_board.c's k_mics
+ * table; the E1004 and every other preset have none.
  */
 export const EMBEDDED_PRESET_MICROPHONE_PINS: Partial<Record<FrameEmbeddedHardwarePreset, MicrophonePins>> = {
   seeed_reterminal_sticky: { clk: 19, data: 20, pwr: 38 },
   seeed_reterminal_e1001: { clk: 42, data: 41, pwr: 38 },
   seeed_reterminal_e1002: { clk: 42, data: 41, pwr: 38 },
   seeed_reterminal_e1003: { clk: 42, data: 41, pwr: 38 },
+  elecrow_crowpanel_watch_2in01: { clk: 12, data: 11, pwr: -1 },
 }
 
 /**

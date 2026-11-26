@@ -230,6 +230,18 @@ export const ESP32_WAVESHARE_AMOLED_1_75_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayou
   pwr: -1,
   det: -1,
 }
+// The Elecrow CrowPanel 2.01" watch's GC9309 is wired by the firmware's own
+// board table too (components/frameos_display/lcd_qspi_amoled.c): no EPD pins.
+export const ESP32_ELECROW_CROWPANEL_WATCH_2IN01_PIN_LAYOUT: Esp32PinLayout = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
 export const ESP32_XTEINK_X4_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
   dc: 4,
@@ -288,6 +300,7 @@ export const ESP32_SEEED_RETERMINAL_E1004_PIN_LAYOUT: Esp32PinLayout = {
   pwr: 12,
 }
 
+// The CrowPanel 5.79"'s panel supply is switched on by GPIO7 (high).
 export const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
   rst: 47,
   dc: 46,
@@ -296,7 +309,17 @@ export const ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT: Esp32PinLayout = {
   busy: 48,
   sck: 12,
   mosi: 11,
+  pwr: 7,
+}
+// Its TF slot on a bus of its own: CS10, SCK39, MISO13, MOSI40, no power switch
+// and no card-detect contact.
+export const ESP32_ELECROW_CROWPANEL_5IN79_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 10,
+  sck: 39,
+  miso: 13,
+  mosi: 40,
   pwr: -1,
+  det: -1,
 }
 
 // The Inky Frame carrier's wiring beyond the eight ESP32-vocabulary keys: BUSY
@@ -563,6 +586,14 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       mountPath: '/srv/assets',
     },
   },
+  elecrow_crowpanel_watch_2in01: {
+    label: 'Elecrow CrowPanel 2.01" watch (ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.gc9309_240x296',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_ELECROW_CROWPANEL_WATCH_2IN01_PIN_LAYOUT,
+  },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
@@ -684,10 +715,17 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
-    device: 'waveshare.EPD_5in79',
+    device: 'waveshare.EPD_5in79_BW',
     flashSize: '8MB',
     psramMB: 8,
     pins: ESP32_ELECROW_CROWPANEL_5IN79_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'elecrow_crowpanel_5in79',
+      pins: ESP32_ELECROW_CROWPANEL_5IN79_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
   },
   // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
   // BOOTSEL and are provisioned via USB serial — the backend never builds

@@ -929,6 +929,150 @@ void EPD_5in79_4GrayDisplay(UBYTE *Image)
 
 }
 
+/******************************************************************************
+function :	FrameOS: wait for BUSY to fall, without the vendor wait's 200 ms tail
+            (a partial update is waited for at every tap)
+parameter:
+******************************************************************************/
+static void EPD_5in79_WaitIdle(void)
+{
+    // 10 ms a look, as EPD_5in79_ReadBusy counts: a shorter delay sleeps a
+    // whole tick anyway, and counted as less it made the timeout five times
+    // longer (a 10 minute stall on the bench, 2026-11-26).
+    for (UDOUBLE waited = 0; DEV_Digital_Read(EPD_BUSY_PIN) && waited < EPD_BUSY_TIMEOUT_MS; waited += 10) {
+        DEV_Delay_ms(10);
+    }
+}
+
+/* FrameOS: the Elecrow CrowPanel 5.79" (EPD_5in79_BW, the ESP32's panel
+ * table) drives its glass (GDEY0579T93) in black and white on the panel's
+ * own waveforms, the way GxEPD2's GxEPD2_579_GDEY0579T93 does: the internal
+ * temperature sensor (a reset leaves the external one selected, and a
+ * waveform loaded for what it reads drew faint greys where a partial update
+ * moved a pixel, the bench 2026-11-26) and the two controllers in cascade.
+ * The board mounts its glass upside down against its keys: the picture goes
+ * over turned (EPD_5in79_SendPlanes). */
+static void EPD_5in79_UpdateControl(UBYTE red, UBYTE sequence)
+{
+    EPD_5in79_SendCommand(0x21);
+    EPD_5in79_SendData(red);
+    EPD_5in79_SendData(0x10); // cascade application
+    EPD_5in79_SendCommand(0x22);
+    EPD_5in79_SendData(sequence);
+    EPD_5in79_SendCommand(0x20);
+}
+
+static void EPD_5in79_InternalSensor(void)
+{
+    EPD_5in79_SendCommand(0x18);
+    EPD_5in79_SendData(0x80);
+}
+
+int EPD_5in79_Init_BW(void)
+{
+    UBYTE err = EPD_5in79_Init();
+    EPD_5in79_InternalSensor();
+    return err;
+}
+
+void EPD_5in79_Init_Partial_BW(void)
+{
+    EPD_5in79_Init_Partial();
+    EPD_5in79_InternalSensor();
+}
+
+/* FrameOS: both controllers' windows, and each one's two planes whole: the
+ * new picture into its BW RAM, `Previous` (NULL: zeros, as EPD_5in79_Display
+ * writes) into its RED RAM, a row's 50 bytes a write, the slave's from byte
+ * 49 (its columns start a byte before the middle). Each row is the picture's
+ * turned over: the last row first, its bits right to left. */
+static void EPD_5in79_SendPlanes(UBYTE *Image, UBYTE *Previous)
+{
+    static const UBYTE planes[4] = {0x24, 0x26, 0xA4, 0xA6};
+    static const UBYTE window[] = {
+        0x11, 1, 0x01, 0x44, 2, 0x00, 0x31, 0x45, 4, 0x0f, 0x01, 0x00, 0x00,
+        0x91, 1, 0x00, 0xC4, 2, 0x31, 0x00, 0xC5, 4, 0x0f, 0x01, 0x00, 0x00,
+    };
+    static const UBYTE nibble[16] = {0x0, 0x8, 0x4, 0xC, 0x2, 0xA, 0x6, 0xE,
+                                     0x1, 0x9, 0x5, 0xD, 0x3, 0xB, 0x7, 0xF};
+    const UDOUBLE stride = EPD_5in79_WIDTH / 8;
+    UBYTE row[EPD_5in79_WIDTH / 8];
+
+    for (UDOUBLE i = 0; i < sizeof(window); i += 2 + window[i + 1]) {
+        EPD_5in79_SendCommand(window[i]);
+        for (UBYTE k = 0; k < window[i + 1]; k++) EPD_5in79_SendData(window[i + 2 + k]);
+    }
+    for (int p = 0; p < 4; p++) {
+        // The cursor back to the window's start, each controller's own.
+        EPD_5in79_SendCommand(p < 2 ? 0x4e : 0xCE);
+        EPD_5in79_SendData(p < 2 ? 0x00 : 0x31);
+        EPD_5in79_SendCommand(p < 2 ? 0x4f : 0xCF);
+        EPD_5in79_SendData(0x0f);
+        EPD_5in79_SendData(0x01);
+        EPD_5in79_SendCommand(planes[p]);
+        UBYTE *plane = p & 1 ? Previous : Image;
+        UDOUBLE first = p < 2 ? 0 : 49;
+        DEV_Digital_Write(EPD_DC_PIN, 1);
+        for (UDOUBLE j = 0; j < EPD_5in79_HEIGHT; j++) {
+            const UBYTE *src = plane ? plane + (EPD_5in79_HEIGHT - 1 - j) * stride : NULL;
+            for (UDOUBLE i = 0; i < stride; i++) {
+                UBYTE b = src ? src[stride - 1 - i] : 0;
+                row[i] = (UBYTE)((nibble[b & 0x0F] << 4) | nibble[b >> 4]);
+            }
+            DEV_Digital_Write(EPD_CS_PIN, 0);
+            DEV_SPI_Write_nByte(row + first, 50);
+            DEV_Digital_Write(EPD_CS_PIN, 1);
+        }
+    }
+}
+
+/******************************************************************************
+function :	FrameOS: a full refresh in black and white on the panel's own
+            waveform
+parameter:
+    Image    : the picture, 1 bit a pixel
+******************************************************************************/
+void EPD_5in79_Display_BW(UBYTE *Image)
+{
+    EPD_5in79_SendPlanes(Image, NULL);
+    EPD_5in79_UpdateControl(0x40, 0xF7); // RED bypassed as 0, mode 1
+    DEV_Delay_ms(1);
+    EPD_5in79_WaitIdle();
+}
+
+/******************************************************************************
+function :	FrameOS: a partial update in black and white, moving only the
+            pixels that differ from what the glass shows. The whole of both
+            planes goes over: the update drives the whole panel whatever the
+            RAM window says
+parameter:
+    Image    : the new picture, 1 bit a pixel
+    Previous : the picture on the glass
+******************************************************************************/
+void EPD_5in79_Display_Partial_BW(UBYTE *Image, UBYTE *Previous)
+{
+    EPD_5in79_SendPlanes(Image, Previous);
+    EPD_5in79_SendCommand(0x3C); // border: VCOM
+    EPD_5in79_SendData(0x80);
+    EPD_5in79_UpdateControl(0x00, 0xFF); // RED is the old picture, mode 2
+    DEV_Delay_ms(1);
+    EPD_5in79_WaitIdle();
+}
+
+/******************************************************************************
+function :	FrameOS: the analog supply off, the controller awake
+parameter:
+******************************************************************************/
+void EPD_5in79_Rest(void)
+{
+    // GxEPD2's power off for this glass: the clock on, then the analog supply
+    // and the clock off. 0x03 alone (the SSD1677's) never finished here: a
+    // partial update's 0xFF leaves the clock off, and BUSY stayed high.
+    EPD_5in79_SendCommand(0x22);
+    EPD_5in79_SendData(0x83);
+    EPD_5in79_SendCommand(0x20);
+    EPD_5in79_WaitIdle();
+}
 
 /******************************************************************************
 function :	Enter sleep mode

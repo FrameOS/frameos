@@ -36,6 +36,7 @@ export const previewDevices: PreviewDevice[] = [
   { group: "Screens", height: 480, key: "sensecap-indicator", label: 'Seeed SenseCAP Indicator, 4" LCD', panel: null, width: 480 },
   { group: "Screens", height: 480, key: "hyperpixel-4", label: "Pimoroni HyperPixel 4.0", panel: null, width: 800 },
   { group: "Screens", height: 480, key: "hyperpixel-2-round", label: "Pimoroni HyperPixel 2.1 Round", panel: null, round: true, width: 480 },
+  { group: "Screens", height: 296, key: "crowpanel-watch-2in01", label: 'Elecrow CrowPanel 2.01" watch', panel: null, width: 240 },
   { group: "Screens", height: 466, key: "waveshare-amoled-1in75", label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75, round', panel: null, round: true, width: 466 },
   { group: "Screens", height: 480, key: "pi-touch-display", label: 'Raspberry Pi Touch Display, 7"', panel: null, width: 800 },
   { group: "Screens", height: 1280, key: "pi-touch-display-2", label: 'Raspberry Pi Touch Display 2, 7"', panel: null, width: 720 },

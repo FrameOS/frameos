@@ -50,6 +50,11 @@ void EPD_5in79_Display_Base(const UBYTE *Image);
 void EPD_5in79_Display_Fast(const UBYTE *Image);
 void EPD_5in79_Display_Partial(const UBYTE *Image, UWORD Xstart, UWORD Ystart, UWORD Xend, UWORD Yend);
 void EPD_5in79_4GrayDisplay(UBYTE *Image);
+int EPD_5in79_Init_BW(void);
+void EPD_5in79_Init_Partial_BW(void);
+void EPD_5in79_Display_BW(UBYTE *Image);
+void EPD_5in79_Display_Partial_BW(UBYTE *Image, UBYTE *Previous);
+void EPD_5in79_Rest(void);
 void EPD_5in79_Sleep(void);
 
 #endif

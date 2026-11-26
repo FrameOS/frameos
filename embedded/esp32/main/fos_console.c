@@ -821,6 +821,17 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "0:BOOT",
               -1, 2.0f, -1, 0, 0 },
+            /* Elecrow CrowPanel 2.01" watch (ESP32-S3R8, 16 MB flash): the
+             * 240x296 GC9309 IPS on one SPI lane, its wiring the driver's
+             * own board table (lcd_qspi_amoled.c), so no EPD pins; BOOT on
+             * GPIO0 and the crown's press on GPIO18 (its turns are
+             * fos_board_encoder_pins). The battery on GPIO1 behind
+             * 100k / 137k. Rails, touch, microphone, LED, the vibration
+             * motor and the bus come from fos_board.c. */
+            { "elecrow_crowpanel_watch_2in01", "LCD_GC9309_240x296",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT\n18:OK",
+              1, 1.73f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): the panel on
              * SCK13/MOSI14 with EP_PWR_EN GPIO47, the AI/Power key GPIO4 and
              * UP/DOWN GPIO5/6 (Seeed's porting specification). The buzzer
@@ -913,9 +924,12 @@ static int cmd_set(int argc, char **argv)
               "rst=2,dc=5,cs=3,cs2=-1,busy=4,sck=8,mosi=10,pwr=-1",
               "9:BOOT",
               -1, 2.0f, -1, 0, 0 },
-            /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8). */
-            { "elecrow_crowpanel_5in79", "EPD_5in79",
-              "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",
+            /* Elecrow CrowPanel 5.79" (ESP32-S3-WROOM-1-N8R8): its glass in
+             * black and white with partial updates (EPD_5in79_BW), the
+             * panel's supply GPIO7 (high), the TF slot and the LED
+             * fos_board.c's. */
+            { "elecrow_crowpanel_5in79", "EPD_5in79_BW",
+              "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=7",
               "2:HOME\n1:EXIT\n4:NEXT\n5:OK\n6:PREV",
               -1, 2.0f, -1, 0, 0 },
         };
