@@ -172,13 +172,15 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
  * press is Enter (OK), and held it talks; the edges swipe. */
 #define CROWPANEL_WATCH_KEYS ONE_BUTTON_TOGGLE("BOOT")
 /* The Elecrow CrowPanel 5.79": HOME, EXIT and a rocker that tilts NEXT and
- * PREV and presses OK. HOME pressed opens the scene switcher, held the
- * scene's settings; the rocker held walks the scene list. */
+ * PREV and presses OK. With the picture turned to its keys, HOME (GPIO2) is
+ * the top key and opens the scene's settings, EXIT (GPIO1) the bottom one
+ * and opens the scene switcher, as the edges swipe on a touch screen; the
+ * rocker held walks the scene list. */
 #define CROWPANEL_5IN79_KEYS \
     "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"longPress\"}," \
     "\"emit\":\"sceneSettings\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"EXIT\",\"action\":\"press\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"PREV\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"NEXT\",\"action\":\"longPress\"}," \
@@ -367,7 +369,8 @@ static const fos_board_rail_t k_watch_rails[] = {{47, 1}, {40, 0}, {-1, 0}};
 static const fos_board_rail_t k_rotary_1in46_rails[] = {{1, 1}, {-1, 0}};
 
 /* The boards with a crown or a knob: its two phases, pulled up, A the one
- * that leads for NEXT. The watch's A GPIO20 / B GPIO19; the 1.46" rotary's
+ * that leads for NEXT. The watch's GPIO19 leads (Elecrow's B; GPIO20 first
+ * walked the ring backwards, the bench 2026-11-26); the 1.46" rotary's
  * Elecrow labels the other way round (their A GPIO45, B GPIO42), and turned
  * that way NEXT and PREV came out reversed (the bench, 2026-11-26). */
 static const struct {
@@ -375,7 +378,7 @@ static const struct {
     const fos_board_rail_t *rails;
     int8_t a, b;
 } k_elecrow_rounds[] = {
-    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 20, 19},
+    {"elecrow_crowpanel_watch_2in01", k_watch_rails, 19, 20},
     {"elecrow_crowpanel_rotary_1in46", k_rotary_1in46_rails, 42, 45},
 };
 

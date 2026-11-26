@@ -607,11 +607,12 @@ const ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 10, sck: 39, miso: 13, mosi: 40, pwr: -1, det: -1 },
   maxFrequencyKHz: 20000,
 }
-// HOME pressed opens the scene switcher and held the scene's settings; the
-// rocker held walks the scene list. Mirrors EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
+// HOME, the top key, opens the scene's settings and EXIT, the bottom one, the
+// scene switcher; the rocker held walks the scene list. Mirrors
+// EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
 const ELECROW_CROWPANEL_5IN79_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'HOME', action: 'longPress' }, emit: 'sceneSettings', as: {} },
+  { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSettings', as: {} },
+  { event: 'button', match: { label: 'EXIT', action: 'press' }, emit: 'sceneSwitcher', as: {} },
   { event: 'button', match: { label: 'PREV', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   { event: 'button', match: { label: 'NEXT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
 ]

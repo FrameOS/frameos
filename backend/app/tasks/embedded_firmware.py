@@ -855,12 +855,12 @@ EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
     {"pin": 5, "label": "OK"},
     {"pin": 6, "label": "PREV"},
 ]
-# HOME pressed opens the scene switcher and held the scene's settings; the
-# rocker held walks the scene list. fos_board.c's CROWPANEL_5IN79_KEYS is the
-# device copy.
+# HOME, the top key, opens the scene's settings and EXIT, the bottom one, the
+# scene switcher (as the edges swipe on a touch screen); the rocker held walks
+# the scene list. fos_board.c's CROWPANEL_5IN79_KEYS is the device copy.
 EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP = [
-    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
+    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSettings", "as": {}},
+    {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
     {
         "event": "button",
         "match": {"label": "PREV", "action": "longPress"},

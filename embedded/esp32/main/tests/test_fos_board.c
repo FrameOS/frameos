@@ -470,7 +470,7 @@ static void test_crowpanel_boards(void)
     CHECK(fos_board_rails("waveshare_esp32_s3_touch_amoled_1_75") == NULL, "no rails elsewhere");
     CHECK(fos_board_rails(NULL) == NULL, "no preset, no rails");
     int a = 0, b = 0;
-    CHECK(fos_board_encoder_pins(watch, &a, &b) && a == 20 && b == 19, "the crown on 20/19");
+    CHECK(fos_board_encoder_pins(watch, &a, &b) && a == 19 && b == 20, "the crown on 19/20 (reversed on the bench)");
     CHECK(!fos_board_encoder_pins("elecrow_crowpanel_5in79", &a, &b) && a == -1 && b == -1, "no crown elsewhere");
     CHECK(strcmp(fos_board_touch_pins(watch), "sda=4,scl=3,int=2,rst=5,en=-1") == 0, "touch pins");
     CHECK(fos_board_touch_mirror(watch) == 0, "the glass as mounted");
@@ -509,8 +509,10 @@ static void test_crowpanel_boards(void)
     CHECK(fos_board_led(epd, &pin, &type) && pin == 41 && type == 0, "the 5.79's LED lit high on 41");
     CHECK(fos_board_rails(epd) == NULL, "its panel supply is the EPD pwr pin");
     fos_board_event_map(epd, map, sizeof(map));
-    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"press\"},\"emit\":\"sceneSwitcher\"") != NULL,
-          "HOME opens the switcher");
+    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"press\"},\"emit\":\"sceneSettings\"") != NULL,
+          "HOME, the top key, opens the settings");
+    CHECK(strstr(map, "\"label\":\"EXIT\",\"action\":\"press\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "EXIT, the bottom key, opens the switcher");
     CHECK(strstr(map, "\"label\":\"NEXT\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\"") != NULL,
           "NEXT held walks the scenes");
     CHECK(strstr(map, "edgeSwipe") == NULL && strstr(map, "voiceChat") == NULL, "no glass, no microphone");
