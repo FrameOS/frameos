@@ -3,7 +3,9 @@ import { useActions, useValues } from 'kea'
 import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
+  ArrowTopRightOnSquareIcon,
   ArrowUpTrayIcon,
+  BoltIcon,
   CommandLineIcon,
   ComputerDesktopIcon,
   CpuChipIcon,
@@ -54,6 +56,7 @@ import { apiFetch } from '../../utils/apiFetch'
 import { framesModel } from '../../models/framesModel'
 import { useState } from 'react'
 import { AdoptFields, AdoptMethod, adoptCanSubmit, adoptCodeInput, adoptPaste, adoptRequestBody } from './adoptFrame'
+import { flasherUrl } from '../../utils/flasherBridge'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -67,6 +70,9 @@ function errorText(error: unknown): string | null {
   return String(error)
 }
 
+const MODE_BUTTON_CLASS_NAME =
+  'frameos-install-method-button frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+
 function ModeButton({
   children,
   onClick,
@@ -79,17 +85,38 @@ function ModeButton({
   description: string
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="frameos-install-method-button frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-    >
+    <button type="button" onClick={onClick} className={MODE_BUTTON_CLASS_NAME}>
       <span className="flex items-center gap-2 text-sm font-semibold">
         {children}
         {title}
       </span>
       <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
     </button>
+  )
+}
+
+// An installation method that happens on another site: a card like the others
+// that opens it in a new tab instead of a form here.
+function ModeLink({
+  children,
+  href,
+  title,
+  description,
+}: {
+  children: JSX.Element | string
+  href: string
+  title: string
+  description: string
+}): JSX.Element {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={MODE_BUTTON_CLASS_NAME}>
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        {children}
+        {title}
+        <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+      </span>
+      <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
+    </a>
   )
 }
 
@@ -1469,6 +1496,17 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             >
               <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
+            {/* flash.frameos.net (cloud/docs/flasher.md): an ESP32-S3 flashed
+                there runs as a standalone frame, and Adopt frame below brings it
+                here with the code on its screen. flasherUrl() honours the
+                backend's FRAMEOS_FLASHER_URL. */}
+            <ModeLink
+              href={flasherUrl()}
+              title="Use the web flasher"
+              description={`Flash an ESP32-S3 frame at ${new URL(flasherUrl()).host} with only a browser and a USB cable. It starts as a standalone frame: bring it here afterwards with Adopt frame.`}
+            >
+              <BoltIcon className="h-4 w-4" />
+            </ModeLink>
             <ModeButton
               onClick={() => setNewFrameValues(setVirtualInstallValues(savedSettings))}
               title="Virtual frame"
