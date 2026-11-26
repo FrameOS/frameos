@@ -6,7 +6,8 @@ the rotation and the render scale on the device, and says so in one log line:
 1.5, ...}` (the ESP32's fos_frame_settings.c, the Pi's
 frame_settings_linux.nim), and on a board that has them the sounds of a tap
 and a press (`clickSounds`, the row's device_config) and, on one that deep-sleeps, how long a
-tap keeps it up (`awakeAfterInputSeconds`, device_config too). The row takes them, so the next deploy keeps what
+tap keeps it up (`awakeAfterInputSeconds`, device_config too) and, where the glass can dim, its
+`brightness` (device_config too). The row takes them, so the next deploy keeps what
 the person chose, and so does the deploy baseline, so the drawer does not offer
 to deploy what the frame already has. The cloud follows the hello's hardware
 report instead (frames.ts `settingsWithReported`).
@@ -25,6 +26,7 @@ ROTATIONS = (0, 90, 180, 270)
 CLICK_SOUNDS = ("silent", "normal")  # embedded_firmware.EMBEDDED_CLICK_SOUNDS
 AWAKE_AFTER_INPUT_DEFAULT = 300  # the firmware's FRAMEOS_DEFAULT_AWAKE_AFTER_INPUT_SEC
 AWAKE_AFTER_INPUT_MAX = 3600  # docs/cloud-frames-contract.json awake_after_input_seconds
+BRIGHTNESS_DEFAULT = 100  # docs/cloud-frames-contract.json brightness (5..100)
 
 
 def _rotation(value: Any) -> int | None:
@@ -70,6 +72,11 @@ def panel_settings_changes(frame: Frame, log: dict[str, Any]) -> dict[str, Any]:
     if awake is not None and awake != (AWAKE_AFTER_INPUT_DEFAULT if held_awake is None else held_awake):
         config.pop("awake_after_input_seconds", None)
         config["awakeAfterInputSeconds"] = awake
+    bright = log.get("brightness")
+    held_bright = device_config.get("brightness")
+    if (isinstance(bright, int) and not isinstance(bright, bool) and 5 <= bright <= 100
+            and bright != (held_bright if isinstance(held_bright, int) else BRIGHTNESS_DEFAULT)):
+        config["brightness"] = bright
     if config != device_config:
         changes["device_config"] = config
     snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None

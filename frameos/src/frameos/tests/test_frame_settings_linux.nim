@@ -315,4 +315,34 @@ suite "the frame page on a Linux frame":
     aboutMachineForTest = ""
     setSystemHostnameForTest("")
 
+  test "Brightness: a backlight with levels, set as it moves and kept when the finger lifts":
+    let root = dir / "sysroot-backlight"
+    createDir(root / "sys/class/backlight/gpio")
+    writeFile(root / "sys/class/backlight/gpio/max_brightness", "1\n")
+    writeFile(root / "sys/class/backlight/gpio/brightness", "1\n")
+    aboutRoot = root
+    writeConfig(true)
+    brightnessPath = dir / "state-brightness"
+    # A HyperPixel's GPIO backlight is on or off: no brightness offered.
+    check backlightPercent() == -1
+    check not linuxFrameSettingsRead().hasKey("brightness")
+    linuxFrameSettingsApply(%*{"brightness": 50})
+    check readFile(root / "sys/class/backlight/gpio/brightness") == "1\n"
+    check not fileExists(brightnessPath)
+    # One with levels (the official touch display's, 0..255).
+    createDir(root / "sys/class/backlight/rpi")
+    writeFile(root / "sys/class/backlight/rpi/max_brightness", "255\n")
+    writeFile(root / "sys/class/backlight/rpi/brightness", "128\n")
+    check linuxFrameSettingsRead()["brightness"] == %50
+    # While a finger drags it: set, not kept.
+    linuxFrameSettingsApply(%*{"brightness": 70, "live": true})
+    check readFile(root / "sys/class/backlight/rpi/brightness") == "179"
+    check linuxFrameSettingsRead()["brightness"] == %70
+    check not fileExists(brightnessPath)
+    # It lifts: kept, and never quite dark.
+    linuxFrameSettingsApply(%*{"brightness": 5})
+    check readFile(root / "sys/class/backlight/rpi/brightness") == "13"
+    check readFile(brightnessPath) == "5"
+    aboutRoot = ""
+
 removeDir(dir)

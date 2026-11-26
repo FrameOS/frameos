@@ -17,7 +17,8 @@ type
     ## nil when the page is not offered (no host has one, or the frame's
     ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
     ## rssi, ip, networks: [name…], scanning, password}, rotate,
-    ## renderScale, battery: {percent}, managedBy, version,
+    ## renderScale, brightness (only where the glass can dim), battery:
+    ## {percent}, managedBy, version,
     ## actions: ["restart"…], note, about: {chip, soc, cores, mhz, board,
     ## system, display, psram, memory, flash, storage, card, uptime, mac,
     ## hostname, frameId, server, build}}: `battery` absent without one; `wifi`
@@ -29,7 +30,8 @@ type
     ## bytes and [total, free] for what fills (docs/scene-settings.md "About").
   FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
-    ## for the same network, none for another), rotate, renderScale.
+    ## for the same network, none for another), rotate, renderScale; and,
+    ## with no Save, brightness as a finger moves it (`live`: set, not kept).
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
     ## "open" when the page comes up, "close" when it goes, "scan" for the
     ## networks in range.

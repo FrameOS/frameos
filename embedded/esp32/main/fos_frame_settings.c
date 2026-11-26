@@ -213,6 +213,12 @@ char *fos_frame_settings_json(void)
              fos_wifi_scanning() ? "true" : "false", config->wifi_pass[0] ? "true" : "false",
              (unsigned)config->rotate, config->render_scale_milli / 1000.0);
     put(&out, line);
+    /* A glass whose level the client sets (fos_client_brightness_now: never
+     * on one that cannot dim) offers its brightness; the page has the words. */
+    if (fos_client_brightness_now() >= 0) {
+        snprintf(line, sizeof(line), ",\"brightness\":%u", (unsigned)config->brightness);
+        put(&out, line);
+    }
     /* A frame that makes sounds (a buzzer, a codec's speaker, an LED that
      * follows them) offers its Tap and click sounds; the page has the words. */
     if (fos_buzzer_sounds()) {
@@ -312,7 +318,7 @@ static void restart_task(void *arg)
 /* One `settings:frame` line for what was saved, with the values a control
  * plane adopts (a backend reads it from the log, app/models/log.py; the cloud
  * follows the hardware report instead). Never the network's name. */
-static void log_applied(const char *changes, bool rotate, bool scale, bool sounds, bool awake)
+static void log_applied(const char *changes, bool rotate, bool scale, bool sounds, bool awake, bool bright)
 {
     const fos_config_t *config = fos_config();
     char line[288];
@@ -331,6 +337,9 @@ static void log_applied(const char *changes, bool rotate, bool scale, bool sound
     if (awake && n > 0 && n < (int)sizeof(line)) {
         n += snprintf(line + n, sizeof(line) - n, ",\"awakeAfterInputSeconds\":%lu",
                       (unsigned long)config->awake_after_input_sec);
+    }
+    if (bright && n > 0 && n < (int)sizeof(line)) {
+        n += snprintf(line + n, sizeof(line) - n, ",\"brightness\":%u", (unsigned)config->brightness);
     }
     if (n > 0 && n < (int)sizeof(line) - 1) strlcat(line, "}", sizeof(line));
     frameos_nim_log_hook(line);
@@ -411,6 +420,15 @@ void fos_frame_settings_apply(const char *json)
         config->awake_after_input_sec = (uint32_t)awake_after->valuedouble;
         awake = true;
     }
+    /* The glass's brightness: on the glass at once, saved unless a finger is
+     * still dragging it (`live`): its lift, or a step, sends it again. */
+    const cJSON *bright_pct = cJSON_GetObjectItem(root, "brightness");
+    bool bright = false;
+    if (cJSON_IsNumber(bright_pct) && bright_pct->valuedouble >= 5 && bright_pct->valuedouble <= 100) {
+        config->brightness = (uint8_t)bright_pct->valuedouble;
+        fos_client_apply_brightness();
+        bright = !cJSON_IsTrue(cJSON_GetObjectItem(root, "live"));
+    }
     /* The clock, in the frame's own time zone, and on the board's battery
      * clock too so the next cold boot starts right. */
     const cJSON *clock_text = cJSON_GetObjectItem(root, "clock");
@@ -452,6 +470,7 @@ void fos_frame_settings_apply(const char *json)
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (sounds) strlcat(changes, "clickSounds,", sizeof(changes));
     if (awake) strlcat(changes, "awakeAfterInputSeconds,", sizeof(changes));
+    if (bright) strlcat(changes, "brightness,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
     if (restart) strlcat(changes, "rotate,", sizeof(changes));
     if (scale) strlcat(changes, "renderScale,", sizeof(changes));
@@ -462,7 +481,7 @@ void fos_frame_settings_apply(const char *json)
         ESP_LOGW(TAG, "frame settings not saved: %s", esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "frame settings from the panel: %s", changes);
-    log_applied(changes, restart, scale, sounds, awake);
+    log_applied(changes, restart, scale, sounds, awake, bright);
     if (restart || (wifi && fos_wifi_state() == FOS_WIFI_PORTAL)) {
         /* The runtime sizes its canvas at init (fos_settings.c does the same
          * for a rotation from a plane), and a frame on the setup hotspot
@@ -479,7 +498,7 @@ void fos_frame_settings_apply(const char *json)
         fos_client_render_now();
     }
     /* The cloud's mirror follows the hardware report (hardware.clickSounds). */
-    if ((sounds || awake) && !scale) fos_cloud_request_state();
+    if ((sounds || awake || bright) && !scale) fos_cloud_request_state();
     if (cloud) {
         /* The link on the page, under way or failed, starts over at the new
          * address. */

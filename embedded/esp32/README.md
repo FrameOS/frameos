@@ -1539,8 +1539,10 @@ animation's waits) and at every input, and sends the level only when it
 changes (`fos_power_brightness`, host-tested), so dimming costs no render.
 Screen off (`turnOff`, `toggleScreen`) still darkens the glass, and it comes
 back at the level it should have. `status` prints the settings and the level
-now. Other panels ignore it, and so does a Pi (no backlight control in the
-Linux runtime yet).
+now. Other panels ignore it. The frame page has it too (Brightness, a bar to
+drag and a step down and up: docs/scene-settings.md), set on the glass as the
+finger moves and saved when it lifts (a Pi's page sets its backlight the same
+way where it has levels, `/sys/class/backlight`).
 
 ### Before a restart
 

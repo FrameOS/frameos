@@ -39,6 +39,13 @@ describe("settingsWithReported", () => {
     expect(settingsWithReported({}, { awakeAfterInputSeconds: 1.5 })).toBeUndefined();
   });
 
+  it("takes the glass's brightness set on the frame page; 100 % is the default", () => {
+    expect(settingsWithReported({ rotate: 90 }, { brightness: 40 })).toEqual({ rotate: 90, brightness: 40 });
+    expect(settingsWithReported({ brightness: 40 }, { brightness: 100 })).toEqual({ brightness: 100 });
+    expect(settingsWithReported({}, { brightness: 100 })).toBeUndefined();
+    expect(settingsWithReported({}, { brightness: 4 })).toBeUndefined();
+  });
+
   it("ignores a report without them, as older firmware's, and nonsense", () => {
     expect(settingsWithReported({ rotate: 90 }, { platform: "esp32" })).toBeUndefined();
     expect(settingsWithReported({ rotate: 90 }, { rotate: 45 })).toBeUndefined();

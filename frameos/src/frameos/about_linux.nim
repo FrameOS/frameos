@@ -116,3 +116,37 @@ proc linuxAboutFacts*(netDevice = "", frameDir = "."): JsonNode =
   let name = systemHostname()
   if name.len > 0:
     result["hostname"] = %name
+
+# The screen's backlight (the frame page's Brightness): the first one under
+# /sys/class/backlight with levels between off and full. A GPIO backlight
+# (the HyperPixels') has none, `max_brightness` 1: no brightness to offer.
+
+proc backlight(): tuple[path: string, max: int] =
+  try:
+    for kind, path in walkDir(aboutRoot & "/sys/class/backlight"):
+      let top = parseInt(readSmall(path.substr(aboutRoot.len) & "/max_brightness"))
+      if top > 1:
+        return (path, top)
+  except CatchableError:
+    discard
+
+proc backlightPercent*(): int =
+  ## The backlight's level in percent, -1 without one that dims.
+  let (path, top) = backlight()
+  if top > 1:
+    try:
+      return (parseInt(readSmall(path.substr(aboutRoot.len) & "/brightness")) * 100 + top div 2) div top
+    except ValueError:
+      discard
+  -1
+
+proc setBacklightPercent*(pct: int): bool =
+  ## The backlight to `pct` percent (never quite off): false without one that
+  ## dims, or when it may not be written (it is root's).
+  let (path, top) = backlight()
+  if top > 1:
+    try:
+      writeFile(path & "/brightness", $max(1, (max(0, min(100, pct)) * top + 50) div 100))
+      return true
+    except CatchableError:
+      discard

@@ -105,8 +105,6 @@ export interface PowerSettingsFieldsProps {
   className?: string
 }
 
-const brightnessChoices = [100, 80, 60, 40, 25, 15, 10, 5]
-const dimBrightnessChoices = [0, 5, 10, 20, 30, 50]
 const dimAfterChoices = [
   { value: '0', label: 'Never (default)' },
   { value: '15', label: 'After 15 seconds' },
@@ -128,6 +126,38 @@ function withCurrent(
     : [...options, { value: String(current), label: label(current) }]
 }
 
+/** A percentage on a slider in 5 % steps, the value beside it (the frame takes 5..100, or 0..100 dimmed). */
+function PercentSlider({
+  value,
+  min,
+  onChange,
+  label,
+  testId,
+}: {
+  value: number
+  min: number
+  onChange: (pct: number) => void
+  label: string
+  testId: string
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={min}
+        max={100}
+        step={5}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        aria-label={label}
+        data-testid={testId}
+        className="w-full accent-blue-500"
+      />
+      <span className="w-12 shrink-0 text-right tabular-nums">{value === 0 ? 'Dark' : `${value}%`}</span>
+    </div>
+  )
+}
+
 /** "Brightness" and "Dim when idle": the glass's level, and how far it goes down while nobody touches it. */
 function BrightnessFields({
   value,
@@ -145,14 +175,12 @@ function BrightnessFields({
         label="Brightness"
         tooltip="How bright the screen is. Lower saves power: on an AMOLED every lit pixel costs less, on an LCD the backlight draws less."
       >
-        <Select
-          value={String(value.brightness ?? 100)}
-          onChange={(pct) => onChange({ brightness: parseInt(pct) })}
-          options={withCurrent(
-            brightnessChoices.map((pct) => ({ value: String(pct), label: pct === 100 ? '100% (default)' : `${pct}%` })),
-            value.brightness,
-            (pct) => `${pct}%`
-          )}
+        <PercentSlider
+          value={value.brightness ?? 100}
+          min={5}
+          onChange={(brightness) => onChange({ brightness })}
+          label="Brightness"
+          testId="brightness-slider"
         />
       </PowerField>
       <PowerField
@@ -167,17 +195,12 @@ function BrightnessFields({
       </PowerField>
       {dimAfter > 0 ? (
         <PowerField label="Dimmed brightness" tooltip="How bright the screen is while dimmed. 0% turns it dark until the next touch.">
-          <Select
-            value={String(value.dimBrightness ?? 10)}
-            onChange={(pct) => onChange({ dimBrightness: parseInt(pct) })}
-            options={withCurrent(
-              dimBrightnessChoices.map((pct) => ({
-                value: String(pct),
-                label: pct === 0 ? 'Off (dark)' : pct === 10 ? '10% (default)' : `${pct}%`,
-              })),
-              value.dimBrightness,
-              (pct) => `${pct}%`
-            )}
+          <PercentSlider
+            value={value.dimBrightness ?? 10}
+            min={0}
+            onChange={(dimBrightness) => onChange({ dimBrightness })}
+            label="Dimmed brightness"
+            testId="dim-brightness-slider"
           />
         </PowerField>
       ) : null}

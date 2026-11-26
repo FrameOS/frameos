@@ -118,8 +118,8 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (a plane's render of a board) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`; `about`, what the frame is (below, "About") |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (a plane's render of a board) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), `brightness` (5 to 100: only where the glass can dim), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`; `about`, what the frame is (below, "About") |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock`; and with no Save, `brightness` as it moves (`live: true` while a finger drags it: set, not kept) |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `linkCloud`, `adopt`, `cancelLink` |
 
 The page is for somebody at the frame. A key or a tap that came in over the
@@ -187,6 +187,18 @@ What the page holds, top to bottom:
   no restart; NVS `click_sounds`, default normal; the console's `set
   click_sounds silent|normal`. A plane's `touch_beep` (e-paper touch clicks)
   still works as it did, under it.
+- **Brightness** (a glass whose level the host can set: the ESP32's
+  displays `fos_display_brightness` drives, the round AMOLED's register and a
+  backlight's PWM, which `fos_client_brightness_now` says by being set; a Pi's
+  backlight with levels under `/sys/class/backlight`, never a GPIO one with
+  `max_brightness` 1, as the HyperPixels have): a bar to drag and a step down
+  and up beside it, which the keys reach, 5 to 100 % (never dark: the idle
+  dim's `dim_brightness` is where 0 lives). No Save: each level goes to the
+  host as the finger moves, `live` while it is down (on the glass at once,
+  not written), kept when it lifts and at each step. An ESP32 keeps it as the
+  `brightness` setting (NVS, `set brightness`), a Pi in `state/brightness`,
+  put back at its start (the kernel forgets it). While the page is up the
+  idle dim never shows: touching it is input.
 - **Stay awake after a press or tap** (an ESP32 that deep-sleeps: `deep_sleep`
   or `deep_sleep_on_battery`): how long a press or a tap keeps it up before it
   sleeps again, the web app's Power choices (Sleep as soon as it can, 1, 5, 10,
@@ -508,6 +520,12 @@ replaces it.
   row's `device_config` (`awakeAfterInputSeconds`, which its settings pull
   sends back), the cloud as `awake_after_input_seconds`; 300 is the default
   neither writes.
+- **Brightness: the plane adopts it** on an ESP32 the same way: the
+  `settings:frame` line carries `"brightness": 40` when it was kept, and the
+  hardware report `hardware.brightness`. A backend keeps it in the row's
+  `device_config` (`brightness`), the cloud as `brightness`; 100 is the
+  default neither writes. A Pi's stays on the Pi: no plane sets a Pi's
+  backlight.
 - **Flashing an ESP32 again** erases its network, and the browser flasher sends
   the plane's stored one (the backend's Network settings).
 

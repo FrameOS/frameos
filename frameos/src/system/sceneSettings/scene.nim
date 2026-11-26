@@ -72,6 +72,7 @@ const
   HSave = 1
   HGear = 2
   HCode = 3
+  HBright = 4 ## the brightness bar: a finger down, moving or up on it
   HText = 1000
   HToggle = 2000
   HShow = 3000 ## + field: a secret field's eye, what is typed shown or hidden
@@ -93,6 +94,8 @@ const
   AUnlinkNow = 13 ## leaves it (the host's `unlink`), on a second tap
   ACancelUnlink = 14 ## back from asking, nothing done
   AKeys = 15 ## the service keys typed on the frame (frame_service_keys.nim), on a page of their own
+  ADimmer = 16 ## the brightness a step down
+  ABrighter = 17 ## and up
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -110,6 +113,9 @@ const
   CodeEditorName = "Code editor"
   # A circle with an arrow, 48 units square as the gear is (switcher.gearPath).
   RefreshPath = "M24 8a16 16 0 1 0 16 16h-5a11 11 0 1 1-11-11v6l10-8.5L24 2Z"
+  # A minus and a plus, 48 units square: the brightness's steps.
+  MinusPath = "M10 21h28v6H10z"
+  PlusPath = "M21 10h6v11h11v6H27v11h-6V27H10v-6h11z"
   # An eye, 48 units square: its white winds against its outline, the pupil in it.
   EyePath = "M2 24Q24 0 46 24Q24 48 2 24ZM7 24Q24 40 41 24Q24 8 7 24ZM24 17a7 7 0 1 1 0 14a7 7 0 1 1 0-14Z"
   # wifiLine's words, by the host's `state`.
@@ -137,6 +143,10 @@ var
   # runEvent once the hit test is done, so the handler holds nothing.
   acted {.threadvar.}: int
   actedText {.threadvar.}: string
+  # The brightness bar's: how far along it the finger is (0 to 1), and
+  # whether it lifted.
+  actedAlong {.threadvar.}: float32
+  actedUp {.threadvar.}: bool
 
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
@@ -665,6 +675,14 @@ proc saveLayoutPage(self: SceneSettingsScene) =
     rhythmMarkDue(worn)
   self.showPage(true)
 
+proc setBrightness(pct: int, live: bool) =
+  ## The glass's brightness to the host, 5 to 100 %: `live` while a finger
+  ## drags it (set, not saved), else saved too.
+  let changes = %*{"brightness": max(5, min(100, pct))}
+  if live: changes["live"] = newJBool(true)
+  if not frameSettingsApply.isNil:
+    frameSettingsApply(changes)
+
 proc press(self: SceneSettingsScene, action: int) =
   ## One of the frame page's buttons. Restart and Reboot ask twice: the
   ## first tap turns the button into "Tap again", the second sends the
@@ -687,6 +705,10 @@ proc press(self: SceneSettingsScene, action: int) =
     self.openLayoutPage()
   elif action == AKeys:
     self.openKeysPage()
+  elif action == ADimmer or action == ABrighter:
+    # 10 % steps from 5 to 100, saved at each.
+    let pct = frameInfo(){"brightness"}.getInt(100)
+    setBrightness(if action == ABrighter: (pct + 10) div 10 * 10 else: (pct - 1) div 10 * 10, false)
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
   elif self.state{"confirm"}.getInt(-1) == action:
@@ -751,6 +773,9 @@ proc acting(self: SceneSettingsScene) =
     else:
       # Lit on the frame's page and its sub-pages: back to the scene's form.
       self.showPage(not frame and not self.onSubPage())
+  elif handler == HBright:
+    # Set as the finger moves, so the glass shows it; saved when it lifts.
+    setBrightness(int(actedAlong * 20 + 0.5) * 5, not actedUp)
   elif handler >= HAction:
     self.press(handler - HAction)
   elif handler >= HShow and handler < HSelect:
@@ -791,6 +816,8 @@ proc onHandler(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises
   ## was and a field's text, for `acting` once the hit test is done.
   acted = handler
   actedText = event.str("value")
+  actedAlong = if hit[2] > 0: hit[0] / hit[2] else: 0
+  actedUp = name == "pointerUp"
 
 # --------------------------------------------------------------- the picture
 #
@@ -1215,6 +1242,30 @@ proc aboutCard(self: SceneSettingsScene, look: Look, about: JsonNode): SvgNode =
     result.line(look, $label, text)
   result = result.role("card")
 
+proc brightnessRow(look: Look, pct: int): SvgNode =
+  ## "Brightness" and its percent over a pill to drag (as tall as the buttons,
+  ## to take a finger), a step down and a step up beside it (the keys reach
+  ## those): set as it moves, no Save.
+  var c = "flex flex-col"
+  c.px("gap", look.gap div 3)
+  var label = look.grey
+  label.px("text", look.size * 4 div 5)
+  result = el("div", move c, el("span", move label, SvgNode(text: "Brightness " & $pct & "%")).role("muted"))
+  c = "flex-1 rounded-full overflow-hidden"
+  c.px("h", look.line * 4 div 5)
+  c.add(if look.paper: " border-2 border-black" else: " bg-zinc-800")
+  var fill = if look.paper: "h-full bg-black w-[" else: "h-full bg-sky-600 w-["
+  fill.addInt pct
+  fill.add "%]"
+  let bar = el("div", move c, el("div", move fill)).role("field")
+  bar.attrs.add(("on-pointer-down", $HBright))
+  bar.attrs.add(("on-pointer-move", $HBright))
+  bar.attrs.add(("on-pointer-up", $HBright))
+  let line = el("div", "flex items-center gap-2", look.iconButton(false, MinusPath, HAction + ADimmer))
+  line.children.add bar
+  line.children.add look.iconButton(false, PlusPath, HAction + ABrighter)
+  result.children.add line
+
 proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit, width,
     height: int): SvgNode =
   ## The frame page: how it is doing (a card of label and text rows), its
@@ -1327,6 +1378,10 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       else: ""
     if note.len > 0:
       result.note(look, note)
+  # The glass's brightness, where the host can set it: live, no Save.
+  let bright = info{"brightness"}
+  if not bright.isNil and bright.kind == JInt:
+    result.children.add look.brightnessRow(bright.getInt())
   # What the frame is, last: looked up, not changed.
   let about = info{"about"}
   if not about.isNil and about.kind == JObject:
