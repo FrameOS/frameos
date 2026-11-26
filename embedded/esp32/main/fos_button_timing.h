@@ -64,8 +64,9 @@ int fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
 
 /* The key is still down at `now_ms`: true at every whole
  * FOS_BUTTON_LONG_PRESS_MS of hold counted from the press (1 s, 2 s, ...),
- * when the buzzer counts the hold out loud. The scene hears nothing then:
- * its `longPress` comes once, with the `up`. Never for the second press of a
+ * when the buzzer counts the hold out loud. The first is when the scene's
+ * `longPress` comes (the dispatcher's tick, once); the rest count the hold.
+ * Never for the second press of a
  * double press. One per call: a late call catches up with one. */
 bool fos_button_timing_hold_tick(fos_button_timing_t *b, int64_t now_ms);
 

@@ -5241,8 +5241,8 @@ static void client_task(void *arg)
         int64_t wait_until_us = sleep_decided_us + wait_ms * 1000;
         do {
             /* 50 ms while a button is busy: its `press` is due 350 ms after
-             * the tap and its `longPress`es on each second, and only the
-             * process_events below delivers them. A finger on the glass the
+             * the tap and its `longPress` 1 s into the hold, while it is still
+             * down, and only the process_events below delivers them. A finger on the glass the
              * same: its `longPress` (a held key's accents) is the tick's, due
              * 500 ms after it landed, and a second's slice delivered it up to
              * a second late (the reTerminal Sticky, 2026-11-23). */

@@ -1296,8 +1296,9 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
       # A worker's answer wakes the loop (js_io.nim); a sleep ending does not.
       let sleepEnds = nextJsAsyncMs()
       await sleepOrWake(if sleepEnds >= 0: min(waitTime, max(sleepEnds, 1)) else: waitTime)
-      if uiTimersPending():
-        # A key's light to put out, a held key to type again: on time.
+      if uiTimersPending() or events.inputState.buttonsBusy > 0 or events.inputState.pointersDown > 0:
+        # A key's light to put out, a held key to type again, a key or a
+        # finger held to its long press, a tap's double-press window: on time.
         waitTime = min(waitTime, 20)
       elif waitTime < 200:
         waitTime += 5

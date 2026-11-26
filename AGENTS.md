@@ -583,11 +583,13 @@
   are the planes', never the firmware's: it draws the text it is sent.
 - On the device the binding is read off the map by `fos_voice_binding.c`
   (cJSON, host-tested) and the hold run by `fos_voice_hold.c` (pure,
-  host-tested) in the button task — `voiceChat` is the one emit acted on
-  while the key is still held, since a `longPress` exists only at the
-  release; the session is `fos_voice.c`, the microphone `fos_mic.c`. A
-  voice key's `up` carries `claimed: true` (`docs/events-contract.json`
-  `gpio`): the dispatcher makes no `button` of it. `voice_chat` (the
+  host-tested) in the button task — `voiceChat` is the one emit the
+  firmware carries out itself: the button task opens the microphone at the
+  hold, and the dispatcher, which makes every other key's `longPress` at
+  `longPressMs` while it is held, leaves a voice key's to its `up`
+  (`event_loop.bound`); the session is `fos_voice.c`, the microphone
+  `fos_mic.c`. A voice key's `up` carries `claimed: true`
+  (`docs/events-contract.json` `gpio`): the dispatcher makes no `button` of it. `voice_chat` (the
   microphone switch) is an esp32-only contract setting.
 
 ## Home Assistant: `docs/home-assistant.md`
