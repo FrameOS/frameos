@@ -53,6 +53,7 @@ type HubRecord = ref object
   signatureValid: bool
   replies: seq[JsonNode]
   closed: bool
+  unlinkAtAuth: bool
 
 var stubLock: Lock
 initLock(stubLock)
@@ -101,14 +102,24 @@ proc websocketHandler(websocket: mummy.WebSocket, event: mummy.WebSocketEvent,
         websocket.send($(%*{"type": "challenge", "nonce": NonceBase64}))
       of "auth":
         var valid = false
+        var unlink = false
         withLock stubLock:
           recorded.authMessage = msg
           valid = verifySignatureBase64(devicePublicKey, NonceBytes, msg{"signature"}.getStr(""))
           recorded.signatureValid = valid
+          unlink = recorded.unlinkAtAuth
+          recorded.unlinkAtAuth = false
         if not valid:
           websocket.send($(%*{"type": "error", "error": "bad_signature"}))
           websocket.close()
           return
+        if unlink:
+          # The local admin unlinks the frame while its session is still in
+          # the handshake: the `ready` below lands on a link that is gone.
+          withLock cloudLinkLock:
+            let state = loadCloudLinkState()
+            resetLinkState(state)
+            saveCloudLinkState(state)
         # What the hub says the link holds: one scope a managing provider
         # may add by itself, and one only the frame's own admin may ask for.
         websocket.send($(%*{"type": "ready", "pending_commands": 2,
@@ -171,6 +182,8 @@ proc repliesOfType(msgType: string): seq[JsonNode] {.gcsafe.} =
       for reply in recorded.replies:
         if reply{"type"}.getStr("") == msgType:
           result.add(reply.copy())
+
+var linkedState: JsonNode
 
 suite "cloud hub session over a live socket":
   test "the frame dials, authenticates with its Ed25519 key, and serves verbs":
@@ -311,6 +324,8 @@ suite "cloud hub session over a live socket":
     withLock stubLock:
       socket = recorded.socket
       helloesBefore = recorded.helloCount
+      # So that the wait below is for the new session's own signature.
+      recorded.signatureValid = false
     socket.send(newString(5 * 1024 * 1024))
     # The frame reconnects (a fresh hello) rather than dying or hanging on.
     check waitUntil(30.0, proc(): bool {.gcsafe.} =
@@ -329,6 +344,7 @@ suite "cloud hub session over a live socket":
       recorded.closed = false
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
+      linkedState = state.copy()
       resetLinkState(state)
       saveCloudLinkState(state)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
@@ -338,6 +354,30 @@ suite "cloud hub session over a live socket":
     # Standalone again: the private-network deny is gone.
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       not localNetworkPolicySnapshot().active)
+
+  test "an unlink during the handshake closes the session and writes no scope":
+    # The hub's `ready` lands after the local admin unlinked the frame. The
+    # session used to take the unlinked link file's generation as its own
+    # (the save of the scopes `ready` announced, written into the
+    # disconnected link) and stay connected.
+    withLock stubLock:
+      recorded.closed = false
+      recorded.signatureValid = false
+      recorded.unlinkAtAuth = true
+    withLock cloudLinkLock:
+      saveCloudLinkState(linkedState)
+    check waitUntil(20.0, proc(): bool {.gcsafe.} =
+      {.gcsafe.}:
+        withLock stubLock:
+          result = recorded.signatureValid and not recorded.unlinkAtAuth)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      {.gcsafe.}:
+        withLock stubLock:
+          result = recorded.closed)
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      check not isManagedLink(state)
+      check not state.hasKey("scope")
 
 stopCloudHubClient()
 sleep(300)

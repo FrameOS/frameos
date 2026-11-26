@@ -18,6 +18,15 @@ def clear_env():
     so each test starts from a known baseline.
     """
     original_env = {key: os.environ.get(key) for key in HASSIO_ENV_KEYS}
+    # A reload makes a new `config` object, but every module that ran
+    # `from app.config import config` keeps the one it imported. Reloading
+    # again afterwards would leave `app.config.config` a third object, and a
+    # later test on this worker that patches it would not reach the code that
+    # reads the original (test_response_headers on CI). Put the originals back
+    # instead.
+    from app import config, fastapi
+
+    saved = [(module, dict(vars(module))) for module in (config, fastapi)]
     for key in HASSIO_ENV_KEYS:
         os.environ.pop(key, None)
     _reload_app_and_config()
@@ -27,7 +36,9 @@ def clear_env():
             os.environ.pop(key, None)
         else:
             os.environ[key] = value
-    _reload_app_and_config()
+    for module, namespace in saved:
+        vars(module).clear()
+        vars(module).update(namespace)
 
 def _reload_app_and_config():
     """
