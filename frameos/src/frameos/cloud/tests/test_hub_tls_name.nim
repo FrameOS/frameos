@@ -13,6 +13,7 @@ import ../hub_client
 
 const TestPort = 19476
 const AccessToken = "hub-tls-name-token"
+const DialTimeoutMs = 15_000
 
 let dir = getTempDir() / ("frameos-hub-tls-" & $getCurrentProcessId())
 createDir(dir)
@@ -64,18 +65,31 @@ proc serve() {.thread.} =
       let ctx = newContext(verifyMode = CVerifyNone, certFile = certFile, keyFile = keyFile)
       ctx.wrapConnectedSocket(client, handshakeAsServer)
       var secKey = ""
+      var complete = false
       while true:
         let line = client.recvLine(timeout = 5000)
         {.gcsafe.}:
           withLock stubLock:
             received.add line
-        if line == "\r\n" or line.len == 0:
+        if line == "\r\n":
+          complete = true
           break
+        if line.len == 0:
+          break # the peer went away (a dial that refused the certificate)
         if line.toLowerAscii().startsWith("sec-websocket-key:"):
           secKey = line.split(":", 1)[1].strip()
-      client.send("HTTP/1.1 101 Switching Protocols\r\n" &
-                  "Upgrade: websocket\r\nConnection: Upgrade\r\n" &
-                  "Sec-WebSocket-Accept: " & webSocketAcceptFor(secKey) & "\r\n\r\n")
+      # Only a peer that finished its request is answered, and without
+      # SafeDisconn: std/net's send retries a disconnection error forever
+      # (socketError returns, the loop writes again), so a reply to a peer that
+      # reset spun this thread at EPIPE and never accepted the next dial. The
+      # dial that refuses the "wrong" certificate closes with the server's TLS
+      # 1.3 session tickets unread, which is a reset whenever they have arrived
+      # first: on a loaded CI runner, often (a 300 s timeout in shard 4).
+      if complete:
+        client.send("HTTP/1.1 101 Switching Protocols\r\n" &
+                    "Upgrade: websocket\r\nConnection: Upgrade\r\n" &
+                    "Sec-WebSocket-Accept: " & webSocketAcceptFor(secKey) & "\r\n\r\n",
+                    flags = {})
     except CatchableError:
       discard
     try:
@@ -94,10 +108,16 @@ proc dial(leaf, authority: string): tuple[connected: bool, error, seen: string] 
   hubDialCaFile = dir / (authority & ".pem")
   let handle = DialHandle()
   try:
-    let socket = waitFor dialManagementSocket(
+    # Bounded, as the hub client bounds every dial (HubHandshakeTimeoutMs): a
+    # stub that stops answering fails here, by name, not at CI's 300 s kill.
+    let dialing = dialManagementSocket(
       "https://localhost:" & $TestPort, "/api/frames/ws", AccessToken, handle)
-    result.connected = true
-    socket.tcpSocket.close()
+    if not waitFor withTimeout(dialing, DialTimeoutMs):
+      result.error = "the dial did not finish in " & $DialTimeoutMs & " ms"
+    else:
+      let socket = dialing.read()
+      result.connected = true
+      socket.tcpSocket.close()
   except CatchableError as error:
     result.error = error.msg
   sleep(300) # let the stub finish reading what was sent
