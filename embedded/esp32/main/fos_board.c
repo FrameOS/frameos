@@ -175,16 +175,18 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 #define CROWPANEL_WATCH_HOME \
     "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
     "\"emit\":\"sceneSwitcher\",\"as\":{}}"
-/* The Elecrow CrowPanel 5.79": HOME, EXIT and a rocker that tilts NEXT and
- * PREV and presses OK. With the picture turned to its keys, HOME (GPIO2) is
- * the top key and opens the scene's settings, EXIT (GPIO1) the bottom one
- * and opens the scene switcher, as the edges swipe on a touch screen; the
- * rocker held walks the scene list. */
-#define CROWPANEL_5IN79_KEYS \
+/* The Elecrow CrowPanel e-paper boards (the 5.79"): HOME, EXIT and a rocker
+ * that tilts NEXT and PREV and presses OK. With the picture turned to its
+ * keys, HOME (GPIO2) is the top key and opens the scene switcher, held the
+ * scene's settings; EXIT (GPIO1) the bottom one is back (the Sticky's back);
+ * the rocker held walks the scene list. */
+#define CROWPANEL_EPAPER_KEYS \
     "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"longPress\"}," \
     "\"emit\":\"sceneSettings\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"EXIT\",\"action\":\"press\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
+    "\"emit\":\"back\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"PREV\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"NEXT\",\"action\":\"longPress\"}," \
@@ -218,7 +220,7 @@ static const struct {
     /* The CrowPanel 1.46" rotary: the watch's keys (BOOT, the knob pressed
      * OK and turned NEXT / PREV) and no microphone; the edges swipe. */
     {"elecrow_crowpanel_rotary_1in46", CROWPANEL_WATCH_KEYS, NULL, true},
-    {"elecrow_crowpanel_5in79", CROWPANEL_5IN79_KEYS, NULL, false},
+    {"elecrow_crowpanel_5in79", CROWPANEL_EPAPER_KEYS, NULL, false},
     /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
      * swipe, BOOT twice opens the switcher. */
     {"elecrow_crowpanel_advance_7", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},

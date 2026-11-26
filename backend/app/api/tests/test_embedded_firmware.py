@@ -1297,10 +1297,11 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
     }
     assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
     assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
-    # HOME (top) opens the settings, EXIT (bottom) the switcher, the rocker held walks the scenes.
+    # HOME (top) opens the switcher and held the settings, EXIT (bottom) is back, the rocker held walks the scenes.
     assert frame.event_map == [
-        {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSettings", "as": {}},
-        {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
+        {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "back", "as": {}},
         {
             "event": "button",
             "match": {"label": "PREV", "action": "longPress"},

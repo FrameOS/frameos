@@ -514,10 +514,12 @@ static void test_crowpanel_boards(void)
     CHECK(fos_board_led(epd, &pin, &type) && pin == 41 && type == 0, "the 5.79's LED lit high on 41");
     CHECK(fos_board_rails(epd) == NULL, "its panel supply is the EPD pwr pin");
     fos_board_event_map(epd, map, sizeof(map));
-    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"press\"},\"emit\":\"sceneSettings\"") != NULL,
-          "HOME, the top key, opens the settings");
-    CHECK(strstr(map, "\"label\":\"EXIT\",\"action\":\"press\"},\"emit\":\"sceneSwitcher\"") != NULL,
-          "EXIT, the bottom key, opens the switcher");
+    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"press\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "HOME, the top key, opens the switcher");
+    CHECK(strstr(map, "\"label\":\"HOME\",\"action\":\"longPress\"},\"emit\":\"sceneSettings\"") != NULL,
+          "HOME held opens the settings");
+    CHECK(strstr(map, "\"label\":\"EXIT\",\"action\":\"press\"},\"emit\":\"back\"") != NULL,
+          "EXIT, the bottom key, is back");
     CHECK(strstr(map, "\"label\":\"NEXT\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\"") != NULL,
           "NEXT held walks the scenes");
     CHECK(strstr(map, "edgeSwipe") == NULL && strstr(map, "voiceChat") == NULL, "no glass, no microphone");
