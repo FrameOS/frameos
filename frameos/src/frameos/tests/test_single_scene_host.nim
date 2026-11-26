@@ -558,6 +558,37 @@ block:
   doAssert show("tests/wearsB") != first, "after the scenes were replaced, a new instance"
   echo "kept layout ok"
 
+  # The switcher opened over a scene wears that scene's layout: the same
+  # instance, lent and given back, never a second one started beside it
+  # (1.6-2.5 s of each switcher open on a reTerminal Sticky, read off flash
+  # again, 2026-11-26).
+  keepHost.dropScene()
+  dropParkedLayout()
+  keepHost.requestSelect = proc (sceneId: string): bool =
+    keepHost.makeCurrent(sceneId.SceneId)
+    true
+  keepHost.sceneOrder = proc (): seq[SceneId] = @["tests/wearsA".SceneId, "tests/wearsB".SceneId]
+  proc renderNow() =
+    discard keepHost.renderScene(ExecutionContext(scene: keepHost.scene, event: "render",
+      payload: %*{}, image: newImage(40, 40), hasImage: true, loopIndex: 0, loopKey: "."))
+  let worn = show("tests/wearsA")
+  let covered = keepHost.scene
+  doAssert keepHost.send(eoHttpAdmin, "sceneSwitcher", %*{})
+  doAssert keepHost.ensureScene() and keepHost.scene.id.string == SceneSwitcherId
+  doAssert keepHost.covered == covered, "the scene stays under the switcher"
+  renderNow()
+  doAssert keepHost.scene.wornLayout == worn, "the switcher wears the covered scene's layout instance"
+  doAssert covered.wornLayout.isNil, "lent, not shared"
+  keepHost.makeCurrent("tests/wearsA".SceneId)
+  doAssert keepHost.ensureScene() and keepHost.scene == covered, "back to the covered scene"
+  renderNow()
+  doAssert keepHost.scene.wornLayout == worn, "and its layout back with it"
+  keepHost.dropScene()
+  dropParkedLayout()
+  keepHost.requestSelect = proc (sceneId: string): bool = true
+  keepHost.sceneOrder = nil
+  echo "the switcher borrows the layout ok"
+
 # ------------------------------------------------------ windows (the browser)
 #
 # A windowed host (the browser's, wasm_main `frameos_wasm_set_windowed`) runs
