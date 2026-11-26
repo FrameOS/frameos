@@ -621,10 +621,12 @@ export const get = () => (
   (`onPointerDown`, `onPointerMove`, `onPointerUp`) that returns `false` asks
   for no render: what it did shows with the next one (2026.11.15+; other
   handlers' `false` is a value like any other). A drawing keeps a stroke's
-  points at every move and returns `false` until it wants a piece of the
-  stroke shown: on e-paper about one partial update apart, so no refresh holds
-  the moves back (the Sketchbook and Handwriting notes samples, their
-  `ink.ts`; `test_smooth_ink_scenes.nim`).
+  points at every move (`e.points` too) and asks for a render at every move,
+  on e-paper as well: the frame renders when its glass can take the next
+  picture, and the moves that came meanwhile arrive as one with their
+  `points`, so each partial update carries all of them (the Sketchbook and
+  Handwriting notes samples, their `ink.ts`; `test_smooth_ink_scenes.nim`;
+  docs/realtime-rendering.md "A stroke on e-paper").
 - **`hover:`** applies while the pointer is over the element, **`active:`**
   while it is pressed on it, **`group-hover:`** while the pointer is over an
   ancestor with the class `group`. A change renders again. A finger that

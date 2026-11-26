@@ -3,9 +3,11 @@
 ## is, the gesture the frame made of it, and the trail of a drag. Run for
 ## real through the JS app runtime, this pins that a held drag draws every
 ## move from the press to the finger and keeps it after the lift until the
-## next press, that an LCD asks for a render a move and e-paper waits for the
-## lift, that a long drag keeps a bounded trail, that a move repaints its
-## piece of the trail and not the whole of it, and the scene's wiring; and,
+## next press, that every panel asks for a render a move (the frame paces them
+## by its glass) and e-paper draws it in black, that the positions a coalesced
+## move stood for join the trail, that a long drag keeps a bounded trail, that
+## a move repaints its piece of the trail and not the whole of it, and the
+## scene's wiring; and,
 ## through the interpreter, that the scene hears the moves at all (it had no
 ## `pointerMove` listener, so a held drag did not update it).
 
@@ -30,6 +32,7 @@ const
   PaleRed = rgbx(0xf0, 0xa8, 0xa8, 255)
   PaleBlue = rgbx(0xa8, 0xc2, 0xf2, 255)
   White = rgbx(255, 255, 255, 255)
+  Black = rgbx(0, 0, 0, 255)
 
 let
   sample = parseJson(readFile(SamplePath))[0]
@@ -82,8 +85,11 @@ proc event(t: Touch, name: string, payload: JsonNode): bool =
 proc down(t: Touch, x, y: int, id = 1): bool =
   t.event("pointerDown", %*{"x": x, "y": y, "button": 0, "buttons": 1, "pointerId": id, "pointerType": "touch"})
 
-proc move(t: Touch, x, y: int, id = 1, buttons = 1, kind = "touch"): bool =
-  t.event("pointerMove", %*{"x": x, "y": y, "buttons": buttons, "pointerId": id, "pointerType": kind})
+proc move(t: Touch, x, y: int, id = 1, buttons = 1, kind = "touch", points: seq[int] = @[]): bool =
+  var payload = %*{"x": x, "y": y, "buttons": buttons, "pointerId": id, "pointerType": kind}
+  if points.len > 0:
+    payload["points"] = %points
+  t.event("pointerMove", payload)
 
 proc up(t: Touch, x, y: int, id = 1): bool =
   t.event("pointerUp", %*{"x": x, "y": y, "button": 0, "buttons": 0, "pointerId": id, "pointerType": "touch"})
@@ -173,31 +179,51 @@ suite "Touch test":
     check kept["trail"].len == 2 * 29 # the press and every move; the lift where the last move was
     check kept["trail"][0].getInt() == 60 and kept["trail"][1].getInt() == 150
 
-  test "e-paper waits for the finger to lift, then draws the whole drag":
+  test "e-paper draws the drag as it comes too, in black":
+    # Every move asks: the frame renders as fast as its glass takes pictures,
+    # each with all the moves that came meanwhile (their `points`). Black on a
+    # panel without colors, which e-paper's fast waveform draws exactly.
     let t = newTouch("tests/touch-paper", Paper)
-    check not t.down(60, 150)
-    check t.drag() == 0
+    check t.down(60, 150)
+    check t.drag() == 28
+    let held = t.render()
+    check held[60, 132] == Black # the ring around the press
+    check held[200, 150] == Black # a move's dot
+    check held[205, 150] == Black # the line between two moves
+    check held[340, 150] == Black # the finger, a solid dot while held
+    check held[205, 160] == White
     check t.up(340, 150)
     let lifted = t.render()
-    check lifted[60, 132].near(Blue)
-    check lifted[200, 150].near(Blue)
-    check lifted[205, 150].near(PaleBlue)
-    check lifted[340, 158].near(Blue)
+    check lifted[200, 150] == Black
+    check lifted[340, 162] == Black # lifted, the finger is a ring
+    check lifted[340, 150] == White
     check t.seen()["moves"].getInt() == 28
-    # A tap draws once, at the lift.
-    check not t.down(200, 60)
+    check t.down(200, 60)
     check t.up(200, 60)
     check t.event("tap", %*{"x": 200, "y": 60, "pointerId": 1, "pointerType": "touch"})
 
-  test "an ESP32 knows its panel in an event, before any render":
-    # app.frame.fast is the board's panel (embedded_main says it at init):
-    # an event has no canvas, and asked one it said e-paper on an LCD.
-    for (format, fast) in [(PanelFormatRgb565, true), (8, false), (7, false)]:
+  test "the positions a coalesced move stood for join the trail":
+    let t = newTouch("tests/touch-points", Paper)
+    check t.down(60, 150)
+    check t.move(100, 150, points = @[70, 150, 80, 150, 90, 150])
+    check t.move(100, 150, points = @[95, 160]) # back where it is: a render for the point passed
+    check not t.move(100, 150) # nothing new
+    let drawn = t.render()
+    check drawn[85, 150] == Black
+    check t.seen()["trail"] == %*[60, 150, 70, 150, 80, 150, 90, 150, 100, 150, 95, 160, 100, 150]
+    check t.seen()["moves"].getInt() == 6
+
+  test "an ESP32's panel, LCD or e-paper, asks for a render at every move":
+    # The glass sets the pace (one partial update after another on e-paper),
+    # never the app; and the look is the board's panel (embedded_main says
+    # it at init), black where it shows no colors.
+    for (format, color) in [(PanelFormatRgb565, true), (8, false), (1, false), (7, true)]:
       boardPanelFormat = format
       let t = newTouch("tests/touch-esp32-" & $format, "embedded")
-      check t.down(60, 150) == fast
-      check t.drag() == (if fast: 28 else: 0)
+      check t.down(60, 150)
+      check t.drag() == 28
       check t.up(340, 150)
+      check t.render()[205, 150].near(if color: PaleBlue else: Black)
     boardPanelFormat = 0
 
   test "a mouse moving with nothing pressed, or another finger, draws nothing":
@@ -230,7 +256,7 @@ suite "Touch test":
     check kept["moves"].getInt() == 0
     check kept["trail"] == %*[200, 60]
 
-  test "a long drag keeps at most 256 points, from the press to the finger":
+  test "a long drag keeps at most 1024 points, from the press to the finger":
     let t = newTouch("tests/touch-long", Lcd)
     discard t.render()
     check t.down(10, 10)
@@ -242,8 +268,8 @@ suite "Touch test":
     discard t.render()
     let trail = t.seen()["trail"]
     checkpoint $(trail.len div 2) & " points"
-    check trail.len div 2 <= 256
-    check trail.len div 2 > 128
+    check trail.len div 2 <= 1024
+    check trail.len div 2 > 512
     check trail[0].getInt() == 10 and trail[1].getInt() == 10
     check trail[trail.len - 2].getInt() == x and trail[trail.len - 1].getInt() == y
     check t.seen()["moves"].getInt() == 2000

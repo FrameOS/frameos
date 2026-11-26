@@ -2,9 +2,10 @@
 ## (repo/scenes/samples), run for real through the JS app runtime and the JSX
 ## events: a finger's stroke keeps every point it passes (the ones a busy
 ## frame coalesced into a move, `points`, included), is drawn as one smooth
-## curve a piece at a time, at every move on an LCD and about one partial
-## update apart on e-paper, where no move between asks for a render, and what
-## the pieces drew is the stroke drawn whole. Also the ink helpers' path and
+## curve a piece at a time, a render asked at every move on every panel (the
+## frame paces them by its glass: one partial update after another on
+## e-paper, each with the moves that came meanwhile), and what the pieces drew
+## is the stroke drawn whole. Also the ink helpers' path and
 ## its points read back (the SVG files the apps save).
 
 import std/[json, math, os, tables, unittest]
@@ -169,14 +170,15 @@ suite "smooth ink":
     check st["two"] == %*[1, 2, 3, 4]
 
   for (folder, x0, y0, width) in [("Sketchbook", 250.0, 240.0, 800), ("Handwriting notes", 200.0, 260.0, 800)]:
-    test folder & ": on e-paper a stroke keeps every point and is shown a piece at a time":
+    test folder & ": on e-paper a stroke keeps every point and is shown as it is drawn":
       var b = newBoard(folder, "tests/ink-paper-" & folder, Paper)
       discard b.render()
       let s = b.stroke(x0, y0)
       checkpoint $s
-      # 240 moves 10 ms apart: about 2.4 s, so three or four pieces at 650 ms,
-      # and no render for any move between.
-      check s.asked >= 2 and s.asked <= 5
+      # Every move asks: the frame renders when its glass can take the next
+      # picture, and the moves that came meanwhile arrive as one, with
+      # `points` (as every sixth here does).
+      check s.asked == s.moves
       let key = if folder == "Sketchbook": "drawing" else: "notebook"
       let strokes = b.scene.state[key]["strokes"]
       check strokes.len == 1
@@ -217,13 +219,13 @@ suite "smooth ink":
       checkpoint $off & " pixels apart"
       check off < 150
 
-  test "on e-paper a press waits for its lift or the first piece, and a mouse passing over asks nothing":
+  test "on e-paper a press shows its dot at once, and a mouse passing over asks nothing":
     var b = newBoard("Handwriting notes", "tests/ink-paper-tap", Paper)
     discard b.render()
     b.clock(0)
     check not dispatchUiEvent(b.id, "pointerMove", %*{"x": 300, "y": 300, "pointerId": 0, "pointerType": "mouse",
       "buttons": 0})
-    check not dispatchUiEvent(b.id, "pointerDown", touch(300, 300))
+    check dispatchUiEvent(b.id, "pointerDown", touch(300, 300))
     b.clock(80)
     check dispatchUiEvent(b.id, "pointerUp", touch(300, 300, buttons = 0))
     discard b.render()
