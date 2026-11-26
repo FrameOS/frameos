@@ -252,6 +252,7 @@ describe("bindings and rules", () => {
     expect(frameOffersEdgeGestures(null, "lcd.st7701s_480x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.ek9716_800x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.sc7277_800x480", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "lcd.st7789_320x240", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "amoled.co5300_466x466", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.gc9309_240x296", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.st77961_360x360", [])).toBe(true);

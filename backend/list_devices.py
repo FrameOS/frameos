@@ -107,6 +107,10 @@ def build_groups():
             "value": "lcd.st77961_360x360",
             "label": 'ST77961 1.46" round IPS LCD 360x360 (ESP32 SPI, Elecrow CrowPanel 1.46" rotary)',
         },
+        {
+            "value": "lcd.st7789_320x240",
+            "label": 'ST7789 2.8" IPS LCD 320x240 (ESP32 SPI, Elecrow CrowPanel Advance 2.8")',
+        },
     ]
 
     return [

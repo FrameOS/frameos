@@ -80,6 +80,10 @@ static const struct {
      * GPIO45, Elecrow's config.h) plays the buzzer's notes instead: a tap's
      * click is a tick on the wrist. */
     {"elecrow_crowpanel_watch_2in01", 45, 2000},
+    /* The CrowPanel Advance 2.8"'s passive 5025 buzzer behind a transistor on
+     * GPIO8 (V1.2 schematic, B1/Q5); its speaker is an NS4168 on I2S, not
+     * driven. A 5 mm buzzer like the Sticky's, at its 4 kHz. */
+    {"elecrow_crowpanel_advance_2in8", 8, 4000},
 };
 
 static int buzzer_index(const char *hardware_preset)
@@ -224,6 +228,9 @@ static const struct {
     /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
      * swipe, BOOT twice opens the switcher. */
     {"elecrow_crowpanel_advance_7", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
+    /* The CrowPanel Advance 2.8": BOOT and a touch screen, like the 7.0", and
+     * a microphone: BOOT held talks. */
+    {"elecrow_crowpanel_advance_2in8", ONE_BUTTON_TOGGLE("BOOT"), ONE_KEY_VOICE("BOOT"), true},
 };
 
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
@@ -266,6 +273,10 @@ static const struct {
     /* The Elecrow CrowPanel 2.01" watch's LMD3526 on PDM clock GPIO12, data
      * GPIO11, powered by the board's peripheral rail (fos_board_rails). */
     {"elecrow_crowpanel_watch_2in01", 12, 11, -1},
+    /* The CrowPanel Advance 2.8"'s LMD3526 on PDM clock GPIO9, data GPIO10,
+     * through an SGM3799 switch that GPIO45 high turns from the wireless
+     * module's header to the microphone (V1.2 schematic, U8). */
+    {"elecrow_crowpanel_advance_2in8", 9, 10, 45},
 };
 
 /* Chargers with no bus, strapped by resistors, whose charge-enable input
@@ -557,6 +568,9 @@ static const struct {
     /* The Elecrow CrowPanel 5.79"'s TF slot on its own bus: CS10, SCK39,
      * MISO13, MOSI40 (Elecrow's demo). */
     {"elecrow_crowpanel_5in79", "cs=10,sck=39,miso=13,mosi=40"},
+    /* The CrowPanel Advance 2.8"'s TF slot on its own bus: CS7, SCK5, MISO4,
+     * MOSI6 (V1.2 schematic). */
+    {"elecrow_crowpanel_advance_2in8", "cs=7,sck=5,miso=4,mosi=6"},
 };
 
 const char *fos_board_sd_pins(const char *hardware_preset)
@@ -614,6 +628,9 @@ static const struct {
     /* The CrowPanel 1.46" rotary's Hynitron CST816T (0x15) on its own bus,
      * SDA6/SCL7, INT GPIO5, reset GPIO13 (Elecrow's schematic). */
     {"elecrow_crowpanel_rotary_1in46", "sda=6,scl=7,int=5,rst=13,en=-1"},
+    /* The CrowPanel Advance 2.8"'s FocalTech FT6336U (0x38) on the board's
+     * bus, INT GPIO47, reset GPIO48 (V1.2 schematic, Elecrow's lesson 3). */
+    {"elecrow_crowpanel_advance_2in8", "sda=15,scl=16,int=47,rst=48,en=-1"},
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap
@@ -631,6 +648,10 @@ static const struct {
     {"waveshare_esp32_s3_touch_amoled_1_75", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
     /* The Guition 4848S040's GT911 reports the top right as the bottom left. */
     {"guition_esp32_4848s040", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
+    /* The CrowPanel Advance 2.8"'s FT6336U reports the glass in portrait,
+     * 240x320, under a panel turned to landscape: x runs down it, and the
+     * panel's x is its y mirrored (Elecrow's lesson 3: swap_xy, mirror_y). */
+    {"elecrow_crowpanel_advance_2in8", FOS_BOARD_TOUCH_ACROSS | FOS_BOARD_TOUCH_MIRROR_X},
 };
 
 int fos_board_touch_mirror(const char *hardware_preset)

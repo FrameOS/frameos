@@ -814,6 +814,15 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "0:BOOT",
               -1, 2.0f, -1, 0, 0 },
+            /* Elecrow CrowPanel Advance 2.8" (ESP32-S3-WROOM-1-N16R8, V1.2):
+             * the 320x240 ST7789 on one SPI lane, its wiring the driver's own
+             * board table (lcd_qspi_amoled.c), so no EPD pins; the BOOT key
+             * on GPIO0. The cell has no divider to an ADC. The bus, touch,
+             * microphone, buzzer and TF slot come from fos_board.c. */
+            { "elecrow_crowpanel_advance_2in8", "LCD_ST7789_320x240",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT",
+              -1, 2.0f, -1, 0, 0 },
             /* Guition ESP32-4848S040: the LCD's wiring is lcd_st7701s_rgb.c's
              * board table, so no EPD pins. */
             { "guition_esp32_4848s040", "LCD_ST7701S_480x480",

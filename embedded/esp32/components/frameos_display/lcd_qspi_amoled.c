@@ -1,7 +1,8 @@
 /* Panels that keep their own picture, behind an SPI controller: the CO5300
  * 466x466 AMOLED of the Waveshare ESP32-S3-Touch-AMOLED-1.75 on QSPI, and the
- * GC9309 240x296 IPS of the Elecrow CrowPanel 2.01" watch and the round
- * ST77961 360x360 of the CrowPanel 1.46" rotary on one lane with a D/C line.
+ * GC9309 240x296 IPS of the Elecrow CrowPanel 2.01" watch, the round
+ * ST77961 360x360 of the CrowPanel 1.46" rotary and the ST7789 320x240 of the
+ * CrowPanel Advance 2.8" on one lane with a D/C line.
  * See lcd_qspi_amoled.h. */
 #include "lcd_qspi_amoled.h"
 
@@ -95,6 +96,16 @@ static const uint8_t k_st77961_init[] = {
     0x2A, 4, 0x00, 0x00, 0x01, 0x67, 0x2B, 4, 0x00, 0x00, 0x01, 0x67, 0x11, INIT_WAIT,
 };
 
+/* The ST7789 of the Elecrow CrowPanel Advance 2.8", as Elecrow's ESP-IDF
+ * lesson 3 has esp_lcd set it up: no reset line, so a software reset (0x01)
+ * and SLPOUT, each with its wait; 0x36 0xA0 the glass turned to its 320x240
+ * landscape (rows and columns exchanged, rows mirrored: their swap_xy and
+ * mirror_y) in RGB order, 0x3A 0x55 RGB565, 0x21 the inversion its IPS glass
+ * wants. */
+static const uint8_t k_st7789_init[] = {
+    0x01, INIT_WAIT, 0x11, INIT_WAIT, 0x36, 1, 0xA0, 0x3A, 1, 0x55, 0x21, 0,
+};
+
 /* Waveshare ESP32-S3-Touch-AMOLED-1.75 (Waveshare's ESP-IDF BSP,
  * esp32_s3_touch_amoled_1_75.h): CS GPIO12, SCLK GPIO38, D0..D3 GPIO4..7,
  * reset GPIO39, no backlight (an AMOLED lights its own pixels). The glass is
@@ -142,6 +153,20 @@ static const qspi_board_t k_boards[] = {
         .dc = 3, .backlight = 46,
         .spi_hz = 80 * 1000 * 1000,
         .init = k_st77961_init, .init_len = sizeof(k_st77961_init),
+    },
+    {
+        /* Elecrow CrowPanel Advance 2.8" (V1.2 schematic, Elecrow's factory
+         * sketch): the ST7789 on CS GPIO40, SCLK GPIO42, MOSI GPIO39, D/C
+         * GPIO41, no reset line, the backlight on GPIO38 (through a
+         * transistor, lit high). 80 MHz is Elecrow's (LovyanGFX's
+         * freq_write). */
+        .preset = "elecrow_crowpanel_advance_2in8",
+        .panel = "LCD_ST7789_320x240",
+        .width = 320, .height = 240,
+        .cs = 40, .sclk = 42, .data = {39, -1, -1, -1}, .rst = -1,
+        .dc = 41, .backlight = 38,
+        .spi_hz = 80 * 1000 * 1000,
+        .init = k_st7789_init, .init_len = sizeof(k_st7789_init),
     },
 };
 

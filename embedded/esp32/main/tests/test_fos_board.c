@@ -551,8 +551,39 @@ static void test_crowpanel_advance_7(void)
     CHECK(strstr(map, "\"edgeSwipe\"") != NULL, "the edges swipe");
 }
 
+/* The Elecrow CrowPanel Advance 2.8": its touch panel turned across the
+ * landscape glass, its microphone behind the switch, buzzer, TF slot and key;
+ * no coprocessor and no clock, so no board bus (the touch panel opens its
+ * own). */
+static void test_crowpanel_advance_2in8(void)
+{
+    const char *preset = "elecrow_crowpanel_advance_2in8";
+    const uint8_t *pairs = NULL;
+    uint8_t addr = 1, on = 1, off = 1;
+    CHECK(fos_board_i2c_writes(preset, &pairs) == 0 && !pairs, "no coprocessor commands");
+    CHECK(!fos_board_i2c_backlight(preset, &addr, &on, &off), "the backlight is a GPIO");
+    CHECK(strcmp(fos_board_i2c_buses(preset), "") == 0, "no board bus");
+    CHECK(strcmp(fos_board_touch_pins(preset), "sda=15,scl=16,int=47,rst=48,en=-1") == 0, "touch pins");
+    CHECK(fos_board_touch_mirror(preset) == (FOS_BOARD_TOUCH_ACROSS | FOS_BOARD_TOUCH_MIRROR_X),
+          "the FT6336U reports across the glass, x mirrored");
+    int clk, data, pwr;
+    CHECK(fos_board_mic_pins(preset, &clk, &data, &pwr) && clk == 9 && data == 10 && pwr == 45,
+          "PDM mic, GPIO45 turns the switch to it");
+    CHECK(fos_board_buzzer_pin(preset) == 8 && fos_board_buzzer_tone_hz(preset) == 4000, "the buzzer on 8");
+    CHECK(strcmp(fos_board_sd_pins(preset), "cs=7,sck=5,miso=4,mosi=6") == 0, "the TF slot");
+    CHECK(fos_board_rails(preset) == NULL, "no rails");
+    char map[1024];
+    fos_board_event_map(preset, map, sizeof(map));
+    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
+          "BOOT pressed toggles the screen");
+    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+          "BOOT held talks");
+    CHECK(strstr(map, "\"edgeSwipe\"") != NULL && map[strlen(map) - 1] == ']', "the edges swipe");
+}
+
 int main(void)
 {
+    test_crowpanel_advance_2in8();
     test_crowpanel_advance_7();
     test_crowpanel_boards();
     test_amoled_1_75();
