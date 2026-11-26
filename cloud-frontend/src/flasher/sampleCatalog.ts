@@ -51,9 +51,31 @@ export interface FlasherSample {
 
 export type FlasherSampleLeftOut = 'layout' | 'pi' | 'video' | 'key' | 'empty'
 
+/** One layout the flasher offers (docs/scene-layouts.md): a sample whose one
+ * scene is a layout. Every scene the frame starts with wears it. */
+export interface FlasherLayout {
+  /** Its folder name: what a pick names, and the build's file for it. */
+  name: string
+  /** Its scene's name, as the frame's settings list it ("Windows 98"). */
+  title: string
+  description: string
+  /** The layout scene's id: what each scene's `layout.sceneId` names. */
+  id: string
+  /** A desktop: it runs the frame's scenes in windows (`settings.desktop`). */
+  desktop: boolean
+  /** The boards it is made for (`settings.devices`, hardware ids); none for any. */
+  devices: string[]
+  /** Its scene as the board is sent it: compact JSON, in bytes. */
+  bytes: number
+  file: string
+  thumb: string | null
+}
+
 export interface FlasherSampleIndex {
   samples: FlasherSample[]
-  /** What was left out and why, for the build's log and the tests. */
+  /** The layouts, made for a device first, then the desktops, then the rest, each by title. */
+  layouts: FlasherLayout[]
+  /** What was left out and why, for the build's log and the tests (a layout among them). */
   leftOut: { name: string; why: FlasherSampleLeftOut }[]
 }
 
@@ -88,6 +110,11 @@ export function flasherSampleLeftOut(source: FlasherSampleSource): FlasherSample
   if (shown.length === 0) {
     return 'layout'
   }
+  return standaloneCannotRun(source)
+}
+
+/** What a standalone frame cannot run of a sample's scenes, or null. */
+function standaloneCannotRun(source: FlasherSampleSource): FlasherSampleLeftOut | null {
   const needs = sceneNeeds(source.scenes)
   if (needs.includes('linux')) {
     return 'pi'
@@ -103,6 +130,36 @@ export function flasherSampleLeftOut(source: FlasherSampleSource): FlasherSample
     return 'key'
   }
   return null
+}
+
+/** The layout a sample is, when it is one scene that is a layout a standalone
+ * frame can run; else null. */
+export function flasherLayoutOf(source: FlasherSampleSource): Omit<FlasherLayout, 'file' | 'thumb' | 'bytes'> | null {
+  const [scene] = source.scenes
+  if (source.scenes.length !== 1 || !scene || !isLayout(scene) || standaloneCannotRun(source) !== null) {
+    return null
+  }
+  const settings = settingsOf(scene)
+  const id = typeof scene.id === 'string' ? scene.id : ''
+  if (!id) {
+    return null
+  }
+  const name = typeof scene.name === 'string' && scene.name.trim() ? scene.name.trim() : source.title.trim()
+  return {
+    name: source.name,
+    title: name || source.name,
+    description: source.description,
+    id,
+    desktop: settings.desktop === true,
+    devices: Array.isArray(settings.devices)
+      ? settings.devices.filter((device): device is string => typeof device === 'string' && device.length > 0)
+      : [],
+  }
+}
+
+function compareFlasherLayouts(a: FlasherLayout, b: FlasherLayout): number {
+  const rank = (layout: FlasherLayout): number => (layout.devices.length > 0 ? 0 : layout.desktop ? 1 : 2)
+  return rank(a) - rank(b) || a.title.localeCompare(b.title)
 }
 
 /** The file a sample's scenes are served at: its name, made safe for a URL. */
@@ -162,19 +219,42 @@ export function compareFlasherCategories(a: string, b: string): number {
 
 /**
  * The flasher's index of `sources`: the Scene store first, then by category and
- * name. Throws when two offered samples share a scene id (picked together they
- * would be one scene) or when there is no Scene store (a frame could install
- * nothing).
+ * name, and the layouts beside them. Throws when two offered samples or layouts
+ * share a scene id (picked together they would be one scene) or when there is
+ * no Scene store (a frame could install nothing).
  */
 export function flasherSampleIndex(sources: readonly FlasherSampleSource[]): FlasherSampleIndex {
   const samples: FlasherSample[] = []
+  const layouts: FlasherLayout[] = []
   const leftOut: FlasherSampleIndex['leftOut'] = []
   const ids = new Map<string, string>()
   const files = new Set<string>()
+  const served = (name: string): string => {
+    const file = flasherSampleFile(name)
+    if (files.has(file)) {
+      throw new Error(`two flasher samples are served as ${file}`)
+    }
+    files.add(file)
+    return file
+  }
   for (const source of sources) {
     const why = flasherSampleLeftOut(source)
     if (why) {
       leftOut.push({ name: source.name, why })
+      const layout = why === 'layout' ? flasherLayoutOf(source) : null
+      if (layout) {
+        const other = ids.get(layout.id)
+        if (other !== undefined) {
+          throw new Error(`flasher samples "${other}" and "${source.name}" share the scene id "${layout.id}"`)
+        }
+        ids.set(layout.id, source.name)
+        layouts.push({
+          ...layout,
+          bytes: new TextEncoder().encode(flasherScenesJson(source.scenes)).byteLength,
+          file: served(source.name),
+          thumb: source.hasImage ? flasherSampleThumb(source.name) : null,
+        })
+      }
       continue
     }
     for (const scene of source.scenes) {
@@ -188,11 +268,7 @@ export function flasherSampleIndex(sources: readonly FlasherSampleSource[]): Fla
       }
       ids.set(id, source.name)
     }
-    const file = flasherSampleFile(source.name)
-    if (files.has(file)) {
-      throw new Error(`two flasher samples are served as ${file}`)
-    }
-    files.add(file)
+    const file = served(source.name)
     samples.push({
       name: source.name,
       title: source.title.trim() || source.name,
@@ -215,5 +291,6 @@ export function flasherSampleIndex(sources: readonly FlasherSampleSource[]): Fla
       compareFlasherCategories(a.category, b.category) ||
       a.title.localeCompare(b.title)
   )
-  return { samples, leftOut }
+  layouts.sort(compareFlasherLayouts)
+  return { samples, layouts, leftOut }
 }

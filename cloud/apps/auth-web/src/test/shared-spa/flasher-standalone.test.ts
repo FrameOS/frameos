@@ -4,12 +4,16 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { FlasherSample } from "../../../../../../cloud-frontend/src/flasher/sampleCatalog";
+import type { FlasherLayout, FlasherSample } from "../../../../../../cloud-frontend/src/flasher/sampleCatalog";
 import {
   CUSTOM_BOARD,
   TOUCH_PRESETS,
   boardFromQuery,
+  boardLayouts,
+  defaultBoardLayout,
   defaultScenePreset,
+  flasherLayoutGroups,
+  pickedSceneCount,
   pickedScenes,
   pickedScenesProblem,
   pinSpecProblem,
@@ -142,6 +146,88 @@ describe("starterSceneSet", () => {
   it("marks nothing on a board that takes taps: it opens on its scene list", () => {
     const scenes = starterSceneSet([store, clock, layoutAndScene], { touch: true });
     expect(scenes.some((scene) => "default" in scene)).toBe(false);
+  });
+
+  it("puts every scene in the layout picked, as a plane installs one, and sends it after the store", () => {
+    const layout = { id: "layout-reterminal-sticky", settings: { isLayout: true }, default: true };
+    const scenes = starterSceneSet([clock, store], { touch: false }, layout);
+    expect(scenes.map((scene) => scene.id)).toEqual(["scene-store", "layout-reterminal-sticky", "clock"]);
+    expect(scenes.map((scene) => scene.layout)).toEqual([
+      { sceneId: "layout-reterminal-sticky" },
+      undefined,
+      { sceneId: "layout-reterminal-sticky" },
+    ]);
+    // A layout is never what a frame boots to.
+    expect(scenes.filter((scene) => scene.default).map((scene) => scene.id)).toEqual(["clock"]);
+    expect(clock[0]).toEqual({ id: "clock" });
+    expect(starterSceneSet([clock, store], { touch: false }, null).some((scene) => "layout" in scene)).toBe(false);
+  });
+});
+
+describe("the layout picked for a board", () => {
+  const layout = (name: string, extra: Partial<FlasherLayout> = {}): FlasherLayout => ({
+    name,
+    title: name,
+    description: "",
+    id: name.toLowerCase(),
+    desktop: false,
+    devices: [],
+    bytes: 20 * 1024,
+    file: `${name}.json`,
+    thumb: `${name}.jpg`,
+    ...extra,
+  });
+  const layouts = [
+    layout("reTerminal", { devices: ["seeed_reterminal_e1001", "seeed_reterminal_e1002", "seeed_reterminal_e1004"] }),
+    layout("reTerminal Sticky", { devices: ["seeed_reterminal_sticky"] }),
+    layout("Windows 98", { desktop: true }),
+    layout("Top bar"),
+  ];
+
+  it("starts a reTerminal on the layout made for it, and any other board on none", () => {
+    expect(defaultBoardLayout("seeed_reterminal_sticky", layouts)).toBe("reTerminal Sticky");
+    expect(defaultBoardLayout("seeed_reterminal_e1002", layouts)).toBe("reTerminal");
+    expect(defaultBoardLayout("seeed_sensecap_indicator", layouts)).toBe("");
+    expect(defaultBoardLayout("", layouts)).toBe("");
+  });
+
+  it("offers a board the layouts made for it and those made for any board, grouped", () => {
+    expect(boardLayouts("seeed_reterminal_sticky", layouts).map((entry) => entry.name)).toEqual([
+      "reTerminal Sticky",
+      "Windows 98",
+      "Top bar",
+    ]);
+    expect(flasherLayoutGroups("seeed_reterminal_sticky", layouts).map((group) => group.title)).toEqual([
+      "Made for this board",
+      "Desktops",
+      "Full screen",
+    ]);
+    // No group of its own for a board nothing was made for.
+    expect(flasherLayoutGroups("seeed_sensecap_indicator", layouts).map((group) => group.title)).toEqual([
+      "Desktops",
+      "Full screen",
+    ]);
+  });
+
+  it("counts the layout's bytes and its one scene", () => {
+    const store: FlasherSample = {
+      name: "Scene store",
+      title: "Scene store",
+      description: "",
+      category: "System",
+      needs: [],
+      bytes: 60 * 1024,
+      scenes: 1,
+      file: "scene-store.json",
+      thumb: null,
+      store: true,
+    };
+    const samples = [store];
+    const chosen = pickedScenes(samples, [], layouts[1]!);
+    expect(chosen.bytes).toBe(80 * 1024);
+    expect(chosen.scenes).toBe(1);
+    expect(pickedSceneCount(chosen)).toBe(2);
+    expect(pickedSceneCount(pickedScenes(samples, []))).toBe(1);
   });
 });
 

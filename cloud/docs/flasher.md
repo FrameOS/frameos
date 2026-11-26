@@ -218,6 +218,21 @@ On a board that takes taps (its firmware event map swipes: `fos_board.c`
 switcher, its home. On a board of keys the first picked scene that is not the
 Scene store is marked `default`: a clock, not the shop.
 
+**A layout** (docs/scene-layouts.md) is picked under the presets, in one
+select with each layout's picture: "No layout", then "Made for this board"
+(the layouts whose `settings.devices` name it), "Desktops" and "Full screen".
+Every repo sample that is one layout a standalone frame can run is offered
+(`flasherLayoutOf` in `sampleCatalog.ts`; build.mjs serves each beside the
+samples, its file fetched only when it is picked). A board starts on the
+layout made for it (the reTerminal Sticky's, and `reTerminal` on the E1001 to
+E1004) and any other board on none (`defaultBoardLayout`); a layout picked by
+hand stays when another board is picked that can wear it. The layout goes to
+the board right after the Scene store, in the first batch, and every scene
+names it the way a control plane installs one (`layout: {sceneId}`,
+`starterSceneSet`). A frame of a backend or of FrameOS Cloud is not given one
+here: its scenes and the layout they wear are its plane's, chosen in the
+frame's Settings.
+
 ## What is counted
 
 The page counts how it is used, for questions like how many boards are

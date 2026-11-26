@@ -797,7 +797,8 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   status are buttons too.
 
 Both are on the store's Device layouts shelf (`settings.devices` names the
-boards), and both are set up through their fields, on the install or from the
+boards), the browser flasher starts those boards on them (its Layout select,
+cloud/docs/flasher.md), and both are set up through their fields, on the install or from the
 frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
 E-series' hint under the name; the Sticky's date, in its bar and on its home

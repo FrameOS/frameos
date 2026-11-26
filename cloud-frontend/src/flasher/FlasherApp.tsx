@@ -1,6 +1,8 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import type { ChangeEvent, DragEvent, ReactNode } from 'react'
+import { Listbox } from '@headlessui/react'
+import { CheckIcon, ChevronUpDownIcon } from '@heroicons/react/20/solid'
 
 import { Spinner } from '../../../frontend/src/components/Spinner'
 import { ESP32_HARDWARE_PRESET_CONFIGS } from '../../../frontend/src/scenes/frame/panels/FrameSettings/esp32Hardware'
@@ -8,6 +10,8 @@ import { NOT_A_LOGIN } from '../../../frontend/src/utils/notALogin'
 import { sceneNeedLabel } from '../../../frontend/src/utils/sceneNeeds'
 import { esp32Panels } from '../lib/generated-devices'
 import { FLASHER_FRAME_ID, flasherLogic } from './flasherLogic'
+import type { FlasherLayout } from './sampleCatalog'
+import { FLASHER_SAMPLES_URL } from './sampleList'
 import {
   CUSTOM_BOARD,
   sceneBytesLabel,
@@ -225,6 +229,75 @@ function uploadTimeLabel(seconds: number): string {
 // The needs a row shows: what decides where a scene fits.
 const SHOWN_NEEDS = ['fast', 'touch', 'keys'] as const
 
+function LayoutThumb({ layout }: { layout: FlasherLayout | null }): JSX.Element {
+  return (
+    <span className="block h-9 w-12 shrink-0 overflow-hidden rounded border border-[color:var(--tool-border)]">
+      {layout?.thumb ? (
+        <img src={`${FLASHER_SAMPLES_URL}${layout.thumb}`} alt="" loading="lazy" className="h-full w-full object-cover" />
+      ) : null}
+    </span>
+  )
+}
+
+/** The layout every scene wears (docs/scene-layouts.md): one line closed, the
+ * layouts with their pictures open. A reTerminal starts on its own. */
+function LayoutPicker(): JSX.Element | null {
+  const { layouts, layoutGroups, chosenLayout } = useValues(flasherLogic)
+  const { setLayout } = useActions(flasherLogic)
+  if (layouts.length === 0) {
+    return null
+  }
+  const optionClass = ({ active }: { active: boolean }): string =>
+    clsx('flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5', active && 'bg-blue-500/10')
+  const row = (layout: FlasherLayout | null, selected: boolean): JSX.Element => (
+    <>
+      <LayoutThumb layout={layout} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-[color:var(--tool-strong)]">
+          {layout ? layout.title : 'No layout'}
+        </span>
+        <span className="frame-tool-muted block truncate text-xs">
+          {layout ? layout.description : 'Every scene on the whole screen.'}
+        </span>
+      </span>
+      {selected ? <CheckIcon className="h-4 w-4 shrink-0 text-blue-500" aria-hidden /> : null}
+    </>
+  )
+  return (
+    <Listbox value={chosenLayout?.name ?? ''} onChange={(name: string) => setLayout(name, true)}>
+      <div className="relative">
+        <Listbox.Label className="text-sm font-semibold text-[color:var(--tool-strong)]">Layout</Listbox.Label>
+        <Listbox.Button
+          className={clsx(inputClass, 'mt-1.5 flex items-center gap-3 py-1.5 text-left')}
+          aria-label={`Layout: ${chosenLayout ? chosenLayout.title : 'No layout'}`}
+        >
+          {row(chosenLayout, false)}
+          <ChevronUpDownIcon className="frame-tool-muted h-4 w-4 shrink-0" aria-hidden />
+        </Listbox.Button>
+        <Listbox.Options className="absolute z-20 mt-1 max-h-80 w-full overflow-y-auto rounded-xl border border-[color:var(--tool-border)] bg-white p-1 shadow-lg focus:outline-none dark:bg-slate-900">
+          <Listbox.Option value="" className={optionClass}>
+            {({ selected }) => row(null, selected)}
+          </Listbox.Option>
+          {layoutGroups.map((group) => (
+            <li key={group.title} role="presentation">
+              <div className="frame-tool-muted px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide">
+                {group.title}
+              </div>
+              <ul role="presentation">
+                {group.layouts.map((layout) => (
+                  <Listbox.Option key={layout.name} value={layout.name} className={optionClass}>
+                    {({ selected }) => row(layout, selected)}
+                  </Listbox.Option>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </Listbox.Options>
+      </div>
+    </Listbox>
+  )
+}
+
 function ScenePicker(): JSX.Element {
   const {
     samples,
@@ -269,15 +342,18 @@ function ScenePicker(): JSX.Element {
             {presetShown ? presetShown.description : 'Picked by hand.'}
             {noRoom.length > 0 ? ` ${noRoom.length} more from this set do not fit on the board.` : ''}
           </div>
+          <LayoutPicker />
           <div
             className={clsx('text-sm', scenesIssue ? 'font-semibold text-red-500' : 'text-[color:var(--tool-strong)]')}
           >
             {scenesIssue ??
-              `${chosenScenes.scenes} scene${chosenScenes.scenes === 1 ? '' : 's'}, ${sceneBytesLabel(
-                chosenScenes.bytes
-              )}. The board has room for about ${sceneBytesLabel(sceneRoom.bytes)}${
-                sceneRoom.assumed ? ' (if it has 8 MB of flash)' : ''
-              }. Sending them takes ${uploadTimeLabel(uploadSeconds)}.`}
+              `${chosenScenes.scenes} scene${chosenScenes.scenes === 1 ? '' : 's'}${
+                chosenScenes.layout ? ` and the ${chosenScenes.layout.title} layout` : ''
+              }, ${sceneBytesLabel(chosenScenes.bytes)}. The board has room for about ${sceneBytesLabel(
+                sceneRoom.bytes
+              )}${sceneRoom.assumed ? ' (if it has 8 MB of flash)' : ''}. Sending them takes ${uploadTimeLabel(
+                uploadSeconds
+              )}.`}
           </div>
           <input
             className={inputClass}

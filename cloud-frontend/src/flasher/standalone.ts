@@ -2,7 +2,7 @@ import { EMBEDDED_ESP32_S3 } from '../../../frontend/src/devices'
 import { ESP32_HARDWARE_PRESET_CONFIGS } from '../../../frontend/src/scenes/frame/panels/FrameSettings/esp32Hardware'
 import type { ProvisioningCommands } from '../../../frontend/src/scenes/workspace/embeddedFlashRun'
 import type { EmbeddedUsbConfigKey } from '../../../frontend/src/models/embeddedUsbLogsModel'
-import { SCENE_STORE_ID, type FlasherSample } from './sampleCatalog'
+import { SCENE_STORE_ID, type FlasherLayout, type FlasherSample } from './sampleCatalog'
 
 // A standalone ESP32 (cloud/docs/flasher.md "A standalone frame"): a board
 // with no backend and no account, set up by flash.frameos.net from what the
@@ -376,18 +376,62 @@ export function defaultScenePreset(): ScenePresetKey {
 
 export interface PickedScenes {
   samples: FlasherSample[]
+  /** The layout every scene wears, sent with them: one scene more. */
+  layout: FlasherLayout | null
+  /** What goes to the board, the layout included. */
   bytes: number
+  /** The picked samples' scenes, the layout not among them. */
   scenes: number
 }
 
-/** The picked samples in the list's order, the Scene store always among them. */
-export function pickedScenes(samples: FlasherSample[], picked: readonly string[]): PickedScenes {
+/** The picked samples in the list's order, the Scene store always among them,
+ * and the layout they wear. */
+export function pickedScenes(
+  samples: FlasherSample[],
+  picked: readonly string[],
+  layout: FlasherLayout | null = null
+): PickedScenes {
   const chosen = samples.filter((sample) => sample.store || picked.includes(sample.name))
   return {
     samples: chosen,
-    bytes: chosen.reduce((sum, sample) => sum + sample.bytes, 0),
+    layout,
+    bytes: chosen.reduce((sum, sample) => sum + sample.bytes, 0) + (layout?.bytes ?? 0),
     scenes: chosen.reduce((sum, sample) => sum + sample.scenes, 0),
   }
+}
+
+/** How many scenes go to the board: the picked ones and the layout. */
+export function pickedSceneCount(picked: PickedScenes): number {
+  return picked.scenes + (picked.layout ? 1 : 0)
+}
+
+/** The layouts a board can wear: those made for it (`settings.devices`), and
+ * every one made for no board in particular. */
+export function boardLayouts(board: string, layouts: readonly FlasherLayout[]): FlasherLayout[] {
+  return layouts.filter((layout) => layout.devices.length === 0 || layout.devices.includes(board))
+}
+
+/** The layout a board starts with: the one made for it, else none (""). The
+ * reTerminal Sticky and the E1001 to E1004 have theirs: the keys' help and
+ * the bar around every scene (docs/scene-layouts.md "Made for a device"). */
+export function defaultBoardLayout(board: string, layouts: readonly FlasherLayout[]): string {
+  return layouts.find((layout) => layout.devices.includes(board))?.name ?? ''
+}
+
+export interface FlasherLayoutGroup {
+  title: string
+  layouts: FlasherLayout[]
+}
+
+/** The picker's groups, as the frame's settings group layouts: the board's
+ * own, then the desktops, then the layouts around one scene. */
+export function flasherLayoutGroups(board: string, layouts: readonly FlasherLayout[]): FlasherLayoutGroup[] {
+  const offered = boardLayouts(board, layouts)
+  return [
+    { title: 'Made for this board', layouts: offered.filter((layout) => layout.devices.length > 0) },
+    { title: 'Desktops', layouts: offered.filter((layout) => layout.devices.length === 0 && layout.desktop) },
+    { title: 'Full screen', layouts: offered.filter((layout) => layout.devices.length === 0 && !layout.desktop) },
+  ].filter((group) => group.layouts.length > 0)
 }
 
 /** A size as the list says it: KB, or MB from one. */
@@ -404,7 +448,7 @@ export function pickedScenesProblem(
   if (samples === null) {
     return null
   }
-  if (picked.scenes > STANDALONE_MAX_SCENES) {
+  if (pickedSceneCount(picked) > STANDALONE_MAX_SCENES) {
     return `A frame holds at most ${STANDALONE_MAX_SCENES} scenes. Untick some.`
   }
   const room = standaloneSceneRoom(kind)
@@ -427,10 +471,16 @@ function sceneIsLayout(scene: Record<string, unknown>): boolean {
  * scene of its own choosing it opens on the scene switcher, its home. A board
  * of keys alone boots into the first scene that is not the store (a clock, not
  * the shop), or the store when it is all there is.
+ *
+ * With a layout every scene wears it, the way a control plane installs one
+ * (`layout: {sceneId}` beside the scene, docs/scene-layouts.md "Control
+ * planes"), and it goes right after the Scene store: in the first batch the
+ * board stores, so no scene waits for the layout it names.
  */
 export function starterSceneSet(
   sampleScenes: readonly (readonly Record<string, unknown>[])[],
-  kind: Pick<StandaloneBoardKind, 'touch'>
+  kind: Pick<StandaloneBoardKind, 'touch'>,
+  layout: Record<string, unknown> | null = null
 ): Record<string, unknown>[] {
   const scenes = sampleScenes.flatMap((scenes) => scenes.map((scene) => ({ ...scene })))
   scenes.sort((a, b) => Number(b.id === SCENE_STORE_ID) - Number(a.id === SCENE_STORE_ID))
@@ -443,6 +493,16 @@ export function starterSceneSet(
     } else {
       delete scene.default
     }
+  }
+  const layoutId = layout && typeof layout.id === 'string' ? layout.id : ''
+  if (layout && layoutId) {
+    for (const scene of scenes) {
+      if (!sceneIsLayout(scene)) {
+        scene.layout = { sceneId: layoutId }
+      }
+    }
+    const { default: _default, ...worn } = layout
+    scenes.splice(scenes[0]?.id === SCENE_STORE_ID ? 1 : 0, 0, worn)
   }
   return scenes
 }
