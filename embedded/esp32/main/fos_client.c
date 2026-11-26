@@ -975,7 +975,15 @@ static void glass_slot_wait(void)
 {
     if (fos_display_is_lcd()) return;
     int64_t now = esp_timer_get_time();
-    int64_t wait_us = fos_glass_slot_wait_us(now, fos_display_glass_free_at(), s_glass_lead_us);
+    int64_t free_at = fos_display_glass_free_at();
+    int64_t wait_us = fos_glass_slot_wait_us(now, free_at, s_glass_lead_us);
+    if (fos_config()->debug_logging && free_at > 0) {
+        char line[160];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:slot\",\"source\":\"esp32\",\"freeInMs\":%lld,\"leadMs\":%lld,\"waitMs\":%lld}",
+                 (long long)((free_at - now) / 1000), (long long)(s_glass_lead_us / 1000), (long long)(wait_us / 1000));
+        frameos_nim_log_hook(line);
+    }
     if (wait_us <= 0) return;
     int64_t until = now + wait_us;
     while (until - esp_timer_get_time() >= FOS_GLASS_SLOT_MIN_US) {

@@ -463,12 +463,37 @@ static bool s_failed = false;
 static int64_t s_waveform_due_us = 0;
 static int64_t s_waveform_started_us = 0;
 static UWORD s_waveform_mode = MODE_DU;
-/* How long a DU runs on this glass, learned from the waits for one: the
- * controller holds HRDY until its waveform has run, so a wait that began
- * before then ends with it. DU_US until then. 340-365 ms on an E1003 at
- * 21 C (2026-11-26), where the 470 ms first measured would have a render
- * timed to the glass start 120 ms late (fos_display_glass_free_at). */
+/* How long a DU runs on this glass, learned: the controller holds HRDY low
+ * until its waveform has run and nobody talks to it meanwhile, so the first
+ * time HRDY reads high after a start is its end (end_poll, a 2 ms timer
+ * while one runs). DU_US until then. 330-365 ms on an E1003 at 21 C
+ * (2026-11-26), where the 470 ms first measured would have a render timed to
+ * the glass start well after it is free (fos_display_glass_free_at). */
 static int64_t s_du_us = DU_US;
+static esp_timer_handle_t s_end_timer = NULL;
+static volatile int64_t s_waveform_end_us = 0;
+
+static void end_poll(void *arg)
+{
+    (void)arg;
+    if (s_waveform_end_us == 0 && DEV_Digital_Read(EPD_BUSY_PIN) != 0) {
+        s_waveform_end_us = esp_timer_get_time();
+        esp_timer_stop(s_end_timer);
+    }
+}
+
+static void watch_waveform_end(void)
+{
+    s_waveform_end_us = 0;
+    if (!s_end_timer) {
+        const esp_timer_create_args_t args = {.callback = end_poll, .name = "it8951_end"};
+        if (esp_timer_create(&args, &s_end_timer) != ESP_OK) s_end_timer = NULL;
+    }
+    if (s_end_timer) {
+        esp_timer_stop(s_end_timer);
+        esp_timer_start_periodic(s_end_timer, 2000);
+    }
+}
 /* The box the next `changed` hashes, in packed pixels (fos_it8951_10in3_hint). */
 static bool s_hint_armed = false;
 static fos_it8951_rect_t s_hint;
@@ -776,6 +801,7 @@ static void start_waveform(UWORD mode, const fos_it8951_rect_t *rect)
      * ran first (HRDY held the words back). */
     s_waveform_started_us = esp_timer_get_time();
     s_waveform_mode = mode;
+    watch_waveform_end();
     s_waveform_due_us = s_waveform_started_us + (mode == MODE_DU ? s_du_us : mode == MODE_GC16 ? GC16_US : INIT_US);
 }
 
@@ -814,10 +840,15 @@ static void finish_waveforms(void)
     wait_waveforms();
     int64_t end_us = esp_timer_get_time();
     int64_t waited = now_ms() - start;
-    /* Arrived while a DU ran: it ended now, and that is how long one takes
-     * here (smoothed; HRDY is spun on, so within a fraction of a ms). */
-    int64_t ran_us = end_us - s_waveform_started_us;
-    if (s_waveform_mode == MODE_DU && end_us - start_us > 2000 && !s_failed && ran_us > 100000 && ran_us < 2000000) {
+    if (s_end_timer) esp_timer_stop(s_end_timer);
+    /* When it ended: what the timer saw, or now when this wait outlasted it
+     * (HRDY is spun on here, so within a fraction of a ms). That is how long
+     * a DU takes here, smoothed. */
+    int64_t ended_us = s_waveform_end_us > s_waveform_started_us ? s_waveform_end_us
+                       : end_us - start_us > 2000                 ? end_us
+                                                                  : 0;
+    int64_t ran_us = ended_us - s_waveform_started_us;
+    if (s_waveform_mode == MODE_DU && ended_us && !s_failed && ran_us > 100000 && ran_us < 2000000) {
         s_du_us = (s_du_us * 3 + ran_us) / 4;
     }
     if (waited > 20) {
@@ -1147,7 +1178,10 @@ void fos_it8951_10in3_wait(void)
 
 int64_t fos_it8951_10in3_free_at(void)
 {
-    return s_waveform_pending && !s_failed ? s_waveform_due_us : 0;
+    if (!s_waveform_pending || s_failed) return 0;
+    /* Ended already (the timer saw HRDY go high): free now. */
+    if (s_waveform_end_us > s_waveform_started_us) return 0;
+    return s_waveform_due_us;
 }
 
 void fos_it8951_10in3_rest(void)
