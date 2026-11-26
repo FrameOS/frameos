@@ -115,6 +115,12 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
  * an idle frame runs no pass to refresh it, and the pass after the input hold
  * releases reads a new one. */
 #define FOS_POWER_READING_REUSE_US (600 * 1000000LL)
+/* And a pass of a steady run (an animation, a burst): its housekeeping comes
+ * once a second, and a fresh reading is the gap above on the render task,
+ * plus the gauge and the charger over I2C (a frame and more of every second
+ * of the AMOLED 1.75's animations, 2026-11-26). A cell does not go critical
+ * in half a minute. */
+#define FOS_POWER_READING_STEADY_REUSE_US (30 * 1000000LL)
 
 /* How long a deep sleep waits for the cloud task to finish streaming the
  * frame's image (an `image_get` the provider queued on this pass's `render`
@@ -4564,12 +4570,14 @@ static void client_task(void *arg)
             static fos_charger_status_t s_power_charger;
             int64_t power_now_us = esp_timer_get_time();
             bool answering = input_hold_on() || s_asked_us > s_render_began_us;
-            bool power_fresh = s_power_read_us != 0 &&
-                               power_now_us - s_power_read_us < FOS_POWER_READING_REUSE_US;
+            bool steady = fos_animation_steady(&s_anim, power_now_us);
+            int64_t power_age_us = s_power_read_us != 0 ? power_now_us - s_power_read_us : INT64_MAX;
+            bool power_reused = (answering && power_age_us < FOS_POWER_READING_REUSE_US) ||
+                                (steady && power_age_us < FOS_POWER_READING_STEADY_REUSE_US);
             int battery_pct = -1, battery_mv = 0;
             fos_charger_status_t charger;
             bool charger_known;
-            if (answering && power_fresh) {
+            if (power_reused) {
                 battery_mv = s_power_mv;
                 battery_pct = s_power_pct;
                 charger = s_power_charger;
