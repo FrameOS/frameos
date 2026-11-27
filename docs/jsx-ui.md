@@ -532,7 +532,12 @@ Handwriting notes, which grew themselves, while the setting moved only some).
   that fetches a photo for its size wants every one of them.
 - **Raster stays raster.** Pixels the app hands over are drawn stretched
   (soft): an image spec or `frameos.canvas` made at the app's size, or an
-  image returned instead of JSX. Drawing into `context.image` with
+  image returned instead of JSX. `frameos.pixels` is the exception that
+  stays crisp: each cell is the scale's square of the panel (5 px at 2 is
+  10, a fraction rounds up), so a grid sized for the canvas the app was told
+  covers the panel. A game that fills its canvas with cells and reads the
+  pointer's `x` and `y` (panel pixels) is simplest at its scene's
+  `settings.renderScale: 1`, as the samples' games are. Drawing into `context.image` with
   `frameos.draw` is in the canvas's own pixels; multiply by
   `app.frame.scale`.
 - **The pointer** is divided by the scale before it meets the UI's regions,

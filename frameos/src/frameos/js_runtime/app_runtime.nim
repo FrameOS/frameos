@@ -4888,7 +4888,17 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
   let
     frameWidth = defaultImageWidth(owner, context, %*{})
     frameHeight = defaultImageHeight(owner, context, %*{})
-    ps = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
+    # At a render scale above 1 (render_scale.nim) a .tsx app sized its grid
+    # for the canvas it was told, the panel over the scale: a cell is the
+    # scale's square of the panel, so the grid covers the panel as the rest of
+    # the app's picture does. A whole scale (every automatic one) keeps each
+    # cell whole; a fraction rounds up, and a grid past the panel is a picture
+    # of its own. At 2 on the reTerminal E1003 the games drew in the top-left
+    # quarter (the UX bench, 2026-11-27).
+    scale = runtime.jsxScale(owner)
+    asked = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
+    scaled = asked.float * max(scale, 1.0)
+    ps = if scaled - float(int(scaled)) > 1e-6: int(scaled) + 1 else: int(scaled)
     width = jsOptionInt(ctx, options, "width", frameWidth div ps)
     height = jsOptionInt(ctx, options, "height", frameHeight div ps)
   var palette: PixelPalette
