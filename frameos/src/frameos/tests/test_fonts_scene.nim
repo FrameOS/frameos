@@ -118,9 +118,9 @@ suite "the Fonts scene":
     let config = frame(480, 800, getTempDir() / "frameos-fonts-scene-none")
     let scene = load(config)
     discard scene.draw(config)
-    # Narrow: Get fonts, the list (one row, the built-in face) and the page
-    # buttons, the specimen under them.
-    check taps().len == 4
+    # Narrow: Get fonts and the list (one row, the built-in face; one page,
+    # so no page buttons), the specimen under them.
+    check taps().len == 2
     scene.tap(taps()[1])
     check scene.state{"font"}.getStr() == ""
     check scene.state{"page"}.getInt() == 0 # the list stays, the specimen shows under it
@@ -173,7 +173,7 @@ suite "the Fonts scene":
     # The families on the left (under the bar and the kind and search row),
     # the first of them Test Sans.
     let list = tapsIn(0, 320, 100)
-    check list.len >= 5 # three families and the page buttons
+    check list.len == 3 # three families, on one page: no page buttons
     scene.tap(list[0])
     check scene.state{"family"}.getStr() == "Test Sans"
     discard scene.draw(config)

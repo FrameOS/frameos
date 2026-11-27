@@ -149,7 +149,7 @@ suite "Touch test":
     check fields == @["touchCursor -> render/image fieldInput/image"]
     let config = parseJson(app["sources"]["config.json"].getStr())
     check config["events"] == %*["pointerDown", "pointerMove", "pointerUp", "pointerCancel", "tap", "doubleTap",
-      "longPress", "swipe"]
+      "longPress", "swipe", "button"]
 
   test "a held drag on an LCD draws every move, from the ring at the press to the dot":
     let t = newTouch("tests/touch-lcd", Lcd)
@@ -255,6 +255,17 @@ suite "Touch test":
     check kept["last"].getStr() == "tap"
     check kept["moves"].getInt() == 0
     check kept["trail"] == %*[200, 60]
+
+  test "a key says which, and draws no pointer where none was":
+    let t = newTouch("tests/touch-keys", Paper)
+    discard t.render()
+    check t.event("button", %*{"pin": 41, "label": "OK", "role": "primary", "action": "press"})
+    let after = t.render()
+    check t.seen()["last"].getStr() == "OK pressed"
+    check t.seen()["count"].getInt() == 1
+    check after[2, 2] == White # no dot at the corner a pointer never was
+    check t.event("button", %*{"pin": 42, "label": "NEXT", "role": "next", "action": "longPress"})
+    check t.seen()["last"].getStr() == "NEXT held"
 
   test "a long drag keeps at most 1024 points, from the press to the finger":
     let t = newTouch("tests/touch-long", Lcd)
