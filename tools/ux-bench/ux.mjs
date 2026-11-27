@@ -819,8 +819,8 @@ for (const scene of tested) {
         let last = null
         let quiet = 0
         // Until the ring comes round to where it started (a long list pages
-        // on the way), or a press for each element and a page of slack.
-        const maxPresses = Math.min(takers.length * 2 + 12, 160)
+        // on the way, and has more rows than the panel showed at first).
+        const maxPresses = Math.min(Math.max(takers.length * 2 + 12, 60), 200)
         const press = (label, k) => step('focus', label, () => key(k.label, k.pin ?? -1, 90), false)
         const ringNow = () => {
           const rings = keptRings()
@@ -851,7 +851,8 @@ for (const scene of tested) {
             const whole = Math.min((el.box[2] - el.box[0]) * (el.box[3] - el.box[1]), W * H)
             if (whole > 0 && shown / whole < 0.3) walk.offscreen.push({ id, box: el.box.map(Math.round), shown: Math.round((shown / whole) * 100) / 100 })
           }
-          if (first && id === first && last !== first) {
+          // Round: back on the first stop, after others (or again, when it is the only one).
+          if (first && id === first && (last !== first || seen.size === 1)) {
             walk.wrapped = true
             break
           }
