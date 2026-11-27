@@ -864,7 +864,7 @@ on the glass through the touch task, in the controller's own coordinates, so
 the bench times all of this without one, and prints when the touch task saw
 it and lit it. `touch drag <x0> <y0> <x1> <y1> [ms] [amp] [waves]`
 (`fos_touch_inject_drag`) moves one from one panel pixel to another over `ms`
-along a sine of `amp` pixels and `waves` periods, read at the touch task's
+along a zigzag of `amp` pixels and `waves` periods, read at the touch task's
 own pace as the glass's reports are: a stroke for the drawing scenes, timed
 ("A stroke on e-paper", below).
 

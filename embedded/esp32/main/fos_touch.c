@@ -1,7 +1,6 @@
 #include "fos_touch.h"
 #include "fos_press.h"
 
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -894,14 +893,18 @@ static bool inject_points(fos_touch_point_t *points, int *count)
         return true;
     }
     if (s_inject_drag) {
-        /* Doubles: the firmware's libm has them already (QuickJS's Math). */
-        double t = (double)(now - s_inject_from_us) / (double)(until - s_inject_from_us);
-        double dx = s_drag_x[1] - s_drag_x[0], dy = s_drag_y[1] - s_drag_y[0];
-        double len = sqrt(dx * dx + dy * dy);
-        double w = len > 0 ? s_drag_amp * sin(6.283185307179586 * s_drag_waves * t) / len : 0;
+        /* Integers (a float's sine is a kilobyte of software doubles here):
+         * along the line, and a zigzag across it, `waves` periods of `amp`
+         * pixels, sideways to a mostly level drag and up and down otherwise. */
+        int64_t done = now - s_inject_from_us, span = until - s_inject_from_us;
+        int dx = s_drag_x[1] - s_drag_x[0], dy = s_drag_y[1] - s_drag_y[0];
+        int f = (int)(((int64_t)s_drag_waves * done * 4096 / span) % 4096);
+        int zig = f < 1024 ? f : f < 3072 ? 2048 - f : f - 4096; /* -1024..1024 */
+        int off = s_drag_amp * zig / 1024;
+        bool level = (dx < 0 ? -dx : dx) >= (dy < 0 ? -dy : dy);
         int16_t x, y;
-        panel_to_raw((int)floor(s_drag_x[0] + dx * t - dy * w + 0.5), (int)floor(s_drag_y[0] + dy * t + dx * w + 0.5), &x,
-                     &y);
+        panel_to_raw(s_drag_x[0] + (int)(dx * done / span) + (level ? 0 : off),
+                     s_drag_y[0] + (int)(dy * done / span) + (level ? off : 0), &x, &y);
         s_inject_x = x;
         s_inject_y = y;
     }
