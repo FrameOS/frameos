@@ -245,6 +245,21 @@ await build({
   tsconfig: path.resolve(__dirname, 'tsconfig.json'),
 })
 
+// The settings previews' OpenDisplay worker, by fixed URL like Monaco's
+// (frontend/src/workers/ditherPreviewClient.ts): self-contained, the WASM
+// build inside it.
+await build({
+  absWorkingDir: __dirname,
+  entryPoints: [{ in: '../frontend/src/workers/ditherPreview.worker.ts', out: 'workers/ditherPreview.worker' }],
+  bundle: true,
+  format: 'esm',
+  splitting: false,
+  outdir: staticDir,
+  minify: true,
+  sourcemap: isDev,
+  tsconfig: path.resolve(__dirname, 'tsconfig.json'),
+})
+
 const buildOptions = {
   absWorkingDir: __dirname,
   entryPoints: [

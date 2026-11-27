@@ -33,17 +33,20 @@ const common = {
   bundle: true,
 }
 
-function isMonacoWorkerOutput(outputPath, staticPrefix) {
-  return outputPath.startsWith(`${staticPrefix}monaco/`) && outputPath.endsWith('.js')
+function isWorkerOutput(outputPath, staticPrefix, workerDir) {
+  return outputPath.startsWith(`${staticPrefix}${workerDir}/`) && outputPath.endsWith('.js')
 }
 
 function isSharedWorkerChunk(outputPath, staticPrefix) {
   return outputPath.startsWith(`${staticPrefix}chunk-`) && outputPath.endsWith('.js')
 }
 
-function copyMonacoWorkerChunks(buildOutputs, staticPrefix = 'dist/static/') {
+// A worker in a subfolder imports esbuild's shared chunks by a same-folder
+// path (./chunk-*.js): copy them in next to it. Monaco's workers, and the
+// settings previews' dithering worker (static/workers/).
+function copyMonacoWorkerChunks(buildOutputs, staticPrefix = 'dist/static/', workerDir = 'monaco') {
   const outputs = buildOutputs.outputs ?? {}
-  const workerOutputKeys = Object.keys(outputs).filter((key) => isMonacoWorkerOutput(key, staticPrefix))
+  const workerOutputKeys = Object.keys(outputs).filter((key) => isWorkerOutput(key, staticPrefix, workerDir))
   const chunkKeys = new Set()
   const visit = (key) => {
     const output = outputs[key]
@@ -64,7 +67,7 @@ function copyMonacoWorkerChunks(buildOutputs, staticPrefix = 'dist/static/') {
 
   for (const key of chunkKeys) {
     const sourcePath = path.resolve(__dirname, key)
-    const targetPath = path.resolve(__dirname, `${staticPrefix}monaco`, path.basename(key))
+    const targetPath = path.resolve(__dirname, `${staticPrefix}${workerDir}`, path.basename(key))
     fse.copyFileSync(sourcePath, targetPath)
 
     const sourceMapPath = `${sourcePath}.map`
@@ -198,6 +201,9 @@ const configs = [
         'src/monaco/css.worker.ts',
         'src/monaco/html.worker.ts',
         'src/monaco/ts.worker.ts',
+        // OpenDisplay dithering for the settings previews, by fixed URL
+        // (workers/ditherPreviewClient.ts). Imports nothing the page does.
+        'src/workers/ditherPreview.worker.ts',
       ],
       splitting: true,
       format: 'esm',
@@ -275,10 +281,14 @@ await buildInParallel(
       }
 
       const files = Object.keys(buildResponse.outputs).filter(
-        (key) => key.startsWith('dist/static/main-') || key.startsWith('dist/static/monaco/')
+        (key) =>
+          key.startsWith('dist/static/main-') ||
+          key.startsWith('dist/static/monaco/') ||
+          key.startsWith('dist/static/workers/ditherPreview.worker-')
       )
       createHashlessEntrypoints(__dirname, files)
       copyMonacoWorkerChunks(buildResponse)
+      copyMonacoWorkerChunks(buildResponse, 'dist/static/', 'workers')
     },
   }
 )

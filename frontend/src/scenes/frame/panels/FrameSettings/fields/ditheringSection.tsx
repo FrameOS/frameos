@@ -1,23 +1,13 @@
 import { useActions, useValues } from 'kea'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '../../../../../components/Button'
 import { Field } from '../../../../../components/Field'
 import { NumberTextInput } from '../../../../../components/NumberTextInput'
 import { Select } from '../../../../../components/Select'
-import { Spinner } from '../../../../../components/Spinner'
 import { Switch } from '../../../../../components/Switch'
 import { TextInput } from '../../../../../components/TextInput'
 import { Tooltip } from '../../../../../components/Tooltip'
-import type { DitherPreset, FrameDither, FrameType } from '../../../../../types'
-import { frameAssetsApiPath } from '../../../../../utils/frameAssetsApi'
-import { getBasePath } from '../../../../../utils/getBasePath'
-import {
-  paletteDeviceOf,
-  panelPaletteForFrame,
-  panelPaletteKindForFrame,
-  visiblePalette,
-} from '../../../../../utils/assetColors/devicePalette'
-import { ditherToPalette } from '../../../../../utils/assetColors/dither'
+import type { DitherPreset, FrameColors, FrameDither, FrameType } from '../../../../../types'
 import {
   BUILTIN_DITHER_PRESETS,
   DITHER_ADJUSTMENTS,
@@ -29,9 +19,10 @@ import {
   normalizeFrameDither,
   type NormalizedFrameDither,
 } from '../../../../../utils/ditherPresets'
-import { deviceLabelFor } from '../../Assets/assetColorsLogic'
 import { settingsLogic } from '../../../../settings/settingsLogic'
 import { useFrameSettings } from '../frameSettingsContext'
+import { globalProfileOf } from './colorsSection'
+import { PanelPreview, panelPpiOf } from './panelPreview'
 import { SectionBody, SectionHeading } from '../sections/FrameSettingsSection'
 
 // How the control plane dithers the picture it packs for this frame's palette
@@ -43,170 +34,6 @@ import { SectionBody, SectionHeading } from '../sections/FrameSettingsSection'
 // its scenes on the server or is a thin client.
 
 const CUSTOM = 'custom'
-
-/** The inks of a palette kind's visible colours, in order: OpenDisplay names each one. */
-const INKS: Partial<Record<string, string[]>> = {
-  spectra6: ['black', 'white', 'yellow', 'red', 'blue', 'green'],
-  sevenColor: ['black', 'white', 'green', 'blue', 'red', 'yellow', 'orange'],
-  fourColor: ['black', 'white', 'yellow', 'red'],
-}
-const NOMINAL: Record<string, string> = {
-  black: '#000000',
-  white: '#ffffff',
-  yellow: '#ffff00',
-  red: '#ff0000',
-  blue: '#0000ff',
-  green: '#00ff00',
-  orange: '#ff8000',
-}
-
-/** panel_ppi: the density the plane uses, from the panel's name (`EPD_7in3e` = 7.3"). */
-function panelPpiOf(frame: Partial<FrameType>, width: number, height: number): number {
-  const hardwarePanel = (frame.hardware as { panel?: unknown } | null | undefined)?.panel
-  const name = (typeof hardwarePanel === 'string' ? hardwarePanel : frame.device) ?? ''
-  const short = name.split('.').pop() ?? name
-  const inches = /(\d+)in(\d)/.exec(short)
-  const impression = /impression_(\d+(?:\.\d+)?)/.exec(short)
-  const diagonal = inches ? Number(`${inches[1]}.${inches[2]}`) : impression ? Number(impression[1]) : null
-  return diagonal && width > 0 && height > 0 ? Math.hypot(width, height) / diagonal : 127
-}
-
-type OpenDisplay = typeof import('@opendisplay/epaper-dithering')
-let openDisplayModule: Promise<OpenDisplay> | null = null
-function loadOpenDisplay(): Promise<OpenDisplay> {
-  // Only fine tuning needs it: the WASM build stays out of the main bundle.
-  openDisplayModule ??= import('@opendisplay/epaper-dithering')
-  return openDisplayModule
-}
-
-/**
- * The frame's current image dithered with `dither` (null: Floyd–Steinberg),
- * painted in the panel's colours. OpenDisplay runs the same Rust core as both
- * planes' packers, so this is the picture the frame will get.
- */
-function DitherPreview({
-  frame,
-  dither,
-}: {
-  frame: Partial<FrameType> & Pick<FrameType, 'id'>
-  dither: NormalizedFrameDither | null
-}): JSX.Element {
-  const [source, setSource] = useState<ImageBitmap | null>(null)
-  const [failed, setFailed] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [took, setTook] = useState<number | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const panel = {
-    device: frame.device,
-    palette: frame.palette,
-    device_config: frame.device_config,
-    embedded: frame.embedded,
-    hardware: frame.hardware,
-  }
-  const deviceLabel = deviceLabelFor(paletteDeviceOf(panel))
-  const palette = visiblePalette(panelPaletteForFrame(panel, deviceLabel))
-  const inks = INKS[panelPaletteKindForFrame(panel, deviceLabel)]
-  const key = JSON.stringify([dither, palette])
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(`${getBasePath()}${frameAssetsApiPath(frame.id, 'image')}?t=-1`, { credentials: 'include' })
-      .then((response) => (response.ok ? response.blob() : Promise.reject(new Error(String(response.status)))))
-      .then((blob) => createImageBitmap(blob))
-      .then((bitmap) => (cancelled ? bitmap.close() : setSource(bitmap)))
-      .catch(() => !cancelled && setFailed(true))
-    return () => {
-      cancelled = true
-    }
-  }, [frame.id])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !source || palette.length === 0) {
-      return
-    }
-    let cancelled = false
-    // DBS takes a moment on a big panel: wait for the sliders to settle.
-    const timer = window.setTimeout(async () => {
-      setBusy(true)
-      const started = performance.now()
-      canvas.width = source.width
-      canvas.height = source.height
-      const context = canvas.getContext('2d', { willReadFrequently: true })
-      if (!context) {
-        return
-      }
-      context.drawImage(source, 0, 0)
-      const imageData = context.getImageData(0, 0, source.width, source.height)
-      if (dither && inks && inks.length === palette.length) {
-        try {
-          const od = await loadOpenDisplay()
-          const odPalette = od.Palette.fromSrgb(
-            palette.map(([r, g, b], index) => ({ rgb: { r, g, b }, name: inks[index], nominal: NOMINAL[inks[index]] })),
-            true
-          )
-          const result = od.ditherImage(
-            { width: source.width, height: source.height, data: imageData.data },
-            odPalette,
-            {
-              mode: dither.algorithm as never,
-              exposure: dither.exposure,
-              saturation: dither.saturation,
-              shadows: dither.shadows,
-              highlights: dither.highlights,
-              tone: dither.tone,
-              gamut: dither.gamut,
-              dbs: dither.dbs
-                ? {
-                    viewingDistanceCm: dither.viewingDistanceCm,
-                    ppi: dither.ppi ?? panelPpiOf(frame, source.width, source.height),
-                  }
-                : false,
-            }
-          )
-          for (let i = 0; i < result.indices.length; i += 1) {
-            const [r, g, b] = palette[result.indices[i]]
-            imageData.data[i * 4] = r
-            imageData.data[i * 4 + 1] = g
-            imageData.data[i * 4 + 2] = b
-          }
-        } catch {
-          ditherToPalette(imageData.data, source.width, source.height, palette)
-        }
-      } else {
-        ditherToPalette(imageData.data, source.width, source.height, palette)
-      }
-      if (!cancelled) {
-        context.putImageData(imageData, 0, 0)
-        setTook(Math.round(performance.now() - started))
-        setBusy(false)
-      }
-    }, 300)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [source, key])
-
-  return (
-    <div className="space-y-1">
-      <div className="frame-tool-card relative flex min-h-[8rem] items-center justify-center overflow-hidden rounded-2xl bg-slate-900/80 p-2">
-        {failed ? (
-          <span className="frame-tool-muted p-4 text-xs">No current image to preview on.</span>
-        ) : source ? (
-          <canvas ref={canvasRef} className="max-h-[22rem] max-w-full object-contain" />
-        ) : (
-          <Spinner className="h-6 w-6" color="white" />
-        )}
-        {busy && source ? <Spinner className="absolute right-3 top-3 h-4 w-4" color="white" /> : null}
-      </div>
-      <p className="frameos-muted text-xs">
-        The frame&apos;s current image, dithered as the panel will show it and painted in its palette&apos;s colors
-        {took !== null ? ` (${took} ms here)` : ''}. Zoom in to judge the dots; step back to judge the picture.
-      </p>
-    </div>
-  )
-}
 
 function Slider({
   label,
@@ -338,6 +165,8 @@ function DitherControls({
 
 export function DitheringSection(): JSX.Element {
   const { frame, frameForm, palette } = useFrameSettings()
+  // The preview shows the Colors section's correction too: the render applies it before the dithering.
+  const colors: FrameColors = frameForm.colors ?? frame.colors ?? {}
   const { savedSettings } = useValues(settingsLogic)
   const { saveDitherPresets } = useActions(settingsLogic)
   const ownPresets: DitherPreset[] = savedSettings.ditherPresets ?? []
@@ -417,9 +246,11 @@ export function DitheringSection(): JSX.Element {
                   )}
                   {current && showFineTuning ? (
                     <div className="grid gap-3 @3xl:grid-cols-[minmax(0,1fr)_22rem]">
-                      <DitherPreview
+                      <PanelPreview
                         frame={{ ...frame, ...frameForm, id: frame.id } as Partial<FrameType> & Pick<FrameType, 'id'>}
-                        dither={current}
+                        colors={colors}
+                        global={globalProfileOf(colors)}
+                        dither={value}
                       />
                       <div className="space-y-3">
                         <DitherControls
