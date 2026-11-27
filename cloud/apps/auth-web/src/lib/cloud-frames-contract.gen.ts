@@ -573,7 +573,10 @@ export const cloudFramesContract = {
                 "down",
                 "back",
                 "menu",
-                "refresh"
+                "refresh",
+                "screen",
+                "left",
+                "right"
               ]
             }
           },

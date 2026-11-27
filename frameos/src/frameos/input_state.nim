@@ -53,13 +53,14 @@ type
 
   ButtonKey = object
     ## A key the button layer has not finished with: held (`down`), or a
-    ## short press that is over and not yet a `press` (a down of the same pin
-    ## within `ButtonDoublePressMs` of `releasedAt` makes the pair a
-    ## `doublePress` instead; once the window has passed it is a `press`), or
-    ## a pair held back for a third press (`third`: a down within the window
-    ## makes it a `triplePress`; once the window has passed it is the
-    ## `doublePress`). One record for all three, so the ESP32 carries one set
-    ## of seq hooks.
+    ## short press of a key some rule binds a `doublePress` or `triplePress`
+    ## of, over and not yet a `press` (a down of the same pin within
+    ## `ButtonDoublePressMs` of `releasedAt` makes the pair a `doublePress`
+    ## instead; once the window has passed it is a `press`), or a pair held
+    ## back for a third press (`third`: a down within the window makes it a
+    ## `triplePress`; once the window has passed it is the `doublePress`). A
+    ## key no rule binds twice is a `press` at its `up`, and never waits. One
+    ## record for all of it, so the ESP32 carries one set of seq hooks.
     pin: int
     label, role: string
     origin: EventOrigin
@@ -71,6 +72,7 @@ type
     longPressed: bool ## its `longPress` came while it was held: its `up` makes nothing more
     third: bool     ## the second down, held back: a third may make the run a `triplePress`
     wake: bool      ## began with the down that woke the device: its button-layer event says so
+    chord: bool     ## held together with another key: half of the frame's two-key Back key, nothing of its own
 
 type PointerRecord = object
   id: int
@@ -107,6 +109,11 @@ type
   InputState* = object
     buttonRoles: seq[(int, string)] ## pin -> the role the frame configured
     buttons: seq[ButtonKey]         ## held, or a short press in its double-press window
+    chordLabel: string              ## the two keys held together now, "LEFT+RIGHT"; "" for none
+    chordAt: MonoTime               ## when the second of them went down: its hold is timed from there
+    chordAtMs: int
+    chordOrigin: EventOrigin
+    chordDone: bool                 ## its `press` or `longPress` came: the ups make nothing more
     width, height: int             ## scene pixels
     panelWidth, panelHeight, rotate: int
     flip: string
@@ -114,11 +121,14 @@ type
     pointers: seq[PointerRecord]   ## a handful at most: a search beats a table's code
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
     bound*: proc (pin: int, label, role, action: string): bool
-      ## What event_loop.nim asks of the event maps for this key. `triplePress`:
-      ## whether a rule of the frame's map or the showing scene's binds it;
-      ## only then does the key's second down wait for a third instead of
-      ## being the `doublePress` at once, so a key no rule binds three times
-      ## is no slower. `longPress`: whether the frame takes the hold for a
+      ## What event_loop.nim asks of the event maps for this key. `doublePress`
+      ## and `triplePress`: whether a rule of the frame's map or the showing
+      ## scene's binds it; only then does a short press wait out
+      ## `ButtonDoublePressMs` for a second (and its second down for a third),
+      ## so a key no rule binds twice is a `press` the moment it comes up. A
+      ## `back` press of the key two held keys make (`pin` -1, a label with a
+      ## `+`): whether a rule binds Back by its role, not by a key's label —
+      ## only then are two keys held together that key (`chordWanted`). `longPress`: whether the frame takes the hold for a
       ## gesture of its own (the frame's map binds it to `voiceChat`: the
       ## ESP32 starts listening at the hold and the `up` comes `claimed`);
       ## such a key's long press is left to its `up`. nil: neither.
@@ -193,12 +203,51 @@ proc seenAt(payload: JsonNode, now: MonoTime): MonoTime =
 
 # ------------------------------------------------------------------- buttons
 
+proc facing*(state: InputState, role: string): string =
+  ## What a key that points somewhere means on this frame (docs/events.md
+  ## "Buttons", rotation): `left`, `right`, `up` and `down` name where a key
+  ## sits on the board as it comes, unrotated, and a scene hears them as
+  ## `next` (towards the right or the bottom of the picture it sees) or
+  ## `prev`, the way a touch on the same frame turns (`panelToScenePoint`):
+  ## a reTerminal turned upside down has its next key on the right. Any
+  ## other role is what it is: a knob's clockwise stays clockwise.
+  var dx, dy: int
+  case role
+  of "left": dx = -1
+  of "right": dx = 1
+  of "up": dy = -1
+  of "down": dy = 1
+  else: return role
+  var sx = dx
+  var sy = dy
+  if state.panelWidth > 2 and state.panelHeight > 2:
+    let cx = state.panelWidth div 2
+    let cy = state.panelHeight div 2
+    let reach = max(1, min(cx, cy) div 2)
+    let a = panelToScenePoint(cx, cy, state.panelWidth, state.panelHeight, state.rotate, state.flip)
+    let b = panelToScenePoint(cx + dx * reach, cy + dy * reach, state.panelWidth, state.panelHeight,
+      state.rotate, state.flip)
+    sx = b.x - a.x
+    sy = b.y - a.y
+  if (if abs(sx) >= abs(sy): sx > 0 else: sy > 0): "next" else: "prev"
+
 proc buttonRole*(state: InputState, pin: int, label: string): string =
-  ## The configured role of a button, or the default its label carries.
+  ## The configured role of a button, or the default its label carries, as
+  ## this frame's rotation makes it (`facing`).
   for (configuredPin, role) in state.buttonRoles:
     if configuredPin == pin:
-      return role
-  buttonRoleForLabel(label.strip().toUpperAscii())
+      return state.facing(role)
+  state.facing(buttonRoleForLabel(label.strip().toUpperAscii()))
+
+const ChordProbe = "+" ## the label `chordWanted` asks the maps about: no key has it
+
+proc chordWanted(state: InputState): bool =
+  ## Whether two keys held together are the frame's Back key (docs/events.md
+  ## "Buttons"): a map binds a `back` press by role, as the default map of a
+  ## board with no key of its own for Back does, and not by a key's label
+  ## (EXIT's, an Inky's D). Nothing would hear it otherwise, and a scene that
+  ## wants two keys at once (a game) keeps them.
+  not state.bound.isNil and state.bound(-1, ChordProbe, "back", "press")
 
 proc addButton(output: var seq[InputDelivery], name: string, origin: EventOrigin, pin: int,
                label, role, action: string, atMs = -1, durationMs = -1, level = -1, wake = false,
@@ -234,14 +283,20 @@ proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDeli
   ## to let go (its `up` makes nothing more); a short press whose double-press
   ## window has closed is a `press`, a pair held back for a third press whose
   ## window has closed the `doublePress`.
+  # Two keys held together (the frame's Back key, `chordWanted`): their hold is
+  # one long press, the Back key's, while both are still down.
+  if state.chordLabel.len > 0 and not state.chordDone and msSince(now, state.chordAt) >= ButtonLongPressMs:
+    state.chordDone = true
+    output.addButton(evButton, state.chordOrigin, -1, state.chordLabel, "back", "longPress", state.chordAtMs,
+      msSince(now, state.chordAt))
   var index = 0
   while index < state.buttons.len:
     let key = state.buttons[index]
     if key.down:
       # Not the second down of a run (a double press is that and nothing
-      # more; a held-back pair is decided by its `up`), not a key the frame
-      # takes at the hold.
-      if not key.twice and not key.longPressed and msSince(now, key.downAt) >= ButtonLongPressMs and
+      # more; a held-back pair is decided by its `up`), not half of two keys
+      # held together, not a key the frame takes at the hold.
+      if not key.twice and not key.longPressed and not key.chord and msSince(now, key.downAt) >= ButtonLongPressMs and
           (state.bound.isNil or not state.bound(key.pin, key.label, key.role, "longPress")):
         state.buttons[index].longPressed = true
         output.addButton(evButton, key.origin, key.pin, key.label, key.role, "longPress", key.atMs,
@@ -289,8 +344,7 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   let pin = payload{"pin"}.getInt(-1)
   let label = payload{"label"}.getStr()
   var role = payload{"role"}.getStr()
-  if role.len == 0:
-    role = state.buttonRole(pin, label)
+  role = if role.len == 0: state.buttonRole(pin, label) else: state.facing(role)
   let action = payload{"action"}.getStr()
   let atMs = payload{"atMs"}.getInt(-1)
   let given = payload{"durationMs"}.getInt(-1)
@@ -319,11 +373,30 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
     let startedByWake = wake or (twice and state.buttons[index].wake)
     if index >= 0:
       state.buttons.delete(index)
+    # Another key already held: on a frame with no key for Back, the two are
+    # that key (docs/events.md "Buttons", two keys together), and neither
+    # makes a press or a long press of its own; a third joins them, unheard.
+    var chord = state.chordLabel.len > 0
+    if not chord and not twice:
+      for other in state.buttons.mitems:
+        if other.down and not other.longPressed and not other.chord:
+          if state.chordWanted():
+            other.chord = true
+            chord = true
+            state.chordLabel = if other.label < label: other.label & "+" & label else: label & "+" & other.label
+            state.chordAt = at
+            state.chordAtMs = atMs
+            state.chordOrigin = origin
+            state.chordDone = false
+          break
     # The second down waits for a third only where a rule binds one.
-    let third = twice and not thrice and not state.bound.isNil and state.bound(pin, label, role, "triplePress")
+    let third = twice and not thrice and not chord and not state.bound.isNil and
+      state.bound(pin, label, role, "triplePress")
     state.buttons.add(ButtonKey(pin: pin, label: label, role: role, origin: origin, down: true,
-      downAt: at, atMs: atMs, twice: twice, third: third, wake: startedByWake))
-    if thrice:
+      downAt: at, atMs: atMs, twice: twice and not chord, third: third, wake: startedByWake, chord: chord))
+    if chord:
+      discard
+    elif thrice:
       output.addButton(evButton, origin, pin, label, role, "triplePress", atMs, wake = startedByWake)
     elif twice and not third:
       output.addButton(evButton, origin, pin, label, role, "doublePress", atMs, wake = startedByWake)
@@ -335,10 +408,31 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
     let key = state.buttons[index]
     let duration = msSince(at, key.downAt)
     output.addButton(evGpio, origin, pin, label, role, "up", atMs, duration, level = 1, claimed = claimed)
-    if claimed or key.longPressed:
+    if key.chord:
+      # Half of two keys held together: the first to come up is their press,
+      # unless their hold already was their long press.
+      state.buttons.delete(index)
+      if not state.chordDone:
+        state.chordDone = true
+        output.addButton(evButton, state.chordOrigin, -1, state.chordLabel, "back", "press", state.chordAtMs,
+          msSince(at, state.chordAt))
+      var held = false
+      for other in state.buttons:
+        held = held or other.chord
+      if not held:
+        state.chordLabel = ""
+    elif claimed or key.longPressed:
       # The frame's own gesture took this press, or its long press came
       # while it was held: the key is done, and nothing more follows.
       state.buttons.delete(index)
+    elif not key.twice and duration < ButtonLongPressMs and
+        (state.bound.isNil or not (state.bound(pin, label, role, "doublePress") or
+          state.bound(pin, label, role, "triplePress"))):
+      # A short press of a key no rule binds twice: a `press` now. Two of them
+      # quickly are two presses (docs/events.md "Buttons"): the same digit on
+      # a calculator twice, the next key two steps.
+      state.buttons.delete(index)
+      output.addButton(evButton, key.origin, pin, label, role, "press", key.atMs, duration, wake = key.wake)
     elif (not key.twice or key.third) and duration < ButtonLongPressMs:
       # A short press: it waits out its window before it is a `press`; a
       # held-back pair, before it is the `doublePress`.

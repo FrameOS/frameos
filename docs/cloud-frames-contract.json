@@ -211,7 +211,7 @@
       "$comment": "[{pin, label, role?}] — the whole list, replaced; an empty list unbinds every button. `role` (one of docs/events-contract.json `buttons.roles`) is what the button MEANS to a scene; without one the runtime derives it from the label (`buttons.roleByLabel`). Linux only, and only from 2026.9.23 (the release `input_settings` landed in): the profile's `since` stays 2026.8.31 because the key itself is older, so a provider sends `role` past THAT floor and strips it below — firmware in between refuses the whole push on the unknown item key (the cloud route and the SPA both gate on input_settings' since). The chip's rule has no `role`: the firmware stores `pin:label` lines and takes roles by label from the shared default table. The chip's table is smaller, and the firmware refuses (invalid_settings) any pin that is an SPI flash / PSRAM pad or already a driver's on that chip (fos_config_gpio_pin_reserved): the range here is chip-agnostic, the reservation is not.",
       "rule": {
         "type": "array",
-        "items": {"type": "object", "keys": {"pin": {"type": "int", "min": 0, "max": 48}, "label": {"type": "string", "format": "gpio_label"}, "role": {"type": "string", "enum": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]}}, "required": ["pin", "label"]},
+        "items": {"type": "object", "keys": {"pin": {"type": "int", "min": 0, "max": 48}, "label": {"type": "string", "format": "gpio_label"}, "role": {"type": "string", "enum": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh", "screen", "left", "right"]}}, "required": ["pin", "label"]},
         "maxItems": 16
       },
       "extraChecks": ["no pin appears twice"],

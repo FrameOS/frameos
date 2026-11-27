@@ -75,7 +75,7 @@ const
   ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
   ButtonDoublePressMs* = 350
   ButtonLongPressMs* = 1000
-  ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
+  ButtonRoles*: array[12, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh", "screen", "left", "right"]
   ## The presses a `button` event carries as its `action` (`buttons.actions`).
   ButtonActions*: array[4, string] = ["press", "doublePress", "triplePress", "longPress"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
@@ -550,12 +550,13 @@ proc buttonRoleForLabel*(upperLabel: string): string =
   ## (upper-cased by the caller); empty when the label says nothing.
   case upperLabel
   of "A": "primary"
-  of "B": "next"
-  of "C": "prev"
+  of "B": "prev"
+  of "C": "next"
   of "D": "back"
+  of "E": "menu"
   of "BOOT": "primary"
-  of "KEY1": "next"
-  of "KEY2": "prev"
+  of "KEY1": "prev"
+  of "KEY2": "primary"
   of "KEY3": "next"
   of "BUTTON": "primary"
   of "AI": "primary"
@@ -568,10 +569,12 @@ proc buttonRoleForLabel*(upperLabel: string): string =
   of "EXIT": "back"
   of "BACK": "back"
   of "NEXT": "next"
-  of "RIGHT": "next"
+  of "RIGHT": "right"
   of "PREV": "prev"
-  of "LEFT": "prev"
+  of "LEFT": "left"
   of "UP": "up"
   of "DOWN": "down"
   of "REFRESH": "primary"
+  of "PWR": "screen"
+  of "SCREEN": "screen"
   else: ""

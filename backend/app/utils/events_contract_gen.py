@@ -58,7 +58,7 @@ CLOUD_EVENT_ROUTE_VERBS: dict[str, dict] = {
 # `gpioButtons[].role` may carry (`buttons.roles`).
 DEFAULT_KEYBOARD_LAYOUT = "us"
 KEYBOARD_LAYOUTS: tuple[str, ...] = ("us", "gb", "de", "fr", "es", "it", "sv", "da", "nb")
-BUTTON_ROLES: tuple[str, ...] = ("primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh")
+BUTTON_ROLES: tuple[str, ...] = ("primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh", "screen", "left", "right")
 
 # Log lines, not scene events (docs/events-contract.json `logEvents`).
 SCENE_CHANGED_LOG_EVENTS: tuple[str, ...] = ("render:scene", "render:sceneChange", "event:setCurrentScene")

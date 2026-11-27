@@ -839,7 +839,10 @@
           "down",
           "back",
           "menu",
-          "refresh"
+          "refresh",
+          "screen",
+          "left",
+          "right"
         ]
       },
       {
@@ -908,7 +911,10 @@
           "down",
           "back",
           "menu",
-          "refresh"
+          "refresh",
+          "screen",
+          "left",
+          "right"
         ]
       },
       {
