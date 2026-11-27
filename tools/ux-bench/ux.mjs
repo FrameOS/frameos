@@ -806,7 +806,10 @@ for (const scene of tested) {
     const primaryKey = (panel.keys || []).find((k) => k.role === 'primary')
     if (STEPS.has('focus') && nextKey) {
       restore()
-      const els = (uiElements() || []).filter((e) => e.box[2] - e.box[0] >= 1 && e.box[3] - e.box[1] >= 1)
+      // The scene's own UIs and its layout's: the scene list's (left from a
+      // held key in the keys step) are not on the glass any more.
+      const ours = (e) => e.scene === scene.id || e.scene.startsWith(scene.id + '#') || (layoutScene && e.scene === layoutScene.id)
+      const els = (uiElements() || []).filter((e) => ours(e) && e.box[2] - e.box[0] >= 1 && e.box[3] - e.box[1] >= 1)
       const takers = els.filter((e) => e.stop ?? e.takes)
       // What takes a press but no key ever stops at (a board game's cells
       // with an onPointerDown, a canvas to draw on): a tap's alone.
