@@ -828,7 +828,11 @@ the preview alike. There are two, applied in this order:
   the frame's frame.json (`[]` there would turn the swipes off), the frame
   API reports it as `null`, and the cloud sees it in what the frame
   reports). An empty list is a choice and stays empty. It needs no scene: it
-  is checked before the scene is looked up.
+  is checked before the scene is looked up, and it holds on a scene that
+  could not start (an app the runtime does not have, a split's panel scene
+  that is gone, an init that throws), so a held key or a swipe still opens
+  the scene list there (Linux runs an error scene in its place, the ESP32
+  and the preview leave it unbuilt: `single_scene_host.buildForInput`).
 - **The installed scene's** (`eventMap` next to `nodes` in what a frame
   receives; the backend keeps it on the installed entry of `frame.scenes`, the
   cloud on the assignment row): how one installed copy of a scene is told that

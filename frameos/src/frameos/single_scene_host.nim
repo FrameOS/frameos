@@ -153,6 +153,10 @@ type
       ## Scenes a layout asked for past the limit, said once.
     drawn: seq[SceneId]
       ## The windows drawn in this render pass.
+    unbuilt: ExportedInterpretedScene
+      ## The scene definition whose build threw for an event (`buildForInput`):
+      ## not tried again for the next one. A switch or new scenes (another
+      ## definition) try again, and so does every render.
 
 proc say(host: SingleSceneHost, message: string) =
   if not host.note.isNil:
@@ -763,6 +767,31 @@ proc start*(host: SingleSceneHost) =
         host.logEntry(entry),
   ), host.frameConfig)
 
+proc buildForInput(host: SingleSceneHost) =
+  ## The current scene, built for an event that came before its first render.
+  ## One that cannot be built (an app this runtime does not have, a split's
+  ## panel scene that is gone, an init that throws) is said once and left
+  ## unbuilt, and the event goes on: the dispatcher serves the frame's own
+  ## map without a scene (a held key or a swipe up opens the scene list, a
+  ## swipe down the settings), and drops what only the scene could hear. The
+  ## exception used to take the event with it, so every key and swipe the
+  ## frame had did nothing on a scene that failed to start: the way off it
+  ## was the control plane (the UX bench, 2026-11-27). Linux puts an error
+  ## scene in its place (runner.nim `sceneInitErrorExport`); here the render
+  ## draws the error.
+  if host.sceneId.isNone or not host.scene.isNil:
+    return
+  let sceneId = host.sceneId.get()
+  if not host.unbuilt.isNil and not isBuiltInScene(sceneId.string) and
+      getInterpretedScenes().getOrDefault(sceneId, nil) == host.unbuilt:
+    return
+  try:
+    discard host.ensureScene()
+    host.unbuilt = nil
+  except Exception as error:
+    host.unbuilt = host.exported
+    host.say("scene " & sceneId.string & " failed to start, its keys and swipes go to the frame: " & error.msg)
+
 proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: JsonNode): bool =
   ## One event from the platform: queued, and the queue drained before this
   ## returns (one task: nobody else will). False when it came to nothing.
@@ -777,7 +806,7 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   # otherwise build the scene it is leaving first — seconds of JavaScript
   # transpiling for a scene nobody sees.
   if event != "setCurrentScene":
-    discard host.ensureScene()
+    host.buildForInput()
   # No tick on the way in. A button edge the platform queued during a render
   # carries when it was seen (`atMs`), and the input state advances the holds
   # to that moment itself; ticking to now first turned a tap made during a
