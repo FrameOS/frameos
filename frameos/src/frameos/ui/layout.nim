@@ -270,7 +270,13 @@ type
     emitted: seq[SvgNode]
     emittedRegions: seq[UiRegion]
     when defined(frameosWasm):
-      emittedTexts: seq[TextSeen]
+      # The text report (textsSeenOn): a text's own record as noteText made
+      # it, and a box that clips, where its last emit clipped and scrolled
+      # (sx, sy, vx, vy, vw, vh): a box taken back unchanged walks these to
+      # report its texts again, one record a text, none a box above it.
+      noted: TextSeen
+      clipNoted: array[6, float32]
+      clipped, clipPages: bool
     emittedAt: array[7, float32]
     emittedOver: ColorRGBA  ## the backdrop its emit pre-blended against
     emittedFor: (int, float32, float32)
@@ -1679,9 +1685,46 @@ when defined(frameosWasm):
       let last = a.lines[li][1]
       if last + 1 < a.runes.len and a.runes[last].wordRune and a.runes[last + 1].wordRune:
         broken = true
-    textsSeen.add TextSeen(box: [x, y, x + w, y + bottom], ink: ink, visible: ink, size: size,
+    n.noted = TextSeen(box: [x, y, x + w, y + bottom], ink: ink, visible: ink, size: size,
       cut: a.runes[^1] == Rune(0x2026) and not source.endsWith("…"), broken: broken,
       text: $a.runes[0 ..< min(a.runes.len, 40)])
+    textsSeen.add n.noted
+
+  proc clipTexts(first: int, clip: array[6, float32], pages: bool, key: int) =
+    ## The texts reported since `first`, as a box that clips shows them:
+    ## scrolled by (sx, sy), cut to its viewport (vx, vy, vw, vh), and in it
+    ## when it pages.
+    let (sx, sy, vx, vy, vw, vh) = (clip[0], clip[1], clip[2], clip[3], clip[4], clip[5])
+    for i in first ..< textsSeen.len:
+      template t: untyped = textsSeen[i]
+      for e in 0 .. 3:
+        let d = if e mod 2 == 0: sx else: sy
+        t.box[e] -= d
+        t.ink[e] -= d
+        t.visible[e] -= d
+      t.visible = [max(t.visible[0], vx), max(t.visible[1], vy), min(t.visible[2], vx + vw),
+        min(t.visible[3], vy + vh)]
+      if pages and t.scroller == 0:
+        t.scroller = int32(key + 1)
+
+  proc renoteTexts(n: UiNode, opacity: float32) =
+    ## A box taken back unchanged: the texts it emitted, reported again as
+    ## its emit reported them (each text's record, moved by the boxes that
+    ## clip on the way down).
+    for c in n.children:
+      let op = opacity * c.box.opacity
+      if c.box.display == diNone or op <= 0:
+        continue
+      if c.kind == ukText:
+        if c.noted.text.len > 0:
+          textsSeen.add c.noted
+      elif c.kind == ukBox:
+        if c.clipped and (c.clipNoted[4] <= 0 or c.clipNoted[5] <= 0):
+          continue
+        let first = textsSeen.len
+        c.renoteTexts(op)
+        if c.clipped:
+          clipTexts(first, c.clipNoted, c.clipPages, c.key)
 
 var emitBackdrop {.threadvar.}: ColorRGBA
 var emitRim {.threadvar.}: array[3, float32]
@@ -2214,8 +2257,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       regions.add region
     when defined(frameosWasm):
       if textsSeenOn:
-        for t in n.emittedTexts:
-          textsSeen.add t
+        let first = textsSeen.len
+        n.renoteTexts(op)
+        if n.clipped:
+          clipTexts(first, n.clipNoted, n.clipPages, n.key)
     gradients += n.emittedGradients[1]
     return
   let
@@ -2283,6 +2328,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       vh = h - b.border[0] - b.border[2]
       kids = regions.len
     var view: SvgNode
+    when defined(frameosWasm):
+      n.clipped = clips
+      if clips:
+        n.clipNoted = [sx, sy, vx, vy, vw, vh]
     if clips:
       if vw <= 0 or vh <= 0:
         return
@@ -2352,17 +2401,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           inc k
       regions.setLen(k)
       when defined(frameosWasm):
-        for i in firstText ..< textsSeen.len:
-          template t: untyped = textsSeen[i]
-          for e in 0 .. 3:
-            let d = if e mod 2 == 0: sx else: sy
-            t.box[e] -= d
-            t.ink[e] -= d
-            t.visible[e] -= d
-          t.visible = [max(t.visible[0], vx), max(t.visible[1], vy), min(t.visible[2], vx + vw),
-            min(t.visible[3], vy + vh)]
-          if pages and t.scroller == 0:
-            t.scroller = int32(n.key + 1)
+        n.clipPages = pages
+        if textsSeenOn:
+          clipTexts(firstText, n.clipNoted, pages, n.key)
       if scrollsY and n.maxY > 0:
         # Where in what it holds it shows: a thin bar at its right edge.
         let
@@ -2389,8 +2430,6 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           labelFor: regions[only].key + 1), firstRegion)
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
-    when defined(frameosWasm):
-      n.emittedTexts = if textsSeenOn: textsSeen[firstText .. ^1] else: @[]
     n.emittedAt = at
     n.emittedOver = emitBackdrop
     n.emittedFor = call
