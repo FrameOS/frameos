@@ -1,5 +1,27 @@
 [
   {
+    "apps": {
+      "xkcdLayout": {
+        "name": "XKCD layout",
+        "category": "data",
+        "description": "Where the comic and its title text go on the panel: the text under the comic or beside it.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "src",
+            "label": "Comic URL",
+            "type": "string",
+            "value": ""
+          },
+          { "name": "alt", "label": "Title text", "type": "text", "value": "" }
+        ],
+        "output": [{ "name": "layout", "type": "json" }],
+        "sources": {
+          "config.json": "{\n  \"name\": \"XKCD layout\",\n  \"category\": \"data\",\n  \"description\": \"Where the comic and its title text go on the panel: the text under the comic or beside it.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"src\",\n      \"label\": \"Comic URL\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    },\n    {\n      \"name\": \"alt\",\n      \"label\": \"Title text\",\n      \"type\": \"text\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"layout\",\n      \"type\": \"json\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.ts": "// Where the comic and its title text go, as big as the panel allows: the\n// text under the comic, or beside it where that leaves the comic more room (a\n// tall comic on a wide panel, a small panel). On a round panel the two go in\n// the largest box the circle holds. Each place is a split's margins: the\n// splits draw the comic straight into the canvas and the text in its box.\n\n// The comic's own size, read from the first bytes of the file (PNG, GIF or\n// JPEG) and kept for as long as the feed names the same comic.\nfunction comicSize(src: string) {\n  const kept = frameos.recall('size') as any\n  if (kept && kept.src === src) return kept\n  const size = { src, width: 0, height: 0 }\n  const r = frameos.httpRequest(src, { headers: { Range: 'bytes=0-4095' }, base64: true, timeoutMs: 20000 })\n  if ((r.status === 200 || r.status === 206) && r.bodyBase64) {\n    const s = atob(r.bodyBase64.slice(0, 5464))\n    const b = (i: number) => s.charCodeAt(i) & 255\n    const be = (i: number) => (b(i) << 8) | b(i + 1)\n    if (s.startsWith('\\x89PNG')) {\n      size.width = (be(16) << 16) | be(18)\n      size.height = (be(20) << 16) | be(22)\n    } else if (s.startsWith('GIF8')) {\n      size.width = b(6) | (b(7) << 8)\n      size.height = b(8) | (b(9) << 8)\n    } else if (b(0) === 0xff && b(1) === 0xd8) {\n      for (let i = 2; i + 9 < s.length && b(i) === 0xff; i += 2 + be(i + 2)) {\n        const m = b(i + 1)\n        if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {\n          size.height = be(i + 5)\n          size.width = be(i + 7)\n          break\n        }\n      }\n    }\n  }\n  // Only a size read is kept: a failed read is tried again next time.\n  if (size.width > 0 && size.height > 0) frameos.remember('size', size)\n  return size\n}\n\n// The comic (`aspect` wide for 1 high) and its text in a box: the comic's\n// rectangle and where the text starts, or null when the text would take more than its\n// share of the box (`strict`).\nfunction arrange(box, aspect: number, alt: string, font: number, beside: boolean, strict: boolean) {\n  const gap = Math.round(font * 0.8)\n  const className = `text-[${font}px] leading-[${Math.round(font * 1.3)}px]`\n  const fit = (w: number, h: number) => {\n    const iw = Math.min(w, h * aspect)\n    return { iw: Math.max(1, Math.floor(iw)), ih: Math.max(1, Math.floor(iw / aspect)) }\n  }\n  if (!alt) {\n    const { iw, ih } = fit(box.w, box.h)\n    return { iw, ih, cx: box.x + Math.floor((box.w - iw) / 2), cy: box.y + Math.floor((box.h - ih) / 2), text: null }\n  }\n  if (!beside) {\n    // A line no longer than about 60 letters, unless the comic is wider.\n    const lineW = (w: number) => Math.min(box.w, Math.max(w, font * 32))\n    let tw = lineW(box.w)\n    let th = frameos.measureText([alt], { className, width: tw })[0]\n    if (strict && th + gap > box.h * 0.3) return null\n    let { iw, ih } = fit(box.w, box.h - th - gap)\n    if (lineW(iw) < tw) {\n      tw = lineW(iw)\n      th = frameos.measureText([alt], { className, width: tw })[0]\n      if (strict && th + gap > box.h * 0.3) return null\n      ;({ iw, ih } = fit(box.w, box.h - th - gap))\n    }\n    const top = box.y + Math.floor((box.h - ih - gap - th) / 2)\n    return {\n      iw, ih, cx: box.x + Math.floor((box.w - iw) / 2), cy: top,\n      text: { x: box.x + Math.floor((box.w - tw) / 2), y: top + ih + gap, w: tw, bottom: box.y + box.h, font, beside: false },\n    }\n  }\n  // The narrowest column the text fits in, a third of the box at most.\n  for (const share of [0.22, 0.28, 0.34]) {\n    const tw = Math.round(box.w * share)\n    if (tw < font * 7) continue\n    const th = frameos.measureText([alt], { className, width: tw })[0]\n    if (th > box.h) continue\n    const { iw, ih } = fit(box.w - tw - gap, box.h)\n    const left = box.x + Math.floor((box.w - iw - gap - tw) / 2)\n    return {\n      iw, ih, cx: left, cy: box.y + Math.floor((box.h - ih) / 2),\n      text: { x: left + iw + gap, y: box.y + Math.floor((box.h - th) / 2), w: tw, bottom: box.y + box.h, font, beside: true },\n    }\n  }\n  return null\n}\n\n// The last layout: each of the four places asks for it in one render.\nlet last = { key: '', layout: null }\n\nexport function get(app: FrameOSApp) {\n  // The whole panel's, whoever asks (the text's size is asked from inside\n  // its box).\n  const W = app.frame.width\n  const H = app.frame.height\n  // The splits count their margins and the text's size at the render scale.\n  const k = app.frame.scale || 1\n  const src = String(app.config.src || '')\n  const alt = String(app.config.alt || '').replace(/\\s+/g, ' ').trim()\n  const key = [src, alt, W, H, k, app.frame.round === true].join('|')\n  if (last.key === key) return last.layout\n  const size = src ? comicSize(src) : { width: 0, height: 0 }\n  // A comic of a size not known yet is drawn in a square, as big as it goes.\n  const aspect = size.width > 0 ? size.width / size.height : 1\n\n  const side = Math.min(W, H) / k\n  // Boxes to try: the panel inside its margins, or on a round panel the\n  // rectangles of a few shapes that fit in the circle, 12 px in from the rim.\n  const boxes = []\n  if (app.frame.round === true) {\n    const r = Math.min(W, H) / 2 - 12\n    for (const shape of [0.6, 0.75, 0.9, 1.1, 1.35, 1.7]) {\n      const q = Math.sqrt(1 + shape * shape)\n      const w = Math.floor((2 * r * shape) / q)\n      const h = Math.floor((2 * r) / q)\n      boxes.push({ x: Math.floor((W - w) / 2), y: Math.floor((H - h) / 2), w, h })\n    }\n  } else {\n    const m = Math.round(Math.max(6, Math.min(24, side * 0.04)) * k)\n    boxes.push({ x: m, y: m, w: W - 2 * m, h: H - 2 * m })\n  }\n\n  // The text's size from the panel's, down to a little smaller where that\n  // gives the comic more room. Beside only when it gives the comic clearly\n  // more room than under it, a smaller size only when it gives some.\n  const largest = Math.round(Math.max(11, Math.min(32, side / 26)))\n  const smallest = Math.min(largest, Math.round(Math.max(11, side / 34)))\n  let best = null\n  for (let font = largest; font >= smallest; font--) {\n    for (const box of boxes) {\n      for (const beside of [false, true]) {\n        const fit = arrange(box, aspect, alt, Math.round(font * k), beside, true)\n        if (fit && (!best || fit.iw > best.iw * ((beside && !best.text?.beside ? 1.08 : 1) + (font < best.font ? 0.03 : 0)))) {\n          best = { ...fit, font }\n        }\n      }\n    }\n  }\n  if (!best) best = { ...arrange(boxes[0], aspect, alt, Math.round(10 * k), false, false), font: 10 }\n\n  const margins = (x: number, y: number, w: number, h: number) =>\n    [y, W - x - w, H - y - h, x].map((v) => Math.max(0, Math.round(v / k))).join(' ')\n  const t = best.text\n  const layout = {\n    comic: margins(best.cx, best.cy, best.iw, best.ih),\n    // The text from its first line down to the box's end: a line set a\n    // little taller than measured still has room.\n    text: t ? margins(t.x, t.y, t.w, t.bottom - t.y) : margins(0, H - 1, 1, 1),\n    font: best.font,\n    align: t && t.beside ? 'left' : 'center',\n  }\n  last = { key, layout }\n  return layout\n}\n"
+        }
+      }
+    },
     "edges": [
       {
         "id": "0c8c7d9e-284a-48fb-9173-17cd810a973a",
@@ -16,14 +38,6 @@
         "target": "c58d9419-c712-472d-83d4-c48e91d6edab",
         "targetHandle": "fieldInput/url",
         "type": "codeNodeEdge"
-      },
-      {
-        "id": "7feafd92-b8a8-41c9-b9a5-90c3b7936272",
-        "source": "503ff6b3-4fab-41ce-8db6-7e23e664f9b4",
-        "sourceHandle": "field/render_functions[2][1]",
-        "target": "f6996bc4-a737-4ad0-84a0-3aa5fe414037",
-        "targetHandle": "prev",
-        "type": "appNodeEdge"
       },
       {
         "id": "f585938b-e4af-45f9-bc13-f9cc04225f3b",
@@ -122,19 +136,99 @@
         "type": "codeNodeEdge"
       },
       {
-        "id": "xkcd-round-margin-edge",
-        "source": "xkcd-round-margin",
+        "id": "1efba5a9-4c4f-5bb5-9c10-9c3c2bee1590",
+        "source": "503ff6b3-4fab-41ce-8db6-7e23e664f9b4",
+        "sourceHandle": "next",
+        "target": "xkcd-text-split",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "6c153c90-49d1-5306-a0a6-cf86d8cbd62a",
+        "source": "xkcd-text-split",
+        "sourceHandle": "field/render_functions[1][1]",
+        "target": "f6996bc4-a737-4ad0-84a0-3aa5fe414037",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "2f115f2e-b082-56f1-8cb7-183669a993aa",
+        "source": "8c7d0b52-d0a2-4ed2-b9a0-37522164c3a5",
+        "sourceHandle": "fieldOutput",
+        "target": "xkcd-layout",
+        "targetHandle": "fieldInput/src",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "16cab4c5-0371-5682-b0b9-c3296548b707",
+        "source": "a281a4e7-ef04-4a81-9e4a-ad06063c6ea3",
+        "sourceHandle": "fieldOutput",
+        "target": "xkcd-layout",
+        "targetHandle": "fieldInput/alt",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "c54b68a5-65e7-594a-834d-16ec7732fd49",
+        "source": "xkcd-layout",
+        "sourceHandle": "fieldOutput",
+        "target": "xkcd-comic-box",
+        "targetHandle": "codeField/layout",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "32d48f68-bbed-51d4-a7a1-9c8f11175b13",
+        "source": "xkcd-comic-box",
         "sourceHandle": "fieldOutput",
         "target": "503ff6b3-4fab-41ce-8db6-7e23e664f9b4",
         "targetHandle": "fieldInput/margin",
         "type": "codeNodeEdge"
       },
       {
-        "id": "xkcd-round-ratios-edge",
-        "source": "xkcd-round-ratios",
+        "id": "45edefd2-2bb3-5f6b-9e17-3e808046fdcb",
+        "source": "xkcd-layout",
         "sourceHandle": "fieldOutput",
-        "target": "503ff6b3-4fab-41ce-8db6-7e23e664f9b4",
-        "targetHandle": "fieldInput/height_ratios",
+        "target": "xkcd-text-box",
+        "targetHandle": "codeField/layout",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "2ded9fe1-fbb5-503b-a052-977f9dd99178",
+        "source": "xkcd-text-box",
+        "sourceHandle": "fieldOutput",
+        "target": "xkcd-text-split",
+        "targetHandle": "fieldInput/margin",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "ed59277b-ff6c-5abe-afab-40a4a62237cd",
+        "source": "xkcd-layout",
+        "sourceHandle": "fieldOutput",
+        "target": "xkcd-text-size",
+        "targetHandle": "codeField/layout",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "ef33dae5-62f8-5c3a-93e4-ee5bd4a8433b",
+        "source": "xkcd-text-size",
+        "sourceHandle": "fieldOutput",
+        "target": "f6996bc4-a737-4ad0-84a0-3aa5fe414037",
+        "targetHandle": "fieldInput/fontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "f6416fc5-36b7-5a6b-8103-74fff214e0e3",
+        "source": "xkcd-layout",
+        "sourceHandle": "fieldOutput",
+        "target": "xkcd-text-align",
+        "targetHandle": "codeField/layout",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "a90b4470-7233-51d1-bd96-94a73110b90d",
+        "source": "xkcd-text-align",
+        "sourceHandle": "fieldOutput",
+        "target": "f6996bc4-a737-4ad0-84a0-3aa5fe414037",
+        "targetHandle": "fieldInput/position",
         "type": "codeNodeEdge"
       }
     ],
@@ -228,12 +322,7 @@
       },
       {
         "data": {
-          "config": {
-            "gap": "20",
-            "height_ratios": "85 15",
-            "margin": "20 40 20 40",
-            "rows": "2"
-          },
+          "config": { "columns": "1", "margin": "0", "rows": "1" },
           "keyword": "render/split"
         },
         "dragging": false,
@@ -250,7 +339,10 @@
           "config": {
             "borderColor": "#ffffff",
             "borderWidth": "0",
-            "fontColor": "#000000"
+            "fontColor": "#000000",
+            "padding": "0",
+            "position": "center",
+            "vAlign": "top"
           },
           "keyword": "render/text"
         },
@@ -421,64 +513,71 @@
         "height": 48
       },
       {
-        "data": {
-          "codeJS": "(() => {\n  // A round panel shows only the circle inside its square: the comic and its\n  // caption go in the tallest box that fits in it, 12 px in from the rim.\n  if (!context.round) return '20 40 20 40'\n  const width = context.imageWidth\n  const height = context.imageHeight\n  const r = Math.min(width, height) / 2 - 12\n  const top = Math.round((height - r * 1.56) / 2)\n  const side = Math.round((width - r * 1.25) / 2)\n  return top + ' ' + side + ' ' + top + ' ' + side\n})()",
-          "codeArgs": [],
-          "codeOutputs": [
-            {
-              "name": "margin",
-              "type": "string"
-            }
-          ]
-        },
-        "dragging": false,
-        "height": 119,
-        "id": "xkcd-round-margin",
-        "position": {
-          "x": 863.15,
-          "y": -170
-        },
-        "positionAbsolute": {
-          "x": 863.15,
-          "y": -170
-        },
-        "selected": false,
-        "style": {
-          "height": 119,
-          "width": 300
-        },
-        "type": "code",
-        "width": 300
+        "id": "xkcd-layout",
+        "type": "app",
+        "position": { "x": 500, "y": -620 },
+        "data": { "keyword": "xkcdLayout", "config": {} }
       },
       {
-        "data": {
-          "codeJS": "context.round ? '80 20' : '85 15'",
-          "codeArgs": [],
-          "codeOutputs": [
-            {
-              "name": "height_ratios",
-              "type": "string"
-            }
-          ]
-        },
-        "dragging": false,
-        "height": 119,
-        "id": "xkcd-round-ratios",
-        "position": {
-          "x": 863.15,
-          "y": -40
-        },
-        "positionAbsolute": {
-          "x": 863.15,
-          "y": -40
-        },
-        "selected": false,
-        "style": {
-          "height": 119,
-          "width": 300
-        },
+        "id": "xkcd-comic-box",
         "type": "code",
-        "width": 300
+        "position": { "x": 863.15, "y": -300 },
+        "style": { "height": 119, "width": 300 },
+        "width": 300,
+        "height": 119,
+        "data": {
+          "codeJS": "layout.comic",
+          "codeArgs": [{ "name": "layout", "type": "json" }],
+          "codeOutputs": [{ "name": "margin", "type": "string" }]
+        }
+      },
+      {
+        "id": "xkcd-text-box",
+        "type": "code",
+        "position": { "x": 1300, "y": 380 },
+        "style": { "height": 119, "width": 300 },
+        "width": 300,
+        "height": 119,
+        "data": {
+          "codeJS": "layout.text",
+          "codeArgs": [{ "name": "layout", "type": "json" }],
+          "codeOutputs": [{ "name": "margin", "type": "string" }]
+        }
+      },
+      {
+        "id": "xkcd-text-size",
+        "type": "code",
+        "position": { "x": 1300, "y": 520 },
+        "style": { "height": 119, "width": 300 },
+        "width": 300,
+        "height": 119,
+        "data": {
+          "codeJS": "layout.font",
+          "codeArgs": [{ "name": "layout", "type": "json" }],
+          "codeOutputs": [{ "name": "fontSize", "type": "float" }]
+        }
+      },
+      {
+        "id": "xkcd-text-align",
+        "type": "code",
+        "position": { "x": 1300, "y": 660 },
+        "style": { "height": 119, "width": 300 },
+        "width": 300,
+        "height": 119,
+        "data": {
+          "codeJS": "layout.align",
+          "codeArgs": [{ "name": "layout", "type": "json" }],
+          "codeOutputs": [{ "name": "position", "type": "string" }]
+        }
+      },
+      {
+        "id": "xkcd-text-split",
+        "type": "app",
+        "position": { "x": 1250, "y": 220 },
+        "data": {
+          "keyword": "render/split",
+          "config": { "columns": "1", "margin": "0", "rows": "1" }
+        }
       }
     ],
     "settings": {
