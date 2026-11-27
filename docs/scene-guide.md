@@ -645,10 +645,15 @@ export function get(app, context) {
   a picture of the content instead. A split with a content panel cannot be a
   layout (see Layouts below).
 - A big frame draws a .tsx app's JSX larger by itself: at render scale 2
-  (automatic on a 4K screen on HDMI, or set on the frame) the app is told
-  its canvas is half the size (`context.imageWidth`, `app.frame.width`) and
-  what it returns is drawn sharp at full size. Design for the size you are
-  told; `app.frame.scale` says the factor. A position from outside the app
+  (automatic on a 10" 1872x1404 e-paper or a 4K screen on HDMI, or set on
+  the frame) the app is told its canvas is half the size
+  (`context.imageWidth`, `app.frame.width`) and what it returns is drawn
+  sharp at full size. Design for the size you are told; `app.frame.scale`
+  says the factor. Size a UI's text and buttons in pixels for about 480 px
+  of the shorter side, smaller below that if you must, and never zoom it up
+  for a bigger canvas: the frame's scale does that, and a zoom of your own
+  stops the owner's setting from changing your scene. A picture that fills
+  the canvas (a clock face, a poster) can size itself to it. A position from outside the app
   is in panel pixels (a pointer's `x` / `y` kept in state): divide it by
   `app.frame.scale` before drawing it. A scene can set its own
   `settings.renderScale` (1 keeps every pixel).

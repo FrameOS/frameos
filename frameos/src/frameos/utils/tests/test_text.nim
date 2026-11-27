@@ -43,6 +43,31 @@ suite "text layout helpers":
     check layout.fontScaleRatio > 0
     check layout.fontScaleRatio < 1.0
 
+  test "a render scale makes every length larger: the font, the padding, the border and rich text's sizes":
+    var opts = makeOptions(overflow = "visible", borderWidth = 2)
+    let plain = typesetIntoBounds(opts, 2000, 400)
+    opts.scale = 2.0
+    let scaled = typesetIntoBounds(opts, 2000, 400)
+    check scaled.fontScaleRatio == 2.0 # the border's stroke goes with it (drawText)
+    check scaled.opts.padding == 8.0
+    check scaledBorder(scaled) == 4
+    let plainW = layoutBounds(plain.textTypeset).x - layoutBoundsTopLeft(plain.textTypeset).x
+    let scaledW = layoutBounds(scaled.textTypeset).x - layoutBoundsTopLeft(scaled.textTypeset).x
+    check abs(scaledW - 2 * plainW) < 4
+    # A size of rich text's own is as much larger, and shrinking to fit
+    # still shrinks from the scaled size.
+    var rich = makeOptions(overflow = "fit-bounds")
+    rich.richTextMode = "basic-caret"
+    rich.text = "^(10)small"
+    let small = typesetIntoBounds(rich, 2000, 400)
+    rich.scale = 2.0
+    let twice = typesetIntoBounds(rich, 2000, 400)
+    let smallH = layoutBounds(small.textTypeset).y - layoutBoundsTopLeft(small.textTypeset).y
+    let twiceH = layoutBounds(twice.textTypeset).y - layoutBoundsTopLeft(twice.textTypeset).y
+    check abs(twiceH - 2 * smallH) < 3
+    rich.text = "FrameOS text test"
+    check typesetIntoBounds(rich, 220, 24).fontScaleRatio < 1.0
+
   test "drawText renders without exceptions with offset":
     let image = newImage(240, 120)
     image.fill(parseHtmlColor("#ffffff"))

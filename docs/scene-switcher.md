@@ -164,7 +164,7 @@ through the one rasterizer (`utils/svg_frames.nim`): on an LCD only the
 tile that changed is repainted. Its tiles are regions for `ui/events.nim`,
 which hit-tests the taps and scrolls the list under a finger as it does a JS
 app's UI. It is laid out at the
-frame's render scale, sized from the panel, within the bounds the settings
+frame's render scale, sized for a 480 px panel, within the bounds the settings
 panel keeps (docs/scene-settings.md, "At the frame's scale").
 
 ### The tiles

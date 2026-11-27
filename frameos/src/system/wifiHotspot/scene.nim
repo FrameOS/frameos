@@ -128,8 +128,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
+  # Its sizes are the panel's already (apps.panelScale): the render scale
+  # would make them larger twice.
   let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0,
-      backgroundColor: parseHtmlColor("#000000"))
+      backgroundColor: parseHtmlColor("#000000"), renderScaleSetting: 1.0)
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")

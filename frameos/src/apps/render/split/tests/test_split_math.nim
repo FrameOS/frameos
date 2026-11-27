@@ -18,6 +18,12 @@ block test_extract_gaps_supports_one_or_two_values:
   let g2 = extractGaps("5 7")
   doAssert g2 == (5.0, 7.0)
 
+block test_margins_and_gaps_are_larger_by_the_render_scale:
+  doAssert extractMargins("10 20", 2.0) == (20.0, 40.0, 20.0, 40.0)
+  doAssert extractGaps("5 7", 1.5) == (7.5, 10.5)
+  let cells = splitDimensions(100, 100, AppConfig(rows: 1, columns: 2, gap: "10"), 2.0)
+  doAssert cells == @[(40, 100), (40, 100)], $cells
+
 block test_extract_ratios_repeats_provided_ratio_lists:
   let (widthRatios, heightRatios, totalWidth, totalHeight) = extractRatios("1 2", "3", columns = 3, rows = 2)
   doAssert widthRatios == @[1.0, 2.0, 1.0]

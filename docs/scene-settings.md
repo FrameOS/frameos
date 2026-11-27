@@ -242,11 +242,17 @@ pass; a Linux frame sets it in the live config instead of reloading, which
 would rebuild every scene, this page among them).
 
 **At the frame's scale.** The settings panel and the scene switcher are laid
-out at the frame's render scale as a scene is, sized from the panel
-(sceneSwitcher's `uiScale` / `uiRoom`): at 1.5 everything is half as large
-again with less room, and the pointer is divided back. They stop at 0.75 and
-at a layout of 320 px, whatever the scale, so the page that sets it can always
-set it back.
+out at the frame's render scale as a scene is (sceneSwitcher's `uiScale` /
+`uiRoom`), sized for a panel of 480 px and less (`panelUnit`: the panel's
+shorter edge up to 480, a desktop window's 400): at 1.5 everything is half
+as large again with less room, and the pointer is divided back. A bigger
+panel shows more of them at the same size; the scale makes them larger, and
+the automatic one picks it from the panel (2 on the reTerminal E1003's
+1872x1404, docs/jsx-ui.md "Scale"), as it does for every scene. They stop at
+0.75 and at a layout of 320 px, whatever the scale, so the page that sets it
+can always set it back. The frame page's Scale offers the steps that leave
+320 px of the panel's own shorter edge (`panelEdge`), and names the
+automatic one for the panel.
 
 **Turned off by the control plane.** The frame's `frame_settings_on_screen`
 (frame.json `frameSettingsOnScreen`, on unless the owner turns it off in the

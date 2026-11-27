@@ -105,7 +105,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     state: %*{},
     logger: logger,
     refreshInterval: 120.0,
-    backgroundColor: parseHtmlColor("#000000")
+    backgroundColor: parseHtmlColor("#000000"),
+    # Its sizes are the panel's already (apps.panelScale): the render scale
+    # would make them larger twice.
+    renderScaleSetting: 1.0
   )
   scene.node1 = render_textApp.App(nodeName: "render/text", nodeId: 1.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(

@@ -63,3 +63,16 @@ suite "render/text app":
     check output.height > 0
     check output.width <= 70
     check output.height <= 24
+
+  test "the scene's render scale makes the text larger, with no scene the frame's own pixels":
+    let config = makeConfig(2000, 400)
+    let plain = makeTextApp(config, "FrameOS").get(ExecutionContext(hasImage: false))
+    let app = makeTextApp(config, "FrameOS")
+    app.scene = FrameScene(frameConfig: config, renderScaleSetting: 2.0)
+    let scaled = app.get(ExecutionContext(hasImage: false))
+    check abs(scaled.width - 2 * plain.width) <= 4
+    check abs(scaled.height - 2 * plain.height) <= 4
+    # The runner's own text (no scene) at a frame scale of 2: as it was.
+    let frame = makeConfig(2000, 400)
+    frame.renderScale = 2.0
+    check makeTextApp(frame, "FrameOS").get(ExecutionContext(hasImage: false)).width == plain.width

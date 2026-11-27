@@ -478,19 +478,42 @@ is drawn at the panel's full size. pixie stretches the root `<svg width
 height>` (or `viewBox`) to the target as vectors, so it stays sharp. A scene
 made for an 800x480 screen fills a 1600x960 one with the same layout instead
 of sitting small in whitespace, and an app that fetches for its size (the
-Map scene's lines) fetches a quarter of the data.
+Map scene's lines) fetches a quarter of the data. It is the one setting that
+makes every scene larger or smaller, so every scene's text comes out about
+the same size on a frame (the reTerminal E1003, 2026-11-27: its scene list
+and most JSX scenes were half the size of its settings page and of the
+Handwriting notes, which grew themselves, while the setting moved only some).
 
 - **Which scale.** A field with `role: "renderScale"` whose state holds a
   number, else the scene's `settings.renderScale`, else the frame's
   (frame.json `renderScale`, the control planes' `render_scale`). The
-  frame's 0 is automatic: 1, and 2 on a 4K or larger screen on HDMI (the
-  `framebuffer` device, a shorter edge of 2160 px or more). Anything else is
-  the owner's to set.
+  frame's 0 is automatic: the largest of 1, 1.25, 1.5, 2, 2.5, 3 and 4 that
+  leaves a layout 640 px on the panel's shorter edge (`PanelRoom`), or 1080
+  on HDMI (the `framebuffer` device, a screen seen from across a room:
+  `HdmiRoom`), and 1 where there is no panel (`web_only`). So an 800x480,
+  1024x600 or 720x1280 panel stays at 1, a 1280x800 one is 1.25, the
+  13.3" 1200x1600 e-paper 1.5, the 10.3" 1872x1404 e-paper 2, a 1080p
+  screen on HDMI 1 and a 4K one 2. Anything else is the owner's to set.
   A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
   layout gets more room than the panel has and everything is drawn smaller.
-  The built-in scenes (the switcher, the settings panel) follow the frame's
-  scale between 0.75 and a 320 px layout (docs/scene-settings.md).
   Out-of-range values (above 4) are ignored.
+- **What follows it.** A .tsx/.jsx app's UI (above); the built-in scenes,
+  laid out at it between 0.75 and a 320 px layout and sized for a 480 px
+  panel (sceneSwitcher's `uiRoom` / `panelUnit`, docs/scene-settings.md "At
+  the frame's scale"); and the pixel sizes of three Nim apps:
+  render/text's font size, padding, border and offsets (rich text's own
+  sizes too: `TextRenderOptions.scale`), a render/split's gaps and margins,
+  and data/qr's pixels (`nodeRenderScale`). The Pi's own pages (the boot
+  guard, the setup hotspot) and the runner's overlays keep sizing
+  themselves by `apps.panelScale`.
+- **A UI does not grow by itself.** Text, buttons and lists are sized in
+  pixels for about 480 px of the shorter side and may shrink below that; a
+  zoom of the scene's own that grows with the canvas fights the setting (the
+  samples' desktops, Terminal, Browser, Files, Books, PDF viewer, Fonts, the
+  Scene store, the Home Assistant and Homey remotes, the Handwriting notes,
+  Sketchbook and Pixel art each had one, up to 2.25x, until 2026-11-27). A
+  picture meant to fill the canvas (a clock face, a poster, a board game)
+  may size itself to it: it fills the panel at any scale.
 - **What a scaled app sees.** `context.imageWidth` / `imageHeight`,
   `targetWidth` / `targetHeight` and `app.frame.width` / `height`, divided by
   the scale and rounded. Every app, scaled or not, reads the scale as
