@@ -225,7 +225,9 @@ the keys move it too. Opened, the list starts at its top and, at its first
 render, brings the scene it was opened from to its middle when it is further
 down: measured in the room that render has (a layout's hole, a window), never
 the panel's, which is all the open knows (`revealing`; the reTerminal
-Sticky's home screen left it below the hole, 2026-11-25).
+Sticky's home screen left it below the hole, 2026-11-25), and then up to
+where a row starts, so the list's first row shows whole (never a row of
+names whose icons are above the edge), short of the list's end.
 
 The header ends with the gear and Close. **A frame that takes no taps has no
 Close**: e-paper whose event map binds its keys and nothing else
