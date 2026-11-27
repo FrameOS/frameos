@@ -434,15 +434,38 @@ suite "exiftool arguments":
 suite "error frames":
   test "on a round panel the message keeps inside the circle":
     let message = "Image from URL: no URL given. Set the url field of the downloadImage node to a picture's address."
-    proc inked(round: bool): tuple[outside, inside: int] =
+    proc inked(message: string, round: bool): tuple[outside, inside: int] =
       let image = renderError(480, 480, message, round)
       for y in 0 ..< 480:
         for x in 0 ..< 480:
           if image.pixel(x, y) != rgbx(255, 255, 255, 255):
             if insideRound(480, 480, x, y, RoundInset): inc result.inside
             else: inc result.outside
-    let square = inked(false)
-    check square.outside > 0 # the square's lines run into the corners
-    let round = inked(true)
+    # A message that fills the square runs into its corners, which a round
+    # panel does not show: what the round box is for.
+    var long = ""
+    for _ in 0 ..< 8:
+      long.add message & " "
+    check inked(long, false).outside > 0
+    let round = inked(message, true)
     check round.outside == 0
     check round.inside > 1000
+
+  test "the message is sized by the picture, as the device sizes it":
+    # A fixed 32 px was a third of a 240 px watch's width in the preview and
+    # on a frame its plane draws, and a sliver of a 1872x1404 panel.
+    proc letterHeight(width, height: int): int =
+      let image = renderError(width, height, "Hi")
+      var top = height
+      var bottom = -1
+      for y in 0 ..< height:
+        for x in 0 ..< width:
+          if image.pixel(x, y).r < 128:
+            top = min(top, y)
+            bottom = max(bottom, y)
+      bottom - top
+    let watch = letterHeight(240, 296)
+    let wide = letterHeight(800, 480)
+    let big = letterHeight(1872, 1404)
+    check watch < wide and wide < big
+    check watch < 20 # 16 px type
