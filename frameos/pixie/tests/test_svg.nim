@@ -178,6 +178,24 @@ block:
   doAssert scaled[6, 2] == rgbx(0, 0, 255, 255), $scaled[6, 2]
 
 block:
+  # A viewBox that does not start at 0, drawn at another size: its corner is
+  # the image's, and the move is in user units, inside the scale. It was
+  # applied after it, off by minX * (1 - scale): a clock laid out round its
+  # centre on a panel of another shape stood to one side.
+  let data = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -10 40 20"><rect x="-20" y="-10" width="20" height="20" fill="#ff0000"/><rect x="0" y="-10" width="20" height="20" fill="#0000ff"/></svg>"""
+  let natural = newImage(parseSvg(data))
+  doAssert natural[1, 10] == rgbx(255, 0, 0, 255), $natural[1, 10]
+  doAssert natural[38, 10] == rgbx(0, 0, 255, 255), $natural[38, 10]
+  let scaled = newImage(parseSvg(data, 8, 4))
+  doAssert scaled[0, 0] == rgbx(255, 0, 0, 255), $scaled[0, 0]
+  doAssert scaled[3, 3] == rgbx(255, 0, 0, 255), $scaled[3, 3]
+  doAssert scaled[4, 0] == rgbx(0, 0, 255, 255), $scaled[4, 0]
+  doAssert scaled[7, 3] == rgbx(0, 0, 255, 255), $scaled[7, 3]
+  let larger = newImage(parseSvg(data, 80, 40))
+  doAssert larger[0, 0] == rgbx(255, 0, 0, 255) and larger[39, 39] == rgbx(255, 0, 0, 255)
+  doAssert larger[40, 0] == rgbx(0, 0, 255, 255) and larger[79, 39] == rgbx(0, 0, 255, 255)
+
+block:
   # viewBox with commas and decimals; unit suffixes on width/height dropped.
   let data = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0,0,40.0,20" width="40px" height="20px"><rect width="40" height="20" fill="#00ff00"/></svg>"""
   let image = newImage(parseSvg(data))
