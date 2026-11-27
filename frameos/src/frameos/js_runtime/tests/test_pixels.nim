@@ -152,6 +152,27 @@ suite "frameos.pixels":
     check other[52, 22] == poked.as565 # index 1, red in both
     check other[37, 17] == black.as565 and other[0, 0] == black.as565 # recolored
 
+  test "at a render scale, a cell is the scale's square of the panel":
+    # A .tsx app at scale 2 is told half the panel and sizes its grid for it
+    # (render_scale.nim); the grid still covers the panel. It drew in the
+    # top-left quarter on the reTerminal E1003 (the UX bench, 2026-11-27).
+    forgetPanelFrames()
+    let app = newApp("tests/pixels-scale", 200, 120)
+    app.owner.frameConfig.renderScale = 2.0
+    let target = newImage565(200, 120)
+    let (image, owed) = app.intoPanel(target, %*{"step": 1})
+    check cast[pointer](image) == cast[pointer](target)
+    check not owed
+    check target[0, 0] == green.as565 and target[9, 9] == green.as565 and target[10, 10] == black.as565
+    check target[100, 39] == black.as565 and target[100, 40] == red.as565 and target[199, 59] == red.as565
+    check target[199, 119] == black.as565 and target[100, 60] == black.as565
+    # A fraction rounds a cell up: 5 px at 1.5 is 8.
+    forgetPanelFrames()
+    app.owner.frameConfig.renderScale = 1.5
+    let picture = app.render(%*{"step": 1})
+    check picture[7, 7] == green and picture[8, 8] == black
+    check picture[100, 31] == black and picture[100, 32] == red and picture[100, 47] == red and picture[100, 48] == black
+
   test "in a layout's hole, a view of the panel, it draws where the hole is":
     # A scene inside a layout renders into a view of the panel's canvas
     # (docs/scene-layouts.md): Pixel toys in the Windows 98 layout drew at

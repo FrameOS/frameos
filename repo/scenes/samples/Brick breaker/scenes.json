@@ -5,6 +5,7 @@
     "settings": {
       "execution": "interpreted",
       "refreshInterval": 0.03,
+      "renderScale": 1,
       "backgroundColor": "#0e1230",
       "windowSize": "640x640",
       "category": "Games",

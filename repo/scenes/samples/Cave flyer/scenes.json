@@ -5,6 +5,7 @@
     "settings": {
       "execution": "interpreted",
       "refreshInterval": 0.03,
+      "renderScale": 1,
       "backgroundColor": "#0c0718",
       "windowSize": "640x480",
       "icon": "M2 2H22V7L19 10L16 8L12 12L9 9L6 11L2 8ZM2 22H22V17L19 14L16 16L12 13L9 16L6 14L2 16ZM7 11.5L12 12.5L7 13.5Z",
