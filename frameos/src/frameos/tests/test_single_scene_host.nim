@@ -1,4 +1,4 @@
-import std/[json, monotimes, options, os, strutils, tables]
+import std/[json, monotimes, options, os, sequtils, strutils, tables]
 import ../channels
 import ../events_gen
 from ../events import settingsWindowId
@@ -999,3 +999,62 @@ block the_frame_page_keeps_the_frame_layout_when_the_focus_moves:
   w.setWindowed(false)
   sceneSettings.frameSettingsRead = savedRead
   echo "the frame page keeps the frame's layout ok"
+
+# A scene that cannot be built (an app this runtime does not have, a split's
+# panel scene that is gone) keeps the frame's own keys and swipes: the held
+# key still opens the scene list. The exception used to take every event with
+# it, and the frame could only be left from its control plane (the UX bench,
+# 2026-11-27).
+block a_scene_that_fails_to_start_keeps_the_frame_map:
+  let brokenId = "fixtures/broken".SceneId
+  let fineId = "fixtures/dispatcher/switchFrom".SceneId
+  var withBroken = copy(scenes)
+  withBroken.add %*{"id": brokenId.string, "name": "Broken",
+    "settings": {"execution": "interpreted", "refreshInterval": 300},
+    "nodes": [{"id": "e1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "a1", "type": "app", "data": {"keyword": "data/noSuchApp", "config": {}}}],
+    "edges": [{"id": "x1", "source": "e1", "sourceHandle": "next", "target": "a1", "targetHandle": "prev"}],
+    "fields": []}
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($withBroken)))
+  let mapConfig = FrameConfig(width: 320, height: 240, rotate: 0, scalingMode: "cover", device: "embedded",
+    debug: false, saveAssets: %*false, eventMap: %*[
+      {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+      {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}}])
+  let brokenHost = SingleSceneHost(frameConfig: mapConfig, logger: logger)
+  var notes: seq[string]
+  var picked: seq[string]
+  brokenHost.note = proc (message: string) = notes.add message
+  brokenHost.requestSelect = proc (sceneId: string): bool =
+    picked.add(sceneId)
+    brokenHost.makeCurrent(SceneId(sceneId))
+    true
+  brokenHost.sceneOrder = proc (): seq[SceneId] = @[brokenId, fineId]
+  brokenHost.start()
+  localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      brokenHost.queue(origin, event, payload, scene)
+  brokenHost.makeCurrent(brokenId)
+  var threw = false
+  try:
+    discard brokenHost.ensureScene()
+  except Exception:
+    threw = true
+  doAssert threw and brokenHost.scene.isNil, "the fixture scene must fail to build"
+  # A press the scene alone could hear goes nowhere, and says so once.
+  discard brokenHost.send(eoHttpWrite, "button", %*{"label": "OK", "role": "primary", "action": "press"})
+  discard brokenHost.send(eoHttpWrite, "button", %*{"label": "OK", "role": "primary", "action": "press"})
+  doAssert notes.countIt("failed to start" in it) == 1, $notes
+  doAssert picked.len == 0, $picked
+  # The held key is the frame's: the scene list opens over the broken scene.
+  doAssert brokenHost.send(eoHttpWrite, "button", %*{"label": "OK", "role": "primary", "action": "longPress"})
+  doAssert picked == @[SceneSwitcherId], $picked
+  doAssert brokenHost.ensureScene() and brokenHost.scene of SceneSwitcherScene
+  # And from it, the way to a scene that works.
+  doAssert brokenHost.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": fineId.string})
+  doAssert brokenHost.ensureScene() and brokenHost.scene.id == fineId
+  # Back on the broken one, a swipe down still opens its settings.
+  brokenHost.makeCurrent(brokenId)
+  discard brokenHost.send(eoDriver, "edgeSwipe", %*{"edge": "top", "direction": "down", "x": 16383, "y": 0})
+  doAssert picked[^1].startsWith(SceneSettingsId), $picked
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
+  echo "a scene that fails to start keeps the frame's keys ok"
