@@ -142,6 +142,19 @@ type
     firstYield: int ## its place + 1
     items*: array[MaxHoles, UiHole]
 
+  TextSeen* = object
+    ## A text as a layout set it, for tools/ux-bench (wasm_main
+    ## frameos_wasm_ui_texts; recorded only in the wasm runtime and only while
+    ## `textsSeenOn`): its box, what its glyphs cover and what of that no box
+    ## that clips cut off, in the UI's pixels; its smallest type size; cut
+    ## with an ellipsis; a line broken inside a word; the box that scrolls
+    ## around it (its key + 1, 0 for none); its first characters.
+    box*, ink*, visible*: array[4, float32]
+    size*: float32
+    cut*, broken*: bool
+    scroller*: int32
+    text*: string
+
   LayoutAnswer = object
     ## A layout call's question (fixed sides, width, height) and its answer.
     fix: int
@@ -256,6 +269,8 @@ type
     # and first gradient number: the same again is the same nodes again.
     emitted: seq[SvgNode]
     emittedRegions: seq[UiRegion]
+    when defined(frameosWasm):
+      emittedTexts: seq[TextSeen]
     emittedAt: array[7, float32]
     emittedOver: ColorRGBA  ## the backdrop its emit pre-blended against
     emittedFor: (int, float32, float32)
@@ -1619,6 +1634,55 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # the "off" card of the home panel rastered 28 ms slower than the "on" one
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
+when defined(frameosWasm):
+  var
+    textsSeenOn* {.threadvar.}: bool ## record each text a layout sets (a harness asked)
+    textsSeen {.threadvar.}: seq[TextSeen]
+
+  proc takeTextsSeen*(): seq[TextSeen] =
+    ## What the last layout set, recorded while `textsSeenOn`.
+    move(textsSeen)
+
+  proc wordRune(r: Rune): bool {.inline.} =
+    ## A letter or digit of a script that puts spaces between words.
+    r.int32 < 0x2E80 and (r.isAlpha or r.int32 in ord('0') .. ord('9'))
+
+  proc noteText(n: UiNode, x, y, w: float32) =
+    let a = n.arrangement
+    if a.isNil or a.runes.len == 0:
+      return
+    let shift =
+      case n.text.align
+      of CenterAlign: -0.5'f32
+      of RightAlign: -1
+      else: 0
+    var
+      ink = [high(float32), high(float32), low(float32), low(float32)]
+      bottom = 0'f32
+    for i in 0 ..< min(a.runes.len, a.selectionRects.len):
+      let r = a.selectionRects[i]
+      bottom = max(bottom, r.y + r.h)
+      if a.runes[i].int32 in [10'i32, 32, 9]:
+        continue
+      ink = [min(ink[0], x + shift + r.x), min(ink[1], y + r.y), max(ink[2], x + shift + r.x + r.w),
+        max(ink[3], y + r.y + r.h)]
+    if ink[2] < ink[0]:
+      return
+    var size = high(float32)
+    for font in a.fonts:
+      size = min(size, font.size)
+    var source = ""
+    for run in n.runs:
+      source.add run.text
+    var broken = false
+    for li in 0 ..< a.lines.len - 1:
+      let last = a.lines[li][1]
+      if last + 1 < a.runes.len and a.runes[last].wordRune and a.runes[last + 1].wordRune:
+        broken = true
+    textsSeen.add TextSeen(box: [x, y, x + w, y + bottom], ink: ink, visible: ink, size: size,
+      cut: a.runes[^1] == Rune(0x2026) and not source.endsWith("…"), broken: broken,
+      text: $a.runes[0 ..< min(a.runes.len, 40)])
+
 var emitBackdrop {.threadvar.}: ColorRGBA
 var emitRim {.threadvar.}: array[3, float32]
   ## A round panel's whole canvas (UiInput.round): its circle's centre and
@@ -2148,6 +2212,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       drawn.add node
     for region in n.emittedRegions:
       regions.add region
+    when defined(frameosWasm):
+      if textsSeenOn:
+        for t in n.emittedTexts:
+          textsSeen.add t
     gradients += n.emittedGradients[1]
     return
   let
@@ -2157,6 +2225,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     # A <textarea> scrolls its text like a box with overflow-y-auto.
     scrollsY = b.overflowY == ovScroll or n.field == 2
     scrolls = b.overflowX == ovScroll and n.maxX > 0 or scrollsY and n.maxY > 0
+  when defined(frameosWasm):
+    let firstText = textsSeen.len
   n.emitPaint(x, y, w, h, op, drawn, gradients)
   # A link with no `cursor-*` of its own shows the hand, as in a browser.
   let cursor = when defined(frameosEmbedded): 0'u8
@@ -2174,6 +2244,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
+    when defined(frameosWasm):
+      if textsSeenOn:
+        n.noteText(cx, cy, cw)
   of ukImage:
     let
       embedded = n.src.tag == "Scene"
@@ -2278,6 +2351,18 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           regions[k] = r
           inc k
       regions.setLen(k)
+      when defined(frameosWasm):
+        for i in firstText ..< textsSeen.len:
+          template t: untyped = textsSeen[i]
+          for e in 0 .. 3:
+            let d = if e mod 2 == 0: sx else: sy
+            t.box[e] -= d
+            t.ink[e] -= d
+            t.visible[e] -= d
+          t.visible = [max(t.visible[0], vx), max(t.visible[1], vy), min(t.visible[2], vx + vw),
+            min(t.visible[3], vy + vh)]
+          if pages and t.scroller == 0:
+            t.scroller = int32(n.key + 1)
       if scrollsY and n.maxY > 0:
         # Where in what it holds it shows: a thin bar at its right edge.
         let
@@ -2304,6 +2389,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           labelFor: regions[only].key + 1), firstRegion)
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
+    when defined(frameosWasm):
+      n.emittedTexts = if textsSeenOn: textsSeen[firstText .. ^1] else: @[]
     n.emittedAt = at
     n.emittedOver = emitBackdrop
     n.emittedFor = call
@@ -2817,6 +2904,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   ## its focused field scrolled into sight, and the keyboard drawn below.
   memo = textMemo
   ui = addr input
+  when defined(frameosWasm):
+    textsSeen.setLen(0)
   if input.pressed.len > 0:
     input.pressedDrawn = true
   focusSeen = false

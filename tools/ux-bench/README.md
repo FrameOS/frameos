@@ -30,10 +30,24 @@ installed (`ux.mjs`):
   not show, a Next that leaves the scene or does nothing; then Action on
   three of the elements it rang, spread over the walk (does any of them do
   anything?). On a keys-only e-paper this is the only way into a scene;
-- **taps** on every region the press map says takes one (spread out, six at
-  most): did the picture change, how long did it take;
+- **every text on the screen** (`frameos_wasm_ui_texts`, which only the wasm
+  runtime records, and only once the harness asks): under the size a person
+  reads (`--minText`, 9 canvas px), past the panel's edge or cut by a box that
+  clips it (an ellipsis is counted apart), broken inside a word, printed over
+  another text, cut by a round glass;
+- **taps** on every element there is to press (`--taps`, 16 at most, spread
+  over them): did it do anything, how long did it take (fetching left out);
+- **Back**: after a tap, or Action on the keys' walk, that went to another
+  page of the scene (most of the picture and of its elements changed, and
+  what was pressed went with them), the frame's Back as the board gives it (a
+  Back key, two keys together, the swipe in from the left): did the page
+  before come back (docs/buttons.md)?
 - **a scroll** (a drag up the middle): whether the scene's own view scrolls,
-  that is, has content past the panel.
+  that is, has content past the panel;
+- **every box that scrolls**, flicked to its top and dragged until it goes no
+  further: does it move under a finger, and is what it ends with shown whole?
+- on a round panel, how much of the ring between the inscribed square and the
+  glass's edge a scene uses (a "square in the middle").
 
 The pointer goes in as the glass reports it (panel pixels, turned by the
 frame's rotation), so a rotated frame is driven as it really is.
@@ -47,6 +61,9 @@ node --experimental-strip-types tools/ux-bench/gen_panels.mjs /tmp/presets.json
 tools/ux-bench/run_all.sh ~/.frameos-bench/ux/wasm ~/.frameos-bench/ux/run      # every panel, ~10 min
 tools/ux-bench/run_extra.sh ~/.frameos-bench/ux/wasm ~/.frameos-bench/ux/extra  # the reTerminal layouts both ways, the built-in scenes
 python3 tools/ux-bench/report.py ~/.frameos-bench/ux/run --sheets                # issues.json, report.md, a contact sheet per panel
+python3 tools/ux-bench/report.py ~/.frameos-bench/ux/run --baseline ~/.frameos-bench/ux/run-before  # + what got slower
+# (compare runs made under the same load: run_all.sh beside run_extra.sh on 12 cores made the
+#  E1003's games read 2.5x slower; alone, main and branch timed the same)
 
 node tools/ux-bench/ux.mjs --wasm <dir> --panel sticky-landscape --out <dir> --layout "reTerminal Sticky layout" --builtins 1
 UX_REPO=<other checkout> node tools/ux-bench/ux.mjs ...   # that checkout's samples
@@ -78,6 +95,11 @@ swallowed every key and swipe on an ESP32; the pixel games drew in a quarter
 of the reTerminal E1003 at its new render scale; pixie drew an SVG whose
 viewBox starts away from 0 off to one side when scaled; server rendering sent
 no User-Agent; the Sticky's landscape home screen left the scene list one row.
+The fourth time, with texts, every element and Back: some twenty scenes open
+a page (a game's Options, a store scene, a notebook list) that the frame's
+Back does not leave, though each has a Back button of its own on it.
+`report.md` ends with the slowest interactions and `timings.json` keeps every
+scene's, so a later run compares (`--baseline`).
 The keys' walk, the third time: a list paged to its end and round never came
 back to its top (only what shows of a box answers), a list that ends at its
 box's edge was never paged at all, and a page turn rang a row twice.

@@ -35,9 +35,10 @@ for (let i = 2; i < process.argv.length; i++) {
 const WASM = args.wasm
 const OUT = args.out
 const PANEL_KEY = args.panel
-const STEPS = new Set((args.steps || 'render,keys,focus,swipes,taps,scroll').split(','))
+const STEPS = new Set((args.steps || 'render,keys,focus,swipes,taps,scroll,scrollall,back').split(','))
 const SCENE_RE = args.scenes ? new RegExp(args.scenes, 'i') : null
-const MAX_TAPS = Number(args.taps || 6)
+const MAX_TAPS = Number(args.taps || 16)
+const MIN_TEXT_PX = Number(args.minText || 9) // what a person must read, in canvas pixels
 const LAYOUT = args.layout || '' // a layout sample's folder: every scene wears it
 const BUILTINS = !!args.builtins // the scene list, settings and frame page instead of the scenes
 const CACHE_DIR = args.cache || join(process.env.HOME, '.frameos-bench/ux/http-cache')
@@ -246,6 +247,7 @@ async function boot(under) {
   if (panel.embedded !== false) call('frameos_wasm_set_embedded', null, ['boolean'], [true])
   if (panel.canvasBits) call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [panel.canvasBits])
   call('frameos_wasm_set_frame_page', null, ['boolean'], [true])
+  if (typeof Module._frameos_wasm_note_texts === 'function') call('frameos_wasm_note_texts', null, ['boolean'], [true])
   const frame = {
     eventMap: panel.eventMap && panel.eventMap.length ? panel.eventMap : null,
     pixelFormat: panel.pixelFormat,
@@ -318,6 +320,8 @@ function analyze(px, w, h) {
   let nonBg = 0
   let outsideCircle = 0
   let outsideCircleTotal = 0
+  let ringContent = 0
+  let ringTotal = 0
   const cx = w / 2
   const cy = h / 2
   const r = Math.min(w, h) / 2
@@ -342,6 +346,10 @@ function analyze(px, w, h) {
         if (d > r - 1) {
           outsideCircleTotal++
           if (isContent) outsideCircle++
+        } else if (Math.abs(x + 0.5 - cx) > r * Math.SQRT1_2 || Math.abs(y + 0.5 - cy) > r * Math.SQRT1_2) {
+          // The ring between the inscribed square and the glass's edge.
+          ringTotal++
+          if (isContent) ringContent++
         }
       }
     }
@@ -365,7 +373,10 @@ function analyze(px, w, h) {
     blank: distinct.size <= 1,
     bbox: maxX >= 0 ? [minX, minY, maxX, maxY] : null,
     edgeContent,
-    ...(panel.round ? { outsideCircle: outsideCircleTotal ? Math.round((outsideCircle / outsideCircleTotal) * 1000) / 1000 : 0 } : {}),
+    ...(panel.round ? {
+      outsideCircle: outsideCircleTotal ? Math.round((outsideCircle / outsideCircleTotal) * 1000) / 1000 : 0,
+      ring: ringTotal ? Math.round((ringContent / ringTotal) * 1000) / 1000 : 0,
+    } : {}),
   }
 }
 function diffFraction(a, b) {
@@ -554,6 +565,122 @@ function elementProblems(sceneId) {
   return out.slice(0, 12)
 }
 
+// Every text of the last layout (frameos_wasm_ui_texts, the wasm runtime of
+// this branch on): too small to read, cut by the panel's edge or by a box that
+// clips it (not an ellipsis, not a box that scrolls), broken inside a word,
+// over another text, cut by a round glass; and how many an ellipsis cut.
+function uiTexts() {
+  if (typeof Module._frameos_wasm_ui_texts !== 'function') return null
+  try {
+    return JSON.parse(call('frameos_wasm_ui_texts', 'string', [], []))
+  } catch {
+    return null
+  }
+}
+function textProblems(sceneId) {
+  const all = uiTexts()
+  if (!all) return null
+  const mine = all.filter((t) => t.scene === sceneId || t.scene.startsWith(sceneId + '#') || (layoutScene && t.scene === layoutScene.id))
+  const out = []
+  const round2 = (b) => b.map((v) => Math.round(v))
+  const area = (q) => Math.max(0, q[2] - q[0]) * Math.max(0, q[3] - q[1])
+  const onPanel = (q) => [Math.max(q[0], 0), Math.max(q[1], 0), Math.min(q[2], W), Math.min(q[3], H)]
+  const shown = mine.filter((t) => area(onPanel(t.visible)) > 0 && t.text.trim().length > 0)
+  const r = Math.min(W, H) / 2
+  let cut = 0
+  const tiny = []
+  for (const t of shown) {
+    const label = t.text.slice(0, 24)
+    if (t.cut) cut++
+    if (t.size < MIN_TEXT_PX) tiny.push({ text: label, size: Math.round(t.size * 10) / 10, box: round2(t.ink) })
+    if (t.broken) out.push({ kind: 'textBrokenWord', text: label, box: round2(t.ink) })
+    if (t.scroller === 0) {
+      // Past the panel's edge.
+      const past = Math.max(-t.visible[0], -t.visible[1], t.visible[2] - W, t.visible[3] - H)
+      if (past > 2) out.push({ kind: 'textPastCanvas', text: label, past: Math.round(past), box: round2(t.ink) })
+      // Cut by a box that clips (overflow-hidden), not by an ellipsis: what shows of its glyphs.
+      const iw = t.ink[2] - t.ink[0]
+      const ih = t.ink[3] - t.ink[1]
+      const vw = Math.min(t.visible[2], W) - Math.max(t.visible[0], 0)
+      const vh = Math.min(t.visible[3], H) - Math.max(t.visible[1], 0)
+      if (past <= 2 && ((iw > 4 && vw < iw - 3) || (ih > 4 && vh < ih - 3))) {
+        out.push({ kind: 'textClipped', text: label, shown: Math.round((Math.max(vw, 0) * Math.max(vh, 0)) / Math.max(iw * ih, 1) * 100) / 100, box: round2(t.ink) })
+      }
+    }
+    if (panel.round) {
+      const [v0, v1, v2, v3] = onPanel(t.visible)
+      let inside = 0
+      let n = 0
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) {
+        n++
+        if (Math.hypot(v0 + ((v2 - v0) * (i + 0.5)) / 6 - W / 2, v1 + ((v3 - v1) * (j + 0.5)) / 3 - H / 2) <= r - 2) inside++
+      }
+      if (inside / n < 0.85) out.push({ kind: 'textCutByCircle', text: label, shown: Math.round((inside / n) * 100) / 100, box: round2(t.visible) })
+    }
+  }
+  // Two texts over each other (overprint): the parts of their glyphs that show.
+  for (let i = 0; i < shown.length; i++) {
+    for (let j = i + 1; j < shown.length; j++) {
+      const a = onPanel(shown[i].visible)
+      const b = onPanel(shown[j].visible)
+      const ix = Math.min(a[2], b[2]) - Math.max(a[0], b[0])
+      const iy = Math.min(a[3], b[3]) - Math.max(a[1], b[1])
+      if (ix <= 1 || iy <= 1) continue
+      if (shown[i].text === shown[j].text) continue // a shadow, an outline drawn twice
+      const share = (ix * iy) / Math.max(1, Math.min(area(a), area(b)))
+      if (share > 0.25) out.push({ kind: 'textsOverlap', share: Math.round(share * 100) / 100, a: shown[i].text.slice(0, 20), b: shown[j].text.slice(0, 20), boxes: [round2(a), round2(b)] })
+    }
+  }
+  if (tiny.length) {
+    tiny.sort((x, y) => x.size - y.size)
+    out.push({ kind: 'textTiny', count: tiny.length, of: shown.length, smallest: tiny[0].size, examples: tiny.slice(0, 3) })
+  }
+  return { texts: shown.length, cut, minSize: shown.length ? Math.round(Math.min(...shown.map((t) => t.size)) * 10) / 10 : null, problems: out.slice(0, 16) }
+}
+// The elements of a scene's own UIs (and its layout's), by key, for "did the
+// page change" and "did Back bring it back".
+function elementKeys(sceneId) {
+  const els = uiElements() || []
+  return new Set(els.filter((e) => (e.scene === sceneId || e.scene.startsWith(sceneId + '#')) && e.box[2] - e.box[0] >= 1)
+    .map((e) => `${e.node}:${e.key}`))
+}
+function jaccard(a, b) {
+  if (!a.size && !b.size) return 1
+  let both = 0
+  for (const k of a) if (b.has(k)) both++
+  return both / (a.size + b.size - both)
+}
+// The frame's Back, as this board gives it: a Back key, two keys together, or
+// the swipe in from the left (docs/buttons.md).
+function backGesture() {
+  const keys = panel.keys || []
+  const backKey = keys.find((k) => k.role === 'back')
+  if (backKey) return { how: `key ${backKey.label}`, fn: () => key(backKey.label, backKey.pin ?? -1, 90) }
+  const em = panel.eventMap || []
+  if (panel.touch && em.some((r) => r.event === 'edgeSwipe' && r.match?.edge === 'left' && r.emit === 'back')) {
+    const m = Math.round(Math.min(W, H) * 0.35)
+    const x0 = panel.round ? Math.round(W / 2 - Math.min(W, H) / 2 + 3) : 2
+    const pts = [0, 0.25, 0.5, 0.75, 1].map((t) => [Math.round(x0 + m * t), Math.round(H / 2)])
+    return { how: 'swipe from the left', fn: () => drag(pts, 220) }
+  }
+  const held = keys.filter((k) => k.hold !== false)
+  if (held.length >= 2 && em.some((r) => r.event === 'button' && r.match?.role === 'back')) {
+    const [a, b] = held
+    return {
+      how: `${a.label}+${b.label}`, fn: () => {
+        clock += 1200
+        return deviceInput(null, [
+          { label: a.label, pin: a.pin ?? -1, action: 'down', atMs: clock - 300 },
+          { label: b.label, pin: b.pin ?? -1, action: 'down', atMs: clock - 280 },
+          { label: a.label, pin: a.pin ?? -1, action: 'up', atMs: clock - 150 },
+          { label: b.label, pin: b.pin ?? -1, action: 'up', atMs: clock - 140 },
+        ])
+      },
+    }
+  }
+  return null
+}
+
 // --------------------------------------------------------------- run
 const outDir = join(OUT, PANEL_KEY + (LAYOUT ? '@' + LAYOUT.replace(/[^a-zA-Z0-9]+/g, '-') : '') + (BUILTINS ? '@builtins' : ''))
 mkdirSync(outDir, { recursive: true })
@@ -602,7 +729,7 @@ async function runBuiltins() {
     const l = takeLogs()
     const s = { tag, before, after: currentScene(), delivered, inputMs: Math.round(inputMs), renderMs: Math.round(r.ms), code: r.code,
       changed: diffFraction(prev, r.pixels), logErrors: errorsIn(l), error: r.error, shot: save(tag, r),
-      press: pressMap().filter((p) => p.taken).length }
+      press: pressMap().filter((p) => p.taken).length, texts: textProblems(currentScene()), elements: elementProblems(currentScene()) }
     prev = r.pixels
     results.push(s)
     console.error(`[${PANEL_KEY}] ${tag}: ${s.after} ${s.renderMs} ms changed ${s.changed}`)
@@ -615,6 +742,7 @@ async function runBuiltins() {
   if (panel.embedded !== false) call('frameos_wasm_set_embedded', null, ['boolean'], [true])
   if (panel.canvasBits) call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [panel.canvasBits])
   call('frameos_wasm_set_frame_page', null, ['boolean'], [true])
+  if (typeof Module._frameos_wasm_note_texts === 'function') call('frameos_wasm_note_texts', null, ['boolean'], [true])
   call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ eventMap: panel.eventMap?.length ? panel.eventMap : null,
     pixelFormat: panel.pixelFormat, gpioButtons: panel.gpioButtons || [], rotate: panel.rotate || 0, round: !!panel.round, panel: panel.panel })])
   const payload = [...set, ...(layoutScene ? [layoutScene] : [])].map(({ __folder, ...x }) => x)
@@ -624,12 +752,9 @@ async function runBuiltins() {
   call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
   step('00-home-scene', () => 0)
   const keys = panel.keys || []
-  const byRole = (role) => keys.find((k) => {
-    const r = k.role
-    if (role === 'next') return ['next', 'right', 'down'].includes(r)
-    if (role === 'prev') return ['prev', 'left', 'up'].includes(r)
-    return r === role
-  })
+  // By the role the scene hears, as the frame hangs (a key that points
+  // somewhere is next or prev by its direction turned with the frame).
+  const byRole = (role) => keys.find((k) => resolveRole(k.role) === role)
   const walk = (prefix) => {
     if (panel.touch) {
       const x = Math.round(W / 2)
@@ -683,7 +808,8 @@ if (BUILTINS) {
 
 for (const scene of tested) {
   const rec = { scene: scene.id, folder: scene.__folder, name: scene.name, order: frameScenes(scene).filter((s) => !s.settings?.isLayout).map((s) => s.id), steps: [] }
-  const base = safe(scene.__folder)
+  // A folder of several scenes (Split screen and its panels): each its own pictures.
+  const base = safe(scene.__folder + (tested.filter((x) => x.__folder === scene.__folder).length > 1 ? '-' + (scene.name || scene.id) : ''))
   const shot = (tag, r) => {
     if (!r.pixels) return null
     const f = `${base}.${tag}.png`
@@ -740,6 +866,7 @@ for (const scene of tested) {
       return out
     })
     rec.elementProblems = elementProblems(scene.id)
+    rec.texts = textProblems(scene.id)
     let prev = warm.pixels || cold.pixels
     takeEvents()
 
@@ -751,8 +878,26 @@ for (const scene of tested) {
       takeEvents()
     }
 
+    const ours = (e) => e.scene === scene.id || e.scene.startsWith(scene.id + '#')
+    const onPanelBox = (q) => [Math.max(q[0], 0), Math.max(q[1], 0), Math.min(q[2], W), Math.min(q[3], H)]
+    const boxArea = (q) => Math.max(0, q[2] - q[0]) * Math.max(0, q[3] - q[1])
+    const scrollOf = (boxKey) => {
+      for (const t of keptScrolls(scene.id)) for (const v of t) if (v[0] === boxKey) return [v[1], v[2]]
+      return [0, 0]
+    }
+    // The scene as it first came up again, in a new runtime: after a tap
+    // that went somewhere Back did not come back from.
+    const fresh = async () => {
+      await boot(scene)
+      call('frameos_wasm_select_scene', 'boolean', ['string'], [scene.id])
+      render()
+      prev = render().pixels
+      takeLogs()
+      takeEvents()
+    }
     const step = (kind, label, fn, shoot = true) => {
       const before = currentScene()
+      const fetchesBefore = fetchMs
       const t0 = performance.now()
       const delivered = fn()
       const inputMs = performance.now() - t0
@@ -767,6 +912,7 @@ for (const scene of tested) {
         changed: diffFraction(prev, r.pixels), events: ev.map((e) => e.name).filter((n) => !/^render/.test(n)).slice(0, 10),
         logErrors: errorsIn(l), error: r.error,
       }
+      if (fetchMs > fetchesBefore) s.fetchMs = fetchMs - fetchesBefore
       if (r.aborted) s.aborted = true
       if (shoot && (s.changed > 0 || after !== before)) s.shot = shot(`${kind}-${safe(label)}`, r)
       prev = r.pixels
@@ -779,6 +925,14 @@ for (const scene of tested) {
       for (const k of panel.keys || []) {
         for (const [action, ms] of (k.hold === false ? [['press', 90]] : [['press', 90], ['hold', 1400]])) {
           step('key', `${k.label}-${action}`, () => key(k.label, k.pin ?? -1, ms))
+          // The Screen key's press turned the screen off: on again, or the
+          // next tap only wakes it (and reads as an element that does nothing).
+          const em = panel.eventMap || []
+          const screenRule = em.find((r) => r.event === 'button' && r.emit === 'toggleScreen' && r.match &&
+            (!r.match.label || r.match.label === k.label) && (r.match.action || 'press') === (action === 'press' ? 'press' : 'longPress'))
+          if (screenRule) {
+            try { call('frameos_wasm_event', 'boolean', ['string', 'string'], ['turnOn', '{}']) } catch {}
+          }
           restore()
         }
       }
@@ -882,9 +1036,22 @@ for (const scene of tested) {
             }
             if (currentScene() !== scene.id) break
             const ring = ringNow()
+            const keysBefore = elementKeys(scene.id)
+            const pxBefore = prev
             const s = step('focus', `primary-${want}`, () => key(primaryKey.label, primaryKey.pin ?? -1, 90))
-            walk.actions.push({ stop: want, ring, changed: s.changed, after: s.after })
+            const act = { stop: want, ring, changed: s.changed, after: s.after }
+            walk.actions.push(act)
             if (s.after !== scene.id) break
+            const back = STEPS.has('back') ? backGesture() : null
+            if (back && s.changed >= 0.2 && jaccard(keysBefore, elementKeys(scene.id)) < 0.6 && !(uiElements() || []).some((e) => elementId(e) === ring)) {
+              act.page = true
+              const b = step('back', back.how, back.fn)
+              act.back = {
+                how: back.how, after: b.after, changed: b.changed,
+                returned: b.after === scene.id && (jaccard(keysBefore, elementKeys(scene.id)) >= 0.8 || diffFraction(pxBefore, prev) < 0.05),
+              }
+              if (b.after !== scene.id) break
+            }
           }
           walk.primary = walk.actions.find((a) => a.changed > 0 || a.after !== scene.id) || walk.actions[walk.actions.length - 1]
         }
@@ -913,22 +1080,137 @@ for (const scene of tested) {
       }
     }
     if (STEPS.has('taps') && panel.touch) {
-      const taken = press.filter((p) => p.taken && p.x1 > p.x0 && p.y1 > p.y0)
-      // Spread the picks across the list.
-      const picks = []
-      for (let i = 0; i < Math.min(MAX_TAPS, taken.length); i++) picks.push(taken[Math.floor((i * taken.length) / Math.min(MAX_TAPS, taken.length))])
-      for (const p of picks) {
-        // Panel point -> scene point.
-        const px = (p.x0 + p.x1) / 2
-        const py = (p.y0 + p.y1) / 2
-        const r = panel.rotate || 0
-        let sx = px
-        let sy = py
-        if (r === 90) [sx, sy] = [py, panel.width - 1 - px]
-        else if (r === 180) [sx, sy] = [panel.width - 1 - px, panel.height - 1 - py]
-        else if (r === 270) [sx, sy] = [panel.height - 1 - py, px]
-        const s = step('tap', `${Math.round(sx)},${Math.round(sy)}`, () => tap(Math.round(sx), Math.round(sy)))
-        if (s.after !== scene.id) restore()
+      restore()
+      // Every element there is to press, each once (MAX_TAPS spread over
+      // them): did it do anything, how long did it take; and after one that
+      // went to another page of the scene, does the frame's Back come back?
+      const seenEl = new Set()
+      const els0 = (uiElements() || []).filter((e) => {
+        const id = `${e.scene}#${e.node}:${e.key}`
+        if (!ours(e) || !e.takes || e.scrolls || seenEl.has(id) || boxArea(onPanelBox(e.visible)) < 9) return false
+        seenEl.add(id)
+        return true
+      })
+      const back = STEPS.has('back') ? backGesture() : null
+      if (els0.length) {
+        const n = Math.min(MAX_TAPS, els0.length)
+        const picks = []
+        for (let i = 0; i < n; i++) picks.push(els0[Math.floor((i * els0.length) / n)])
+        rec.taps = []
+        let reboots = 0
+        for (const e of picks) {
+          const id = `${e.scene}#${e.node}:${e.key}`
+          const find = () => (uiElements() || []).find((x) => `${x.scene}#${x.node}:${x.key}` === id && boxArea(onPanelBox(x.visible)) >= 9)
+          let now = find()
+          if (!now) {
+            if (reboots >= 3) break
+            reboots++
+            await fresh()
+            now = find()
+            if (!now) continue
+          }
+          const v = onPanelBox(now.visible)
+          const cx = Math.round((v[0] + v[2]) / 2)
+          const cy = Math.round((v[1] + v[3]) / 2)
+          const keysBefore = elementKeys(scene.id)
+          const pxBefore = prev
+          const s = step('tap', `${cx},${cy}`, () => tap(cx, cy))
+          const t = { el: id, at: [cx, cy], changed: s.changed, after: s.after, ms: s.renderMs + s.inputMs - (s.fetchMs || 0) }
+          if (s.after !== scene.id) {
+            restore()
+          } else if (back && s.changed >= 0.2 && jaccard(keysBefore, elementKeys(scene.id)) < 0.6 && !find()) {
+            // Another page (what was pressed went with it: a tab that stays is no page).
+            // Another page: Back should bring the one before.
+            t.page = true
+            const b = step('back', back.how, back.fn)
+            t.back = {
+              how: back.how, after: b.after, changed: b.changed,
+              returned: b.after === scene.id && (jaccard(keysBefore, elementKeys(scene.id)) >= 0.8 || diffFraction(pxBefore, prev) < 0.05),
+            }
+            if (b.after !== scene.id) restore()
+          }
+          rec.taps.push(t)
+        }
+      } else {
+        // No UI elements (an SVG scene, event nodes): the press map's regions.
+        const taken = press.filter((p) => p.taken && p.x1 > p.x0 && p.y1 > p.y0)
+        const picks = []
+        const n = Math.min(6, taken.length)
+        for (let i = 0; i < n; i++) picks.push(taken[Math.floor((i * taken.length) / n)])
+        for (const p of picks) {
+          // Panel point -> scene point.
+          const px = (p.x0 + p.x1) / 2
+          const py = (p.y0 + p.y1) / 2
+          const r = panel.rotate || 0
+          let sx = px
+          let sy = py
+          if (r === 90) [sx, sy] = [py, panel.width - 1 - px]
+          else if (r === 180) [sx, sy] = [panel.width - 1 - px, panel.height - 1 - py]
+          else if (r === 270) [sx, sy] = [panel.height - 1 - py, px]
+          const s = step('tap', `${Math.round(sx)},${Math.round(sy)}`, () => tap(Math.round(sx), Math.round(sy)))
+          if (s.after !== scene.id) restore()
+        }
+      }
+    }
+    if (STEPS.has('scrollall') && panel.touch) {
+      // Every box that scrolls, dragged until it goes no further: does it
+      // move under a finger, and is what it ends with then shown whole?
+      restore()
+      const boxes = []
+      const seenBox = new Set()
+      for (const e of uiElements() || []) {
+        if (!ours(e) || !e.scrolls || seenBox.has(e.key)) continue
+        const v = onPanelBox(e.visible)
+        if (boxArea(v) < 900 || v[3] - v[1] < 30) continue
+        seenBox.add(e.key)
+        boxes.push(e)
+      }
+      boxes.sort((a, b) => boxArea(onPanelBox(b.visible)) - boxArea(onPanelBox(a.visible)))
+      rec.scrollers = []
+      for (const b of boxes.slice(0, 3)) {
+        const v = onPanelBox(b.visible)
+        const x = Math.round((v[0] + v[2]) / 2)
+        const top = Math.round(v[1] + (v[3] - v[1]) * 0.15)
+        const bot = Math.round(v[1] + (v[3] - v[1]) * 0.85)
+        const pts = [0, 0.25, 0.5, 0.75, 1].map((t) => [x, Math.round(bot + (top - bot) * t)])
+        const sc = { box: v.map(Math.round), drags: 0, scrolled: 0, left: null }
+        // From its top: what came before may have left it scrolled.
+        for (let i = 0; i < 6 && scrollOf(b.key)[1] > 0.5; i++) {
+          if (step('scrollall', `${b.key}-up${i}`, () => drag([...pts].reverse(), 150), false).after !== scene.id) break
+        }
+        if (currentScene() !== scene.id) restore()
+        sc.from = Math.round(scrollOf(b.key)[1])
+        let last = scrollOf(b.key)[1]
+        for (let i = 0; i < 25; i++) {
+          const s = step('scrollall', `${b.key}-${i}`, () => drag(pts, 400), i === 0)
+          if (s.after !== scene.id) {
+            sc.left = s.after
+            break
+          }
+          const y = scrollOf(b.key)[1]
+          if (Math.abs(y - last) < 0.5) break
+          sc.drags++
+          last = y
+        }
+        sc.scrolled = Math.round(last)
+        if (!sc.left) {
+          // What the box ends with: its lowest text and element, shown whole?
+          const inBox = (uiTexts() || []).filter((t) => t.scene === b.scene && t.node === b.node && t.scroller === b.key + 1 && t.text.trim())
+          const lowest = inBox.sort((p, q) => q.ink[3] - p.ink[3])[0]
+          if (lowest) {
+            sc.lastText = lowest.text.slice(0, 24)
+            sc.endShown = lowest.visible[3] >= lowest.ink[3] - 1 && lowest.visible[1] <= lowest.ink[1] + 1 && lowest.visible[3] <= H + 1
+          }
+          const elsIn = (uiElements() || []).filter((e) => e.scene === b.scene && e.node === b.node && e.scroller === b.key + 1 && e.takes)
+          const lowEl = elsIn.sort((p, q) => q.box[3] - p.box[3])[0]
+          if (lowEl) sc.lastElementShown = lowEl.visible[3] >= lowEl.box[3] - 1 && lowEl.visible[3] <= H + 1
+          sc.texts = textProblems(scene.id)?.problems?.filter((p) => p.kind !== 'textTiny').slice(0, 4)
+          // And back up with a flick.
+          step('scrollall', `${b.key}-top`, () => drag([...pts].reverse(), 150), false)
+        } else {
+          restore()
+        }
+        rec.scrollers.push(sc)
       }
     }
     if (STEPS.has('scroll') && panel.touch) {
@@ -939,7 +1221,7 @@ for (const scene of tested) {
       if (s.after !== scene.id) restore()
     }
   } catch (e) {
-    rec.error = String(e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+    rec.error = e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : typeof e === 'object' ? JSON.stringify(e).slice(0, 300) : String(e)
     rec.logs = takeLogs().slice(-20)
   }
   results.push(rec)

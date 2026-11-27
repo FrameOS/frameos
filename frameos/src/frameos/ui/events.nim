@@ -46,6 +46,10 @@ type
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
     scale*: float32             ## canvas pixels per layout pixel (render_scale.nim); 0 = 1
     regions*: seq[UiRegion]     ## the last render's, in paint order
+    when defined(frameosWasm):
+      texts*: seq[TextSeen]     ## the last layout's texts, while layout.textsSeenOn (tools/ux-bench)
+      sceneX*, sceneY*: float32 ## where its scene's canvas is on the frame's: a scene a layout wraps
+                                ## (FrameScene.canvasX), for the reports in the frame's pixels
     input*: UiInput             ## what the pointer and the keyboard are doing, for the next one
     memo*: UiMemo               ## the last layout's type, for the next one
     inputOnly*: bool            ## the pointer changed what it is over or
@@ -1680,7 +1684,7 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
 proc uiElementsReport*(): JsonNode =
   ## Every element of every UI's last render, where the layout put it whole
   ## (`box`, not cut by the canvas or a scroller) and what of it shows
-  ## (`visible`: what no scrolling box cut off), in the scene's pixels, and
+  ## (`visible`: what no scrolling box cut off), in the frame's pixels, and
   ## whether it sits in a box that scrolls; its UI (`node`) and `key`, which
   ## the keys' ring names (`lastingUiInput`'s `ring` is the key + 1), and
   ## whether the keys stop at it (`stop`). For a harness to ask whether every
@@ -1697,8 +1701,8 @@ proc uiElementsReport*(): JsonNode =
         if handler > 0:
           takes = true
       let
-        ox = target.offsetX
-        oy = target.offsetY
+        ox = target.offsetX + (when defined(frameosWasm): target.sceneX else: 0'f32)
+        oy = target.offsetY + (when defined(frameosWasm): target.sceneY else: 0'f32)
       result.add %*{
         "scene": target.sceneId, "node": target.nodeId, "key": r.key,
         "box": [ox + r.x * scale, oy + r.y * scale, ox + (r.x + r.w) * scale, oy + (r.y + r.h) * scale],
@@ -1708,6 +1712,29 @@ proc uiElementsReport*(): JsonNode =
         "takes": takes, "field": r.field.int,
         "stop": r.stop(false), # one the keys walk to
       }
+
+when defined(frameosWasm):
+  proc uiTextsReport*(): JsonNode =
+    ## Every text of every UI's last layout (layout.TextSeen), in the frame's
+    ## pixels: its box, its glyphs' extent and what of that shows, its type
+    ## size in canvas pixels, cut with an ellipsis or broken inside a word,
+    ## the box that scrolls around it. For tools/ux-bench to ask whether every
+    ## text is whole, on the screen, big enough and clear of the others
+    ## (wasm_main frameos_wasm_ui_texts); nothing on a frame calls it.
+    result = newJArray()
+    for target in targets:
+      let
+        scale = if target.scale > 0: target.scale else: 1'f32
+        ox = target.offsetX + target.sceneX
+        oy = target.offsetY + target.sceneY
+      template q(a: array[4, float32]): JsonNode =
+        %*[ox + a[0] * scale, oy + a[1] * scale, ox + a[2] * scale, oy + a[3] * scale]
+      for t in target.texts:
+        result.add %*{
+          "scene": target.sceneId, "node": target.nodeId, "box": q(t.box), "ink": q(t.ink),
+          "visible": q(t.visible), "size": t.size * scale, "cut": t.cut, "broken": t.broken,
+          "scroller": t.scroller, "text": t.text,
+        }
 
 proc handlerPayload(target: UiTarget, r: UiRegion, payload: JsonNode, scale: float32): JsonNode =
   ## What a pointer handler is handed: the event, a coalesced move's `points`

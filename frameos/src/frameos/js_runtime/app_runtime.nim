@@ -4434,6 +4434,10 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
   target.offsetX = x.float32
   target.offsetY = y.float32
   target.scale = scale
+  when defined(frameosWasm):
+    if not owner.scene.isNil:
+      target.sceneX = owner.scene.canvasX.float32
+      target.sceneY = owner.scene.canvasY.float32
   # Into the app that drew these regions, every render: the scene can be
   # loaded again since the last one (a switch away and back), with a new app.
   target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) {.closure, raises: [].} =
@@ -4615,6 +4619,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       # corner here is where the last render put this UI in the scene's canvas.
       svg = layoutUiDocked(root, layoutWidth, layoutHeight, target.input, regions, target.memo, sceneId,
         regionScale, target.offsetX, target.offsetY)
+      when defined(frameosWasm):
+        if textsSeenOn:
+          target.texts = takeTextsSeen()
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil

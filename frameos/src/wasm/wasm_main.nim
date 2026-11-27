@@ -23,8 +23,8 @@ from frameos/input_state import initInputState, CursorHideMs
 import frameos/cursor_sprite
 from frameos/loading_mark import MarkView
 from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput, uiOpenLink,
-  uiElementsReport
-from frameos/ui/layout import uiClipboard, setUiClipboard, uiClipboardChanges
+  uiElementsReport, uiTextsReport
+from frameos/ui/layout import uiClipboard, setUiClipboard, uiClipboardChanges, textsSeenOn
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
   urlImagesOneARender
 import frameos/interpreter
@@ -1211,6 +1211,23 @@ proc frameos_wasm_ui_elements(): cstring {.exportc, cdecl.} =
   except Exception:
     uiElementsBuffer = "[]"
   uiElementsBuffer.cstring
+
+var uiTextsBuffer: string
+
+proc frameos_wasm_note_texts(on: bool) {.exportc, cdecl.} =
+  ## Record every text each layout sets from now on (layout.textsSeenOn), for
+  ## frameos_wasm_ui_texts. Off by default: the preview never pays for it.
+  textsSeenOn = on
+
+proc frameos_wasm_ui_texts(): cstring {.exportc, cdecl.} =
+  ## Every text of every UI's last layout (ui/events.uiTextsReport) as JSON,
+  ## while frameos_wasm_note_texts is on: for tools/ux-bench to ask whether
+  ## each text is whole, on the screen, big enough and clear of the others.
+  try:
+    uiTextsBuffer = $uiTextsReport()
+  except Exception:
+    uiTextsBuffer = "[]"
+  uiTextsBuffer.cstring
 
 proc frameos_wasm_scene_info(): cstring {.exportc, cdecl.} =
   let scenes = getInterpretedScenes()

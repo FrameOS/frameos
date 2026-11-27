@@ -1130,6 +1130,9 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   if owed.isSome:
     image.fill(bg)
   target.regions = move(regions)
+  when defined(frameosWasm):
+    if textsSeenOn:
+      target.texts = takeTextsSeen()
   target.offsetX = 0
   target.offsetY = 0
   target.scale = image.width.float32 / max(roomW, 1).float32
