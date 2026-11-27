@@ -50,6 +50,9 @@ python3 tools/ux-bench/sheet.py out.png 300 4 a.png b.png ...                   
 - The contact sheets are for looking at: what a scene looks like is the one
   thing the report cannot judge. A sheet a panel, about fifty scenes each.
 
+`UXDEBUG=1` echoes the runtime's output and its log lines to stderr as the
+harness runs, for a scene that does something unexpected.
+
 `device_ux.py <port> <board>` is the part a board has to do itself: each
 edge swipe through its own touch task (`touch drag`) and each key through its
 dispatcher, timed by the board's log, checked against the same event map.

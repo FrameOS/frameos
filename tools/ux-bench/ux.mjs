@@ -193,7 +193,7 @@ async function newModule() {
     thisProgram: 'frameos',
     print: (l) => { logs.push(String(l)); if (process.env.UXDEBUG) console.error('P', l) },
     printErr: (l) => { logs.push(String(l)); if (process.env.UXDEBUG) console.error('E', l) },
-    onFrameosLog: (l) => logs.push(String(l)),
+    onFrameosLog: (l) => { logs.push(String(l)); if (process.env.UXDEBUG) console.error('L', String(l).slice(0, 300)) },
     onFrameosEvent: (name, payload) => events.push({ name, payload }),
   })
 }
