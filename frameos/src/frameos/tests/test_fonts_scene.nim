@@ -118,11 +118,12 @@ suite "the Fonts scene":
     let config = frame(480, 800, getTempDir() / "frameos-fonts-scene-none")
     let scene = load(config)
     discard scene.draw(config)
-    # Narrow: Get fonts, the list (one row, the built-in face) and the page buttons.
+    # Narrow: Get fonts, the list (one row, the built-in face) and the page
+    # buttons, the specimen under them.
     check taps().len == 4
     scene.tap(taps()[1])
     check scene.state{"font"}.getStr() == ""
-    check scene.state{"page"}.getInt() == -1 # the specimen, on a narrow screen
+    check scene.state{"page"}.getInt() == 0 # the list stays, the specimen shows under it
     discard scene.draw(config)
     check problems.len == 0
 
