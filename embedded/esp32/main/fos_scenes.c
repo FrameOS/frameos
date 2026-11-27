@@ -1153,6 +1153,16 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
     slot_path(slot, path, sizeof(path));
     size_t len = 0;
     char *json = read_slot_file(slot, path, &len);
+    if (json == NULL) {
+        /* No block for the file: the scene it replaces goes first, as the
+         * load would have dropped it anyway, and the file is read again
+         * (Hacker News on the Sticky left 1.3 MB of PSRAM in 30 KB pieces and
+         * no other scene would load, the hardware bench 2026-11-27). */
+        ESP_LOGW(TAG, "scene slot %d: no room to read it (%s); the resident scene goes first",
+                 slot, scene_id ? scene_id : "?");
+        frameos_nim_drop_scene();
+        json = read_slot_file(slot, path, &len);
+    }
     if (json == NULL || len == 0) {
         free(json);
         ESP_LOGW(TAG, "scene slot %d unreadable (%s)", slot, scene_id ? scene_id : "?");

@@ -182,6 +182,11 @@ int frameos_nim_load_scenes(const char *const *scenes, const size_t *lens, int c
  * makes exactly one resident, tearing down the previous one. */
 int frameos_nim_set_scene_catalog(const char *index_json);
 int frameos_nim_load_scene(const char *scene_json);
+/* The resident scene goes (its QuickJS context, app instances, kept
+ * interpreters) before a scene's file is read again: the first read found no
+ * room for it (fos_scenes.c load_scene_slot). The next render builds it
+ * again if no other scene comes. */
+void frameos_nim_drop_scene(void);
 /* The next render was asked for (a render verb, the console, a button, the
  * schedule) rather than timed: every scene inside the current one runs, also
  * those whose own interval has not come round (frameos/scene_rhythm.nim).
