@@ -1149,8 +1149,8 @@ proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr Unchec
 
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):
-  ## a held button is a `longPress` at every whole second, a short press whose
-  ## double-press window closed a `press`. And for async JavaScript
+  ## a button held `longPressMs` is its `longPress` while it is still down, a
+  ## short press whose double-press window closed a `press`. And for async JavaScript
   ## (docs/async-js.md): the answers components/frameos_nim/fos_js_io.c brought and the timers
   ## that are over settle their promises, and the code waiting on them runs
   ## to its next await; a scene that asks for a render gets one through

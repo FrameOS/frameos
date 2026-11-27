@@ -494,7 +494,7 @@ pointers plugged in after boot are found (inotify on `/dev/input`).
 - **`triplePress`, only where a rule binds one** (since 2026.11.15,
   `buttons.triplePressSince`). A key that a rule of the frame's event map or
   of the showing scene's names a `triplePress` of (`match.action`, and the
-  rule fits the key: `input_state.tripleWanted`, asked by `event_loop.nim`)
+  rule fits the key: `InputState.bound`, asked by `event_loop.nim`)
   holds its pair back: its second down is no `doublePress` yet. A third down
   within `doublePressMs` (350) of the second `up` is the `triplePress`, at
   once, and nothing more (no `press`, no `doublePress`, no `longPress`; a
@@ -513,7 +513,15 @@ A tap is therefore `gpio` `down`, `gpio` `up`, then `button` `press`; a
 double tap `down`, `up`, `down` with a `doublePress`, `up`; three taps of a
 key bound three times `down`, `up`, `down`, `up`, `down` with a
 `triplePress`, `up`; a 2.2 s hold
-`down`, then `up` and a `longPress` (`durationMs` 2200) together. **A `button`
+`down`, a `longPress` (`durationMs` 1000) the moment it has been held
+`longPressMs`, while the key is still down, then `up` (`durationMs` 2200) and
+nothing more. **A held key acts when holding it longer would change
+nothing** (the owner's rule, 2026-11-26), so nobody guesses whether they held
+it long enough: the dispatcher's tick makes the long press, and every host
+ticks while a key is down (the ESP32's idle wait every 50 ms, a Pi's loop
+every 20 ms, the preview's worker). A host busy the whole hold (an ESP32 in a
+refresh) delivers it with the `up` it reached, before that `up`; a key the
+frame takes at the hold (the voice key) has its long press left to its `up`. **A `button`
 listener with no `action` filter hears every press, double press, triple
 press and long press**, once each: a scene that reacts to a button listens for `button` and
 branches on `action` if it cares; one that must count every tap listens for
@@ -538,9 +546,10 @@ Each event has its sound on an ESP32 with a buzzer, at the instant it
 happens: a click on `down`, a lower one on every `up`, a higher click
 for the second `down` of a `doublePress`, and one an octave over the press
 for the third `down` of a `triplePress` (a key the frame's map binds three
-times; one only a scene's map binds clicks as a first press). While a key is held a short falling pair sounds at every whole
-second, counting the hold out loud; the scene's `longPress` still comes once,
-with the `up`. A `press` adds no sound: its clicks were the down and the up
+times; one only a scene's map binds clicks as a first press). While a key is held a short falling pair sounds once, at
+`longPressMs`: the moment the scene's `longPress` comes; nothing more while
+it stays down, which would talk over what the long press started (a scene
+loading's chirp). A `press` adds no sound: its clicks were the down and the up
 (`embedded/esp32/README.md`, "Button beep"). On e-paper a press on the glass
 that something takes clicks the same way, unless the frame's `touch_beep` is off.
 An `edgeSwipe` there is four quick clicks, the moment the finger has gone far
@@ -837,9 +846,10 @@ came. A rule does one of two things:
 **`voiceChat`** (`docs/voice-chat.md`) is the one emit that is not the
 dispatcher's to carry out: a `button` rule emitting it on a key's `longPress`
 makes that key the frame's voice key, and the ESP32 firmware reads the binding
-off the map and opens the microphone while the key is held — a `longPress`
-exists only at the release, and a sentence has to be heard before that. The
-press is claimed (`gpio.claimed`), so the rule never fires for it; a
+off the map and opens the microphone at the hold, on the button task, before
+the dispatcher could (which leaves that key's long press to its `up`:
+`event_loop.bound` asks the frame's map). The press is claimed
+(`gpio.claimed`), so the rule never fires for it; a
 `voiceChat` that does reach a dispatcher (a `button` said over HTTP, a Pi) is
 a device command its host logs as unsupported. Only the `eventMap` origin may
 emit it, and only the ESP32 host has it.

@@ -1413,15 +1413,17 @@ same stamps and the contract's numbers) says so:
 | `gpio` `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
 | `doublePress` | its second down is 1.5× 14 instead of 1× |
 | `triplePress` | its third down is 2× 14 instead of 1× (a key the frame's map binds three times) |
-| a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
+| a key held | 1× 8 then 0.5× 20 once, at 1 s, when its long press comes |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
 
 So a tap is "click, clack" and the scene hears `gpio` `down`, `up`, and the
 `button` `press` 350 ms later; a double tap is 2000, 1400, 3000, 1400 Hz (the second down
-higher); a 2.5 s hold is "click, dun, dun, clack", and the scene
-hears its one `longPress` with the `up`: the duns count the hold out loud, they
-are not events. Until 2026.10.16 a hold
+higher); a 2.5 s hold is "click, dun, clack", and the scene
+hears its one `longPress` at the dun, while the key is still down (the
+dispatcher's tick, docs/events.md "Buttons"). Holding on sounds nothing more:
+a dun a second (as until 2026.11) talked over what the long press started, a
+scene loading's chirp. Until 2026.10.16 a hold
 chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the
 moment the edge is queued, so the feedback does not wait for a render that
 may be 30 s into a panel refresh. A press that wakes the chip from deep sleep
@@ -1567,9 +1569,11 @@ second and the frame listens (`docs/voice-chat.md` is the contract). The
 button task reads the binding off `config->event_map` (`fos_voice_binding.c`,
 cJSON, host tested by `main/tests/test_fos_voice_binding.c`; read again
 whenever the map changes) and runs the key's hold (`fos_voice_hold.c`, pure,
-`main/tests/test_fos_voice_hold.c`) before its per-key loop: the dispatcher
-would make the `longPress` only at the release, too late to hear a sentence,
-so this is the one map rule the firmware carries out itself. From the start
+`main/tests/test_fos_voice_hold.c`) before its per-key loop: the microphone
+opens at the hold on the button task, sooner than a render task in a refresh
+could, and the dispatcher leaves that key's `longPress` to its `up`
+(`event_loop.bound`), so this is the one map rule the firmware carries out
+itself. From the start
 until the key is up it is *claimed*: no hold sound, no release click, and its
 `up` edge carries `claimed: true`, which the Nim dispatcher takes as "deliver
 the edge, make no `button` of the press". The buzzer plays a rising sparkle

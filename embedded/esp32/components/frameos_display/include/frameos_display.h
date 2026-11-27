@@ -325,6 +325,11 @@ esp_err_t fos_display_glass_rect(const uint8_t *buf, int x, int y, int w, int h)
  * picture it hands fos_display_glass_rect, so it holds it changed no longer
  * than the upload. */
 void fos_display_glass_wait(void);
+/* When the glass takes the next picture (esp_timer us): the end of the
+ * waveform it is running, about, on a controller that runs one at a time
+ * (the IT8951); 0 when it would take one now, or cannot say. What a render a
+ * finger asked for is timed to (fos_client.c glass_slot_wait). */
+int64_t fos_display_glass_free_at(void);
 /* Parts of the picture were drawn roughly while someone tapped and nobody has
  * for a while: pack the canvas and hand it to fos_display_update, not as input. */
 bool fos_display_settle_due(int64_t now_us);

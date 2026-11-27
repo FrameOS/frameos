@@ -268,3 +268,19 @@ bool fos_loading_taps_wanted(bool lcd, bool sounds_on, bool render_held, int64_t
     if (lcd || !sounds_on || render_held || last_input_us == 0) return false;
     return now_us - last_input_us < FOS_INPUT_HOLD_QUIET_US;
 }
+
+int64_t fos_glass_slot_wait_us(int64_t now_us, int64_t free_at_us, int64_t lead_us)
+{
+    if (free_at_us <= 0) return 0;
+    if (lead_us <= 0) lead_us = FOS_GLASS_LEAD_DEFAULT_US;
+    int64_t wait_us = free_at_us - lead_us - FOS_GLASS_SLOT_MARGIN_US - now_us;
+    if (wait_us < FOS_GLASS_SLOT_MIN_US) return 0;
+    return wait_us > FOS_GLASS_SLOT_MAX_US ? FOS_GLASS_SLOT_MAX_US : wait_us;
+}
+
+int64_t fos_glass_lead_note(int64_t previous_us, int64_t sample_us)
+{
+    if (sample_us < 10000) sample_us = 10000;
+    if (sample_us > 1000000) sample_us = 1000000;
+    return previous_us <= 0 ? sample_us : (previous_us * 3 + sample_us) / 4;
+}

@@ -956,6 +956,12 @@ void fos_display_glass_wait(void)
     DEV_SPI_Release();
 }
 
+int64_t fos_display_glass_free_at(void)
+{
+    if (!fos_display_glass_supported() || !s_panel_awake || fos_display_refreshing()) return 0;
+    return fos_it8951_10in3_free_at();
+}
+
 bool fos_display_settle_due(int64_t now_us)
 {
     if (!s_partial || !s_partial->owed || !s_partial->owed()) return false;

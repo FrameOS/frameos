@@ -297,6 +297,23 @@ bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_ref
 #define FOS_TIMED_UNDER_FINGER_MAX_US 1500000
 bool fos_timed_render_waits_for_finger(int64_t now_us, int64_t due_us, bool finger_down);
 
+/* A render a finger asked for (a stroke being drawn) on a glass that runs one
+ * waveform at a time (the IT8951) while it still runs the last picture's: how
+ * long to hold its start (us) so the picture is ready as the glass frees,
+ * and carries what the finger did meanwhile. `free_at_us` when the glass
+ * frees (0: now), `lead_us` how long such a render takes to the panel's
+ * update (fos_glass_lead_note; 0: not known yet). 0: start now. Never longer
+ * than FOS_GLASS_SLOT_MAX_US (a waveform's estimate gone wrong costs no more).
+ * docs/realtime-rendering.md "A stroke on e-paper". */
+#define FOS_GLASS_SLOT_MARGIN_US 30000
+#define FOS_GLASS_SLOT_MIN_US 10000
+#define FOS_GLASS_SLOT_MAX_US 600000
+#define FOS_GLASS_LEAD_DEFAULT_US 250000
+int64_t fos_glass_slot_wait_us(int64_t now_us, int64_t free_at_us, int64_t lead_us);
+/* Such a render took `sample_us` from its pass's start to the update: the
+ * lead smoothed (`previous` 0: none yet), each sample held to 10 ms..1 s. */
+int64_t fos_glass_lead_note(int64_t previous_us, int64_t sample_us);
+
 /* Whether a load starting now gets the buzzer's quiet taps
  * (fos_buzzer_loading_begin): e-paper has no loading mark to draw, and a
  * frame must not tap at a room nobody is in, so only when someone at the frame

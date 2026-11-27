@@ -51,9 +51,9 @@
  * next step up from the double's. */
 #define TRIPLE_DOWN_NUM 2
 #define TRIPLE_DOWN_DEN 1
-/* A key held, at every whole second it stays down: a short note at the
- * press pitch falling to a longer one an octave down, a "dun" that counts
- * the hold out loud. */
+/* A key held to its long press, once: a short note at the press pitch
+ * falling to a longer one an octave down, a "dun" that says the long press
+ * came. */
 #define LONG_HEAD_MS 8
 #define LONG_TAIL_MS 20
 
