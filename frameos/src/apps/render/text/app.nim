@@ -1,8 +1,9 @@
-import std/json
+import std/[json, math]
 import pixie, options
 import frameos/apps
 import frameos/types
 import frameos/render_scale
+import frameos/panel_shape
 import frameos/utils/text
 import frameos/utils/image
 
@@ -129,8 +130,49 @@ proc offsets(self: App): (float, float) =
   let k = if scale > 0: scale else: 1.0
   (self.appConfig.offsetX * k, self.appConfig.offsetY * k)
 
+proc roundBox(self: App, width, height: int): tuple[x, y, w, h: int] =
+  ## Where the text goes when it is drawn on a round panel's whole canvas, of
+  ## which only the circle shows (panel_shape.nim): text pinned to an edge or
+  ## a corner in the square inside the circle, `RoundInset` in from the rim;
+  ## text in the middle as wide as the circle is where its block reaches, a
+  ## line or two of a setup message across the whole glass. Laid out from the
+  ## canvas's corner, a scene's "add your key" note and a corner's clock lost
+  ## their first words to the rim (the UX bench, 2026-11-27).
+  let r = float(min(width, height)) / 2 - RoundInset.float
+  let side = max(8, int(r * sqrt(2.0)))
+  result = ((width - side) div 2, (height - side) div 2, side, side)
+  if self.appConfig.vAlign notin ["middle", "center"] or self.appConfig.position != "center":
+    return
+  # The block's height at a width sets the width the circle has there; the
+  # wider line may take fewer rows. Three rounds settle it.
+  var w = side
+  for _ in 0 ..< 3:
+    self.ensureLayout(w, side)
+    let lay = self.layout.get()
+    let blockH = layoutBounds(lay.textTypeset).y - layoutBoundsTopLeft(lay.textTypeset).y +
+      2 * lay.opts.padding * (if lay.opts.scale > 0: lay.opts.scale else: 1.0)
+    let half = sqrt(max(0.0, r * r - (blockH / 2) * (blockH / 2)))
+    let wider = max(side, int(2 * half))
+    if wider == w:
+      break
+    w = wider
+  result = ((width - w) div 2, (height - side) div 2, w, side)
+
+proc roundCanvas(self: App, image: Image): bool =
+  ## This run draws a round panel's whole canvas: not a window, a split's
+  ## panel or a layout's hole, which are rooms of their own (app_runtime's
+  ## `context.round`).
+  not self.frameConfig.isNil and panelIsRound(self.frameConfig.device) and
+    image.width == self.frameConfig.renderWidth() and image.height == self.frameConfig.renderHeight()
+
 proc run*(self: App, context: ExecutionContext) =
   if self.appConfig.text.len == 0:
+    return
+  if self.roundCanvas(context.image):
+    let box = self.roundBox(context.image.width, context.image.height)
+    self.ensureLayout(box.w, box.h)
+    let (ox, oy) = self.offsets()
+    discard self.renderText(context, context.image, ox + box.x.float, oy + box.y.float)
     return
   self.ensureLayout(context.image.width, context.image.height)
   let (ox, oy) = self.offsets()
