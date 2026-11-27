@@ -29,7 +29,8 @@ suite "render scale":
     check autoRenderScale(1872, 1404, "wasm", 10.3) == 2.0
     check autoRenderScale(720, 1280, "embedded", 7.0) == 1.0 # 210 ppi, but held to a 576 px layout
     check autoRenderScale(800, 480, "embedded", 7.3) == 1.0
-    check autoRenderScale(1200, 1600, "embedded", 13.3) == 1.0 # 150 ppi: 1.16, a whole number
+    # 150 ppi is 1.16, but a 13.3" panel is read from across a room: 2 (600x800).
+    check autoRenderScale(1200, 1600, "embedded", 13.3) == 2.0
 
   test "a frame's own scale, else the automatic one":
     check frameRenderScale(FrameConfig(width: 1200, height: 1600)) == 1.0 # no device: no panel

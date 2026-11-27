@@ -938,10 +938,11 @@
   vectors. The scale is a `role: "renderScale"` field's state, else the
   scene's `settings.renderScale`, else the frame's `render_scale` (0 =
   automatic, a WHOLE number by the panel's density: ppi over 130, rounded,
+  at least 2 on a panel of 12" or more (a poster, read from across a room),
   never leaving a layout under 576 px; the size from the driver's name
   `EPD_10in3` or `NamedPanelInches`, an ESP32's display and a plane's render
   passing theirs; HDMI by the room it leaves, 1080 px; unknown 1: 2 on the
-  E1003 and on 4K. The SPA's copy is `utils/renderScale.ts`, both pinned by
+  E1003, the 13.3" E1004 and on 4K. The SPA's copy is `utils/renderScale.ts`, both pinned by
   `docs/render-scale-fixtures.json`). It is the ONE setting that sizes
   every scene: the built-in scenes are sized for a 480 px panel and laid out
   at it, render/text, a split's gaps and margins and data/qr's pixels are

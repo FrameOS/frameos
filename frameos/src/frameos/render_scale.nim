@@ -34,8 +34,12 @@
 ##   (`EPD_10in3`) or `NamedPanelInches`; one of unknown size is 1. HDMI, a
 ##   screen of unknown size seen from across a room, is the largest whole
 ##   number that leaves 1080 px (a 4K screen is 2), and no panel (`web_only`)
-##   is 1. The reTerminal E1003 (10.3", 1872x1404, 227 ppi) is 2, a 13.3"
-##   1200x1600 e-paper (150 ppi) and a 7.3" 800x480 one 1.
+##   is 1. A panel of 12" or more (`PosterInches`) hangs like a poster and is
+##   read from across a room: at least 2 where its layout keeps its 576 px
+##   (a 13.3" 1200x1600 e-paper, 150 ppi, lays out at 600x800: at 1 the
+##   scenes and pages made for 480 px drew small on it; the UX bench,
+##   2026-11-27). The reTerminal E1003 (10.3", 1872x1404, 227 ppi) and the
+##   E1004 (13.3") are 2, a 7.3" 800x480 one 1.
 ##
 ## docs/jsx-ui.md "Scale" is the spec. The same automatic rule lives in
 ## `frontend/src/utils/renderScale.ts`; keep the two in step.
@@ -57,6 +61,9 @@ const
   MinLayoutEdge = 576
   ## HDMI: the layout's shorter edge the automatic scale leaves at least.
   HdmiRoom = 1080
+  ## A panel this big or bigger (a 13.3" e-paper) hangs like a poster and is
+  ## read from across a room: at least 2 where its layout keeps its 576 px.
+  PosterInches = 12.0
   ## Panels whose name does not say their size: only those with a shorter edge
   ## of 720 px or more, as no other can scale (MinLayoutEdge). Keep in step
   ## with `NAMED_PANEL_INCHES` in frontend/src/utils/renderScale.ts
@@ -109,7 +116,9 @@ proc autoRenderScale*(width, height: int, device: string, inches = 0.0): float =
   if diagonal <= 0.0:
     return
   let ppi = sqrt(float(width * width + height * height)) / diagonal
-  let dense = floor(ppi / ReferencePpi + 0.5)
+  var dense = floor(ppi / ReferencePpi + 0.5)
+  if diagonal >= PosterInches:
+    dense = max(dense, 2.0)
   let fits = float(edge div MinLayoutEdge)
   result = clamp(min(dense, fits), 1.0, MaxRenderScale)
 

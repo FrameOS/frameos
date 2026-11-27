@@ -50,7 +50,7 @@ describe("autoRenderScale", () => {
 describe("the Scale selects", () => {
   it("name the automatic scale on this panel, or just Automatic", () => {
     expect(automaticRenderScaleLabel(3840, 2160, "framebuffer")).toBe("Automatic (2× on this panel)");
-    expect(automaticRenderScaleLabel(1200, 1600, "waveshare.EPD_13in3e")).toBe("Automatic (1× on this panel)");
+    expect(automaticRenderScaleLabel(1200, 1600, "waveshare.EPD_13in3e")).toBe("Automatic (2× on this panel)");
     expect(automaticRenderScaleLabel(1872, 1404, "waveshare.EPD_10in3")).toBe("Automatic (2× on this panel)");
     expect(automaticRenderScaleLabel(800, 480)).toBe("Automatic (1× on this panel)");
     expect(automaticRenderScaleLabel(undefined, 480)).toBe("Automatic");
