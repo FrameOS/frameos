@@ -2370,10 +2370,14 @@ proc turnStops(n: UiNode, oy, shift, lo, hi: float32, into: var seq[(int, float3
 proc turnPage(top: UiNode, input: var UiInput) =
   ## A frame's next or prev button turned a page of a box that scrolls
   ## (ui/events.nim `turnPage`, which scrolled it): the ring goes to the
-  ## first element the new page shows below where it was (going back, the
-  ## last above it), and `turnSteps` on from there; with none, it stays
-  ## where it was while that shows, else it is on the box itself. Before
-  ## `reveal`, which shows the element whole.
+  ## element after the one it was on (going back, before it), when the new
+  ## page shows that one still, else to the first element the new page shows
+  ## below where it was (going back, the last above it), and `turnSteps` on
+  ## from there; with none, it stays where it was while that shows, else it is
+  ## on the box itself. Before `reveal`, which shows the element whole. By the
+  ## walk's order first: the elements of a row are not all the same height,
+  ## and one beside the ring that sits lower is not after it (a row's checkbox
+  ## centred beside its text was rung again, the UX bench, 2026-11-27).
   let
     box = top.fieldIn(input.turn - 1)
     back = input.turnBack
@@ -2386,10 +2390,17 @@ proc turnPage(top: UiNode, input: var UiInput) =
   let sy = clamp(scrollOf(box.key)[1], 0, box.maxY)
   var stops: seq[(int, float32, float32)]
   box.turnStops(0, 0, sy + box.box.border[0], sy + box.size.y - box.box.border[2], stops)
-  var picked = -1
+  var
+    picked = -1
+    was = -1 # where the ring was, if the new page shows it
+  for i, s in stops:
+    if s[0] == input.ring - 1:
+      was = i
   for j in 0 ..< stops.len:
     let i = if back: stops.high - j else: j
-    if (if back: stops[i][1] < at - 0.5 else: stops[i][1] > at + 0.5):
+    if (if was >= 0: (if back: i < was else: i > was)
+        elif back: stops[i][1] < at - 0.5
+        else: stops[i][1] > at + 0.5):
       picked = i
       if steps == 0:
         break

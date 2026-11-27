@@ -1214,7 +1214,8 @@ proc pageBox(target: UiTarget, i: int, back: bool): int =
 proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, back: bool): bool =
   ## A frame's next (prev with `back`) on an element in a box that scrolls,
   ## while the box has more that way: the element Tab would go to next is
-  ## not on the page (it is outside the box, or cut off at its edge), so the
+  ## not on the page (it is outside the box, cut off at its edge, or round
+  ## past the walk's end because what is past the edge has no regions), so the
   ## box scrolls a page instead (its height less an eighth, so the reader
   ## keeps their place), and the next layout rings the first element on it
   ## (ui/layout.nim `turnPage`). At the box's end Tab goes on as before.
@@ -1225,7 +1226,11 @@ proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, b
   if s < 0:
     return false
   let (nu, nk) = stops[next]
-  if nu == u and nk != s and t.inBox(nk, s):
+  # Round past the walk's end while the box has more that way: what it holds
+  # beyond its edge has no regions (only what shows answers), so the walk
+  # would go round without it (a list that ends exactly at the box's edge).
+  let onward = if back: next < current else: next > current
+  if nu == u and nk != s and t.inBox(nk, s) and onward:
     let
       n = t.regions[nk]
       topShows = n.visible[1] <= n.y + 0.5
@@ -1248,6 +1253,47 @@ proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, b
   # Where the ring was, in the box's own pixels: on the box itself, its page's
   # top edge (its bottom edge going back).
   t.input.turnFrom = if k == s: (if back: sy + box.h else: sy) else: c.y - box.y + sy
+  t.input.turnSteps = 0
+  t.inputOnly = true
+  t.scrolledBy(box)
+  true
+
+proc enterBox(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, back: bool): bool =
+  ## A frame's next (prev with `back`) that comes into a box that scrolls,
+  ## from outside it or round past the walk's end, while the box is scrolled
+  ## away from its start (its end): what it scrolled past has no regions (only
+  ## what shows answers), so the walk would come in halfway down, and the
+  ## rows above could never be rung again (a long list paged to its end and
+  ## round, the UX bench, 2026-11-27). The box goes back to its start (its
+  ## end) and the next layout rings its first element (its last: ui/layout.nim
+  ## `turnPage`), as a browser's Tab into a list does.
+  let
+    (nu, nk) = stops[next]
+    t = list[nu]
+    s = t.pageBox(nk, not back)
+  if s < 0:
+    return false
+  let (u, k) = stops[current]
+  if u == nu and (k == s or t.inBox(k, s)) and (if back: next < current else: next > current):
+    return false # on through the box: `turnPage`'s
+  for i, o in list:
+    if i != nu:
+      if o.input.ring > 0:
+        o.input.ring = 0
+        o.inputOnly = true
+      if o.input.focus > 0:
+        o.blurField()
+  if t.input.focus > 0:
+    t.blurField()
+  let
+    box = t.regions[s]
+    (sx, _) = t.input.scrolled(box.key)
+  t.input.ring = box.key + 1
+  t.input.scrollTo(box.key, sx, if back: box.scrollY else: 0)
+  t.input.turn = box.key + 1
+  t.input.turnBack = back
+  # From past its far end: its first element (going back, its last) is the one.
+  t.input.turnFrom = if back: box.h + box.scrollY + 1 else: -1
   t.input.turnSteps = 0
   t.inputOnly = true
   t.scrolledBy(box)
@@ -1307,7 +1353,8 @@ proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
     if current < 0: (if back: stops.len - 1 else: 0)
     elif back: (current + stops.len - 1) mod stops.len
     else: (current + 1) mod stops.len
-  if not typed and not listUp and current >= 0 and turnPage(list, stops, current, next, back):
+  if not typed and not listUp and current >= 0 and
+      (turnPage(list, stops, current, next, back) or enterBox(list, stops, current, next, back)):
     return true
   let (u, k) = stops[next]
   for i, t in list:

@@ -252,6 +252,68 @@ suite "the keys turn pages":
     check target.ringed == 23 # row 13, the last on the new page above row 14
     forgetUiTarget("news", 1)
 
+  test "round past the end, the list starts again at its first row":
+    # Only what shows of a box that scrolls answers: paged to its end, its
+    # first rows have no regions, and the walk round came in halfway down.
+    let target = uiTarget("news", 1)
+    let root = news()
+    discard target.draw(root)
+    for _ in 1 .. 22:
+      target.next(root)
+    check target.ringed == 2 # the bar below the list, the list at its end
+    check target.scrollTop == 540
+    target.next(root)
+    check target.ringed == 1 # round to the bar above it
+    target.next(root)
+    check target.scrollTop == 0
+    check target.ringed == 10 # the list's first row, not the first that showed
+    target.next(root)
+    check target.ringed == 11
+    forgetUiTarget("news", 1)
+
+  test "prev into a list from below starts at its last row":
+    let target = uiTarget("news", 1)
+    let root = news()
+    discard target.draw(root)
+    target.next(root)
+    check target.ringed == 1
+    target.next(root, back = true)
+    check target.ringed == 2 # round the other way, to the bar below the list
+    target.next(root, back = true)
+    check target.scrollTop == 540
+    check target.ringed == 29 # the list's last row
+    forgetUiTarget("news", 1)
+
+  test "a page turned on from a row's last element goes to the next row, not the row again":
+    # Rows of a checkbox centred beside a taller text and a delete button: the
+    # checkbox sits lower than the text. The ring on a row's last element, a
+    # page turned: the next row's first element, though the row's checkbox is
+    # below where the ring was. The rows end at the box's edge, so the next
+    # row has no region at all before the page turns.
+    let target = uiTarget("todo", 1)
+    var rows: seq[SvgNode]
+    for i in 0 ..< 12:
+      rows.add el("div", "h-[50px] shrink-0 flex flex-row items-center gap-2",
+        el("div", "w-[20px] h-[20px]").on("on-click", $(100 + i * 3)),
+        el("div", "flex-1 h-[40px]", txt("Task " & $i)).on("on-click", $(101 + i * 3)),
+        el("div", "w-[30px] h-[40px]", txt("x")).on("on-click", $(102 + i * 3)))
+    let root = el("div", "w-full h-full flex flex-col bg-black text-white",
+      el("div", "h-[300px] shrink-0 overflow-y-auto", rows))
+    discard target.draw(root)
+    proc press(back = false) =
+      check uiButtonKeys(["todo"], button(if back: "prev" else: "next", "press"))
+      discard target.draw(root)
+    var seen: seq[int]
+    for _ in 1 .. 36:
+      press()
+      seen.add target.ringed
+    # Every element once, in order, the rows' pages turned on the way.
+    var expected: seq[int]
+    for i in 0 ..< 36:
+      expected.add 100 + i
+    check seen == expected
+    forgetUiTarget("todo", 1)
+
   test "presses that come before the page is drawn go on from where the ring lands":
     let target = uiTarget("news", 1)
     let root = news()
