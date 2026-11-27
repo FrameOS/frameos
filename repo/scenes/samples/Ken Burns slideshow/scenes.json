@@ -215,6 +215,98 @@
         },
         "width": 220,
         "height": 48
+      },
+      {
+        "id": "photo-loaded",
+        "type": "code",
+        "position": {
+          "x": 120,
+          "y": 300
+        },
+        "data": {
+          "codeJS": "(() => {\n  // A photo of this folder has loaded (localImage keeps its metadata). Until\n  // one has, the folder's picture is drawn still: with none in it, the note\n  // saying so is read whole, not zoomed and panned like a photo.\n  const meta = state.imageMetadata\n  if (!meta || typeof meta !== 'object' || !meta.filename) return false\n  const folder = String(imageFolder || '').replace(/\\/+$/, '')\n  if (folder && !String(meta.path || '').startsWith(folder)) return false\n  const query = String(search || '').toLowerCase()\n  return !query || String(meta.filename).toLowerCase().includes(query)\n})()",
+          "codeArgs": [
+            {
+              "name": "imageFolder",
+              "type": "string"
+            },
+            {
+              "name": "search",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "loaded",
+              "type": "boolean"
+            }
+          ]
+        },
+        "width": 420,
+        "height": 220
+      },
+      {
+        "id": "in-motion",
+        "type": "app",
+        "position": {
+          "x": 160,
+          "y": 100
+        },
+        "data": {
+          "keyword": "logic/ifElse",
+          "config": {}
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "still-image",
+        "type": "app",
+        "position": {
+          "x": 500,
+          "y": 300
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "cover"
+          }
+        },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "sleep-seconds",
+        "type": "code",
+        "position": {
+          "x": 900,
+          "y": -260
+        },
+        "data": {
+          "codeJS": "(() => {\n  // In motion: the scene's own interval. Still (no photo yet, or none in the\n  // folder): look again every 30 seconds at most, not at the frame rate.\n  const meta = state.imageMetadata\n  const folder = String(imageFolder || '').replace(/\\/+$/, '')\n  const query = String(search || '').toLowerCase()\n  const loaded = !!meta && typeof meta === 'object' && !!meta.filename &&\n    (!folder || String(meta.path || '').startsWith(folder)) &&\n    (!query || String(meta.filename).toLowerCase().includes(query))\n  const seconds = Number(interval) > 0 ? Number(interval) : 0.0416\n  return loaded ? seconds : Math.max(seconds, 30)\n})()",
+          "codeArgs": [
+            {
+              "name": "imageFolder",
+              "type": "string"
+            },
+            {
+              "name": "search",
+              "type": "string"
+            },
+            {
+              "name": "interval",
+              "type": "float"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "duration",
+              "type": "float"
+            }
+          ]
+        },
+        "width": 420,
+        "height": 220
       }
     ],
     "edges": [
@@ -222,7 +314,7 @@
         "id": "e7d4ecfa-ce9d-5717-b0f3-13ba24a54025",
         "source": "780b4084-b70f-5067-9ce8-605e4cfcd965",
         "sourceHandle": "next",
-        "target": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "target": "in-motion",
         "targetHandle": "prev"
       },
       {
@@ -262,7 +354,7 @@
       },
       {
         "id": "08a1fd27-433e-58ec-b630-0be9aab97671",
-        "source": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "source": "in-motion",
         "sourceHandle": "next",
         "target": "0d023acc-0edb-5bfe-9cc0-b02ecbcd4cbc",
         "targetHandle": "prev"
@@ -270,6 +362,69 @@
       {
         "id": "ee7805d1-4995-5a30-9651-f72fa1f188e1",
         "source": "4f66643e-a402-53c4-b7a9-9ae3193b0e67",
+        "sourceHandle": "fieldOutput",
+        "target": "sleep-seconds",
+        "targetHandle": "codeField/interval"
+      },
+      {
+        "id": "photo-loaded-to-if",
+        "source": "photo-loaded",
+        "sourceHandle": "fieldOutput",
+        "target": "in-motion",
+        "targetHandle": "fieldInput/condition"
+      },
+      {
+        "id": "if-then-zoom",
+        "source": "in-motion",
+        "sourceHandle": "field/thenNode",
+        "target": "35470220-46e6-5c15-9da4-e7a75cd4e523",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "if-else-still",
+        "source": "in-motion",
+        "sourceHandle": "field/elseNode",
+        "target": "still-image",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "local-to-still",
+        "source": "045962b7-124e-5ef2-a225-e2441d0fa2be",
+        "sourceHandle": "fieldOutput",
+        "target": "still-image",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "folder-to-loaded",
+        "source": "485c3128-c8f4-5b1b-a7ce-0e1fab0f8a4a",
+        "sourceHandle": "fieldOutput",
+        "target": "photo-loaded",
+        "targetHandle": "codeField/imageFolder"
+      },
+      {
+        "id": "search-to-loaded",
+        "source": "c6284198-1c92-5a64-b2cb-d0166a98253b",
+        "sourceHandle": "fieldOutput",
+        "target": "photo-loaded",
+        "targetHandle": "codeField/search"
+      },
+      {
+        "id": "folder-to-sleep",
+        "source": "485c3128-c8f4-5b1b-a7ce-0e1fab0f8a4a",
+        "sourceHandle": "fieldOutput",
+        "target": "sleep-seconds",
+        "targetHandle": "codeField/imageFolder"
+      },
+      {
+        "id": "search-to-sleep",
+        "source": "c6284198-1c92-5a64-b2cb-d0166a98253b",
+        "sourceHandle": "fieldOutput",
+        "target": "sleep-seconds",
+        "targetHandle": "codeField/search"
+      },
+      {
+        "id": "sleep-seconds-to-sleep",
+        "source": "sleep-seconds",
         "sourceHandle": "fieldOutput",
         "target": "0d023acc-0edb-5bfe-9cc0-b02ecbcd4cbc",
         "targetHandle": "fieldInput/duration"

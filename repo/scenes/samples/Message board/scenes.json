@@ -7,6 +7,7 @@
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted",
+      "renderScale": 1,
       "windowSize": "800x480",
       "icon": "M12.04,2.5L9.53,5H14.53L12.04,2.5M4,7V20H20V7H4M12,0L17,5V5H20A2,2 0 0,1 22,7V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V7A2,2 0 0,1 4,5H7V5L12,0M7,18V14H12V18H7M14,17V10H18V17H14M6,12V9H11V12H6Z"
     },
@@ -31,7 +32,7 @@
       { "name": "font", "label": "Font", "type": "font", "persist": "disk", "access": "public" },
       {
         "name": "fontSize",
-        "label": "Font size",
+        "label": "Font size (on an 800x480 panel)",
         "type": "float",
         "persist": "disk",
         "access": "public",
@@ -155,6 +156,45 @@
         "dragging": false
       },
       {
+        "id": "message-font-size",
+        "type": "code",
+        "position": { "x": 679.78, "y": -150 },
+        "data": {
+          "codeJS": "(() => {\n  // The font size is for an 800x480 panel: any other gets the same share of\n  // its own, so the message keeps its look on a watch and on a 13\" e-paper.\n  // (The scene's render scale is 1: these are the panel's pixels.)\n  const scale = Math.min((context.imageWidth || 800) / 800, (context.imageHeight || 480) / 480)\n  return Math.round((Number(fontSize) || 90) * Math.max(0.4, scale))\n})()",
+          "codeArgs": [{ "name": "fontSize", "type": "float" }],
+          "codeOutputs": [{ "name": "fontSize", "type": "float" }]
+        },
+        "style": { "width": 420, "height": 200 },
+        "width": 420,
+        "height": 200
+      },
+      {
+        "id": "clock-font-size",
+        "type": "code",
+        "position": { "x": 1300, "y": -150 },
+        "data": {
+          "codeJS": "(() => {\n  // 24 px on an 800x480 panel, the same share of a bigger one.\n  const scale = Math.min((context.imageWidth || 800) / 800, (context.imageHeight || 480) / 480)\n  return Math.round(24 * Math.max(0.75, scale))\n})()",
+          "codeArgs": [],
+          "codeOutputs": [{ "name": "fontSize", "type": "float" }]
+        },
+        "style": { "width": 420, "height": 200 },
+        "width": 420,
+        "height": 200
+      },
+      {
+        "id": "message-border-width",
+        "type": "code",
+        "position": { "x": 1150, "y": -400 },
+        "data": {
+          "codeJS": "(() => {\n  // The message's outline: 4 px on an 800x480 panel, the same share of any other.\n  const scale = Math.min((context.imageWidth || 800) / 800, (context.imageHeight || 480) / 480)\n  return Math.max(2, Math.round(4 * scale))\n})()",
+          "codeArgs": [],
+          "codeOutputs": [{ "name": "borderWidth", "type": "integer" }]
+        },
+        "style": { "width": 420, "height": 200 },
+        "width": 420,
+        "height": 200
+      },
+      {
         "id": "c5062224-449e-4c87-b0dd-1d3b360071c6",
         "position": { "x": 679.7844179456829, "y": 49.247594112164165 },
         "data": { "keyword": "fontSize" },
@@ -257,7 +297,31 @@
         "id": "632d52e1-df91-4a26-a5e0-39f5cd8f0461",
         "source": "c5062224-449e-4c87-b0dd-1d3b360071c6",
         "sourceHandle": "fieldOutput",
+        "target": "message-font-size",
+        "targetHandle": "codeField/fontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "message-font-size-to-text",
+        "source": "message-font-size",
+        "sourceHandle": "fieldOutput",
         "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
+        "targetHandle": "fieldInput/fontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "message-border-width-to-text",
+        "source": "message-border-width",
+        "sourceHandle": "fieldOutput",
+        "target": "eb54d359-2986-4012-8b49-a034437ebdeb",
+        "targetHandle": "fieldInput/borderWidth",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "clock-font-size-to-clock",
+        "source": "clock-font-size",
+        "sourceHandle": "fieldOutput",
+        "target": "e096ca13-bbab-45e3-8e8c-c34b2f2ac450",
         "targetHandle": "fieldInput/fontSize",
         "type": "codeNodeEdge"
       },
@@ -320,8 +384,9 @@
         "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" },
         "origin": "repo/apps/image/unsplash",
         "sources": {
-          "app.ts": "// A random Unsplash photo for a search; frameos.fetchImage decodes it natively.\nconst enc = (s) =>\n  encodeURIComponent(s)\n    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())\n    .replace(/%20/g, '+')\nconst str = (v, d = '') => (typeof v === 'string' ? v : d)\n\nexport function get(app, context) {\n  const { config: c, frame: f } = app\n  // The size the photo is drawn at: the box it feeds, else the canvas. Both\n  // are in scene pixels, already turned with the frame.\n  const w = context.targetWidth || context.imageWidth || 0\n  const h = context.targetHeight || context.imageHeight || 0\n  if (!(w > 0 && h > 0)) throw new Error('No canvas to draw on: this app runs on render.')\n  const search = c.search.trim()\n  const stateKey = c.metadataStateKey.trim()\n  const fail = (m) => {\n    throw new Error(`Error fetching image from Unsplash: ${m}`)\n  }\n\n  const key = str(frameos.getSetting('unsplash', 'accessKey'))\n  if (!key) throw new Error('Please provide an Unsplash API key in the settings.')\n  const o = c.orientation\n  const orientation = o === 'auto' ? (h > w ? 'portrait' : w > h ? 'landscape' : 'squarish') : o === 'any' ? '' : o\n  const url = `https://api.unsplash.com/photos/random/?orientation=${enc(orientation)}&query=${enc(search)}`\n  if (f.debug) frameos.log(`API request: ${url}`)\n  const r = frameos.httpRequest(url, {\n    headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1', 'Content-Type': 'application/json' },\n    timeoutMs: 60000,\n  })\n  if (!r.status) fail(r.error)\n  if (r.status !== 200) {\n    let detail = r.body\n    try {\n      const j = JSON.parse(r.body)\n      detail = str(j?.error?.message, str(j?.error, JSON.stringify(j)))\n    } catch {}\n    throw new Error(`Error making request ${r.status}: ${detail}`)\n  }\n  let j\n  try {\n    j = JSON.parse(r.body)\n  } catch (e) {\n    fail(e.message)\n  }\n  const raw = str(j?.urls?.raw)\n  if (!raw) throw new Error('No image URL returned from Unsplash.')\n  const imageUrl = `${raw}&w=${w}&h=${h}&fit=crop&crop=faces,edges`\n  const description = str(j.description, str(j.alt_description))\n  const meta = stateKey && {\n    source: 'unsplash',\n    search,\n    orientation,\n    imageUrl,\n    id: str(j.id),\n    title: str(j.slug, description),\n    description,\n    altDescription: str(j.alt_description),\n    location: str(j.location?.name),\n    createdAt: str(j.created_at),\n    photoUrl: str(j.links?.html),\n    author: str(j.user?.name),\n    authorUsername: str(j.user?.username),\n    authorUrl: str(j.user?.links?.html),\n  }\n  j = null\n\n  if (f.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const mode = c.saveAssets\n  const photo = frameos.fetchImage(imageUrl, {\n    saveAsset:\n      mode === 'auto' || mode === 'always' ? { name: `${search} ${w}x${h}`, extension: '.jpg', mode } : undefined,\n  })\n  if (!photo.image) fail(photo.error)\n  if (meta) frameos.setState(stateKey, meta)\n  return photo.image\n}\n",
-          "config.json": "{\n  \"name\": \"Unsplash\",\n  \"description\": \"Random Unsplash photo\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"unsplash\"],\n  \"fields\": [\n    { \"name\": \"search\", \"type\": \"string\", \"value\": \"nature\", \"label\": \"Search\", \"placeholder\": \"e.g. nature, birds\" },\n    {\n      \"name\": \"orientation\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"any\", \"landscape\", \"portrait\", \"squarish\"],\n      \"label\": \"Orientation\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Stores {search, title, description, location, author, links, ...} under this key.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the image to the frame's assets folder. auto follows the frame's save-assets setting.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+          "app.ts": "// A random Unsplash photo for a search; frameos.fetchImage decodes it natively.\n// The message board's copy: the photo is only its background, so without an\n// API key it draws a plain one with a note at the bottom (noKey.tsx) instead\n// of painting the error where the message goes. The app stays a .ts, which\n// keeps the panel's pixels at any render scale: a photo wants every one.\nimport { noKey } from './noKey'\nconst enc = (s) =>\n  encodeURIComponent(s)\n    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())\n    .replace(/%20/g, '+')\nconst str = (v, d = '') => (typeof v === 'string' ? v : d)\n\nexport function get(app, context) {\n  const { config: c, frame: f } = app\n  // The size the photo is drawn at: the box it feeds, else the canvas. Both\n  // are in scene pixels, already turned with the frame.\n  const w = context.targetWidth || context.imageWidth || 0\n  const h = context.targetHeight || context.imageHeight || 0\n  if (!(w > 0 && h > 0)) throw new Error('No canvas to draw on: this app runs on render.')\n  const search = c.search.trim()\n  const stateKey = c.metadataStateKey.trim()\n  const fail = (m) => {\n    throw new Error(`Error fetching image from Unsplash: ${m}`)\n  }\n\n  const key = str(frameos.getSetting('unsplash', 'accessKey'))\n  if (!key) return noKey(app, context, w, h)\n  const o = c.orientation\n  const orientation = o === 'auto' ? (h > w ? 'portrait' : w > h ? 'landscape' : 'squarish') : o === 'any' ? '' : o\n  const url = `https://api.unsplash.com/photos/random/?orientation=${enc(orientation)}&query=${enc(search)}`\n  if (f.debug) frameos.log(`API request: ${url}`)\n  const r = frameos.httpRequest(url, {\n    headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1', 'Content-Type': 'application/json' },\n    timeoutMs: 60000,\n  })\n  if (!r.status) fail(r.error)\n  if (r.status !== 200) {\n    let detail = r.body\n    try {\n      const j = JSON.parse(r.body)\n      detail = str(j?.error?.message, str(j?.error, JSON.stringify(j)))\n    } catch {}\n    throw new Error(`Error making request ${r.status}: ${detail}`)\n  }\n  let j\n  try {\n    j = JSON.parse(r.body)\n  } catch (e) {\n    fail(e.message)\n  }\n  const raw = str(j?.urls?.raw)\n  if (!raw) throw new Error('No image URL returned from Unsplash.')\n  const imageUrl = `${raw}&w=${w}&h=${h}&fit=crop&crop=faces,edges`\n  const description = str(j.description, str(j.alt_description))\n  const meta = stateKey && {\n    source: 'unsplash',\n    search,\n    orientation,\n    imageUrl,\n    id: str(j.id),\n    title: str(j.slug, description),\n    description,\n    altDescription: str(j.alt_description),\n    location: str(j.location?.name),\n    createdAt: str(j.created_at),\n    photoUrl: str(j.links?.html),\n    author: str(j.user?.name),\n    authorUsername: str(j.user?.username),\n    authorUrl: str(j.user?.links?.html),\n  }\n  j = null\n\n  if (f.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const mode = c.saveAssets\n  const photo = frameos.fetchImage(imageUrl, {\n    saveAsset:\n      mode === 'auto' || mode === 'always' ? { name: `${search} ${w}x${h}`, extension: '.jpg', mode } : undefined,\n  })\n  if (!photo.image) fail(photo.error)\n  if (meta) frameos.setState(stateKey, meta)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"Unsplash\",\n  \"description\": \"Random Unsplash photo\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"unsplash\"],\n  \"fields\": [\n    { \"name\": \"search\", \"type\": \"string\", \"value\": \"nature\", \"label\": \"Search\", \"placeholder\": \"e.g. nature, birds\" },\n    {\n      \"name\": \"orientation\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"any\", \"landscape\", \"portrait\", \"squarish\"],\n      \"label\": \"Orientation\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Stores {search, title, description, location, author, links, ...} under this key.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the image to the frame's assets folder. auto follows the frame's save-assets setting.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n",
+          "noKey.tsx": "// No key, no photo: a calm background the message reads on, and a small line\n// at the bottom (inside the circle on a round panel) saying what is missing.\nexport function noKey(app, context, w, h) {\n  frameos.log('No Unsplash API key: add one in the settings for a background photo.')\n  const paper = app.frame.paper === true\n  const round = context.round === true\n  const size = Math.max(12, Math.round(Math.min(w, h) / 30))\n  const bottom = Math.round(h * (round ? 0.15 : 0.04))\n  const side = Math.round(w * (round ? 0.22 : 0.05))\n  const colors = paper ? 'bg-white text-black' : 'bg-gradient-to-b from-slate-600 to-slate-900 text-slate-200'\n  return (\n    <div className={`flex flex-col justify-end items-center w-[${w}px] h-[${h}px] px-[${side}px] pb-[${bottom}px] ${colors}`}>\n      <div className={`text-[${size}px] text-center`}>No background photo: add an Unsplash API key in the settings.</div>\n    </div>\n  )\n}\n"
         }
       },
       "clock": {
