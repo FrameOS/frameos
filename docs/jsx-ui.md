@@ -1091,7 +1091,13 @@ less an eighth so the reader keeps their place, and the ring goes to the first
 element the new page shows below the one it was on. With nothing to press on
 the new page it stays where it was while that shows, else it rings the box
 itself. Only at the box's end does `next` go on past it. `prev` mirrors it
-upward. A box that scrolls with nothing to press showing in it is a stop of
+upward. Coming into a box that scrolls, from outside it or round past the
+walk's end, `next` starts at its first element, the box back at its start
+(`prev`: its last, the box at its end): only what shows of a box answers, so
+the walk would otherwise come in at the first row in sight, and a list paged
+to its end and round could never be rung from its top again. A page turned
+goes on from the element the ring was on, in the walk's order, not by how
+high each sits: a row's checkbox centred lower than its text is not after it. A box that scrolls with nothing to press showing in it is a stop of
 its own, so a long text pages too. Presses that come before the new page is
 drawn (quick taps, taps while e-paper refreshes) go on from where the ring
 lands, one element each. A keyboard's Tab walks on without pages and brings
