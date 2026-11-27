@@ -752,12 +752,9 @@ async function runBuiltins() {
   call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
   step('00-home-scene', () => 0)
   const keys = panel.keys || []
-  const byRole = (role) => keys.find((k) => {
-    const r = k.role
-    if (role === 'next') return ['next', 'right', 'down'].includes(r)
-    if (role === 'prev') return ['prev', 'left', 'up'].includes(r)
-    return r === role
-  })
+  // By the role the scene hears, as the frame hangs (a key that points
+  // somewhere is next or prev by its direction turned with the frame).
+  const byRole = (role) => keys.find((k) => resolveRole(k.role) === role)
   const walk = (prefix) => {
     if (panel.touch) {
       const x = Math.round(W / 2)
@@ -811,7 +808,8 @@ if (BUILTINS) {
 
 for (const scene of tested) {
   const rec = { scene: scene.id, folder: scene.__folder, name: scene.name, order: frameScenes(scene).filter((s) => !s.settings?.isLayout).map((s) => s.id), steps: [] }
-  const base = safe(scene.__folder)
+  // A folder of several scenes (Split screen and its panels): each its own pictures.
+  const base = safe(scene.__folder + (tested.filter((x) => x.__folder === scene.__folder).length > 1 ? '-' + (scene.name || scene.id) : ''))
   const shot = (tag, r) => {
     if (!r.pixels) return null
     const f = `${base}.${tag}.png`

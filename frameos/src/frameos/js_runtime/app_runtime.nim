@@ -4434,6 +4434,10 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
   target.offsetX = x.float32
   target.offsetY = y.float32
   target.scale = scale
+  when defined(frameosWasm):
+    if not owner.scene.isNil:
+      target.sceneX = owner.scene.canvasX.float32
+      target.sceneY = owner.scene.canvasY.float32
   # Into the app that drew these regions, every render: the scene can be
   # loaded again since the last one (a switch away and back), with a new app.
   target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) {.closure, raises: [].} =
