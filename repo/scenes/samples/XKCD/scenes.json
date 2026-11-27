@@ -120,6 +120,22 @@
         "source": "4d63db0a-df16-4a91-9de7-63a6ed9f156d",
         "sourceHandle": "fieldOutput",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "xkcd-round-margin-edge",
+        "source": "xkcd-round-margin",
+        "sourceHandle": "fieldOutput",
+        "target": "503ff6b3-4fab-41ce-8db6-7e23e664f9b4",
+        "targetHandle": "fieldInput/margin",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "xkcd-round-ratios-edge",
+        "source": "xkcd-round-ratios",
+        "sourceHandle": "fieldOutput",
+        "target": "503ff6b3-4fab-41ce-8db6-7e23e664f9b4",
+        "targetHandle": "fieldInput/height_ratios",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
@@ -403,6 +419,66 @@
         "type": "state",
         "width": 152,
         "height": 48
+      },
+      {
+        "data": {
+          "codeJS": "(() => {\n  // A round panel shows only the circle inside its square: the comic and its\n  // caption go in the tallest box that fits in it, 12 px in from the rim.\n  if (!context.round) return '20 40 20 40'\n  const width = context.imageWidth\n  const height = context.imageHeight\n  const r = Math.min(width, height) / 2 - 12\n  const top = Math.round((height - r * 1.56) / 2)\n  const side = Math.round((width - r * 1.25) / 2)\n  return top + ' ' + side + ' ' + top + ' ' + side\n})()",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "margin",
+              "type": "string"
+            }
+          ]
+        },
+        "dragging": false,
+        "height": 119,
+        "id": "xkcd-round-margin",
+        "position": {
+          "x": 863.15,
+          "y": -170
+        },
+        "positionAbsolute": {
+          "x": 863.15,
+          "y": -170
+        },
+        "selected": false,
+        "style": {
+          "height": 119,
+          "width": 300
+        },
+        "type": "code",
+        "width": 300
+      },
+      {
+        "data": {
+          "codeJS": "context.round ? '80 20' : '85 15'",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "height_ratios",
+              "type": "string"
+            }
+          ]
+        },
+        "dragging": false,
+        "height": 119,
+        "id": "xkcd-round-ratios",
+        "position": {
+          "x": 863.15,
+          "y": -40
+        },
+        "positionAbsolute": {
+          "x": 863.15,
+          "y": -40
+        },
+        "selected": false,
+        "style": {
+          "height": 119,
+          "width": 300
+        },
+        "type": "code",
+        "width": 300
       }
     ],
     "settings": {
