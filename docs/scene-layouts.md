@@ -761,14 +761,15 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   the time and the short date on the left (a tap: the scene list), the Wi-Fi
   signal and the battery on the right (a tap: the frame's page), a 2 px rule
   under it, one ink and no greys, so it stays crisp on the black-and-white
-  panel. When the scene list is open (a swipe up, Action pressed thrice, or
-  twice where the frame's map leaves that free: the layout's own binding), the
-  same header is big: the layout turns the list into a home screen with the
-  time and the date large, the battery and the signal, and under the list how
-  to get around, a line each, read off the frame's event map: what Action does (once,
-  twice, thrice, held: `once: go · twice: back · thrice: home · hold: talk`), what UP and
-  DOWN do (in the list they move; held, the map's scene back and on) and the
-  swipes. That is the one place the layout teaches
+  panel. When the scene list is open (a swipe up, two keys held), the same
+  header is big: the layout turns the list into a home screen with the time
+  and the date large, the battery and the signal, and under the list how to
+  get around, a line each, read off the frame's event map: what Action does
+  (`press: go · hold: talk`), what UP and DOWN do (in the list they move;
+  held, the map's scene back and on), two keys together and the swipes. Held
+  sideways (landscape) all of that is a column on the left and the list has
+  the whole height: stacked over and under it, they left the list one row of
+  tiles. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
   nobody used it (removed 2026-11-23; an install that chose it gets the whole
   glass, as "Around the scene: Nothing" does).
