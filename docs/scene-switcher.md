@@ -194,6 +194,19 @@ on a 10" panel alike a cell is 84 px wide (Explorer's is about 75 to 90 at
 (the owner's rule, 2026-11-20); the frame's render scale is what makes them
 larger.
 
+In a room wider than tall (more than 5:4: a panel held sideways, the 5.79"
+strip, a landscape window) each name goes beside its icon instead, on up to
+two lines, left-aligned: Explorer's Tiles view, a row about 46 px tall at
+the same unit (a 30 px icon), the tiles as many as leave a dozen letters'
+room each (140 px) and widened to fill the row (`beside`). The height a row
+of icons over names took is what such a room runs out of long before its
+width: the reTerminal Sticky held sideways showed 9 of 43 scenes, 19 upright;
+with the names beside, 16 (the UX bench, 2026-11-27). Every category keeps
+its heading over a row of its own (the owner's calls, #1106 and #1135).
+A name is never broken inside a word: a word wider than its room is set
+smaller, down to 9 px; its letters say which words might not fit, and only
+those are set in type to see ("Countdow/n" on the 5.79" strip).
+
 - **The icon** is the scene's own (`settings.icon`, docs/scene-icons.md) in
   its category's color, or its first letter on a rounded square of that
   color. The colors are eight, by the category's place in the list, so two

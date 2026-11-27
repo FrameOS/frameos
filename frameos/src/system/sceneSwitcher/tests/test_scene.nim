@@ -94,14 +94,14 @@ sceneSwitcherListing = testListing
 block the_tiles_keep_one_size_whatever_the_count:
   # The grid is the panel's alone: three scenes fill three of its slots, and
   # thirty scroll through the same.
-  let few = switcherGrid(800, 480, thumbnails = true)
-  doAssert few.cols == 8 and few.rows == 4, "a folder's icons, eight by four on 800x480: " & $few
+  let few = switcherGrid(480, 800, thumbnails = true)
+  doAssert few.cols == 5 and few.rows == 7 and not few.beside, "a folder's icons, five by seven on 480x800: " & $few
   let many = switcherGrid(480, 480, thumbnails = false)
   doAssert many.cols * many.rows >= 9, $many
   doAssert many.tileW >= 80 and many.text >= 12, "names stay readable on a 4\" square " & $many
   # A bigger window shows more icons, never larger ones: a folder's icon view.
-  let small = switcherGrid(640, 400, thumbnails = false, unit = 400)
-  let large = switcherGrid(1400, 900, thumbnails = false, unit = 400)
+  let small = switcherGrid(400, 640, thumbnails = false, unit = 400)
+  let large = switcherGrid(900, 1400, thumbnails = false, unit = 400)
   doAssert small.tileW == large.tileW and small.icon == large.icon and small.text == large.text, $small & " " & $large
   doAssert large.cols > small.cols and large.rows > small.rows, $small & " " & $large
   doAssert small.tileW == 84 and small.icon == 40 and small.text == 12 and small.gap == 4, $small
@@ -157,7 +157,9 @@ block the_keys_walk_the_tiles_and_every_press_counts:
   doAssert scene.highlightedId == "scene-5"
   let cols = switcherGrid(800, 480, thumbnails = false).cols
   scene.send("keyDown", %*{"code": "ArrowDown", "key": "ArrowDown"})
-  doAssert scene.highlightedId == (if 4 + cols < 6: "scene-" & $(5 + cols) else: "scene-1"), scene.highlightedId
+  # The row below in its column, or the last of a shorter row, or round to the first.
+  let below = if 4 + cols < 6: "scene-" & $(5 + cols) elif 4 div cols < 5 div cols: "scene-6" else: "scene-1"
+  doAssert scene.highlightedId == below, scene.highlightedId
   sent.setLen(0)
   scene.send("keyDown", %*{"code": "Enter", "key": "Enter"})
   doAssert sent.len == 1 and sent[0][0] == evSetCurrentScene
@@ -869,7 +871,7 @@ block a_scene_icon_in_its_cell:
   listed[4].icon = House
   let marked = newSwitcher(lcd, opener = "scene-2").draw(newImage(800, 480))
   preview("switcher-800x480-lcd-icons", marked)
-  doAssert differIn(marked, lettered, cards, 0) > 400
+  doAssert differIn(marked, lettered, cards, 0) > cards.icon * cards.icon div 4, $differIn(marked, lettered, cards, 0)
   doAssert differIn(marked, lettered, cards, 2) == 0
   sceneSwitcherThumbnail = nil
 
@@ -1073,3 +1075,47 @@ block the_frames_home_on_a_portrait_e_paper:
 
 localEventSink = nil
 echo "scene switcher: ok"
+
+block a_wide_room_puts_each_name_beside_its_icon:
+  # Wider than 5:4 the height runs out long before the width (the Sticky held
+  # sideways showed 9 of 43 scenes, 19 upright; the UX bench, 2026-11-27):
+  # each name beside its icon, a row half as tall, the tiles widened to fill
+  # the row. Every category keeps its heading over a row of its own.
+  let wide = switcherGrid(800, 480, thumbnails = false)
+  let tall = switcherGrid(480, 800, thumbnails = false)
+  doAssert wide.beside and not tall.beside, $wide
+  doAssert wide.tileH * 2 <= tall.tileH + 4, "half as tall: " & $wide & " " & $tall
+  doAssert wide.cols == 5 and wide.rows >= 8, $wide
+  doAssert wide.x0 + wide.cols * (wide.tileW + wide.gap) - wide.gap in 800 - wide.pad - wide.cols .. 800 - wide.pad,
+    "the row filled: " & $wide
+  doAssert not switcherGrid(720, 720, thumbnails = false).beside
+  doAssert not switcherGrid(466, 466, thumbnails = false, round = true).beside
+  # The 5.79" strip, a desktop's landscape window: the same.
+  doAssert switcherGrid(792, 272, thumbnails = false).beside
+  doAssert switcherGrid(640, 400, thumbnails = false, unit = 400).beside
+
+block a_name_is_never_broken_inside_a_word:
+  # A word wider than its cell is set smaller, down to 9 px, rather than
+  # broken ("Countdow/n", "Sketchboo/k" on a small icon view).
+  listed = @[SwitcherEntry(id: "countdown", name: "Countdown"), SwitcherEntry(id: "sketchbook", name: "Sketchbook")]
+  for (w, h) in [(272, 792), (240, 296), (792, 272)]:
+    let s = newSwitcher(config(w, h, "waveshare.EPD_5in79_BW"), opener = "countdown")
+    preview("switcher-" & $w & "x" & $h & "-names", s.draw(newImage(w, h)))
+    let grid = switcherGrid(w, h, thumbnails = false)
+    let room = if grid.beside: grid.tileW - (grid.icon + 2 * grid.inner) - 3 * grid.inner else: grid.tileW
+    proc labelOf(n: SvgNode, name: string): SvgNode =
+      if n.tag == "span" and n.children.len == 1 and n.children[0].text == name: return n
+      for c in n.children:
+        result = labelOf(c, name)
+        if not result.isNil: return
+    for name in ["Countdown", "Sketchbook"]:
+      let label = labelOf(s.tree(w, h, true), name)
+      doAssert not label.isNil, name
+      let classes = label.attrs[0][1]
+      var size = grid.text
+      var pad = 0
+      for part in classes.split(' '):
+        if part.startsWith("text-[") and part.endsWith("px]"): size = parseInt(part[6 ..< ^3])
+        if part.startsWith("px-[") and part.endsWith("px]"): pad = parseInt(part[4 ..< ^3])
+      let h2 = measureText([name, "x"], "leading-tight font-bold text-[" & $size & "px]", float32(room - 2 * pad))
+      doAssert h2[0] <= h2[1] * 1.5, name & " wraps at " & $size & " px in " & $w & "x" & $h & ": " & classes
