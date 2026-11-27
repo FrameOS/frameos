@@ -125,6 +125,10 @@ export interface FrameOSPreviewOptions {
    * inside it shows. Scenes read `context.round` and `app.frame.round`, and the built-in
    * scenes keep inside the circle (docs/scene-guide.md "Round panels"). */
   round?: boolean
+  /** The panel's diagonal in inches (a frame's, or the Device menu's): the
+   * automatic render scale goes by its density, as on the frame
+   * (frameos/render_scale.nim). Unknown (the default): 1. */
+  panelInches?: number
   /** Offer the frame's own page in the scene settings (a desktop's Control
    * Panel, a layout's settings), as a frame shows it: the playground and the
    * scene workspace's preview turn it on. Its Restart and Reboot arrive as
@@ -298,6 +302,7 @@ export class FrameOSPreview {
       renderScale: options.renderScale ?? 0,
       windowed: options.windowed === true,
       round: options.round === true,
+      panelInches: options.panelInches ?? 0,
       framePage: options.framePage === true,
       fileTransfer: options.fileTransfer !== false,
       ...(options.storeUrl ? { storeUrl: options.storeUrl } : {}),

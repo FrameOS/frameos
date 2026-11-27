@@ -524,10 +524,14 @@ export function renderFrameConfig(frame: Pick<FrameRow, "hardware" | "settings">
       ? hardware.eventMap
       : undefined;
   const palette = isRecord(settings.palette) && Array.isArray(settings.palette.colors) ? settings.palette.colors : undefined;
+  // The panel the board reported ("EPD_10in3"): its size is what the
+  // automatic render scale goes by, as on the board.
+  const panel = typeof hardware.device === "string" && hardware.device ? hardware.device : undefined;
   return {
     ...(isRecord(settings.colors) ? { colors: settings.colors } : {}),
     ...(eventMap ? { eventMap } : {}),
     ...(palette ? { palette } : {}),
+    ...(panel ? { panel } : {}),
   };
 }
 

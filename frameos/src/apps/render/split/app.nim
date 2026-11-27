@@ -4,6 +4,7 @@ import pixie
 import options
 import frameos/apps
 import frameos/types
+import frameos/render_scale
 import frameos/utils/image
 
 type
@@ -22,20 +23,22 @@ type
   App* = ref object of AppRoot
     appConfig*: AppConfig
 
-proc extractMargins*(marginString: string): (float, float, float, float) =
+proc extractMargins*(marginString: string, scale = 1.0): (float, float, float, float) =
+  ## The margins, each larger by the render scale (render_scale.nim).
   let
     margins = if marginString == "": @[] else: marginString.split(' ')
-    marginTop = if margins.len > 0: parseFloat(margins[0]) else: 0.0
-    marginRight = if margins.len > 1: parseFloat(margins[1]) else: marginTop
-    marginBottom = if margins.len > 2: parseFloat(margins[2]) else: marginTop
-    marginLeft = if margins.len > 3: parseFloat(margins[3]) else: marginRight
+    marginTop = if margins.len > 0: parseFloat(margins[0]) * scale else: 0.0
+    marginRight = if margins.len > 1: parseFloat(margins[1]) * scale else: marginTop
+    marginBottom = if margins.len > 2: parseFloat(margins[2]) * scale else: marginTop
+    marginLeft = if margins.len > 3: parseFloat(margins[3]) * scale else: marginRight
   result = (marginTop, marginRight, marginBottom, marginLeft)
 
-proc extractGaps*(gapString: string): (float, float) =
+proc extractGaps*(gapString: string, scale = 1.0): (float, float) =
+  ## The gaps, each larger by the render scale (render_scale.nim).
   let
     gaps = if gapString == "": @[] else: gapString.split(' ')
-    gapHorizontal = if gaps.len > 0: parseFloat(gaps[0]) else: 0.0
-    gapVertical = if gaps.len > 1: parseFloat(gaps[1]) else: gapHorizontal
+    gapHorizontal = if gaps.len > 0: parseFloat(gaps[0]) * scale else: 0.0
+    gapVertical = if gaps.len > 1: parseFloat(gaps[1]) * scale else: gapHorizontal
   result = (gapHorizontal, gapVertical)
 
 proc extractRatios*(widthRatios: string, heightRatios: string, columns: int,
@@ -68,13 +71,13 @@ proc extractRatios*(widthRatios: string, heightRatios: string, columns: int,
     totalHeightRatio = rows.toFloat
   result = (normalizedWidthRatios, normalizedHeightRatios, totalWidthRatio, totalHeightRatio)
 
-proc splitDimensions*(width: int, height: int, appConfig: AppConfig): seq[(int, int)] =
+proc splitDimensions*(width: int, height: int, appConfig: AppConfig, scale = 1.0): seq[(int, int)] =
   let
     rows = appConfig.rows
     columns = appConfig.columns
 
-    (marginTop, marginRight, marginBottom, marginLeft) = extractMargins(appConfig.margin)
-    (gapHorizontal, gapVertical) = extractGaps(appConfig.gap)
+    (marginTop, marginRight, marginBottom, marginLeft) = extractMargins(appConfig.margin, scale)
+    (gapHorizontal, gapVertical) = extractGaps(appConfig.gap, scale)
 
     imageWidth = width.toFloat - marginLeft - marginRight - (columns - 1).toFloat * gapHorizontal
     imageHeight = height.toFloat - marginTop - marginBottom - (rows - 1).toFloat * gapVertical
@@ -142,9 +145,10 @@ proc render*(self: App, context: ExecutionContext, image: var Image) =
 
   # Calculate cell dimensions
   let
-    cellDims = splitDimensions(image.width, image.height, self.appConfig)
-    (marginTop, marginRight {.used.}, marginBottom {.used.}, marginLeft) = extractMargins(self.appConfig.margin)
-    (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap)
+    scale = nodeRenderScale(self.scene, self.frameConfig)
+    cellDims = splitDimensions(image.width, image.height, self.appConfig, scale)
+    (marginTop, marginRight {.used.}, marginBottom {.used.}, marginLeft) = extractMargins(self.appConfig.margin, scale)
+    (gapHorizontal, gapVertical) = extractGaps(self.appConfig.gap, scale)
 
   # The background owed goes on the margins, the gaps and the cells nothing
   # draws in, but not under a panel, whose pixels may be staying.

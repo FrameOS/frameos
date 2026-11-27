@@ -1,6 +1,7 @@
 import pixie
 import frameos/apps
 import frameos/types
+import frameos/render_scale
 import frameos/utils/qr
 import frameos/utils/url
 import frameos/utils/image
@@ -31,11 +32,14 @@ proc get*(self: App, context: ExecutionContext): Image =
 
   let qr = qrEncode(code)
 
+  # Pixels are larger by the render scale (render_scale.nim), a share of the
+  # canvas is not.
+  let scale = nodeRenderScale(self.scene, self.frameConfig)
   let width = case self.appConfig.sizeUnit
     of "percent": self.appConfig.size / 100.0 * min(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
             if context.hasImage: context.image.height else: self.frameConfig.renderHeight()).float
-    of "pixels per dot": self.appConfig.size * (qr.size + self.appConfig.padding * 2).float
-    else: self.appConfig.size
+    of "pixels per dot": self.appConfig.size * scale * (qr.size + self.appConfig.padding * 2).float
+    else: self.appConfig.size * scale
 
   # A scene-supplied size is bounded like any other requested raster.
   let boundedWidth = boundedRequestedDimensions(width.int, width.int).width

@@ -51,6 +51,7 @@ type
     borderWidth*: int
     overflow*: string     ## "fit-bounds" | "visible"
     assetsPath*: string   ## for loading typefaces
+    scale*: float         ## what the sizes above (and rich text's own) are multiplied by, the render scale; 0 = 1
 
   TextLayoutResult* = ref object
     ## Final, reusable output for drawing
@@ -419,28 +420,33 @@ proc typesetIntoBounds*(
     height = maxHeight
     hAlign = parseHAlign(opts.position)
     vAlign = parseVAlign(opts.position, opts.vAlign)
-    innerW = max(0.0, width.float - 2 * opts.padding)
-    innerH = max(0.0, height.float - 2 * opts.padding)
+    # The render scale: every length larger by it. Rich text's own sizes
+    # follow through toTypeset's factor (the size typeset over `baseSize`).
+    scale = if opts.scale > 0: opts.scale else: 1.0
+    padding = opts.padding * scale
+    innerW = max(0.0, width.float - 2 * padding)
+    innerH = max(0.0, height.float - 2 * padding)
     bounds = vec2(innerW, innerH)
     baseSize = if opts.fontSize <= 0: 1.0 else: opts.fontSize
+    scaledSize = baseSize * scale
     typeface = getTypeface(opts.font, opts.assetsPath)
 
   var chosen: Arrangement
   var chosenBorder: Option[Arrangement] = none(Arrangement)
-  var scaleRatio = 1.0
-  var fittedSize = baseSize
+  var scaleRatio = scale
+  var fittedSize = scaledSize
 
   if opts.overflow == "visible":
-    chosen = toTypeset(opts.text, opts.richTextMode, baseSize, baseSize, opts.fontColor, typeface, bounds, hAlign,
+    chosen = toTypeset(opts.text, opts.richTextMode, scaledSize, baseSize, opts.fontColor, typeface, bounds, hAlign,
         vAlign, false, opts.assetsPath)
     if opts.borderWidth > 0:
-      chosenBorder = some(toTypeset(opts.text, opts.richTextMode, baseSize, baseSize, opts.borderColor, typeface,
+      chosenBorder = some(toTypeset(opts.text, opts.richTextMode, scaledSize, baseSize, opts.borderColor, typeface,
           bounds, hAlign, vAlign, true, opts.assetsPath))
   else:
     # Binary search font size that fits height
     var tooBig = 0.0
     var tooSmall = 0.0
-    var fontSize = baseSize
+    var fontSize = scaledSize
     var iter = 0
     while iter < 100:
       inc iter
@@ -482,14 +488,22 @@ proc typesetIntoBounds*(
           typeface, bounds, hAlign, vAlign, true, opts.assetsPath)
       chosenBorder = some(borderLayout)
 
+  var laid = opts
+  laid.padding = padding # what drawText insets by
   result = TextLayoutResult(
-    opts: opts,
+    opts: laid,
     width: width,
     height: height,
     textTypeset: chosen,
     borderTypeset: chosenBorder,
     fontScaleRatio: scaleRatio
   )
+
+proc scaledBorder*(layout: TextLayoutResult): int =
+  ## The border's width at the render scale (TextRenderOptions.scale), in
+  ## whole pixels: what a tight crop leaves around the text for it.
+  let scale = if layout.opts.scale > 0: layout.opts.scale else: 1.0
+  int(round(layout.opts.borderWidth.float * scale))
 
 proc drawText*(
   layout: TextLayoutResult,
@@ -526,7 +540,7 @@ proc measureTightImage*(layout: TextLayoutResult): (int, int) =
   ## Computes width/height needed to contain the text + border, ignoring padding.
   let br = layoutBounds(layout.textTypeset)
   let tl = layoutBoundsTopLeft(layout.textTypeset)
-  let bw = layout.opts.borderWidth
+  let bw = layout.scaledBorder()
   let w = max(1, (br.x - tl.x).int + bw)
   let h = max(1, (br.y - tl.y).int + bw)
   (w, h)

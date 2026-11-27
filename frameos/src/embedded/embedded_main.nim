@@ -31,6 +31,7 @@ import frameos/utils/panel_damage
 import frameos/utils/palette_pack
 from frameos/utils/svg_frames import takePanelPaint
 import frameos/render_probe
+from frameos/render_scale import panelInches
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
 
@@ -617,6 +618,7 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 proc displayPresent(): bool {.importc: "fos_display_present", cdecl.}
 proc displayFormat(): cint {.importc: "fos_display_format", cdecl.}
 proc displayRound(): bool {.importc: "fos_display_round", cdecl.}
+proc displayName(): cstring {.importc: "fos_display_name", cdecl.}
 
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
     rotate: cint): bool {.exportc, cdecl.} =
@@ -638,6 +640,10 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     armEmergencyReserve()
     when defined(memProbe): memProbe("INIT after armEmergencyReserve")
     initRuntime(frameWidth, frameHeight, frameName, maxHttpResponseBytes.int, frameRotate)
+    # The panel's size, by its name ("EPD_10in3"): the automatic render scale
+    # is by its density (render_scale.nim), and the device here is "embedded".
+    if displayPresent():
+      setPanelInches(panelInches($displayName()))
     when defined(memProbe): memProbe("INIT after initRuntime")
     # pixie keeps the coverage of shared paths (a kept label, a shared icon,
     # a share()d box) up to this many bytes of PSRAM and draws them as masks:

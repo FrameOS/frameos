@@ -463,6 +463,8 @@ export type SceneEditorPreviewOptions = {
   /** What the panel starts on, and whether it uses this browser's
    * remembered settings (SceneLivePreviewPanel's props of those names). */
   initialDevice?: string | undefined;
+  /** The frame's panel diagonal (renderScale.ts `panelInches`): the preview's automatic scale is the frame's. */
+  panelInches?: number | undefined;
   initialMemoryDevice?: string | undefined;
   rememberSettings?: boolean | undefined;
 };
@@ -1206,6 +1208,7 @@ export function SceneEditorWorkspace({
                 settingsUrl={preview.settingsUrl}
                 width={width}
                 {...(preview.initialDevice !== undefined ? { initialDevice: preview.initialDevice } : {})}
+                {...(preview.panelInches !== undefined ? { panelInches: preview.panelInches } : {})}
                 {...(preview.initialMemoryDevice !== undefined
                   ? { initialMemoryDevice: preview.initialMemoryDevice }
                   : {})}

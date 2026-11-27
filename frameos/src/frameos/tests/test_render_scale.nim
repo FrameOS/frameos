@@ -1,4 +1,4 @@
-import std/[json, tables, unittest]
+import std/[json, os, tables, unittest]
 
 import frameos/interpreter
 import frameos/render_scale
@@ -12,19 +12,32 @@ proc initScene(id: string, config: FrameConfig): InterpretedFrameScene =
   InterpretedFrameScene(init(id.SceneId, config, logger, %*{}))
 
 suite "render scale":
-  test "automatic: 1, and 2 on a 4K or larger screen on HDMI":
-    check autoRenderScale(800, 480, "waveshare.EPD_3in97") == 1.0
-    check autoRenderScale(1200, 1600, "waveshare.EPD_13in3e") == 1.0
-    check autoRenderScale(1920, 1080, "framebuffer") == 1.0
-    check autoRenderScale(2560, 1440, "framebuffer") == 1.0
-    check autoRenderScale(3840, 2160, "framebuffer") == 2.0
-    check autoRenderScale(2160, 3840, "framebuffer") == 2.0 # hung in portrait
-    check autoRenderScale(7680, 4320, "framebuffer") == 2.0
-    check autoRenderScale(3840, 2160, "web_only") == 1.0
-    check autoRenderScale(0, 0, "framebuffer") == 1.0
+  test "automatic, and a panel's size from its name: docs/render-scale-fixtures.json":
+    let fixtures = parseJson(readFile(currentSourcePath().parentDir / ".." / ".." / ".." / ".." / "docs" /
+      "render-scale-fixtures.json"))
+    for fixture in fixtures["automatic"]:
+      let got = autoRenderScale(fixture["width"].getInt(), fixture["height"].getInt(), fixture["device"].getStr())
+      check got == fixture["scale"].getFloat()
+      if got != fixture["scale"].getFloat():
+        echo fixture
+    for fixture in fixtures["panelInches"]:
+      check abs(panelInches(fixture["device"].getStr()) - fixture["inches"].getFloat()) < 1e-9
+
+  test "a panel's size the host knows wins over its name":
+    # An ESP32 is "embedded" (its display names the panel), a plane's render "wasm".
+    check autoRenderScale(1872, 1404, "embedded", 10.3) == 2.0
+    check autoRenderScale(1872, 1404, "wasm", 10.3) == 2.0
+    check autoRenderScale(720, 1280, "embedded", 7.0) == 1.0 # 210 ppi, but held to a 576 px layout
+    check autoRenderScale(800, 480, "embedded", 7.3) == 1.0
+    check autoRenderScale(1200, 1600, "embedded", 13.3) == 1.0 # 150 ppi: 1.16, a whole number
 
   test "a frame's own scale, else the automatic one":
-    check frameRenderScale(FrameConfig(width: 1200, height: 1600)) == 1.0
+    check frameRenderScale(FrameConfig(width: 1200, height: 1600)) == 1.0 # no device: no panel
+    check frameRenderScale(FrameConfig(width: 1872, height: 1404, device: "embedded")) == 1.0 # size unknown
+    check frameRenderScale(FrameConfig(width: 1872, height: 1404, device: "embedded", panelInches: 10.3)) == 2.0
+    check frameRenderScale(FrameConfig(width: 1872, height: 1404, device: "waveshare.EPD_10in3")) == 2.0
+    check frameRenderScale(FrameConfig(width: 1872, height: 1404, device: "embedded", panelInches: 10.3,
+      renderScale: 1.0)) == 1.0
     check frameRenderScale(FrameConfig(width: 3840, height: 2160, device: "framebuffer")) == 2.0
     check frameRenderScale(FrameConfig(width: 3840, height: 2160, device: "framebuffer", renderScale: 1.0)) == 1.0
     check frameRenderScale(FrameConfig(width: 1200, height: 1600, renderScale: 2.0)) == 2.0

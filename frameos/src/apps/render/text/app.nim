@@ -2,6 +2,7 @@ import std/json
 import pixie, options
 import frameos/apps
 import frameos/types
+import frameos/render_scale
 import frameos/utils/text
 import frameos/utils/image
 
@@ -38,6 +39,7 @@ type
     borderWidth: int
     overflow: string
     assetsPath: string
+    scale: float
 
   App* = ref object of AppRoot
     appConfig*: AppConfig
@@ -58,7 +60,14 @@ proc `==`(a, b: CacheKey): bool =
   a.borderColor == b.borderColor and
   a.borderWidth == b.borderWidth and
   a.overflow == b.overflow and
-  a.assetsPath == b.assetsPath
+  a.assetsPath == b.assetsPath and
+  a.scale == b.scale
+
+proc scale(self: App): float =
+  ## The render scale in effect for the scene (render_scale.nim): the text's
+  ## sizes and offsets are larger by it, as a JSX scene's are. The runner's
+  ## own text (no scene) sizes itself by apps.panelScale.
+  nodeRenderScale(self.scene, self.frameConfig)
 
 proc toOptions(self: App, width, height: int): TextRenderOptions =
   TextRenderOptions(
@@ -73,7 +82,8 @@ proc toOptions(self: App, width, height: int): TextRenderOptions =
     borderColor: self.appConfig.borderColor,
     borderWidth: self.appConfig.borderWidth,
     overflow: self.appConfig.overflow,
-    assetsPath: self.frameConfig.assetsPath
+    assetsPath: self.frameConfig.assetsPath,
+    scale: self.scale()
   )
 
 proc buildKey(self: App, width, height: int): CacheKey =
@@ -91,7 +101,8 @@ proc buildKey(self: App, width, height: int): CacheKey =
     borderColor: self.appConfig.borderColor,
     borderWidth: self.appConfig.borderWidth,
     overflow: self.appConfig.overflow,
-    assetsPath: self.frameConfig.assetsPath
+    assetsPath: self.frameConfig.assetsPath,
+    scale: self.scale()
   )
 
 proc ensureLayout(self: App, maxWidth, maxHeight: int) =
@@ -112,17 +123,25 @@ proc renderText*(self: App, context: ExecutionContext, image: Image, offsetX, of
                 "availableBytes": lastApproxStroke.availableBytes})
   image
 
+proc offsets(self: App): (float, float) =
+  ## The offsets at the render scale, like the sizes.
+  let scale = self.layout.get().opts.scale
+  let k = if scale > 0: scale else: 1.0
+  (self.appConfig.offsetX * k, self.appConfig.offsetY * k)
+
 proc run*(self: App, context: ExecutionContext) =
   if self.appConfig.text.len == 0:
     return
   self.ensureLayout(context.image.width, context.image.height)
-  discard self.renderText(context, context.image, self.appConfig.offsetX, self.appConfig.offsetY)
+  let (ox, oy) = self.offsets()
+  discard self.renderText(context, context.image, ox, oy)
 
 proc get*(self: App, context: ExecutionContext): Image =
   if self.appConfig.inputImage.isSome:
     let img = self.appConfig.inputImage.get()
     self.ensureLayout(img.width, img.height)
-    return self.renderText(context, img, self.appConfig.offsetX, self.appConfig.offsetY)
+    let (ox, oy) = self.offsets()
+    return self.renderText(context, img, ox, oy)
   else:
     if context.hasImage:
       self.ensureLayout(context.image.width, context.image.height)
@@ -134,13 +153,14 @@ proc get*(self: App, context: ExecutionContext): Image =
     # same behavior as before but via utils helpers.
     let br = layoutBounds(lay.textTypeset)
     let tl = layoutBoundsTopLeft(lay.textTypeset)
-    let border = self.appConfig.borderWidth
+    let border = lay.scaledBorder()
     # Bounded: a huge font size or border is a scene-supplied allocation.
     let (outW, outH) = boundedRequestedDimensions((br.x - tl.x).int + border, (br.y - tl.y).int + border)
     let output = newImage(outW, outH)
 
     # Offset so that the top-left of the layout sits at ~border/2 inset.
-    let ox = ceil(border.float / 2) - tl.x + self.appConfig.offsetX
-    let oy = ceil(border.float / 2) - tl.y + self.appConfig.offsetY
+    let (dx, dy) = self.offsets()
+    let ox = ceil(border.float / 2) - tl.x + dx
+    let oy = ceil(border.float / 2) - tl.y + dy
     discard self.renderText(context, output, ox, oy)
     return output

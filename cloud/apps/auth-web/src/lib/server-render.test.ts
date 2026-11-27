@@ -300,6 +300,11 @@ describe("what the render is told of its frame", () => {
     expect(renderFrameConfig({ hardware: { eventMap: preset }, settings: {} })).toEqual({ eventMap: preset });
     expect(renderFrameConfig({ hardware: null, settings: null })).toEqual({});
   });
+
+  it("the panel the board reported, whose size the automatic render scale goes by", () => {
+    expect(renderFrameConfig({ hardware: { device: "EPD_10in3" }, settings: {} })).toEqual({ panel: "EPD_10in3" });
+    expect(renderFrameConfig({ hardware: { device: "" }, settings: {} })).toEqual({});
+  });
 });
 
 describe("the frame's reported scene, for hardware the cloud renders for", () => {

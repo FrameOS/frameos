@@ -478,19 +478,53 @@ is drawn at the panel's full size. pixie stretches the root `<svg width
 height>` (or `viewBox`) to the target as vectors, so it stays sharp. A scene
 made for an 800x480 screen fills a 1600x960 one with the same layout instead
 of sitting small in whitespace, and an app that fetches for its size (the
-Map scene's lines) fetches a quarter of the data.
+Map scene's lines) fetches a quarter of the data. It is the one setting that
+makes every scene larger or smaller, so every scene's text comes out about
+the same size on a frame (the reTerminal E1003, 2026-11-27: its scene list
+and most JSX scenes were half the size of its settings page and of the
+Handwriting notes, which grew themselves, while the setting moved only some).
 
 - **Which scale.** A field with `role: "renderScale"` whose state holds a
   number, else the scene's `settings.renderScale`, else the frame's
   (frame.json `renderScale`, the control planes' `render_scale`). The
-  frame's 0 is automatic: 1, and 2 on a 4K or larger screen on HDMI (the
-  `framebuffer` device, a shorter edge of 2160 px or more). Anything else is
-  the owner's to set.
+  frame's 0 is automatic, a whole number, by the panel's **density**: its
+  pixels per inch over 130 (the 7" to 7.5" 800x480 panels scenes are made
+  on, 124 to 133 ppi) to the nearest whole number, never below 1, and never
+  leaving a layout under 576 px on the shorter edge (480 and a fifth: a
+  smaller screen is seen closer, and a scene has to fit). The panel's size
+  comes from its driver's name (`EPD_10in3` is 10.3") or a short table of
+  those whose name does not say it (`NamedPanelInches`), handed over by an
+  ESP32's display (`fos_display_name`) and by a plane rendering for a board
+  (`frameos_wasm_set_frame` `panel`); a panel of unknown size is 1. HDMI (the
+  `framebuffer` device), a screen of unknown size seen from across a room, is
+  the largest whole number that leaves 1080 px, and no panel (`web_only`) is
+  1. So the reTerminal E1003 (10.3", 1872x1404, 227 ppi) and a 4K screen are
+  2; a 13.3" 1200x1600 e-paper (150 ppi), every 800x480 panel and a 1080p
+  screen 1. `docs/render-scale-fixtures.json` pins the runtime's rule and the
+  SPA's. **Whole numbers only**: at 2 a one-pixel line is two, every box edge
+  lands on a pixel and pixie fills in solid spans; at 1.25 or 1.75 every edge
+  is antialiased (slower, and soft) and a hairline is a pixel and a grey,
+  dithered on e-paper. A fraction stays the owner's to set.
   A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
   layout gets more room than the panel has and everything is drawn smaller.
-  The built-in scenes (the switcher, the settings panel) follow the frame's
-  scale between 0.75 and a 320 px layout (docs/scene-settings.md).
   Out-of-range values (above 4) are ignored.
+- **What follows it.** A .tsx/.jsx app's UI (above); the built-in scenes,
+  laid out at it between 0.75 and a 320 px layout and sized for a 480 px
+  panel (sceneSwitcher's `uiRoom` / `panelUnit`, docs/scene-settings.md "At
+  the frame's scale"); and the pixel sizes of three Nim apps:
+  render/text's font size, padding, border and offsets (rich text's own
+  sizes too: `TextRenderOptions.scale`), a render/split's gaps and margins,
+  and data/qr's pixels (`nodeRenderScale`). The Pi's own pages (the boot
+  guard, the setup hotspot) and the runner's overlays keep sizing
+  themselves by `apps.panelScale`.
+- **A UI does not grow by itself.** Text, buttons and lists are sized in
+  pixels for about 480 px of the shorter side and may shrink below that; a
+  zoom of the scene's own that grows with the canvas fights the setting (the
+  samples' desktops, Terminal, Browser, Files, Books, PDF viewer, Fonts, the
+  Scene store, the Home Assistant and Homey remotes, the Handwriting notes,
+  Sketchbook and Pixel art each had one, up to 2.25x, until 2026-11-27). A
+  picture meant to fill the canvas (a clock face, a poster, a board game)
+  may size itself to it: it fills the panel at any scale.
 - **What a scaled app sees.** `context.imageWidth` / `imageHeight`,
   `targetWidth` / `targetHeight` and `app.frame.width` / `height`, divided by
   the scale and rounded. Every app, scaled or not, reads the scale as

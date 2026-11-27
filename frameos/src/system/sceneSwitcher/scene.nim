@@ -233,27 +233,35 @@ proc uiRoom*(frameConfig: FrameConfig, width, height: int): (int, int) =
   let scale = uiScale(frameConfig, width, height)
   (scaledLength(width, scale), scaledLength(height, scale))
 
-const DesktopUnit = 400
-  ## A built-in scene's unit in a desktop's window: its letters a size from
-  ## the desktops' apps (16 px in the settings).
+const
+  UiUnit = 480
+    ## The most a built-in scene's sizes are a share of, full screen: its
+    ## letters and buttons are as large on a bigger panel as on a 480 px one
+    ## (laid out at the frame's render scale, which is what makes them larger:
+    ## the automatic scale is 2 on a 10.3" 1872x1404 e-paper), and the bigger
+    ## panel has more room for them. The switcher's `GridUnitMax`.
+  DesktopUnit = 400
+    ## A built-in scene's unit in a desktop's window: its letters a size from
+    ## the desktops' apps (16 px in the settings).
 
-proc panelUnit*(frameConfig: FrameConfig, image: Image): int =
+proc panelEdge*(frameConfig: FrameConfig, image: Image): int =
   ## The panel's shorter edge, as it is turned (the canvas's without a
-  ## config): what a built-in scene's sizes are a share of in a window on a
-  ## desktop too, so its letters keep the frame's size there and a bigger
-  ## window shows more of it, not more of the same larger.
+  ## config): what the frame page's scales are offered for.
   if not frameConfig.isNil:
     let (w, h) = canvasSize(frameConfig)
     result = min(w, h)
   if result <= 0:
     result = min(image.width, image.height)
-  # In a desktop's window it is one of the desktop's apps, sized as on a
-  # small frame whatever the panel: at the desktops' own zoom, twice that
-  # from a 2160 px short side (1000 on e-paper) at the frame's render scale.
+
+proc panelUnit*(frameConfig: FrameConfig, image: Image): int =
+  ## What a built-in scene's sizes are a share of: the panel's shorter edge
+  ## up to `UiUnit`, and in a window on a desktop a desktop's app's
+  ## (`DesktopUnit`), so its letters keep their size there and a bigger
+  ## window shows more of it, not more of the same larger. The frame's render
+  ## scale (uiRoom) makes them larger, as it does every scene's.
+  result = min(panelEdge(frameConfig, image), UiUnit)
   if not onDesktop.isNil and onDesktop():
-    let laidOut = result.float / max(frameRenderScale(frameConfig), 0.25)
-    let zoom = if laidOut >= (if paperPanel(frameConfig, image): 1000.0 else: 2160.0): 2 else: 1
-    result = min(result, DesktopUnit * zoom)
+    result = min(result, DesktopUnit)
 
 template sizeUnit*(self: FrameScene, image: Image): int =
   ## A built-in scene's `unit` (its `tree`'s `sizeUnit`): the panel's

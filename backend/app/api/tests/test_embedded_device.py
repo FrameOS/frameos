@@ -1902,3 +1902,17 @@ async def test_settings_carry_the_event_map_when_the_backend_holds_one(async_cli
     db.commit()
     response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
     assert response.json()['frame']['eventMap'] == []
+
+
+@pytest.mark.asyncio
+async def test_a_render_for_the_board_is_told_its_panel(async_client, db):
+    # The panel's name says its size ("EPD_10in3"), which the runtime's
+    # automatic render scale goes by (frameos/render_scale.nim): the render
+    # here draws at the scale the board would.
+    from app.api.embedded_device import thin_client_frame_json
+
+    frame = await device_frame(async_client, db)
+    frame.device = "waveshare.EPD_10in3"
+    assert thin_client_frame_json(frame, 8)["panel"] == "waveshare.EPD_10in3"
+    frame.device = ""
+    assert "panel" not in thin_client_frame_json(frame, 8)

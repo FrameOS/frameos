@@ -249,7 +249,7 @@ async def render_scene(
     relayed: button edges, and an ESP32's events from its own producers; the
     scene hears both before the render, each relayed one from its own origin
     (frameos/relayed_input.nim). ``frame_json`` ({"eventMap"?, "palette"?,
-    "colors"?, "pixelFormat"?, "gpioButtons"?, "rotate"?}) is what else of
+    "colors"?, "pixelFormat"?, "gpioButtons"?, "rotate"?, "panel"?}) is what else of
     frame.json a frame's own runtime keeps (frameos_wasm_set_frame).
     ``kept_state`` is what the frame's last render process kept for the next
     (a JSON string the runtime wrote, handed back as it came: the UIs on the

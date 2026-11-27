@@ -387,6 +387,12 @@ proc fos_nim_set_render_scale_impl(scale: cdouble) {.exportc, cdecl.} =
   if not frameConfig.isNil and scale >= 0.0 and scale <= MaxRenderScale:
     frameConfig.renderScale = float(scale)
 
+proc setPanelInches*(inches: float) =
+  ## The panel's diagonal (render_scale.panelInches of the display's name):
+  ## what the automatic render scale goes by, the device here being "embedded".
+  if not frameConfig.isNil and inches >= 0.0:
+    frameConfig.panelInches = inches
+
 var lastColorsJson: string
 
 proc fos_nim_set_colors_impl(json: cstring) {.exportc, cdecl.} =

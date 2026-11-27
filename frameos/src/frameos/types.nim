@@ -124,6 +124,10 @@ type
     ## times smaller, drawn sharp at full size (render_scale.nim). 0 =
     ## automatic from the panel's size; a scene's own setting wins.
     renderScale*: float
+    ## The panel's diagonal in inches where the device's name does not say it
+    ## (render_scale.panelInches): an ESP32's display, a plane's render for a
+    ## board. 0 = from the device's name.
+    panelInches*: float
     ## The settings on the frame's own screen offer the frame page behind
     ## their gear (docs/scene-settings.md "The frame page"). On unless the
     ## control plane turned it off; frame_settings_lock.nim adds the device's

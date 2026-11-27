@@ -405,13 +405,18 @@ block forward_and_back_move_a_screenful:
 block e_paper_scrolls_where_the_finger_lifts:
   # The reTerminal E1003 (1872x1404, sixteen greys): no render while the
   # finger moves (each is seconds of refresh), one where it lifts, and a tap
-  # after that opens the tile it lands on. Its 10" screen holds two hundred
-  # tiles and more (GridUnitMax): four hundred scroll.
+  # after that opens the tile it lands on. At its automatic scale of 2 (its
+  # display says a 10.3" panel: 227 ppi) its screen holds fifty tiles and more
+  # (GridUnitMax): four hundred scroll.
   listed = entries(400)
   sent.setLen(0)
-  let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
+  let e1003 = config(1872, 1404, "embedded")
+  e1003.panelInches = 10.3
+  let scene = newSwitcher(e1003, opener = "scene-1")
   discard scene.draw(newImageGray8(1872, 1404))
   doAssert scene.paper and scene.slow
+  let (roomW, roomH) = uiRoom(scene.frameConfig, 1872, 1404)
+  doAssert (roomW, roomH) == (936, 702), $(roomW, roomH)
   scene.send("pointerDown", touchAt(900, 1200))
   for i in 1 .. 8:
     scene.send("pointerMove", touchAt(900, 1200 - 100 * i.float))
@@ -420,12 +425,13 @@ block e_paper_scrolls_where_the_finger_lifts:
   doAssert sent.len == 1 and sent[0][0] == evRender, "where it lifted: " & $sent
   doAssert listScroll() > 0 and listScroll() <= listRegion().scrollY, $listScroll()
   discard scene.draw(newImageGray8(1872, 1404))
-  let grid = switcherGrid(1872, 1404, thumbnails = false)
+  let grid = switcherGrid(roomW, roomH, thumbnails = false, unit = 1404)
   let below = grid.cols * grid.rows
   doAssert shownWhole(below)
+  # The regions are the layout's; a finger is on the glass, twice as far.
   let r = uiTarget(SceneSwitcherId, 1).regions[tileRegion(below)]
   sent.setLen(0)
-  scene.send("tap", touchAt(r.x + r.w / 2, r.y + r.h / 2))
+  scene.send("tap", touchAt((r.x + r.w / 2) * 2, (r.y + r.h / 2) * 2))
   doAssert sent.len == 1 and sent[0][1]["sceneId"].getStr() == "scene-" & $(below + 1), $sent
   # All of it fits: nothing scrolls, and a drag asks for nothing.
   listed = entries(3)
@@ -779,19 +785,22 @@ block it_is_a_built_in_scene:
   doAssert not fastPanel(config(800, 480, "pimoroni.inky_impression_7"))
 
 block desktopUnit:
-  # Full screen a built-in scene's sizes are a share of the panel; in a desktop's
-  # window (a layout keeping `openScenes`) those of a desktop's apps, twice that
-  # on a 4K screen at scale 1.
+  # Full screen a built-in scene's sizes are a share of the panel up to 480 px
+  # (the render scale is what makes them larger); in a desktop's window (a
+  # layout keeping `openScenes`) those of a desktop's apps, whatever the panel.
   let canvas = newImage(800, 480)
   let saved = onDesktop
   onDesktop = nil
-  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 902
+  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 480
+  doAssert panelUnit(config(800, 480, "web_only"), canvas) == 480
+  doAssert panelUnit(config(240, 296, "web_only"), canvas) == 240
+  doAssert panelEdge(config(1316, 902, "web_only"), canvas) == 902
   onDesktop = proc(): bool {.nimcall, gcsafe.} = true
   doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 400
   doAssert panelUnit(config(800, 480, "web_only"), canvas) == 400
-  doAssert panelUnit(config(3840, 2160, "web_only"), canvas) == 800
+  doAssert panelUnit(config(3840, 2160, "web_only"), canvas) == 400
   onDesktop = proc(): bool {.nimcall, gcsafe.} = false
-  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 902
+  doAssert panelUnit(config(1316, 902, "web_only"), canvas) == 480
   onDesktop = saved
 
 proc noPicture(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =

@@ -4,7 +4,8 @@
   "settings": {
     "execution": "interpreted",
     "refreshInterval": 3600,
-    "backgroundColor": "#0f172a"
+    "backgroundColor": "#0f172a",
+    "renderScale": 1.5
   },
   "e2eFrame": {
     "width": 1600,

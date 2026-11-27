@@ -302,6 +302,11 @@ bool fos_display_round(void)
     return is_qspi() && fos_lcd_qspi_round();
 }
 
+const char *fos_display_name(void)
+{
+    return s_panel ? s_panel->name : "";
+}
+
 esp_err_t fos_display_power(bool on)
 {
     if (!fos_display_is_lcd()) return ESP_ERR_NOT_SUPPORTED;

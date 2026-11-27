@@ -1441,15 +1441,19 @@ proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, heigh
   root.children.add el("div", move c, body)
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
-    keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0): SvgNode =
+    keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0, panel = 0): SvgNode =
   ## The panel as a UI tree: a header with Cancel, the scene's name and
   ## Save, and under it the fields in a list that scrolls. With the host's
   ## `info` (frameSettingsRead) a gear left of Save opens the frame page,
   ## where Cancel is Back. On a `round` panel the scene's alone inside its
   ## circle, the keyboard's top at `keyboardTop` while it is up. `sizeUnit`:
-  ## what its sizes are a share of, the panel's shorter edge for a UI laid out
-  ## at its render scale (sceneSwitcher's uiRoom); the canvas's without it.
+  ## what its sizes are a share of (sceneSwitcher's panelUnit: the panel's
+  ## shorter edge up to 480, for a UI laid out at its render scale, uiRoom);
+  ## the canvas's without it. `panel`: the panel's shorter edge (panelEdge),
+  ## what the frame page offers its scales for; the canvas's without it.
   let unit = if sizeUnit > 0: sizeUnit else: min(width, height)
+  let edge = if panel > 0: panel else: min(width, height)
+  let autoScale = scaleText(autoFrameRenderScale(self.frameConfig))
   var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
   look.gap = look.size
@@ -1468,8 +1472,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
       # is up. Save is lit while there is something to save.
       let edits = self.state{"frameValues"}
       self.roundTree(look, result, width, height, "Frame settings", min(keyboardTop, height),
-        gear = false, self.frameList(look, info,
-          scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit, width, height),
+        gear = false, self.frameList(look, info, autoScale, edge, width, height),
         cancel = "Back", saveLit = not edits.isNil and edits.len > 0)
     else:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height),
@@ -1506,8 +1509,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header.role("bar")
-  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit,
-      width, height)
+  let body = if frame: self.frameList(look, info, autoScale, edge, width, height)
     else: self.pageList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 
@@ -1541,8 +1543,8 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     # Turned off while it showed: the frame's pages go with it.
     self.showPage(false)
   if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,
-      keyboardTop, info, self.sizeUnit(image)), image, self.paper, self.slow, onHandler, IdleSeconds,
-      roomW, roomH):
+      keyboardTop, info, self.sizeUnit(image), panelEdge(self.frameConfig, image)), image, self.paper, self.slow,
+      onHandler, IdleSeconds, roomW, roomH):
     leave()
 
 proc back(self: SceneSettingsScene) =

@@ -70,6 +70,17 @@ suite "data/qr app":
     check outputImage.width == outputImage.height
     check outputImage.width > 12
 
+  test "pixels are larger by the scene's render scale, a share of the canvas is not":
+    proc sized(unit: string, size: float, scale: float): int =
+      let app = makeApp(AppConfig(codeType: "Text", code: "frameos", size: size, sizeUnit: unit, padding: 1,
+        qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff")), makeFrameConfig())
+      if scale > 0:
+        app.scene = FrameScene(frameConfig: app.frameConfig, renderScaleSetting: scale)
+      app.get(ExecutionContext(image: newImage(400, 400), hasImage: true)).width
+    check sized("pixels per dot", 3, 2.0) == 2 * sized("pixels per dot", 3, 0)
+    check sized("pixels", 60, 2.0) == 120
+    check sized("percent", 25, 2.0) == sized("percent", 25, 0)
+
   test "absolute size unit uses direct pixel size":
     let app = makeApp(
       AppConfig(

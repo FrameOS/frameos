@@ -914,9 +914,18 @@
   laid out at that size, and pixie stretches the root to the full target as
   vectors. The scale is a `role: "renderScale"` field's state, else the
   scene's `settings.renderScale`, else the frame's `render_scale` (0 =
-  automatic: 1, and 2 on a 4K or larger screen on HDMI; the SPA's copy
-  is `utils/renderScale.ts`). Never scale by rasterizing small and
-  stretching: pass the smaller size to the layout and the full one to pixie.
+  automatic, a WHOLE number by the panel's density: ppi over 130, rounded,
+  never leaving a layout under 576 px; the size from the driver's name
+  `EPD_10in3` or `NamedPanelInches`, an ESP32's display and a plane's render
+  passing theirs; HDMI by the room it leaves, 1080 px; unknown 1: 2 on the
+  E1003 and on 4K. The SPA's copy is `utils/renderScale.ts`, both pinned by
+  `docs/render-scale-fixtures.json`). It is the ONE setting that sizes
+  every scene: the built-in scenes are sized for a 480 px panel and laid out
+  at it, render/text, a split's gaps and margins and data/qr's pixels are
+  multiplied by it (`nodeRenderScale`), and a scene's UI never zooms itself
+  up with the canvas (a picture that fills it may). Never scale by
+  rasterizing small and stretching: pass the smaller size to the layout and
+  the full one to pixie.
 - **A panel's speed is not its material.** `app.frame.fast`
   (`panel_shape.panelIsFast`, `UiInput.slow`) decides when and how often to
   draw: presses, a drag taken whole, animation, `<img>` in the render, a
