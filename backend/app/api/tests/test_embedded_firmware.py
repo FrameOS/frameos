@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from app.models.frame import Frame
 from app.tasks import embedded_firmware as embedded_firmware_module
 from app.tasks.embedded_firmware import (
+    EMBEDDED_BOARD_KEYS,
     FOS_PIXEL_1BPP,
     EMBEDDED_DEFAULT_FLASH_SIZE,
     EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES,
@@ -105,10 +107,15 @@ async def test_new_embedded_photopainter_frame_adds_gpio_buttons(async_client):
     assert response.status_code == 200, response.text
     frame = response.json()['frame']
     assert frame['device'] == 'waveshare.EPD_7in3e'
+    # Each key with the role the board gives it (docs/buttons.md): KEY1 is
+    # the Action key, BOOT the next one.
     assert frame['gpio_buttons'] == [
-        {'pin': 0, 'label': 'BOOT'},
-        {'pin': 4, 'label': 'KEY1'},
+        {'pin': 0, 'label': 'BOOT', 'role': 'next'},
+        {'pin': 4, 'label': 'KEY1', 'role': 'primary'},
     ]
+    assert frame['event_map'] == embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS[
+        'waveshare_esp32_s3_photopainter'
+    ]['eventMap']
 
 
 @pytest.mark.asyncio
@@ -549,9 +556,11 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
         "maxFrequencyKHz": 20_000,
     }
     assert frame.gpio_buttons == [
-        {"pin": 0, "label": "BOOT"},
-        {"pin": 4, "label": "KEY1"},
+        {"pin": 0, "label": "BOOT", "role": "next"},
+        {"pin": 4, "label": "KEY1", "role": "primary"},
     ]
+    # The console's spec is pins and labels: the roles are the firmware's own
+    # table (fos_board_keys_gen.h).
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (4, "KEY1")]
     check_embedded_panel_fits_memory(frame)
 
@@ -596,7 +605,11 @@ def test_embedded_hardware_preset_for_trmnl_og():
         "rst": 10, "dc": 5, "cs": 6, "cs2": -1,
         "busy": 4, "sck": 7, "mosi": 8, "pwr": -1,
     }
-    assert frame.gpio_buttons == [{"pin": 2, "label": "BUTTON"}]
+    assert frame.gpio_buttons == [{"pin": 2, "label": "BUTTON", "role": "primary"}]
+    # Its one key is the Action key: held, the scene list (no microphone).
+    assert frame.event_map == [
+        {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+    ]
     # VBAT through a 2:1 divider on GPIO3 (trmnl-firmware PIN_BATTERY 3, no
     # load switch) — the metrics battery gauge on a stock TRMNL.
     assert frame.device_config["batteryPin"] == 3
@@ -641,13 +654,15 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
     assert embedded_buffer_size(480, 480, embedded_firmware_module.FOS_PIXEL_RGB565) == 480 * 480 * 2
     # The LCD's wiring is the firmware's own board table: no EPD pins.
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
-    # The top button: pressed it switches the screen, twice it opens the
-    # scene switcher, held nothing; swiped in from the left or the right edge,
-    # back or forward, and up from the bottom the scene switcher.
+    # The top button is the Screen key: pressed it switches the screen, held
+    # it opens the scene list (no microphone to talk to); swiped in from the
+    # left or the right edge, back or forward, up from the bottom the scene
+    # list and down from the top the scene's settings.
     assert embedded_gpio_buttons_for_frame(frame) == [(38, "BUTTON")]
+    assert frame.gpio_buttons == [{"pin": 38, "label": "BUTTON", "role": "screen"}]
     assert frame.event_map == [
         {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
-        {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
@@ -685,12 +700,13 @@ def test_embedded_hardware_preset_for_sunton_esp32_8048s070():
     assert embedded_buffer_size(800, 480, FOS_PIXEL_RGB565) == 800 * 480 * 2
     # The LCD's wiring is the firmware's own board table: no EPD pins.
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
-    # The BOOT key: pressed it switches the screen, twice it opens the scene
-    # switcher; the LCD's edges swipe like the Indicator's.
+    # The BOOT key is the Screen key: pressed it switches the screen, held it
+    # opens the scene list; the LCD's edges swipe like the Indicator's.
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
+    assert frame.gpio_buttons == [{"pin": 0, "label": "BOOT", "role": "screen"}]
     assert frame.event_map == [
         {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
@@ -751,13 +767,13 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_advance_2in8():
     assert embedded_pixel_format_for_panel("LCD_ST7789_320x240") == FOS_PIXEL_RGB565
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
-    # BOOT like the 7.0"'s, and held it talks: the board has a microphone.
-    assert frame.event_map[:3] == [
+    # BOOT like the 7.0"'s, and held it talks: the board has a microphone and
+    # no Action key, so its Screen key is the voice key.
+    assert frame.event_map[:2] == [
         {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
     ]
-    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    assert [rule["event"] for rule in frame.event_map[2:]] == ["edgeSwipe"] * 4
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["panel"] == "LCD_ST7789_320x240"
     assert settings["buzzer_pin"] == "8"
@@ -820,12 +836,17 @@ def test_embedded_hardware_preset_for_waveshare_esp32_s3_touch_amoled_1_75():
     # BOOT is the one GPIO key; PWR sits on the IO expander and is the
     # firmware's own (fos_board_expander_keys), so only the map names it.
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
-    assert frame.event_map[:3] == [
+    assert frame.gpio_buttons == [{"pin": 0, "label": "BOOT", "role": "primary"}]
+    # PWR is the Screen key (held, the scene list), BOOT the Action key and
+    # so the voice key; with no Back key, the two held together are Back.
+    assert frame.event_map[:5] == [
         {"event": "button", "match": {"label": "PWR", "action": "press"}, "emit": "toggleScreen", "as": {}},
-        {"event": "button", "match": {"label": "PWR", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "PWR", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "press"}, "emit": "back", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
     ]
-    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    assert [rule["event"] for rule in frame.event_map[5:]] == ["edgeSwipe"] * 4
     assert "batteryPin" not in frame.device_config
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["panel"] == "AMOLED_CO5300_466x466"
@@ -855,14 +876,23 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_watch_2in01():
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     # BOOT and the crown's press; its turns are the firmware's own presses.
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (18, "OK")]
-    # The power key is HOME: the firmware's own presses (fos_board_toggle_key).
-    assert frame.event_map[:4] == [
+    assert frame.gpio_buttons == [
+        {"pin": 0, "label": "BOOT", "role": "screen"},
+        {"pin": 18, "label": "OK", "role": "primary"},
+    ]
+    # The power key is HOME: the firmware's own presses (fos_board_toggle_key),
+    # never held, and so are the crown's turns: they walk no scenes. The
+    # crown's press is the Action key and talks; BOOT and it held together
+    # are Back.
+    assert frame.event_map[:6] == [
         {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "press"}, "emit": "back", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
     ]
-    assert [rule["event"] for rule in frame.event_map[4:]] == ["edgeSwipe"] * 4
+    assert [rule["event"] for rule in frame.event_map[6:]] == ["edgeSwipe"] * 4
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["panel"] == "LCD_GC9309_240x296"
     assert settings["gpio_buttons"] == "0:BOOT,18:OK"
@@ -897,12 +927,17 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_rotary_1in46():
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     # BOOT and the knob's press; its turns are the firmware's own presses.
     assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT"), (41, "OK")]
-    # The watch's keys without a voice key (no microphone), the edges swipe.
-    assert frame.event_map[:2] == [
+    # The watch's keys without HOME and without a voice key (no microphone):
+    # the knob's press held is the scene list, the edges swipe.
+    assert frame.event_map[:5] == [
         {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "press"}, "emit": "back", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
     ]
-    assert [rule["event"] for rule in frame.event_map[2:]] == ["edgeSwipe"] * 4
+    assert not any(rule["emit"] == "voiceChat" for rule in frame.event_map)
+    assert [rule["event"] for rule in frame.event_map[5:]] == ["edgeSwipe"] * 4
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["panel"] == "LCD_ST77961_360x360"
     assert settings["gpio_buttons"] == "0:BOOT,41:OK"
@@ -955,7 +990,7 @@ def test_embedded_hardware_preset_for_xteink_x4():
     }
     # Every pin fits the C3's GPIO range (0-21).
     assert all(-1 <= pin <= 21 for pin in pins.values())
-    assert frame.gpio_buttons == [{"pin": 3, "label": "POWER"}]
+    assert frame.gpio_buttons == [{"pin": 3, "label": "POWER", "role": "primary"}]
     # 2:1 divider on GPIO0 = ADC1_CH0 (trmnl-firmware PIN_BATTERY 0).
     assert frame.device_config["batteryPin"] == 0
     assert frame.device_config["batteryDivider"] == 2.0
@@ -991,25 +1026,34 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
         "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
         "busy": 18, "sck": 13, "mosi": 14, "pwr": 47,
     }
-    # The AI/Power key and the two arrows; UP/DOWN held walk the scenes. The
-    # AI key pressed once is the scene's, twice back, three times the scene
-    # list, held it talks (docs/voice-chat.md).
+    # The AI/Power key (Action) and the two arrows. AI pressed is the
+    # scene's, held it talks (docs/voice-chat.md); the arrows held walk the
+    # scenes, by role so they turn with the frame; two keys held together
+    # are Back (no Back key), and the glass swipes in from the edges.
     assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
+    assert frame.gpio_buttons == [
+        {"pin": 4, "label": "AI", "role": "primary"},
+        {"pin": 5, "label": "UP", "role": "up"},
+        {"pin": 6, "label": "DOWN", "role": "down"},
+    ]
     assert [rule["emit"] for rule in frame.event_map] == [
+        "voiceChat",
         "setCurrentScene",
         "setCurrentScene",
         "back",
         "sceneSwitcher",
-        "voiceChat",
         "forward",
         "back",
         "sceneSwitcher",
         "sceneSettings",
     ]
-    assert frame.event_map[2]["match"] == {"label": "AI", "action": "doublePress"}
-    assert frame.event_map[3]["match"] == {"label": "AI", "action": "triplePress"}
-    assert frame.event_map[4]["match"] == {"label": "AI", "action": "longPress"}
+    assert frame.event_map[0]["match"] == {"label": "AI", "action": "longPress"}
+    assert frame.event_map[1]["match"] == {"role": "prev", "action": "longPress"}
+    assert frame.event_map[2]["match"] == {"role": "next", "action": "longPress"}
+    assert frame.event_map[3]["match"] == {"role": "back", "action": "press"}
+    assert frame.event_map[4]["match"] == {"role": "back", "action": "longPress"}
     assert not any(rule["match"] == {"label": "AI", "action": "press"} for rule in frame.event_map)
+    assert not any(rule["match"].get("action") in ("doublePress", "triplePress") for rule in frame.event_map)
     # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
     assert frame.device_config["buzzerPin"] == 48
     assert frame.device_config["buzzerToneHz"] == 4000
@@ -1046,7 +1090,9 @@ def test_waveshare_codec_boards_talk_through_their_codec():
         preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS[preset_key]
         assert preset["codecPins"].startswith("mclk=14,"), preset_key
         assert "micClkPin" not in preset and "buzzerPin" not in preset, preset_key
-        assert preset["eventMap"] == [
+        # The codec counts as the board's microphone: its Action key held talks.
+        assert embedded_firmware_module.embedded_preset_has_microphone(preset), preset_key
+        assert [rule for rule in preset["eventMap"] if rule["emit"] == "voiceChat"] == [
             {"event": "button", "match": {"label": label, "action": "longPress"}, "emit": "voiceChat", "as": {}}
         ], preset_key
         frame = Frame(id=9, embedded={"hardwarePreset": preset_key})
@@ -1054,6 +1100,10 @@ def test_waveshare_codec_boards_talk_through_their_codec():
         assert label in [button_label for _pin, button_label in embedded_gpio_buttons_for_frame(frame)], preset_key
         settings = _provisioned(embedded_provisioning_plan(frame))
         assert "codec_pins" not in settings and "mic_pins" not in settings, preset_key
+    # The 13.3E6 has that one key and nothing else to map.
+    assert embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["waveshare_esp32_s3_epaper_13_3e6"]["eventMap"] == [
+        {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}}
+    ]
 
 
 def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
@@ -1089,9 +1139,9 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
         assert settings["led_pin"] == "6"
         assert settings["led_type"] == "gpio_inverted"
         assert frame.gpio_buttons == [
-            {"pin": 3, "label": "REFRESH"},
-            {"pin": 4, "label": "LEFT"},
-            {"pin": 5, "label": "RIGHT"},
+            {"pin": 3, "label": "REFRESH", "role": "primary"},
+            {"pin": 4, "label": "LEFT", "role": "left"},
+            {"pin": 5, "label": "RIGHT", "role": "right"},
         ]
         # Same switched 2:1 divider as the E1004 per Seeed's schematic
         # (hardware-unverified on these two); no shipped power policy.
@@ -1126,9 +1176,9 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     # 2026-10-12 revert to the E10XX order made an E1004's right-arrow press
     # log as `pin 3 / REFRESH`.
     assert frame.gpio_buttons == [
-        {"pin": 3, "label": "RIGHT"},
-        {"pin": 4, "label": "LEFT"},
-        {"pin": 5, "label": "REFRESH"},
+        {"pin": 3, "label": "RIGHT", "role": "right"},
+        {"pin": 4, "label": "LEFT", "role": "left"},
+        {"pin": 5, "label": "REFRESH", "role": "primary"},
     ]
     # Battery behind a switched 2:1 divider, and a battery power policy: the
     # board ships sleeping between renders on battery, checking in every 15 min.
@@ -1150,24 +1200,34 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert frame.device_config["ledPin"] == 48
     assert frame.device_config["ledType"] == "gpio"
     # The arrows held walk the scene list (docs/events.md "Event map"), by
-    # label — this board's pins are swapped, the rules are not. Seeded once:
-    # a frame whose owner cleared the map keeps it cleared.
+    # role — this board's pins are swapped and the frame may be turned, the
+    # rules name neither. REFRESH (Action) held is the scene list: the E1004
+    # has no microphone. No Back key: two keys held together are Back, and
+    # held the scene list. Seeded once: a frame whose owner cleared the map
+    # keeps it cleared.
     assert frame.event_map == [
-        {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
-        {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+        {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"role": "prev", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "button", "match": {"role": "next", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+        {"event": "button", "match": {"role": "back", "action": "press"}, "emit": "back", "as": {}},
+        {"event": "button", "match": {"role": "back", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
     ]
     # The E1001/E1002 have a microphone: REFRESH held talks to the frame
-    # (docs/voice-chat.md), the arrows as above. The E1004 has none.
+    # (docs/voice-chat.md), the rest as above.
     talking = Frame(id=11, embedded={"hardwarePreset": "seeed_reterminal_e1002"})
     ensure_embedded_frame_defaults(talking)
-    assert talking.event_map[:2] == frame.event_map
-    assert talking.event_map[2:] == [
-        {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-    ]
+    assert talking.event_map[1:] == frame.event_map[1:]
+    assert talking.event_map[0] == {
+        "event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {},
+    }
     cleared = Frame(id=10, embedded={"hardwarePreset": "seeed_reterminal_e1002"}, event_map=[])
     ensure_embedded_frame_defaults(cleared)
     assert cleared.event_map == []
-    assert cleared.gpio_buttons == [{"pin": 3, "label": "REFRESH"}, {"pin": 4, "label": "LEFT"}, {"pin": 5, "label": "RIGHT"}]
+    assert cleared.gpio_buttons == [
+        {"pin": 3, "label": "REFRESH", "role": "primary"},
+        {"pin": 4, "label": "LEFT", "role": "left"},
+        {"pin": 5, "label": "RIGHT", "role": "right"},
+    ]
     plan = embedded_provisioning_plan(frame)
     settings = _provisioned(plan)
     assert plan["settings"][0]["key"] == "hardware"
@@ -1224,12 +1284,16 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
     # the E1003 has their microphone. Its glass swipes in from the edges as
     # the Indicator's does (docs/scene-switcher.md).
     assert frame.gpio_buttons == [
-        {"pin": 3, "label": "REFRESH"},
-        {"pin": 4, "label": "LEFT"},
-        {"pin": 5, "label": "RIGHT"},
+        {"pin": 3, "label": "REFRESH", "role": "primary"},
+        {"pin": 4, "label": "LEFT", "role": "left"},
+        {"pin": 5, "label": "RIGHT", "role": "right"},
     ]
-    assert frame.event_map[2:] == [
-        {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    # The E1001's keys and rules, then the glass's four.
+    assert frame.event_map[0] == {
+        "event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {},
+    }
+    assert frame.event_map[:5] == embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["seeed_reterminal_e1001"]["eventMap"]
+    assert frame.event_map[5:] == [
         {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
@@ -1332,22 +1396,28 @@ def test_embedded_hardware_preset_for_elecrow_crowpanel_5in79():
         "rst": 47, "dc": 46, "cs": 45, "cs2": -1,
         "busy": 48, "sck": 12, "mosi": 11, "pwr": 7,
     }
-    assert {"pin": 2, "label": "HOME"} in frame.gpio_buttons
-    assert {"pin": 5, "label": "OK"} in frame.gpio_buttons
-    # HOME (top) opens the switcher and held the settings, EXIT (bottom) is back, the rocker held walks the scenes.
+    assert {"pin": 2, "label": "HOME", "role": "menu"} in frame.gpio_buttons
+    assert {"pin": 1, "label": "EXIT", "role": "back"} in frame.gpio_buttons
+    assert {"pin": 5, "label": "OK", "role": "primary"} in frame.gpio_buttons
+    # HOME (top) opens the switcher and held the settings, EXIT (bottom) is
+    # back and held the switcher, OK held the switcher (no microphone), the
+    # rocker held walks the scenes by role. A Back key of its own: no Back
+    # made of two keys.
     assert frame.event_map == [
         {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
         {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "back", "as": {}},
+        {"event": "button", "match": {"label": "EXIT", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
         {
             "event": "button",
-            "match": {"label": "PREV", "action": "longPress"},
+            "match": {"role": "prev", "action": "longPress"},
             "emit": "setCurrentScene",
             "as": {"direction": "prev"},
         },
         {
             "event": "button",
-            "match": {"label": "NEXT", "action": "longPress"},
+            "match": {"role": "next", "action": "longPress"},
             "emit": "setCurrentScene",
             "as": {"direction": "next"},
         },
@@ -1416,8 +1486,8 @@ def test_embedded_hardware_preset_for_inky_frames():
 
 def test_embedded_hardware_preset_for_trmnl_diy_kits():
     for preset, panel, button in (
-        ("trmnl_og_diy_kit", "EPD_7in5_V2", {"pin": 5, "label": "KEY3"}),
-        ("trmnl_4in26_diy_kit", "EPD_4in26", {"pin": 2, "label": "KEY1"}),
+        ("trmnl_og_diy_kit", "EPD_7in5_V2", {"pin": 5, "label": "KEY3", "role": "next"}),
+        ("trmnl_4in26_diy_kit", "EPD_4in26", {"pin": 2, "label": "KEY1", "role": "next"}),
     ):
         frame = Frame(id=9, embedded={"hardwarePreset": preset})
         ensure_embedded_frame_defaults(frame)
@@ -1429,6 +1499,7 @@ def test_embedded_hardware_preset_for_trmnl_diy_kits():
             "busy": 4, "sck": 7, "mosi": 9, "pwr": -1,
         }
         assert button in frame.gpio_buttons
+        assert {"pin": 0, "label": "BOOT", "role": "primary"} in frame.gpio_buttons
         # The driver board's battery divider sits behind a load switch on
         # GPIO6 (trmnl-firmware PIN_BATTERY 1 / PIN_VBAT_SWITCH 6, active high).
         assert frame.device_config["batteryPin"] == 1
@@ -1450,7 +1521,9 @@ def test_embedded_hardware_presets_for_seeed_xiao_epaper_boards():
         assert embedded_platform_for_frame(frame) == "esp32-s3"
         assert embedded_flash_size_for_frame(frame) == "16MB"
         assert embedded_pins_for_frame(frame) == pins
-        assert {"pin": key3, "label": "KEY3"} in frame.gpio_buttons
+        assert {"pin": key3, "label": "KEY3", "role": "next"} in frame.gpio_buttons
+        assert {"pin": 2, "label": "KEY1", "role": "prev"} in frame.gpio_buttons
+        assert {"pin": 3, "label": "KEY2", "role": "primary"} in frame.gpio_buttons
         assert frame.device_config["batteryPin"] == 1
         assert frame.device_config["batteryEnablePin"] == battery_enable
         check_embedded_panel_fits_memory(frame)
@@ -1476,6 +1549,7 @@ def test_carrier_board_preset_keeps_the_panel_the_frame_names():
 
 _FOS_CONSOLE_C = Path(__file__).resolve().parents[4] / "embedded" / "esp32" / "main" / "fos_console.c"
 _FOS_BOARD_C = _FOS_CONSOLE_C.with_name("fos_board.c")
+_FOS_BOARD_KEYS_GEN_H = _FOS_CONSOLE_C.with_name("fos_board_keys_gen.h")
 
 
 def _board_buzzer_pins() -> dict[str, dict[str, str]]:
@@ -1513,12 +1587,37 @@ def _board_mics() -> dict[str, tuple[str, str, str]]:
     }
 
 
-def _board_event_map_presets() -> set[str]:
-    """The presets fos_board.c's k_event_maps table gives a frame event map."""
-    source = _FOS_BOARD_C.read_text()
-    table = re.search(r"\} k_event_maps\[\] = \{(.*?)\n\};", source, re.DOTALL)
-    assert table, "k_event_maps[] table not found in fos_board.c"
-    return set(re.findall(r'\{"([a-z0-9_]+)",', table.group(1)))
+_C_STRING = r'"((?:[^"\\]|\\.)*)"'
+
+
+def _c_unescape(literal: str) -> str:
+    """The bytes of a C string literal's body: `\\"`, `\\\\` and `\\xNN`, all
+    the generator writes."""
+    return re.sub(
+        r"\\(x[0-9a-fA-F]{2}|.)",
+        lambda m: chr(int(m.group(1)[1:], 16)) if len(m.group(1)) == 3 else m.group(1),
+        literal,
+    )
+
+
+def _board_keys_header() -> dict[str, tuple[str, str]]:
+    """fos_board_keys_gen.h, parsed from source: each board's event map, as
+    the firmware joins it from `k_board_rules` by the numbers in its row
+    (fos_board_event_map), and its keys' roles (`LABEL=role ...`)."""
+    source = _FOS_BOARD_KEYS_GEN_H.read_text(encoding="utf-8")
+    rules_table = re.search(r"k_board_rules\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert rules_table, "k_board_rules[] not found in fos_board_keys_gen.h"
+    rules = [_c_unescape(literal) for literal in re.findall(_C_STRING, rules_table.group(1))]
+    assert rules, "no rules parsed from fos_board_keys_gen.h"
+    boards_table = re.search(r"k_board_keys\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert boards_table, "k_board_keys[] not found in fos_board_keys_gen.h"
+    boards = {}
+    for preset, numbers, roles in re.findall(
+        r'\{"([a-z0-9_]+)",\s*' + _C_STRING + r',\s*"([^"]*)"\}', boards_table.group(1)
+    ):
+        picked = [rules[ord(number) - 1] for number in _c_unescape(numbers)]
+        boards[preset] = ("[" + ",".join(picked) + "]", roles)
+    return boards
 
 
 def _board_leds() -> dict[str, dict[str, str]]:
@@ -1581,12 +1680,19 @@ def test_console_hardware_preset_table_matches_backend_presets():
     assert leds, "no LED rows parsed from fos_board.c"
     mics = _board_mics()
     assert mics, "no microphone rows parsed from fos_board.c"
-    event_map_presets = _board_event_map_presets()
-    assert event_map_presets, "no event map rows parsed from fos_board.c"
+    board_keys = _board_keys_header()
+    assert board_keys, "no board rows parsed from fos_board_keys_gen.h"
     touch_pins = _board_string_table("k_touch_pins")
     assert touch_pins, "no touch panel rows parsed from fos_board.c"
     codec_pins = _board_string_table("k_codec_pins")
     assert codec_pins, "no codec rows parsed from fos_board.c"
+    esp32_presets = {
+        preset_key
+        for preset_key, preset in embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS.items()
+        if str(preset.get("platform", embedded_firmware_module.SUPPORTED_EMBEDDED_PLATFORM)).startswith("esp32")
+    }
+    # Every ESP32 board has a row in the header, and nothing else does.
+    assert set(board_keys) == esp32_presets
     for preset_key, preset in embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS.items():
         platform = preset.get("platform", embedded_firmware_module.SUPPORTED_EMBEDDED_PLATFORM)
         if not str(platform).startswith("esp32"):
@@ -1599,6 +1705,10 @@ def test_console_hardware_preset_table_matches_backend_presets():
         assert row["panel"] == settings["panel"], preset_key
         assert row["pins"] == settings["pins"], preset_key
         assert row["gpio_buttons"] == settings.get("gpio_buttons", ""), preset_key
+        # The console's spec is pins and labels; a key's role is not in it.
+        assert row["gpio_buttons"] == ",".join(
+            f"{button['pin']}:{button['label']}" for button in preset.get("gpioButtons") or []
+        ), preset_key
         # The TF socket, the LED and the I2C buses live in fos_board.c: one
         # table for `set hardware` and the stored-config default.
         assert sd_pins.get(preset_key, "") == settings.get("assets_sd_pins", ""), preset_key
@@ -1608,15 +1718,23 @@ def test_console_hardware_preset_table_matches_backend_presets():
             assert led["type"] == settings.get("led_type"), preset_key
         preset_i2c = preset.get("i2cBuses", "")
         assert i2c_buses.get(preset_key, "") == preset_i2c, preset_key
-        # The microphone, the touch panel, the codec and the frame event map:
-        # the same tables, one per board.
+        # The microphone, the touch panel and the codec: the same tables, one
+        # per board.
         mic = mics.get(preset_key)
         assert (mic[0] if mic else "-1") == str(preset.get("micClkPin", -1)), preset_key
         if mic:
             assert mic == (str(preset["micClkPin"]), str(preset["micDataPin"]), str(preset["micPwrPin"])), preset_key
         assert touch_pins.get(preset_key, "") == preset.get("touchPins", ""), preset_key
         assert codec_pins.get(preset_key, "") == preset.get("codecPins", ""), preset_key
-        assert (preset_key in event_map_presets) == bool(preset.get("eventMap")), preset_key
+        # The frame event map and the keys' roles: the generated header
+        # (frameos/tools/generate_board_keys.py) is the firmware's copy, the
+        # map byte for byte as the backend's compact JSON.
+        assert preset_key in board_keys, f"{preset_key} is missing from fos_board_keys_gen.h"
+        header_map, header_roles = board_keys[preset_key]
+        assert header_map == json.dumps(preset.get("eventMap", []), separators=(",", ":")), preset_key
+        assert header_roles == " ".join(
+            f"{key['label']}={key['role']}" for key in EMBEDDED_BOARD_KEYS[preset_key]
+        ), preset_key
         assert row["battery_pin"] == settings.get("battery_pin", "-1"), preset_key
         assert row["battery_divider"] == float(settings.get("battery_divider", "2.0")), preset_key
         assert row["battery_enable_pin"] == settings.get("battery_enable_pin", "-1"), preset_key

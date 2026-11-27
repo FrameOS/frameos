@@ -1004,13 +1004,15 @@ async def test_the_boards_own_word_on_its_scene_does_not_undo_the_planes(
 async def test_the_render_is_told_the_frames_event_map_palette_colours_buttons_and_rotation(
     async_client, no_auth_client, db, redis, monkeypatch
 ):
-    from app.tasks.embedded_firmware import EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    from app.tasks.embedded_firmware import EMBEDDED_HARDWARE_PRESETS
 
+    reterminal_map = EMBEDDED_HARDWARE_PRESETS['seeed_reterminal_e1004']['eventMap']
     frame = await server_rendered_frame(async_client, db)
-    frame.event_map = EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    frame.event_map = reterminal_map
     frame.palette = {'name': 'Measured', 'colors': ['#101010', '#F0F0F0', '#d0c040', '#a03030']}
     frame.colors = {'autoFit': 'off'}
-    frame.gpio_buttons = [{'pin': 3, 'label': 'RIGHT'}]
+    # A key's role rides along: the map's arrows and Back match by role.
+    frame.gpio_buttons = [{'pin': 3, 'label': 'RIGHT', 'role': 'right'}]
     frame.rotate = 90
     db.add(frame)
     db.commit()
@@ -1018,10 +1020,11 @@ async def test_the_render_is_told_the_frames_event_map_palette_colours_buttons_a
     monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls))
     await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
     sent = calls[-1]['frame_json']
-    assert sent['eventMap'] == EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    assert sent['eventMap'] == reterminal_map
+    assert any(rule['match'].get('role') == 'next' for rule in sent['eventMap'])
     assert sent['palette'] == ['#101010', '#f0f0f0', '#d0c040', '#a03030']
     assert sent['colors'] == {'autoFit': 'off'}
-    assert sent['gpioButtons'] == [{'pin': 3, 'label': 'RIGHT'}]
+    assert sent['gpioButtons'] == [{'pin': 3, 'label': 'RIGHT', 'role': 'right'}]
     assert sent['rotate'] == 90
     assert isinstance(sent['pixelFormat'], int)
 

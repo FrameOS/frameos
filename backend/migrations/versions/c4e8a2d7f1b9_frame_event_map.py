@@ -57,7 +57,11 @@ def _seed_reterminal_frames(connection) -> None:
     for row in connection.execute(sa.select(table.c.id, table.c.embedded, table.c.device_config)).fetchall():
         preset = EMBEDDED_HARDWARE_PRESETS.get(_preset_of(row.embedded, row.device_config))
         event_map = (preset or {}).get("eventMap")
-        if isinstance(event_map, list) and event_map:
+        # The presets are read as they are today (docs/buttons.md), and a frame
+        # this old may run firmware before 2026.11.15, which keeps eight rules
+        # and refuses a push with a ninth: a longer map is left unseeded, and
+        # the frame runs its firmware's own until the owner sets one.
+        if isinstance(event_map, list) and 0 < len(event_map) <= 8:
             connection.execute(
                 table.update().where(table.c.id == row.id).values(event_map=json.loads(json.dumps(event_map)))
             )
