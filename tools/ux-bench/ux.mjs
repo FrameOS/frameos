@@ -49,18 +49,23 @@ if (!panel) throw new Error(`no panel ${PANEL_KEY}`)
 
 // ------------------------------------------------------------- scenes
 function loadSamples() {
-  const root = join(repoRoot, 'repo/scenes/samples')
+  // Every scene of the repo: the samples, then the galleries (their folder
+  // names prefixed, as a store lists them apart).
   const all = []
-  for (const dir of readdirSync(root).sort()) {
-    const file = join(root, dir, 'scenes.json')
-    if (!existsSync(file)) continue
-    let scenes
-    try {
-      scenes = JSON.parse(readFileSync(file, 'utf-8'))
-    } catch {
-      continue
+  for (const [sub, prefix] of [['samples', ''], ['gallery', 'gallery/']]) {
+    const root = join(repoRoot, 'repo/scenes', sub)
+    if (!existsSync(root)) continue
+    for (const dir of readdirSync(root).sort()) {
+      const file = join(root, dir, 'scenes.json')
+      if (!existsSync(file)) continue
+      let scenes
+      try {
+        scenes = JSON.parse(readFileSync(file, 'utf-8'))
+      } catch {
+        continue
+      }
+      for (const s of scenes) all.push({ ...s, __folder: prefix + dir })
     }
-    for (const s of scenes) all.push({ ...s, __folder: dir })
   }
   return all
 }
@@ -116,7 +121,10 @@ class SyncXMLHttpRequest {
       } else {
         result = JSON.parse(child.stdout.toString('utf-8'))
       }
-      if (result.status && result.status < 500) {
+      // Only what worked is kept: a refusal (403, 429) may be the harness's
+      // own doing or the API's mood that day, and a run that kept one would
+      // show it for good (a 403 kept from before the User-Agent fix).
+      if (result.status && result.status < 400) {
         const tmp = `${cacheFile}.${process.pid}`
         writeFileSync(tmp, JSON.stringify(result))
         renameSync(tmp, cacheFile)
@@ -220,9 +228,13 @@ if (LAYOUT && !layoutScene) throw new Error(`no layout ${LAYOUT}`)
 function frameScenes(under) {
   const list = [under]
   if (layoutScene) list.push(layoutScene)
+  // The scenes it came with: a split's panels are scenes of its own folder.
+  for (const s of scenes) {
+    if (s.__folder === under.__folder && s.id !== under.id && !s.settings?.isLayout) list.push(s)
+  }
   for (const name of COMPANIONS) {
     const s = sceneList.find((x) => x.__folder === name)
-    if (s && s.id !== under.id) list.push(s)
+    if (s && !list.includes(s)) list.push(s)
   }
   return list
 }
@@ -449,6 +461,73 @@ function keptScrolls(sceneId) {
   }
 }
 
+// Every UI element of the last render, whole (frameos_wasm_ui_elements):
+// one that reaches past the canvas and sits in no box that scrolls is out of
+// reach (the press map is cut at the canvas, so it cannot say); on a round
+// glass, one whose box the circle cuts; two elements that take presses and
+// overlap without one holding the other.
+function uiElements() {
+  if (typeof Module._frameos_wasm_ui_elements !== 'function') return null
+  try {
+    return JSON.parse(call('frameos_wasm_ui_elements', 'string', [], []))
+  } catch {
+    return null
+  }
+}
+function elementProblems(sceneId) {
+  const els = uiElements()
+  if (!els) return []
+  const out = []
+  const r = Math.min(W, H) / 2
+  const round2 = (b) => b.map((v) => Math.round(v))
+  const mine = els.filter((e) => e.scene === sceneId || e.scene.startsWith(sceneId))
+  for (const e of mine) {
+    const [x0, y0, x1, y1] = e.box
+    if (x1 - x0 < 1 || y1 - y0 < 1) continue
+    if (e.scroller === 0) {
+      const past = Math.max(-x0, -y0, x1 - W, y1 - H)
+      if (past > 2) {
+        const offAll = x1 <= 0 || y1 <= 0 || x0 >= W || y0 >= H
+        out.push({ kind: offAll ? 'elementOffCanvas' : 'elementPastCanvas', past: Math.round(past), box: round2(e.box), takes: e.takes })
+      }
+    }
+    if (panel.round && e.takes) {
+      // The part of the element the glass shows: sample a grid over its visible box.
+      const [v0, v1, v2, v3] = e.visible
+      if (v2 > v0 && v3 > v1) {
+        let inside = 0
+        let n = 0
+        for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+          const x = v0 + ((v2 - v0) * (i + 0.5)) / 5
+          const y = v1 + ((v3 - v1) * (j + 0.5)) / 5
+          n++
+          if (Math.hypot(x - W / 2, y - H / 2) <= r) inside++
+        }
+        if (inside / n < 0.6) out.push({ kind: 'elementCutByCircle', shown: Math.round((inside / n) * 100) / 100, box: round2(e.visible) })
+      }
+    }
+  }
+  // What of each shows on the panel: a toolbar reaching past the edge over a
+  // canvas that fills it is still on the canvas (the reach is its own problem).
+  const onPanel = (q) => [Math.max(q[0], 0), Math.max(q[1], 0), Math.min(q[2], W), Math.min(q[3], H)]
+  const takers = mine.filter((e) => e.takes && e.scroller === 0)
+  for (let i = 0; i < takers.length; i++) {
+    for (let j = i + 1; j < takers.length; j++) {
+      const a = onPanel(takers[i].visible)
+      const b = onPanel(takers[j].visible)
+      const ix = Math.min(a[2], b[2]) - Math.max(a[0], b[0])
+      const iy = Math.min(a[3], b[3]) - Math.max(a[1], b[1])
+      if (ix <= 2 || iy <= 2) continue
+      const holds = (p, q) => p[0] <= q[0] + 1 && p[1] <= q[1] + 1 && p[2] >= q[2] - 1 && p[3] >= q[3] - 1
+      if (holds(a, b) || holds(b, a)) continue
+      const area = (q) => (q[2] - q[0]) * (q[3] - q[1])
+      const share = (ix * iy) / Math.min(area(a), area(b))
+      if (share > 0.2) out.push({ kind: 'elementsOverlap', share: Math.round(share * 100) / 100, a: round2(a), b: round2(b) })
+    }
+  }
+  return out.slice(0, 12)
+}
+
 // --------------------------------------------------------------- run
 const outDir = join(OUT, PANEL_KEY + (LAYOUT ? '@' + LAYOUT.replace(/[^a-zA-Z0-9]+/g, '-') : '') + (BUILTINS ? '@builtins' : ''))
 mkdirSync(outDir, { recursive: true })
@@ -634,6 +713,7 @@ for (const scene of tested) {
       }
       return out
     })
+    rec.elementProblems = elementProblems(scene.id)
     let prev = warm.pixels || cold.pixels
     takeEvents()
 

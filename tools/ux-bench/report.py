@@ -120,6 +120,16 @@ def analyze_panel(panel_dir: Path):
             add(rec, "blank", "fail", "the picture is one colour", r.get("shot"))
         if panel.get("round") and a.get("outsideCircle", 0) > 0.05:
             add(rec, "round-corners", "slow", f"{a['outsideCircle']:.0%} of the invisible corners hold content", r.get("shot"))
+        for p in rec.get("elementProblems") or []:
+            kind = p["kind"]
+            if kind in ("elementPastCanvas", "elementOffCanvas"):
+                what = "a pressable element" if p.get("takes") else "an element"
+                detail = f"{what} at {p['box']} reaches {p['past']}px past the panel, in no box that scrolls"
+            elif kind == "elementCutByCircle":
+                detail = f"a pressable element at {p['box']} is {p['shown']:.0%} inside the round glass"
+            else:
+                detail = f"pressable elements {p['a']} and {p['b']} overlap ({p['share']:.0%})"
+            add(rec, kind, "slow", detail, r.get("shot"))
         for p in rec.get("pressProblems") or []:
             add(rec, "press-" + p["kind"], "slow", f"pressable {p['x0']},{p['y0']}-{p['x1']},{p['y1']}", r.get("shot"))
         dead_taps = 0

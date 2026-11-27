@@ -1,18 +1,23 @@
 # UX bench
 
-Every sample scene (`repo/scenes/samples`) on every bench board, without the
-boards: the wasm runtime run as each board's own runtime runs (its size,
+Every repo scene (`repo/scenes/samples` and the galleries) on every bench
+board, without the boards: the wasm runtime run as each board's own runtime runs (its size,
 rotation, panel format and canvas, round glass, keys, event map, touch, the
 ESP32's memory ceiling), driven the way a person drives it. What
 `tools/frame-bench` does for speed and stability on the hardware, this does
 for how scenes look and behave, in minutes and on any machine.
 
 For each scene and virtual panel (`panels.json`), in a fresh runtime with the
-scene and a dozen companions installed (`ux.mjs`):
+scene, the scenes of its own folder (a split's panels) and a dozen companions
+installed (`ux.mjs`):
 
 - **render**, cold and warm, screenshotted; blank pictures, error frames, log
   errors, out-of-memory under the device's ceiling; on a round panel, how
   much is drawn in the corners nobody sees;
+- **every element on the screen**: each UI element the layout placed, whole
+  (`frameos_wasm_ui_elements`; the press map is cut at the canvas, so it
+  cannot say), past or off the panel in no box that scrolls (out of reach),
+  cut by a round glass, or two pressable ones overlapping;
 - **keys**: each key pressed and held, and two held together where the map
   makes that Back, as relayed edges (`frameos_wasm_device_input`, timed by
   `atMs`); what came up (`report.py` holds it to the board's event map: a held
@@ -46,7 +51,8 @@ python3 tools/ux-bench/sheet.py out.png 300 4 a.png b.png ...                   
 - `--layout <folder>`: every scene wears that layout sample.
 - HTTP goes through the backend renderer's guarded fetch child and is cached
   in `~/.frameos-bench/ux/http-cache`, so a run is repeatable and does not
-  hammer the APIs.
+  hammer the APIs. Only answers under 400 are kept: a refusal kept once would
+  show for good.
 - The contact sheets are for looking at: what a scene looks like is the one
   thing the report cannot judge. A sheet a panel, about fifty scenes each.
 
