@@ -408,6 +408,23 @@ proc toTypeset(
 
 # ---------- Public API
 
+proc breaksWord*(a: Arrangement): bool =
+  ## Whether a word was broken across two lines: pixie wraps at spaces, and a
+  ## word wider than its line it breaks where the line ends. A line that ends
+  ## in a letter, followed by one that starts with one, with no break of the
+  ## text's own between them (a space, a new line, a hyphen).
+  for i in 0 ..< a.lines.len - 1:
+    let
+      last = a.lines[i][1]
+      next = a.lines[i + 1][0]
+    if last < 0 or next != last + 1 or next >= a.runes.len:
+      continue
+    let r = a.runes[last]
+    if r.isWhiteSpace or a.runes[next].isWhiteSpace or r == Rune('-') or r == Rune(0x2010) or
+        r == Rune(0x00AD):
+      continue
+    return true
+
 proc typesetIntoBounds*(
   opts: TextRenderOptions,
   maxWidth: int,
@@ -443,17 +460,24 @@ proc typesetIntoBounds*(
       chosenBorder = some(toTypeset(opts.text, opts.richTextMode, scaledSize, baseSize, opts.borderColor, typeface,
           bounds, hAlign, vAlign, true, opts.assetsPath))
   else:
-    # Binary search font size that fits height
+    # Binary search font size that fits: its height, and every word whole on
+    # a line (a word wider than the box was broken mid-word, "banan/as" in a
+    # narrow split panel, the UX bench 2026-11-27). Words are kept whole only
+    # where they can be at 40 % of the size: a text with a token wider than
+    # that (a URL, compact JSON) breaks at the box as before, rather than
+    # shrink out of sight and break anyway.
     var tooBig = 0.0
     var tooSmall = 0.0
     var fontSize = scaledSize
     var iter = 0
+    let wholeWords = not toTypeset(opts.text, opts.richTextMode, scaledSize * 0.4, baseSize, opts.fontColor,
+        typeface, bounds, hAlign, vAlign, false, opts.assetsPath).breaksWord()
     while iter < 100:
       inc iter
       let layout = toTypeset(opts.text, opts.richTextMode, fontSize, baseSize, opts.fontColor, typeface, bounds, hAlign,
           vAlign, false, opts.assetsPath)
       let lh = layoutBounds(layout).y
-      if lh > innerH:
+      if lh > innerH or wholeWords and layout.breaksWord():
         if fontSize < 2: break
         tooBig = fontSize
         if tooSmall > 0: fontSize = (tooBig + tooSmall) / 2 else: fontSize = tooBig / 2
