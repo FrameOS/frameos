@@ -20,13 +20,18 @@
 ## (device_event_map_gen.nim, frameos/tools/generate_board_keys.py), as is
 ## the SPA's `deviceEventMap` (frontend/src/utils/frameEventMap.ts).
 
-import std/[json, strutils]
-import ./device_event_map_gen
+import std/json
+when not defined(frameosEmbedded):
+  import std/strutils
+  import ./device_event_map_gen
 
 proc deviceEventMap*(device: string): JsonNode =
-  ## A fresh copy of the device's own map; nil when it comes with none.
-  if device.startsWith("pimoroni.hyperpixel"):
-    return parseJson(HyperPixelEventMap)
-  if device in InkyImpressionDevices:
-    return parseJson(InkyImpressionEventMap)
+  ## A fresh copy of the device's own map; nil when it comes with none. An
+  ## ESP32 has its board's from the firmware (fos_board_keys_gen.h): none of
+  ## these is in its flash.
+  when not defined(frameosEmbedded):
+    if device.startsWith("pimoroni.hyperpixel"):
+      return parseJson(HyperPixelEventMap)
+    if device in InkyImpressionDevices:
+      return parseJson(InkyImpressionEventMap)
   nil
