@@ -5,12 +5,14 @@ void fos_voice_hold_init(fos_voice_hold_t *h)
     *h = (fos_voice_hold_t){0};
 }
 
-fos_voice_hold_event_t fos_voice_hold_sample(fos_voice_hold_t *h, bool down, int64_t now_ms)
+fos_voice_hold_event_t fos_voice_hold_sample(fos_voice_hold_t *h, bool down, bool others_down, int64_t now_ms)
 {
     if (down && !h->down) {
         h->down_at_ms = now_ms;
+        h->chord = false;
     }
     h->down = down;
+    if (!down) h->chord = false;
 
     if (h->active) {
         if (!down) {
@@ -24,7 +26,8 @@ fos_voice_hold_event_t fos_voice_hold_sample(fos_voice_hold_t *h, bool down, int
         }
         return FOS_VOICE_HOLD_NONE;
     }
-    if (down && now_ms - h->down_at_ms >= FOS_VOICE_HOLD_MS) {
+    if (down && others_down) h->chord = true;
+    if (down && !h->chord && now_ms - h->down_at_ms >= FOS_VOICE_HOLD_MS) {
         h->active = true;
         h->claimed = true;
         return FOS_VOICE_HOLD_START;

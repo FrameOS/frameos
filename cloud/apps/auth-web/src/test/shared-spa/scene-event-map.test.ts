@@ -11,6 +11,7 @@ import {
   buttonMapConflicts,
   buttonMapRules,
   buttonsHeardAsIs,
+  facingRole,
   frameButtons,
   gestureTitle,
   gestureValue,
@@ -75,8 +76,21 @@ describe("frameButtons", () => {
     const inky = { id: 2, device: "pimoroni.inky_impression_7_3" } as unknown as FrameType;
     expect(frameButtons(inky).map((button) => button.label)).toEqual(["A", "B", "C", "D"]);
     const reported = { id: 3, hardware: { gpioButtons: [{ pin: 9, label: "KEY1" }] } } as unknown as FrameType;
-    expect(frameButtons(reported)).toEqual([{ pin: 9, label: "KEY1", role: "next" }]);
+    expect(frameButtons(reported)).toEqual([{ pin: 9, label: "KEY1", role: "prev" }]);
     expect(frameButtons(reported, { gpio_buttons: [{ pin: 1, label: "GO" }] }).map((b) => b.label)).toEqual(["GO"]);
+  });
+
+  it("turns a key that points somewhere with the frame, as the runtime does (docs/buttons.md)", () => {
+    const keys = { gpio_buttons: [{ pin: 4, label: "LEFT" }, { pin: 5, label: "RIGHT" }, { pin: 6, label: "UP" }] };
+    const roles = (rotate: number, flip = "") =>
+      frameButtons({ ...keys, rotate, flip } as unknown as FrameType).map((button) => button.role);
+    expect(roles(0)).toEqual(["prev", "next", "prev"]);
+    expect(roles(180)).toEqual(["next", "prev", "next"]);
+    // A quarter turn: the board's top edge is the picture's left, LEFT at its bottom.
+    expect(roles(90)).toEqual(["next", "prev", "prev"]);
+    expect(roles(270)).toEqual(["prev", "next", "next"]);
+    expect(roles(0, "horizontal")).toEqual(["next", "prev", "prev"]);
+    expect(facingRole("primary", 180)).toBe("primary");
   });
 
   it("says which buttons a listener hears without any map", () => {

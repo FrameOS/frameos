@@ -53,14 +53,14 @@ doAssert host.scene.isNil, "the scene is built by its first use, not by being ma
 
 # The wake press, as an ESP32 queues it: a `gpio` `down` with `wake: true` and
 # its `up`, stamped when the button task saw them a second before the scene
-# was up. Its window is long over by then, so the first tick makes it the
-# `button` `press` the scene's listener hears. (The scene listens for presses
+# was up. Its up is the `button` `press` the scene's listener hears (no rule
+# binds a double press of it: nothing waits). (The scene listens for presses
 # only: nothing hears the edges themselves.)
 let wokeAt = getMonoTime().ticks div 1_000_000 - 1000
 discard host.send(eoDriver, "gpio", %*{"pin": 5, "label": "RIGHT", "level": 0, "wake": true, "atMs": wokeAt})
 doAssert not host.scene.isNil, "an edge sent before the first render builds the scene"
 discard host.send(eoDriver, "gpio", %*{"pin": 5, "label": "RIGHT", "level": 1, "atMs": wokeAt + 80})
-doAssert host.tick(), "the tick delivers the press"
+discard host.tick()
 doAssert selected == @["fixtures/dispatcher/switchTo"], "selected " & $selected
 
 # What the scene's async code dispatches between renders (docs/async-js.md: a

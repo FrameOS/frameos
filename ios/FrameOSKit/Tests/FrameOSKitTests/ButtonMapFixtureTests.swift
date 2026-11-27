@@ -21,6 +21,8 @@ import Testing
                 #expect(gesture?["label"]?.stringValue == label && gesture?["action"]?.stringValue == action, "rule \(index) gesture")
             case .edge(let edge):
                 #expect(gesture?["edge"]?.stringValue == edge, "rule \(index) gesture")
+            case .role(let role, let action):
+                #expect(gesture?["role"]?.stringValue == role && gesture?["action"]?.stringValue == action, "rule \(index) gesture")
             }
             #expect(row.kind == expected["binding"]?["action"]?["kind"]?.stringValue, "rule \(index) kind")
             #expect(row.sceneId == expected["binding"]?["action"]?["sceneId"]?.stringValue, "rule \(index) scene")

@@ -35,12 +35,16 @@ typedef struct {
     int64_t down_at_ms; /* when it went down */
     bool active;        /* a session started and the key has not let go */
     bool claimed;       /* the key belongs to the hold until it is up again */
+    bool chord;         /* another key went down during this press: the two are the Back key, no voice */
 } fos_voice_hold_t;
 
 void fos_voice_hold_init(fos_voice_hold_t *h);
 
-/* One poll: the key's state (true = down) at `now_ms`. */
-fos_voice_hold_event_t fos_voice_hold_sample(fos_voice_hold_t *h, bool down, int64_t now_ms);
+/* One poll: the key's state (true = down) at `now_ms`, and whether another
+ * key of the board is down too. Another key down before the session starts
+ * makes this press half of two keys held together (the frame's Back key,
+ * docs/buttons.md): no session starts until the key is let go. */
+fos_voice_hold_event_t fos_voice_hold_sample(fos_voice_hold_t *h, bool down, bool others_down, int64_t now_ms);
 
 /* The hold owns the key: no hold sounds, no release click, and its `up` edge
  * carries `claimed`. True from the start until the key is up again. */

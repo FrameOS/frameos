@@ -43,6 +43,7 @@ typedef struct {
     bool twice;             /* this press is the second (or third) of a run: no long press */
     bool thrice;            /* this press is the third of a triple press: nothing follows it */
     bool triple;            /* a rule binds this key's triplePress (fos_buttons.c, from the frame's map) */
+    bool pair;              /* a rule binds its doublePress or triplePress: only then is a quick second down one */
     uint32_t seconds;       /* whole FOS_BUTTON_LONG_PRESS_MS this hold has been down */
 } fos_button_timing_t;
 

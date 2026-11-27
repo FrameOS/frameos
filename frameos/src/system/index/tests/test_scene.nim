@@ -336,15 +336,15 @@ suite "system/index scene":
 
   test "the buttons row matches a rule on the button's role":
     var config = testConfig()
-    # B's role is `next` by default (the contract's roleByLabel); a role in
+    # B's role is `prev` by default (the contract's roleByLabel); a role in
     # frame.json overrides it.
-    config.gpioButtons = @[GPIOButton(pin: 6, label: "B"), GPIOButton(pin: 7, label: "C", role: "next")]
+    config.gpioButtons = @[GPIOButton(pin: 6, label: "B", role: "next"), GPIOButton(pin: 7, label: "C", role: "prev")]
     config.eventMap = %*[
       {"event": "button", "match": {"role": "next", "action": "press"},
        "emit": "setCurrentScene", "as": {"direction": "next"}},
     ]
     check index_scene.buttonsLine(config) ==
-      "B (GPIO 6) press: next scene · C (GPIO 7) press: next scene"
+      "B (GPIO 6) press: next scene · C (GPIO 7)"
 
   test "the inputs and buttons rows reach the screen":
     initTimeZone()

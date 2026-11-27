@@ -58,12 +58,47 @@ export function defaultButtonRole(label: string): string {
   return buttonRoleByLabel[label.trim().toUpperCase()] ?? ''
 }
 
+const FACING: Record<string, [number, number]> = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }
+
+/**
+ * A key's role as a scene hears it (docs/buttons.md; input_state.nim
+ * `facing`): a key configured as a direction (`left`, `right`, `up`, `down`:
+ * where it sits on the board unrotated) is `next` when it points to the right
+ * or the bottom of the picture as the frame shows it, else `prev`, through the
+ * frame's rotation and flip (`panelToScenePoint`'s). Any other role is itself.
+ */
+export function facingRole(role: string, rotate?: number | null, flip?: string | null): string {
+  const direction = FACING[role]
+  if (!direction) {
+    return role
+  }
+  let [x, y] = direction
+  switch ((((rotate ?? 0) % 360) + 360) % 360) {
+    case 90:
+      ;[x, y] = [y, -x]
+      break
+    case 180:
+      ;[x, y] = [-x, -y]
+      break
+    case 270:
+      ;[x, y] = [-y, x]
+      break
+  }
+  if (flip === 'horizontal' || flip === 'both') {
+    x = -x
+  }
+  if (flip === 'vertical' || flip === 'both') {
+    y = -y
+  }
+  return (Math.abs(x) >= Math.abs(y) ? x > 0 : y > 0) ? 'next' : 'prev'
+}
+
 /**
  * The frame's buttons with their effective role: the ones its device always
  * has (an Inky's A–D), then the configured list (the form's, else the
  * frame's), else what the device reported (`hardware.gpioButtons`). One row
  * per pin, the first wins; the role is the configured one, else the
- * contract's default for the label.
+ * contract's default for the label, as the frame hangs (`facingRole`).
  */
 export function frameButtons(
   frame: Partial<FrameType> | null | undefined,
@@ -84,7 +119,8 @@ export function frameButtons(
     if (typeof button.pin === 'number') {
       seenPins.add(button.pin)
     }
-    result.push({ pin: button.pin, label, role: (button as GPIOButton).role || defaultButtonRole(label) })
+    const configured = (button as GPIOButton).role || defaultButtonRole(label)
+    result.push({ pin: button.pin, label, role: facingRole(configured, frame?.rotate, frame?.flip) })
   }
   return result
 }

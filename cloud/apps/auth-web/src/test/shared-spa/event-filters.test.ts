@@ -8,7 +8,7 @@ import {
   eventFilterFieldsToShow,
   foldedEventFilterCount,
 } from "../../../../../../frontend/src/utils/eventFilters";
-import { buttonActions, buttonRoles, gpioActions } from "../../../../../../frontend/src/utils/eventsContract.gen";
+import { buttonActions, buttonFacing, buttonRoles, gpioActions } from "../../../../../../frontend/src/utils/eventsContract.gen";
 import catalog from "../../../../../../frontend/schema/events.json";
 import type { AppConfigField, FrameEvent } from "../../../../../../frontend/src/types";
 
@@ -40,7 +40,11 @@ describe("event node filters", () => {
     const role = eventFilterControl("button", fields.find((f) => f.name === "role")!);
     expect(role).toEqual({
       kind: "select",
-      options: [{ value: "", label: "any" }, ...buttonRoles.map((value) => ({ value, label: value }))],
+      // A direction is configured, never heard (docs/buttons.md): no filter offers it.
+      options: [
+        { value: "", label: "any" },
+        ...buttonRoles.filter((value) => !buttonFacing.includes(value)).map((value) => ({ value, label: value })),
+      ],
     });
     const action = eventFilterControl("button", fields.find((f) => f.name === "action")!);
     expect(action.kind === "select" && action.options.map((o) => o.value)).toEqual(["", ...buttonActions]);
@@ -78,7 +82,7 @@ describe("event node filters", () => {
     expect(pin.kind === "select" && pin.options.map((o) => o.label)).toEqual(["any", "5 (A)", "6 (B)", "7 (Odd)"]);
     const role = eventFilterControl("button", fields.find((f) => f.name === "role")!, buttons);
     expect(role.kind === "select" && role.options.map((o) => o.label)).toEqual([
-      "any", "primary (A)", "secondary", "next (B)", "prev", "up", "down", "back", "menu", "refresh",
+      "any", "primary (A)", "secondary", "next", "prev (B)", "back", "menu", "refresh", "screen",
     ]);
     // An empty list (a frame with no buttons) and an unknown frame draw the plain controls.
     expect(eventFilterControl("button", fields.find((f) => f.name === "label")!, []).kind).toBe("text");

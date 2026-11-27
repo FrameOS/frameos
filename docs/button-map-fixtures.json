@@ -608,6 +608,159 @@
           "as": {}
         }
       }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "role": "next",
+          "action": "longPress"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "next"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "role": "next",
+            "action": "longPress"
+          },
+          "action": {
+            "kind": "nextScene"
+          }
+        },
+        "gestureTitle": "Next key \u00b7 long press",
+        "actionTitle": "Next scene",
+        "rule": {
+          "event": "button",
+          "match": {
+            "role": "next",
+            "action": "longPress"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "direction": "next"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "role": "prev",
+          "action": "longPress"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "prev"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "role": "prev",
+            "action": "longPress"
+          },
+          "action": {
+            "kind": "prevScene"
+          }
+        },
+        "gestureTitle": "Previous key \u00b7 long press",
+        "actionTitle": "Previous scene",
+        "rule": {
+          "event": "button",
+          "match": {
+            "role": "prev",
+            "action": "longPress"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "direction": "prev"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "role": "back",
+          "action": "press"
+        },
+        "emit": "back",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "role": "back",
+            "action": "press"
+          },
+          "action": {
+            "kind": "back"
+          }
+        },
+        "gestureTitle": "Back key (two keys together where there is none) \u00b7 press",
+        "actionTitle": "Back",
+        "rule": {
+          "event": "button",
+          "match": {
+            "role": "back",
+            "action": "press"
+          },
+          "emit": "back",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "role": "back",
+          "action": "longPress"
+        },
+        "emit": "sceneSwitcher",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "role": "back",
+            "action": "longPress"
+          },
+          "action": {
+            "kind": "sceneSwitcher"
+          }
+        },
+        "gestureTitle": "Back key (two keys together where there is none) \u00b7 long press",
+        "actionTitle": "Scene switcher",
+        "rule": {
+          "event": "button",
+          "match": {
+            "role": "back",
+            "action": "longPress"
+          },
+          "emit": "sceneSwitcher",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "role": "next",
+          "label": "RIGHT",
+          "action": "longPress"
+        },
+        "emit": "render",
+        "as": {}
+      },
+      "expect": null
     }
   ]
 }

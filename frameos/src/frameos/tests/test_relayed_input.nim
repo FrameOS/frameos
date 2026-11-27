@@ -49,13 +49,15 @@ block test_a_tap_on_the_board_is_a_press:
   let output = deliver(%*{"nowMs": 1_500, "edges": [edge("B", "down", 1_000), edge("B", "up", 1_080)]}, at(5))
   doAssert output.kinds == @["gpio:down", "gpio:up", "button:press"]
   doAssert output[1].payload["durationMs"].getInt() == 80
-  doAssert output[2].payload["label"].getStr() == "B" and output[2].payload["role"].getStr() == "next"
+  doAssert output[2].payload["label"].getStr() == "B" and output[2].payload["role"].getStr() == "prev"
   doAssert output[2].origin == eoDriver
 
-block test_two_quick_taps_are_a_double_press:
+block test_two_quick_taps_are_two_presses:
+  # No rule binds a double press of A (docs/buttons.md): each up is a press.
   let output = deliver(%*{"nowMs": 1_800, "edges": [
     edge("A", "down", 1_000), edge("A", "up", 1_060), edge("A", "down", 1_200), edge("A", "up", 1_260)]}, at(5))
-  doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "button:doublePress", "gpio:up"]
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:press", "gpio:down", "gpio:up", "button:press"],
+    $output.kinds
 
 block test_a_hold_is_a_long_press_with_its_length:
   let output = deliver(%*{"nowMs": 2_700, "edges": [edge("C", "down", 1_000), edge("C", "up", 2_300)]}, at(5))
@@ -66,7 +68,8 @@ block test_a_hold_is_a_long_press_with_its_length:
 block test_taps_on_two_buttons_are_two_presses:
   let output = deliver(%*{"nowMs": 1_800, "edges": [
     edge("A", "down", 1_000), edge("A", "up", 1_050), edge("B", "down", 1_100), edge("B", "up", 1_150)]}, at(5))
-  doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "gpio:up", "button:press", "button:press"]
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:press", "gpio:down", "gpio:up", "button:press"],
+    $output.kinds
 
 block test_the_press_that_woke_the_board_says_so:
   let output = deliver(%*{"nowMs": 900, "edges": [edge("D", "down", 0, wake = true), edge("D", "up", 140)]}, at(5))

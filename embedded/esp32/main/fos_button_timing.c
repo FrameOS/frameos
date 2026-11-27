@@ -26,7 +26,8 @@ fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, in
 int fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms)
 {
     bool in_window = at_ms - b->released_at_ms <= FOS_BUTTON_DOUBLE_PRESS_MS;
-    int nth = !in_window ? 1 : b->tap_ended ? 2 : b->pair_ended && b->triple ? 3 : 1;
+    /* A key no rule binds twice: every press is a first (docs/buttons.md). */
+    int nth = !in_window || !b->pair ? 1 : b->tap_ended ? 2 : b->pair_ended && b->triple ? 3 : 1;
     b->tap_ended = false;
     b->pair_ended = false;
     b->down = true;
@@ -70,5 +71,7 @@ uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *
 bool fos_button_timing_busy(const fos_button_timing_t *b, int64_t now_ms, int64_t slack_ms)
 {
     if (b->down) return true;
+    /* Every short press, a key's map binding twice or not: the showing
+     * scene's map, which this task never sees, may bind a double press. */
     return (b->tap_ended || b->pair_ended) && now_ms - b->released_at_ms <= FOS_BUTTON_DOUBLE_PRESS_MS + slack_ms;
 }

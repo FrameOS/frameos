@@ -39,15 +39,22 @@ int fos_board_buzzer_pin(const char *hardware_preset);
 int fos_board_buzzer_tone_hz(const char *hardware_preset);
 
 /* The frame's event map a hardware preset ships with (docs/events.md, "Event
- * map"): what the board's buttons do whatever scene shows, as the compact
- * JSON rule list frame.json `eventMap` holds — a reTerminal's LEFT and RIGHT
- * held are the previous and the next scene, and on the E1001/E1002/E1003
- * REFRESH held is the voice chat. "" for a board without one (or
- * no preset at all). The console's `set hardware` applies it, and it is the
- * stored-config default when NVS has no `event_map` key. Keep in step with
- * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)
- * and the SPA's preset table. */
+ * map"; docs/buttons.md): what the board's keys and glass do whatever scene
+ * shows, as the compact JSON rule list frame.json `eventMap` holds. "" for a
+ * board without one (or no preset at all). The console's `set hardware`
+ * applies it, and it is the stored-config default when NVS has no
+ * `event_map` key. Generated with the backend's (fos_board_keys_gen.h,
+ * frameos/tools/generate_board_keys.py): never written here by hand. */
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len);
+
+/* The role a key of the board plays (docs/events-contract.json
+ * `buttons.roles`; docs/buttons.md): "primary" for the PhotoPainter's KEY1,
+ * "screen" for an LCD's BOOT, "left" for a reTerminal's LEFT. The button
+ * task sends it with every edge, so a key whose label means another thing
+ * on another board (BOOT, KEY1) is what its board says. False and "" for a
+ * key the preset does not list (the runtime then takes the label's
+ * default). Case-insensitive on the label. */
+bool fos_board_key_role(const char *hardware_preset, const char *label, char *out, size_t out_len);
 
 /* The board's PDM microphone for a hardware preset key: clock, data and the
  * power-enable GPIO (-1 each when the preset names a board without one, or no

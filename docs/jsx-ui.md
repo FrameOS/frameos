@@ -760,8 +760,8 @@ export function get(app) {
   landed. A tap anywhere else (a button, the page) takes it away and then
   does what it does; so do Enter in an `<input>` (a `<textarea>` gets a new
   line) and Escape.
-- **The frame's `back`** (a swipe in from the left edge, a reTerminal
-  Sticky's Action key pressed twice) puts the keyboard away as Escape does, and
+- **The frame's `back`** (a swipe in from the left edge, a Back key, two keys
+  held together on a board without one: docs/buttons.md) puts the keyboard away as Escape does, and
   goes no further: the scene, its layout and their apps never hear that
   `back`, so it does not also leave the page or the scene. A key's accents
   or a selection made by touch go first, the keyboard staying; an open
@@ -1060,17 +1060,21 @@ the comma or the space), which goes to the next field down the tree, around
 past the last, the keyboard staying up; held, to the one before. A
 `<select>` is passed over there: its list is no place to type.
 
-**A frame's buttons** are the keys, by role (docs/events.md "Buttons"):
-`next` and `down` are Tab, `prev` and `up` Shift+Tab, `primary` Enter (a
-reTerminal's green key), `back` and `menu` Escape: a menu key is a way out,
-as on a remote. `refresh` is Enter too, for a frame that gave a key that
-role by hand. A press is one, a
-double press two, so every tap counts however quickly they come, and taps
-made while e-paper refreshes all land: each moves the ring from where the one
-before left it, on what the last render drew, and the next refresh shows
-where they got to. A long press stays the frame's event map's (a reTerminal's
-arrows held walk the scenes, its green key held talks). A UI with nothing to
-press hears neither keys nor buttons.
+**A frame's buttons** are the keys, by role (docs/events.md "Buttons",
+docs/buttons.md): `next` is Tab, `prev` Shift+Tab (a key that points
+somewhere is `next` or `prev` as the frame hangs), `primary` Enter (the
+Action key: a reTerminal's green key), `back` and `menu` Escape: a menu key
+is a way out, as on a remote. `refresh` is Enter too, for a frame that gave a
+key that role by hand. A press is one, and a press comes the moment the key
+is up, so every tap counts however quickly they come (the same digit twice
+on a calculator), and taps made while e-paper refreshes all land: each moves
+the ring from where the one before left it, on what the last render drew, and
+the next refresh shows where they got to. A long press stays the frame's
+event map's (a reTerminal's arrows held walk the scenes, its green key held
+talks). The default maps make the Back key `back` before a UI hears it, which
+puts a keyboard or a list away first (above). A UI with nothing to press hears
+neither keys nor buttons: its scene hears `next` and `prev` as `forward` and
+`back`.
 
 **A frame's buttons turn pages.** On an element in a box that scrolls
 ([Scrolling](#scrolling-and-clipping)), while the box has more below, `next`
@@ -1083,7 +1087,7 @@ the new page it stays where it was while that shows, else it rings the box
 itself. Only at the box's end does `next` go on past it. `prev` mirrors it
 upward. A box that scrolls with nothing to press showing in it is a stop of
 its own, so a long text pages too. Presses that come before the new page is
-drawn (a double press, taps while e-paper refreshes) go on from where the ring
+drawn (quick taps, taps while e-paper refreshes) go on from where the ring
 lands, one element each. A keyboard's Tab walks on without pages and brings
 what it goes to into sight by what that needs, as a browser does.
 

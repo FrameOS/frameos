@@ -129,90 +129,109 @@ static void test_reservation_policy(void)
 
 static void test_event_maps(void)
 {
-    /* Every reTerminal E-series model: the arrows held walk the scene list
-     * (docs/events.md "Event map"), by label — the E1004's pins are swapped. */
-    const char *e1004 = event_map("seeed_reterminal_e1004");
+    /* docs/buttons.md: the maps come from one function of each board's keys,
+     * glass and microphone (backend/app/utils/button_standard.py), written
+     * into fos_board_keys_gen.h. No double or triple press anywhere. */
+    static const char *const presets[] = {
+        "seeed_reterminal_e1001", "seeed_reterminal_e1003", "seeed_reterminal_e1004", "seeed_reterminal_sticky",
+        "seeed_sensecap_indicator_d1", "sunton_esp32_8048s070", "guition_esp32_4848s040",
+        "waveshare_esp32_s3_touch_amoled_1_75", "elecrow_crowpanel_watch_2in01", "elecrow_crowpanel_rotary_1in46",
+        "elecrow_crowpanel_5in79", "waveshare_esp32_s3_photopainter", "trmnl_og", "seeed_xiao_ee04",
+    };
+    for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
+        const char *map = event_map(presets[i]);
+        CHECK(map[0] == '[' && map[strlen(map) - 1] == ']' && strlen(map) < 1024, "%s: a JSON list that fits",
+              presets[i]);
+        CHECK(strstr(map, "doublePress") == NULL && strstr(map, "triplePress") == NULL, "%s: no double press",
+              presets[i]);
+        CHECK(strstr(map, "\"pin\"") == NULL, "%s: rules name labels or roles, never pins", presets[i]);
+    }
+    /* The reTerminal E-series: the arrows held walk the scene list by role
+     * (they turn with the frame), REFRESH held talks where there is a
+     * microphone and is the scene list on the E1004, and with no Back key
+     * two keys held together are Back, held the scene list. */
     const char *e1001 = event_map("seeed_reterminal_e1001");
+    const char *e1004 = event_map("seeed_reterminal_e1004");
     CHECK(strcmp(e1001, event_map("seeed_reterminal_e1002")) == 0, "e1001 = e1002 event map");
-    CHECK(strstr(e1004, "\"label\":\"LEFT\",\"action\":\"longPress\"") != NULL, "LEFT held");
-    CHECK(strstr(e1004, "\"direction\":\"prev\"") != NULL, "LEFT is prev");
-    CHECK(strstr(e1004, "\"label\":\"RIGHT\",\"action\":\"longPress\"") != NULL, "RIGHT held");
-    CHECK(strstr(e1004, "\"direction\":\"next\"") != NULL, "RIGHT is next");
-    CHECK(strstr(e1004, "\"pin\"") == NULL, "rules name labels, never pins");
-    CHECK(e1004[0] == '[' && e1004[strlen(e1004) - 1] == ']', "a JSON list");
-    CHECK(strlen(e1004) < 1024, "fits the config slot");
-    /* The two with a microphone also talk: REFRESH held is the voice chat
-     * (docs/voice-chat.md); the E1004 has no microphone and no such rule. */
-    CHECK(strncmp(e1001, e1004, strlen(e1004) - 1) == 0, "e1001 starts with the arrows");
+    CHECK(strstr(e1001, "\"role\":\"prev\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
+          "prev held is the previous scene");
+    CHECK(strstr(e1001, "\"role\":\"next\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
+          "next held is the next scene");
     CHECK(strstr(e1001, "\"label\":\"REFRESH\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
           "REFRESH held talks on the e1001");
     CHECK(strstr(e1004, "voiceChat") == NULL, "the e1004 has no voice key");
-    CHECK(strlen(e1001) < 1024, "fits the config slot");
-    /* The E1003 has the E1001's keys and microphone, and a touch screen: the
-     * E1001's map, then the edge swipes (docs/scene-switcher.md). */
+    CHECK(strstr(e1004, "\"label\":\"REFRESH\",\"action\":\"longPress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "REFRESH held is the scene list on the e1004");
+    CHECK(strstr(e1001, "\"role\":\"back\",\"action\":\"press\"},\"emit\":\"back\"") != NULL,
+          "two keys held together are Back");
+    CHECK(strstr(e1001, "\"role\":\"back\",\"action\":\"longPress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "held, the scene list");
+    /* The E1003 has the E1001's keys and microphone, and a touch screen. */
     const char *e1003 = event_map("seeed_reterminal_e1003");
     CHECK(strncmp(e1003, e1001, strlen(e1001) - 1) == 0, "e1003 starts with the e1001 map");
     CHECK(strstr(e1003, "\"edge\":\"right\"},\"emit\":\"forward\"") != NULL, "e1003 right edge is forward");
     CHECK(strstr(e1003, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "e1003 left edge is back");
-    CHECK(strstr(e1003, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "e1003 bottom edge is the switcher");
-    CHECK(strstr(e1003, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "e1003 top edge is the settings");
+    CHECK(strstr(e1003, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "e1003 bottom edge");
+    CHECK(strstr(e1003, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "e1003 top edge");
     CHECK(strstr(e1001, "edgeSwipe") == NULL, "the e1001 has no glass");
-    CHECK(e1003[strlen(e1003) - 1] == ']' && strlen(e1003) < 1024, "a JSON list that fits");
-    /* The Indicator's key: pressed the screen, twice the switcher, held
-     * nothing. Its edges swipe the same way. */
+    /* The Indicator's one key is its Screen key: pressed the screen, held
+     * the scene list (no microphone). */
     const char *indicator = event_map("seeed_sensecap_indicator_d1");
-    CHECK(strstr(indicator, "\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
+    CHECK(strstr(indicator, "\"label\":\"BUTTON\",\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
           "indicator press toggles the screen");
-    CHECK(strstr(indicator, "\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
-          "indicator double press is the switcher");
-    CHECK(strstr(indicator, "longPress") == NULL, "indicator held is nothing");
-    CHECK(strstr(indicator, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\",\"as\":{}}") != NULL,
-          "indicator bottom edge is the switcher");
-    CHECK(strstr(indicator, "\"edge\":\"top\"},\"emit\":\"sceneSettings\",\"as\":{}}]") != NULL,
-          "indicator top edge is the settings");
-    /* The Sunton's one key is the BOOT key: the Indicator's map, relabelled. */
-    const char *sunton = event_map("sunton_esp32_8048s070");
-    CHECK(strstr(sunton, "\"label\":\"BOOT\",\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
-          "sunton press toggles the screen");
-    CHECK(strstr(sunton, "\"label\":\"BOOT\",\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
-          "sunton double press is the switcher");
-    CHECK(strstr(sunton, "longPress") == NULL, "sunton held is nothing");
-    CHECK(strstr(sunton, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "sunton left edge is back");
+    CHECK(strstr(indicator, "\"label\":\"BUTTON\",\"action\":\"longPress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "indicator held is the scene list");
+    CHECK(strstr(indicator, "\"role\":\"back\"") == NULL, "one key: no two keys to hold together");
     const char *guition = event_map("guition_esp32_4848s040");
     CHECK(strstr(guition, "button") == NULL, "guition has no key");
-    /* No key rules: the swipes open the list, with no comma before them. */
     CHECK(strncmp(guition, "[{\"event\":\"edgeSwipe\"", 20) == 0, "guition map starts with a swipe");
-    CHECK(strstr(guition, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "guition top edge");
-    /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks, and
-     * the edges swipe as on every touch preset. */
+    /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks,
+     * two keys together are Back, and the edges swipe. */
     const char *sticky = event_map("seeed_reterminal_sticky");
-    CHECK(strstr(sticky, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "sticky bottom edge");
-    CHECK(strstr(sticky, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "sticky top edge");
-    CHECK(strstr(sticky, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "sticky left edge");
-    CHECK(strstr(sticky, "\"edge\":\"right\"},\"emit\":\"forward\"") != NULL, "sticky right edge");
-    CHECK(strstr(sticky, "\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
-          "UP held is prev");
-    CHECK(strstr(sticky, "\"label\":\"DOWN\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
-          "DOWN held is next");
     CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL, "AI held talks");
-    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"doublePress\"},\"emit\":\"back\"") != NULL, "AI twice is back");
-    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
-          "AI three times is the scene list");
+    CHECK(strstr(sticky, "\"role\":\"next\",\"action\":\"longPress\"") != NULL, "an arrow held walks");
     CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"press\"") == NULL, "AI once is the scene's");
-    CHECK(sticky[0] == '[' && sticky[strlen(sticky) - 1] == ']' && strlen(sticky) < 1024, "a JSON list that fits");
-    /* The Waveshare codec boards: their one user key held talks. */
-    CHECK(strstr(event_map("waveshare_esp32_s3_photopainter"),
-                 "\"label\":\"KEY1\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+    CHECK(strstr(sticky, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "sticky top edge");
+    /* The PhotoPainter: KEY1 is its Action key and talks, BOOT is next. */
+    const char *photopainter = event_map("waveshare_esp32_s3_photopainter");
+    CHECK(strstr(photopainter, "\"label\":\"KEY1\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
           "PhotoPainter KEY1 held talks");
+    CHECK(strstr(photopainter, "\"role\":\"next\",\"action\":\"longPress\"") != NULL, "BOOT held walks");
     CHECK(strstr(event_map("waveshare_esp32_s3_epaper_13_3e6"),
                  "\"label\":\"BOOT\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
           "13.3E6 BOOT held talks");
-    CHECK(strstr(event_map("waveshare_esp32_s3_photopainter"), "setCurrentScene") == NULL,
-          "one key: no scene walking");
-    /* A board without bindings, and no board at all: none. */
-    CHECK(strcmp(event_map("trmnl_og"), "") == 0, "trmnl has no map");
+    /* One key, no microphone: held, the scene list. */
+    CHECK(strcmp(event_map("trmnl_og"),
+                 "[{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"longPress\"},"
+                 "\"emit\":\"sceneSwitcher\",\"as\":{}}]") == 0,
+          "trmnl: its key held is the scene list");
+    /* No board at all, and a buffer too small for the map: none. */
     CHECK(strcmp(event_map(""), "") == 0, "no preset");
     CHECK(strcmp(event_map(NULL), "") == 0, "NULL preset");
+    char small[64];
+    fos_board_event_map("seeed_reterminal_e1001", small, sizeof(small));
+    CHECK(small[0] == '\0', "a map cut short is no map");
+}
+
+static void test_key_roles(void)
+{
+    /* docs/buttons.md: a key's role is its board's, sent with every press. */
+    char role[16];
+    CHECK(fos_board_key_role("waveshare_esp32_s3_photopainter", "KEY1", role, sizeof(role)) &&
+              strcmp(role, "primary") == 0,
+          "the PhotoPainter's KEY1 is its Action key");
+    CHECK(fos_board_key_role("waveshare_esp32_s3_photopainter", "boot", role, sizeof(role)) &&
+              strcmp(role, "next") == 0,
+          "and its BOOT next (labels match whatever their case)");
+    CHECK(fos_board_key_role("sunton_esp32_8048s070", "BOOT", role, sizeof(role)) && strcmp(role, "screen") == 0,
+          "an LCD's BOOT is its Screen key");
+    CHECK(fos_board_key_role("seeed_reterminal_e1004", "LEFT", role, sizeof(role)) && strcmp(role, "left") == 0,
+          "a reTerminal's LEFT points left");
+    CHECK(fos_board_key_role("elecrow_crowpanel_watch_2in01", "HOME", role, sizeof(role)) && strcmp(role, "menu") == 0,
+          "the watch's power key is Home");
+    CHECK(!fos_board_key_role("seeed_reterminal_e1004", "ZORK", role, sizeof(role)) && role[0] == '\0',
+          "a key the board does not list has none");
+    CHECK(!fos_board_key_role(NULL, "BOOT", role, sizeof(role)), "no preset, no role");
 }
 
 static void test_buzzer_pins(void)
@@ -520,8 +539,10 @@ static void test_crowpanel_boards(void)
           "HOME held opens the settings");
     CHECK(strstr(map, "\"label\":\"EXIT\",\"action\":\"press\"},\"emit\":\"back\"") != NULL,
           "EXIT, the bottom key, is back");
-    CHECK(strstr(map, "\"label\":\"NEXT\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\"") != NULL,
+    CHECK(strstr(map, "\"role\":\"next\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\"") != NULL,
           "NEXT held walks the scenes");
+    CHECK(strstr(map, "\"label\":\"EXIT\",\"action\":\"longPress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "EXIT held is the scene list");
     CHECK(strstr(map, "edgeSwipe") == NULL && strstr(map, "voiceChat") == NULL, "no glass, no microphone");
     CHECK(map[0] == '[' && map[strlen(map) - 1] == ']', "a JSON list");
 
@@ -556,8 +577,8 @@ static void test_crowpanel_advance_7(void)
     CHECK(strcmp(fos_board_rtc_chip(preset), "pcf8563") == 0, "the BM8563 reads as a PCF8563");
     char map[1024];
     fos_board_event_map(preset, map, sizeof(map));
-    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
-          "BOOT twice opens the switcher");
+    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"longPress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "BOOT held opens the scene list");
     CHECK(strstr(map, "\"edgeSwipe\"") != NULL, "the edges swipe");
 }
 
@@ -604,6 +625,7 @@ int main(void)
     test_reservation_policy();
     test_buzzer_pins();
     test_event_maps();
+    test_key_roles();
     test_mic_pins();
     test_charge_enable_pin();
     test_power_latch_pins();

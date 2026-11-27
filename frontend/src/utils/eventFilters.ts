@@ -1,5 +1,6 @@
 import type { AppConfigField, SelectFieldOption } from '../types'
 import { buttonRoleByLabel } from './eventsContract.gen'
+import { facingRole } from './sceneEventMap'
 
 /** An event node's `data.config`: payload key -> the text the value must equal (docs/events.md "Filters"). */
 export type EventFilterConfig = Record<string, unknown>
@@ -46,7 +47,8 @@ export function foldedEventFilterCount(fields: AppConfigField[], config: EventFi
 function roleLabelsByRole(buttons: FrameButton[]): Record<string, string[]> {
   const byRole: Record<string, string[]> = {}
   for (const button of buttons) {
-    const role = buttonRoleByLabel[String(button.label ?? '').toUpperCase()]
+    // A key that points somewhere is heard as next or prev (docs/buttons.md).
+    const role = facingRole(buttonRoleByLabel[String(button.label ?? '').toUpperCase()] ?? '')
     if (role) {
       byRole[role] = [...(byRole[role] ?? []), button.label]
     }

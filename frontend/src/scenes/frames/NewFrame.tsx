@@ -27,13 +27,12 @@ import {
   virtualColorModes,
 } from '../../devices'
 import { defaultRemoteControl, newFrameForm } from './newFrameForm'
+import { BOARD_KEYS } from '../../generated/boardKeys.gen'
 import {
   FrameEmbeddedHardwarePreset,
   FrameInstallMethod,
   FrameOSSettings,
   FrameVirtualColorMode,
-  EventMapRule,
-  GPIOButton,
   NewFrameFormType,
 } from '../../types'
 import { settingsLogic } from '../settings/settingsLogic'
@@ -276,68 +275,6 @@ const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['dev
   mosi: 11,
   pwr: -1,
 }
-// The reTerminal E-series' arrows held walk the scene list (docs/events.md
-// "Event map"), by label — the E1004's pins are swapped, its labels are not.
-// On the E1001/E1002/E1003, the three with a microphone, REFRESH held talks
-// to the frame (docs/voice-chat.md). Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP /
-// _VOICE_EVENT_MAP (backend) and fos_board.c.
-const SEEED_RETERMINAL_EVENT_MAP: EventMapRule[] = [
-  {
-    event: 'button',
-    match: { label: 'LEFT', action: 'longPress' },
-    emit: 'setCurrentScene',
-    as: { direction: 'prev' },
-  },
-  {
-    event: 'button',
-    match: { label: 'RIGHT', action: 'longPress' },
-    emit: 'setCurrentScene',
-    as: { direction: 'next' },
-  },
-]
-const SEEED_RETERMINAL_VOICE_EVENT_MAP: EventMapRule[] = [
-  ...SEEED_RETERMINAL_EVENT_MAP,
-  { event: 'button', match: { label: 'REFRESH', action: 'longPress' }, emit: 'voiceChat', as: {} },
-]
-// A touch screen's swipes in from an edge: from the left `back` and from the
-// right `forward`, the scene's own (never another scene), up from the bottom
-// the scene switcher
-// (docs/scene-switcher.md) and down from the top the scene's settings
-// (docs/scene-settings.md). Mirrors EMBEDDED_TOUCH_EDGE_SWIPES and fos_board.c.
-const TOUCH_EDGE_SWIPES: EventMapRule[] = [
-  { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'forward', as: {} },
-  { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'back', as: {} },
-  { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'edgeSwipe', match: { edge: 'top' }, emit: 'sceneSettings', as: {} },
-]
-// The E1003 has the E1001's keys and microphone, and a touch screen.
-const SEEED_RETERMINAL_E1003_EVENT_MAP: EventMapRule[] = [...SEEED_RETERMINAL_VOICE_EVENT_MAP, ...TOUCH_EDGE_SWIPES]
-// The reTerminal Sticky's three keys: UP and DOWN held walk the scene list;
-// the AI key pressed once is the scene's (role primary), twice back, three
-// times the scene list, held it talks; the edges swipe. Mirrors
-// EMBEDDED_SEEED_STICKY_EVENT_MAP and fos_board.c.
-const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  {
-    event: 'button',
-    match: { label: 'DOWN', action: 'longPress' },
-    emit: 'setCurrentScene',
-    as: { direction: 'next' },
-  },
-  { event: 'button', match: { label: 'AI', action: 'doublePress' }, emit: 'back', as: {} },
-  { event: 'button', match: { label: 'AI', action: 'triplePress' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
-  ...TOUCH_EDGE_SWIPES,
-]
-// The Waveshare boards with a codec microphone (fos_codec.c): their one user
-// key held talks. Mirrors the backend's _one_key_voice_event_map and fos_board.c.
-const oneKeyVoiceEventMap = (label: string): EventMapRule[] => [
-  { event: 'button', match: { label, action: 'longPress' }, emit: 'voiceChat', as: {} },
-]
-const WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS: GPIOButton[] = [
-  { pin: 0, label: 'BOOT' },
-  { pin: 4, label: 'KEY1' },
-]
 const WAVESHARE_13IN3E6_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 2,
   dc: 11,
@@ -400,11 +337,6 @@ const SEEED_XIAO_EE_PINS: NonNullable<NonNullable<NewFrameFormType['device_confi
   mosi: 9,
   pwr: 43,
 }
-const SEEED_XIAO_EE_GPIO_BUTTONS: GPIOButton[] = [
-  { pin: 2, label: 'KEY1' },
-  { pin: 3, label: 'KEY2' },
-  { pin: 5, label: 'KEY3' },
-]
 const XIAO_EPAPER_DRIVER_BOARD_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 38,
   dc: 10,
@@ -499,29 +431,6 @@ const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['d
   mosi: -1,
   pwr: -1,
 }
-// The one key pressed switches the screen and pressed twice opens the scene
-// switcher; held it does nothing. The edges swipe (TOUCH_EDGE_SWIPES). Mirrors
-// EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP.
-const SEEED_SENSECAP_INDICATOR_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'BUTTON', action: 'press' }, emit: 'toggleScreen', as: {} },
-  { event: 'button', match: { label: 'BUTTON', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
-  ...TOUCH_EDGE_SWIPES,
-]
-// The Sunton's one key is the BOOT key (GPIO0): the same as the Indicator's.
-const SUNTON_ESP32_8048S070_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
-  { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
-  ...TOUCH_EDGE_SWIPES,
-]
-// The CrowPanel Advance 2.8"'s BOOT works like the Sunton's and, the board
-// having a microphone, held it talks; the edges swipe. Mirrors
-// EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP.
-const ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
-  { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'BOOT', action: 'longPress' }, emit: 'voiceChat', as: {} },
-  ...TOUCH_EDGE_SWIPES,
-]
 // Its TF slot on a bus of its own (EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_PINS).
 const ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_ASSETS: NonNullable<
   NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
@@ -532,32 +441,6 @@ const ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 7, sck: 5, miso: 4, mosi: 6, pwr: -1, det: -1 },
   maxFrequencyKHz: 20000,
 }
-// The AMOLED 1.75's PWR key (on its IO expander, the firmware's own) works like
-// the Indicator's key, BOOT held talks into its microphones, the edges swipe.
-const WAVESHARE_AMOLED_1_75_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'PWR', action: 'press' }, emit: 'toggleScreen', as: {} },
-  { event: 'button', match: { label: 'PWR', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'BOOT', action: 'longPress' }, emit: 'voiceChat', as: {} },
-  ...TOUCH_EDGE_SWIPES,
-]
-// The CrowPanel 2.01" watch's BOOT works like the Indicator's key, its power
-// key is HOME and opens the scene switcher, its crown held talks into its
-// microphone (the crown's turns and the power key are presses the firmware
-// makes itself), the edges swipe. Mirrors
-// EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP.
-const ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
-  { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'OK', action: 'longPress' }, emit: 'voiceChat', as: {} },
-  ...TOUCH_EDGE_SWIPES,
-]
-// The CrowPanel 1.46" rotary: the watch's keys without its voice key (no
-// microphone) and its power key. Mirrors
-// EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP.
-const ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP: EventMapRule[] = ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP.filter(
-  (rule) => rule.emit !== 'voiceChat' && rule.match?.label !== 'HOME'
-)
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 17,
   dc: 16,
@@ -641,16 +524,6 @@ const ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_ASSETS: NonNullable<
   preset: 'elecrow_crowpanel_epd_4in2',
   pins: { cs: 10, sck: 39, miso: 13, mosi: 40, pwr: 42, det: -1 },
 }
-// HOME, the top key, opens the scene switcher and held the scene's settings;
-// EXIT, the bottom one, is back; the rocker held walks the scene list. Mirrors
-// EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP.
-const ELECROW_CROWPANEL_5IN79_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'HOME', action: 'press' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'HOME', action: 'longPress' }, emit: 'sceneSettings', as: {} },
-  { event: 'button', match: { label: 'EXIT', action: 'press' }, emit: 'back', as: {} },
-  { event: 'button', match: { label: 'PREV', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'button', match: { label: 'NEXT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
-]
 // Mirrors EMBEDDED_INKY_FRAME_PINS in backend/app/tasks/embedded_firmware.py.
 // All Inky Frame sizes share the carrier wiring; BUSY and the five front
 // buttons sit behind a shift register (sr_* keys, busy_bit) that only the
@@ -678,9 +551,7 @@ interface EmbeddedHardwarePresetConfig {
   flashSize: NonNullable<NonNullable<NewFrameFormType['embedded']>['flashSize']>
   psramMB: number
   pins: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']>
-  gpioButtons: GPIOButton[]
   /** What the board's buttons do whatever scene shows (docs/events.md "Event map"), seeded onto the frame. */
-  eventMap?: EventMapRule[]
   sdCardAssets?: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
   /** A carrier board for many panels: `device` is only the default, and picking another keeps the preset. */
   panelSelectable?: boolean
@@ -695,8 +566,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: WAVESHARE_PHOTOPAINTER_PINS,
-    gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
-    eventMap: oneKeyVoiceEventMap('KEY1'),
     sdCardAssets: WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
   },
   [WAVESHARE_13IN3E6_HARDWARE_PRESET]: {
@@ -707,8 +576,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     psramMB: 16,
     pins: WAVESHARE_13IN3E6_PINS,
     // BOOT and Reset only: BOOT (GPIO0) is a key once booted.
-    gpioButtons: [{ pin: 0, label: 'BOOT' }],
-    eventMap: oneKeyVoiceEventMap('BOOT'),
     sdCardAssets: WAVESHARE_13IN3E6_SD_CARD_ASSETS,
   },
   trmnl_og: {
@@ -718,7 +585,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '4MB',
     psramMB: 0,
     pins: TRMNL_OG_PINS,
-    gpioButtons: [{ pin: 2, label: 'BUTTON' }],
   },
   trmnl_bwry: {
     label: 'TRMNL BWRY (7.5" color ESP32-C3)',
@@ -727,7 +593,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '4MB',
     psramMB: 0,
     pins: TRMNL_OG_PINS,
-    gpioButtons: [{ pin: 2, label: 'BUTTON' }],
   },
   trmnl_og_diy_kit: {
     label: 'TRMNL 7.5" (OG) DIY Kit (ESP32-S3)',
@@ -736,10 +601,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '8MB',
     psramMB: 8,
     pins: XIAO_EPAPER_DRIVER_BOARD_PINS,
-    gpioButtons: [
-      { pin: 0, label: 'BOOT' },
-      { pin: 5, label: 'KEY3' },
-    ],
   },
   trmnl_4in26_diy_kit: {
     label: 'XIAO ePaper Driver Board + 4.26" panel (XIAO ESP32-S3)',
@@ -748,10 +609,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '8MB',
     psramMB: 8,
     pins: XIAO_EPAPER_DRIVER_BOARD_PINS,
-    gpioButtons: [
-      { pin: 0, label: 'BOOT' },
-      { pin: 2, label: 'KEY1' },
-    ],
   },
   xteink_x4: {
     label: 'XTEINK X4 (4.26" ESP32-C3)',
@@ -760,7 +617,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 0,
     pins: XTEINK_X4_PINS,
-    gpioButtons: [{ pin: 3, label: 'POWER' }],
   },
   esp32_c3_042_oled: {
     label: 'ESP32-C3 0.42" OLED dev board (I2C, thin client)',
@@ -769,7 +625,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '4MB',
     psramMB: 0,
     pins: ESP32_C3_042_OLED_PINS,
-    gpioButtons: [{ pin: 9, label: 'BOOT' }],
   },
   seeed_sensecap_indicator_d1: {
     label: 'Seeed SenseCAP Indicator D1/D1S (4" LCD ESP32-S3)',
@@ -778,8 +633,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '8MB',
     psramMB: 8,
     pins: SEEED_SENSECAP_INDICATOR_PINS,
-    gpioButtons: [{ pin: 38, label: 'BUTTON' }],
-    eventMap: SEEED_SENSECAP_INDICATOR_EVENT_MAP,
   },
   sunton_esp32_8048s070: {
     label: 'Sunton ESP32-8048S070 (7.0" LCD ESP32-S3)',
@@ -788,8 +641,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: SUNTON_ESP32_8048S070_PINS,
-    gpioButtons: [{ pin: 0, label: 'BOOT' }],
-    eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
     sdCardAssets: SUNTON_ESP32_8048S070_SD_CARD_ASSETS,
   },
   // The Elecrow CrowPanel Advance 7.0" (V1.2): BOOT as on the Sunton, the
@@ -801,8 +652,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: SUNTON_ESP32_8048S070_PINS,
-    gpioButtons: [{ pin: 0, label: 'BOOT' }],
-    eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
   },
   // The Elecrow CrowPanel Advance 2.8" (V1.2): its ST7789 is wired by the
   // firmware's board table; BOOT as on the 7.0", held it talks.
@@ -813,8 +662,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: SUNTON_ESP32_8048S070_PINS,
-    gpioButtons: [{ pin: 0, label: 'BOOT' }],
-    eventMap: ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP,
     sdCardAssets: ELECROW_CROWPANEL_ADVANCE_2IN8_SD_CARD_ASSETS,
   },
   // GPIO0 is an RGB data line, so there is no key: only the edges swipe.
@@ -825,8 +672,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: SEEED_SENSECAP_INDICATOR_PINS,
-    gpioButtons: [],
-    eventMap: TOUCH_EDGE_SWIPES,
   },
   waveshare_esp32_s3_touch_amoled_1_75: {
     label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75 (1.75" round AMOLED)',
@@ -835,8 +680,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: WAVESHARE_AMOLED_1_75_PINS,
-    gpioButtons: [{ pin: 0, label: 'BOOT' }],
-    eventMap: WAVESHARE_AMOLED_1_75_EVENT_MAP,
     sdCardAssets: WAVESHARE_AMOLED_1_75_SD_CARD_ASSETS,
   },
   elecrow_crowpanel_watch_2in01: {
@@ -846,11 +689,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: ELECROW_CROWPANEL_WATCH_2IN01_PINS,
-    gpioButtons: [
-      { pin: 0, label: 'BOOT' },
-      { pin: 18, label: 'OK' },
-    ],
-    eventMap: ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP,
   },
   elecrow_crowpanel_rotary_1in46: {
     label: 'Elecrow CrowPanel 1.46" rotary (ESP32-S3)',
@@ -859,11 +697,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: ELECROW_CROWPANEL_WATCH_2IN01_PINS,
-    gpioButtons: [
-      { pin: 0, label: 'BOOT' },
-      { pin: 41, label: 'OK' },
-    ],
-    eventMap: ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP,
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',
@@ -872,12 +705,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_STICKY_PINS,
-    gpioButtons: [
-      { pin: 4, label: 'AI' },
-      { pin: 5, label: 'UP' },
-      { pin: 6, label: 'DOWN' },
-    ],
-    eventMap: SEEED_STICKY_EVENT_MAP,
     sdCardAssets: SEEED_STICKY_SD_CARD_ASSETS,
   },
   seeed_reterminal_e1001: {
@@ -887,12 +714,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_E10XX_PINS,
-    gpioButtons: [
-      { pin: 3, label: 'REFRESH' },
-      { pin: 4, label: 'LEFT' },
-      { pin: 5, label: 'RIGHT' },
-    ],
-    eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1001'),
   },
   seeed_reterminal_e1002: {
@@ -902,12 +723,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_E10XX_PINS,
-    gpioButtons: [
-      { pin: 3, label: 'REFRESH' },
-      { pin: 4, label: 'LEFT' },
-      { pin: 5, label: 'RIGHT' },
-    ],
-    eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1002'),
   },
   seeed_reterminal_e1003: {
@@ -917,12 +732,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_E1003_PINS,
-    gpioButtons: [
-      { pin: 3, label: 'REFRESH' },
-      { pin: 4, label: 'LEFT' },
-      { pin: 5, label: 'RIGHT' },
-    ],
-    eventMap: SEEED_RETERMINAL_E1003_EVENT_MAP,
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1003'),
   },
   seeed_reterminal_e1004: {
@@ -932,16 +741,8 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_E1004_PINS,
-    // GPIO3 and GPIO5 the other way round from the E1001/E1002: GPIO3 is the
-    // right arrow, GPIO5 refresh (the backend's
-    // EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS, #527). This list reaches
-    // the backend with the frame, and its seed-only preset rule keeps it.
-    gpioButtons: [
-      { pin: 3, label: 'RIGHT' },
-      { pin: 4, label: 'LEFT' },
-      { pin: 5, label: 'REFRESH' },
-    ],
-    eventMap: SEEED_RETERMINAL_EVENT_MAP,
+    // Its keys (GPIO3 and GPIO5 the other way round from the E1001/E1002,
+    // #527) are BOARD_KEYS', with every board's.
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1004'),
   },
   seeed_xiao_ee02: {
@@ -951,7 +752,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: { ...SEEED_XIAO_EE_PINS, cs2: 41 },
-    gpioButtons: SEEED_XIAO_EE_GPIO_BUTTONS,
   },
   seeed_xiao_ee03: {
     label: 'Seeed XIAO ePaper EE03 (10.3" grayscale ESP32-S3)',
@@ -960,7 +760,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: { ...SEEED_XIAO_EE_PINS, dc: 8 },
-    gpioButtons: SEEED_XIAO_EE_GPIO_BUTTONS,
   },
   seeed_xiao_ee04: {
     label: 'Seeed XIAO ePaper EE04 (24/50-pin panels, ESP32-S3)',
@@ -970,7 +769,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: SEEED_XIAO_EE_PINS,
-    gpioButtons: SEEED_XIAO_EE_GPIO_BUTTONS,
   },
   seeed_xiao_ee05: {
     label: 'Seeed XIAO ePaper EE05 (24-pin panels, ESP32-S3)',
@@ -980,11 +778,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '16MB',
     psramMB: 8,
     pins: SEEED_XIAO_EE_PINS,
-    gpioButtons: [
-      { pin: 2, label: 'KEY1' },
-      { pin: 3, label: 'KEY2' },
-      { pin: 8, label: 'KEY3' },
-    ],
   },
   seeed_xiao_epaper_7in5: {
     label: 'XIAO 7.5" ePaper Panel (XIAO ESP32-C3)',
@@ -993,7 +786,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '4MB',
     psramMB: 0,
     pins: { rst: 2, dc: 5, cs: 3, cs2: -1, busy: 4, sck: 8, mosi: 10, pwr: -1 },
-    gpioButtons: [{ pin: 9, label: 'BOOT' }],
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
@@ -1002,14 +794,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '8MB',
     psramMB: 8,
     pins: ELECROW_CROWPANEL_5IN79_PINS,
-    gpioButtons: [
-      { pin: 2, label: 'HOME' },
-      { pin: 1, label: 'EXIT' },
-      { pin: 4, label: 'NEXT' },
-      { pin: 5, label: 'OK' },
-      { pin: 6, label: 'PREV' },
-    ],
-    eventMap: ELECROW_CROWPANEL_5IN79_EVENT_MAP,
     sdCardAssets: ELECROW_CROWPANEL_5IN79_SD_CARD_ASSETS,
   },
   // Wired as the 5.79", one SSD1683 400x300 in black and white.
@@ -1020,14 +804,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '8MB',
     psramMB: 8,
     pins: ELECROW_CROWPANEL_5IN79_PINS,
-    gpioButtons: [
-      { pin: 2, label: 'HOME' },
-      { pin: 1, label: 'EXIT' },
-      { pin: 4, label: 'NEXT' },
-      { pin: 5, label: 'OK' },
-      { pin: 6, label: 'PREV' },
-    ],
-    eventMap: ELECROW_CROWPANEL_5IN79_EVENT_MAP,
     sdCardAssets: ELECROW_CROWPANEL_EPD_4IN2_SD_CARD_ASSETS,
   },
   // Pimoroni Inky Frame family: pico platforms flash a generic UF2 over
@@ -1040,7 +816,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '2MB',
     psramMB: 0,
     pins: INKY_FRAME_PINS,
-    gpioButtons: [],
   },
   pimoroni_inky_frame_5_7: {
     label: 'Pimoroni Inky Frame 5.7" (Pico W)',
@@ -1049,7 +824,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '2MB',
     psramMB: 0,
     pins: INKY_FRAME_PINS,
-    gpioButtons: [],
   },
   pimoroni_inky_frame_7_3: {
     label: 'Pimoroni Inky Frame 7.3" (Pico W)',
@@ -1058,7 +832,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '2MB',
     psramMB: 0,
     pins: INKY_FRAME_PINS,
-    gpioButtons: [],
   },
   pimoroni_inky_frame_7_3_pico2: {
     label: 'Pimoroni Inky Frame 7.3" (Pico 2 W, 2024)',
@@ -1067,7 +840,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '4MB',
     psramMB: 0,
     pins: INKY_FRAME_PINS,
-    gpioButtons: [],
   },
   pimoroni_inky_frame_7_3_spectra: {
     label: 'Pimoroni Inky Frame 7.3" Spectra 6 (Pico 2 W)',
@@ -1076,7 +848,6 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '4MB',
     psramMB: 0,
     pins: INKY_FRAME_PINS,
-    gpioButtons: [],
   },
 }
 
@@ -1097,7 +868,6 @@ function embeddedHardwarePresetConfig(
   return {
     ...config,
     pins: { ...config.pins },
-    gpioButtons: config.gpioButtons.map((button) => ({ ...button })),
     sdCardAssets: config.sdCardAssets ? { ...config.sdCardAssets, pins: { ...config.sdCardAssets.pins } } : undefined,
   }
 }
@@ -1373,8 +1143,12 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         pins: { ...presetConfig.pins },
         sdCardAssets: presetConfig.sdCardAssets,
       },
-      gpio_buttons: presetConfig.gpioButtons.map((button) => ({ ...button })),
-      event_map: presetConfig.eventMap?.map((rule) => ({ ...rule, match: { ...rule.match }, as: { ...rule.as } })),
+      // What the board's keys are and do (docs/buttons.md), generated from the
+      // backend's presets (frameos/tools/generate_board_keys.py).
+      gpio_buttons: (BOARD_KEYS[hardwarePreset]?.gpioButtons ?? []).map((button) => ({ ...button })),
+      event_map: BOARD_KEYS[hardwarePreset]?.eventMap.length
+        ? JSON.parse(JSON.stringify(BOARD_KEYS[hardwarePreset].eventMap))
+        : undefined,
     })
   }
 
@@ -2145,8 +1919,8 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
               onChange={(e) => setCode(adoptCodeInput(e.target.value))}
             />
             <p className="frameos-muted mt-1 text-xs text-slate-500">
-              On the frame: Settings → gear → Link to backend. It shows its address and a six-digit
-              code; what its QR code says, pasted into the address, fills both.
+              On the frame: Settings → gear → Link to backend. It shows its address and a six-digit code; what its QR
+              code says, pasted into the address, fills both.
             </p>
           </div>
         ) : (

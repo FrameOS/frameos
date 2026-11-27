@@ -1056,6 +1056,8 @@ export const sceneStateChangedLogEvents: readonly string[] = ["event:setSceneSta
 
 /** GPIO button roles (`gpioButtons[].role`), and the default by label for a button without one. */
 export const buttonRoles: readonly string[] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh", "screen", "left", "right"]
+/** The roles that name where a key sits (configured, never heard: delivered as next or prev). */
+export const buttonFacing: readonly string[] = ["left", "right", "up", "down"]
 export const buttonRoleByLabel: Record<string, string> = {
   "A": "primary",
   "B": "prev",

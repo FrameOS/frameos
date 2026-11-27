@@ -4,17 +4,19 @@
 // node test suite can read it without the settings panel behind it.
 import type { GPIOButton } from '../types'
 
+// A is Action, B and C point up and down (they turn with the frame), D is Back
+// (docs/buttons.md). Keep in step with backend/app/drivers/devices.py.
 export const INKY_GPIO_BUTTONS: GPIOButton[] = [
-  { pin: 5, label: 'A' },
-  { pin: 6, label: 'B' },
-  { pin: 16, label: 'C' },
-  { pin: 24, label: 'D' },
+  { pin: 5, label: 'A', role: 'primary' },
+  { pin: 6, label: 'B', role: 'up' },
+  { pin: 16, label: 'C', role: 'down' },
+  { pin: 24, label: 'D', role: 'back' },
 ]
 export const INKY_13_GPIO_BUTTONS: GPIOButton[] = [
-  { pin: 5, label: 'A' },
-  { pin: 6, label: 'B' },
-  { pin: 25, label: 'C' },
-  { pin: 24, label: 'D' },
+  { pin: 5, label: 'A', role: 'primary' },
+  { pin: 6, label: 'B', role: 'up' },
+  { pin: 25, label: 'C', role: 'down' },
+  { pin: 24, label: 'D', role: 'back' },
 ]
 export const INKY_AUTO_BUTTON_DEVICES = new Set([
   'pimoroni.inky_impression',

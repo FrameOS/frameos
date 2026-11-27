@@ -81,6 +81,12 @@ size_t fos_voice_binding_triple_labels(const char *event_map_json, char labels[]
     return bound_labels(event_map_json, FOS_BUTTON_ACTION_TRIPLE_PRESS, false, NULL, labels, max);
 }
 
+size_t fos_voice_binding_double_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
+                                       size_t max)
+{
+    return bound_labels(event_map_json, FOS_BUTTON_ACTION_DOUBLE_PRESS, false, NULL, labels, max);
+}
+
 static const char *text_of(const cJSON *object, const char *key)
 {
     const cJSON *item = cJSON_GetObjectItem(object, key);
