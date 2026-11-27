@@ -46,7 +46,7 @@
         },
         "data": {
           "code": "",
-          "codeJS": "`${state.text || ''}_\\n\\nlast key: ${state.lastKey}\\n${state.count || 0} keys`",
+          "codeJS": "(() => {\n  // Until a key comes, what to do, apart from where the keys will show.\n  const typed = String(state.text || '')\n  const count = Number(state.count || 0)\n  if (!count && !typed) return 'Type on a keyboard plugged into the frame.\\n\\nWhat you type shows here, and under it the last key and how many came.'\n  return `${typed}_\\n\\nlast key: ${state.lastKey || ''}\\n${count} keys`\n})()",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -328,7 +328,7 @@
         "name": "lastKey",
         "label": "Last key",
         "type": "string",
-        "value": "Type on a keyboard plugged into the frame",
+        "value": "",
         "access": "public",
         "persist": "memory"
       },

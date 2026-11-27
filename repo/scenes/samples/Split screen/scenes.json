@@ -397,12 +397,20 @@
         "type": "appNodeEdge"
       },
       {
-        "id": "db5402ee-24be-4649-989b-f86d1257d14b",
+        "id": "rich-text-state-to-fit",
+        "type": "codeNodeEdge",
         "source": "cf8d78de-d9ec-45de-a093-e615d46de7fa",
         "sourceHandle": "fieldOutput",
+        "target": "rich-text-fit",
+        "targetHandle": "codeField/text"
+      },
+      {
+        "id": "rich-text-fit-to-text",
+        "type": "codeNodeEdge",
+        "source": "rich-text-fit",
+        "sourceHandle": "fieldOutput",
         "target": "c3bbaf66-f11d-45d2-9bed-5395ac0c01b2",
-        "targetHandle": "fieldInput/text",
-        "type": "codeNodeEdge"
+        "targetHandle": "fieldInput/text"
       }
     ],
     "fields": [
@@ -475,6 +483,35 @@
           "y": 9.717096774193521
         },
         "dragging": false
+      },
+      {
+        "id": "rich-text-fit",
+        "type": "code",
+        "data": {
+          "codeJS": "(() => {\n  // Every word on one line: the rich text's sizes made smaller (never\n  // larger) until its longest word fits the canvas (a cell's, in a split),\n  // as the text's fit only shrinks it to the height and breaks a word that\n  // is wider than the box.\n  const raw = String(text || '')\n  const room = Math.max(1, (context.imageWidth || 800) - 20)\n  let size = 32\n  let word = 0\n  let widest = 0\n  const isSize = (arg) => arg.trim() !== '' && Number.isFinite(Number(arg.trim()))\n  for (const part of raw.split(/(\\^\\([^)]*\\))/)) {\n    const marker = /^\\^\\(([^)]*)\\)$/.exec(part)\n    if (marker) {\n      for (const arg of marker[1].split(',')) if (isSize(arg)) size = Number(arg.trim())\n      continue\n    }\n    part.split(/\\s/).forEach((piece, i) => {\n      if (i > 0) word = 0\n      word += piece.length * size * 0.62\n      widest = Math.max(widest, word)\n    })\n  }\n  const k = Math.min(1, room / Math.max(1, widest))\n  if (k >= 1) return raw\n  const fit = (n) => String(Math.max(1, Math.floor(n * k)))\n  return '^(' + fit(32) + ')' + raw.replace(/\\^\\(([^)]*)\\)/g, (_, args) =>\n    '^(' + args.split(',').map((arg) => (isSize(arg) ? fit(Number(arg.trim())) : arg)).join(',') + ')')\n})()",
+          "codeArgs": [
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ],
+          "codeOutputs": [
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ]
+        },
+        "position": {
+          "x": 640,
+          "y": -260
+        },
+        "style": {
+          "width": 420,
+          "height": 240
+        },
+        "width": 420,
+        "height": 240
       }
     ],
     "settings": {
@@ -677,6 +714,30 @@
           "y": 101.62264705512399
         },
         "dragging": false
+      },
+      {
+        "id": "split-round-margin",
+        "type": "code",
+        "data": {
+          "codeJS": "(() => {\n  // On a round panel the grid goes in the square inside the circle, so no\n  // cell has a corner where the glass is not.\n  if (context.round !== true || !context.imageWidth) return '10'\n  const side = Math.min(context.imageWidth, context.imageHeight || context.imageWidth)\n  return String(Math.round(side * 0.15))\n})()",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "margin",
+              "type": "string"
+            }
+          ]
+        },
+        "position": {
+          "x": 360,
+          "y": -200
+        },
+        "style": {
+          "width": 380,
+          "height": 200
+        },
+        "width": 380,
+        "height": 200
       }
     ],
     "edges": [
@@ -727,6 +788,14 @@
         "target": "ac04661a-1f96-4ae3-b462-af934951a8af",
         "targetHandle": "fieldInput/text",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "split-round-margin-to-split",
+        "type": "codeNodeEdge",
+        "source": "split-round-margin",
+        "sourceHandle": "fieldOutput",
+        "target": "7c4aabb9-7add-40ef-a676-db8d96de52e4",
+        "targetHandle": "fieldInput/margin"
       }
     ],
     "fields": [
