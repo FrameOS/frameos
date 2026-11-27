@@ -336,10 +336,10 @@
         "id": "78f163a1-a745-44b8-9d17-4a30bc22d2ab",
         "position": { "x": 878.0620839771876, "y": -145.12543465164183 },
         "data": {
-          "code": "state{\"response\"}{\"stargazers_count\"}",
+          "code": "(if state{\"response\"}{\"stargazers_count\"}.isNil: %(-1) else: state{\"response\"}{\"stargazers_count\"})",
           "codeArgs": [],
           "codeOutputs": [{ "name": "valueJson", "type": "json" }],
-          "codeJS": "state.response.stargazers_count"
+          "codeJS": "typeof state.response?.stargazers_count === 'number' ? state.response.stargazers_count : -1"
         },
         "type": "code",
         "style": { "width": 334, "height": 119 },
