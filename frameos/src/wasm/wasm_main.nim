@@ -652,8 +652,10 @@ proc frameos_wasm_resize(width, height: cint): bool {.exportc, cdecl.} =
   if not host.events.isNil:
     # As frameos_wasm_set_frame does: what is held lets go, the keyboard stays.
     let keyboardAt = host.events.inputState.keyboardAt
+    let bound = host.events.inputState.bound
     host.events.inputState = initInputState(frameConfig)
     host.events.inputState.keyboardAt = keyboardAt
+    host.events.inputState.bound = bound
   # Nothing drawn at the old size can be put back.
   rhythmForgetCanvases()
   forgetPanelFrames()
@@ -804,9 +806,16 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
         height: if rotate in [90, 270]: frameConfig.width else: frameConfig.height,
         rotate: rotate, flip: "", device: frameConfig.device,
         gpioButtons: frameConfig.gpioButtons, inputSettings: frameConfig.inputSettings)
+      # What the loop gave its input state goes on: the keyboard on the
+      # screen, and the question the maps answer (`bound`: whether two keys
+      # held together are Back, whether a key waits for a second press).
+      # Without it every pull of a board its plane draws, which sets the
+      # frame first, made two keys two presses (the UX bench, 2026-11-27).
       let keyboardAt = host.events.inputState.keyboardAt
+      let bound = host.events.inputState.bound
       host.events.inputState = initInputState(geometry)
       host.events.inputState.keyboardAt = keyboardAt
+      host.events.inputState.bound = bound
     let format = node{"pixelFormat"}
     if not format.isNil and format.kind == JInt:
       # What the board's own runtime says of its panel: `app.frame.color` and
