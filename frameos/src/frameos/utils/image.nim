@@ -1899,9 +1899,13 @@ proc writeError*(image: Image, width, height: int, message: string, round = fals
     except Exception:
       writeEmbeddedErrorMarker(image, width, height)
   else:
+    # Sized by the picture as the device sizes it (writeEmbeddedErrorText):
+    # a fixed 32 px was a third of a watch's width in the preview and on a
+    # frame its plane draws, and a sliver of the reTerminal E1003's.
     let typeface = getDefaultTypeface()
-    let font = newFont(typeface, 32, parseHtmlColor("#000000"))
-    let padding = 10.0
+    let fontSize = clamp(min(width, height).float / 24.0, 16.0, 44.0)
+    let font = newFont(typeface, fontSize, parseHtmlColor("#000000"))
+    let padding = max(16.0, min(width, height).float / 20.0)
     let (ox, oy, bw, bh) = errorBox(width, height, round)
     let types = typeset(
         spans = [newSpan(message, font)],
@@ -1910,7 +1914,7 @@ proc writeError*(image: Image, width, height: int, message: string, round = fals
         hAlign = CenterAlign,
         vAlign = MiddleAlign,
       )
-    let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
+    let borderFont = newFont(typeface, fontSize, parseHtmlColor("#ffffff"))
     let borderTypes = typeset(
         spans = [newSpan(message, borderFont)],
         bounds = vec2(bw.toFloat() - 2 * padding,
