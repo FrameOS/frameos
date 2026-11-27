@@ -284,7 +284,7 @@
               "type": "text"
             }
           ],
-          "codeJS": "(() => {\n  const meta = state.unsplashMetadata || {};\n  return [\n    meta.description || meta.altDescription || meta.title || \"\",\n    `Photo by ${meta.author}${meta.authorUsername ? ` (@${meta.authorUsername})` : \"\"}`,\n    meta.location,\n    // `Search: ${meta.search}`,\n  ].filter(a => a).join(\"\\n\")\n})()\n"
+          "codeJS": "(() => {\n  const meta = state.unsplashMetadata || {};\n  return [\n    meta.description || meta.altDescription || meta.title || \"\",\n    // No photo (no key yet, a failed search): no credit to give.\n    meta.author ? `Photo by ${meta.author}${meta.authorUsername ? ` (@${meta.authorUsername})` : \"\"}` : \"\",\n    meta.location,\n    // `Search: ${meta.search}`,\n  ].filter(a => a).join(\"\\n\")\n})()\n"
         },
         "type": "code",
         "style": {
