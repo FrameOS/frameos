@@ -1613,7 +1613,9 @@ def _board_keys_header() -> dict[str, tuple[str, str]]:
     assert boards_table, "k_board_keys[] not found in fos_board_keys_gen.h"
     boards = {}
     for preset, numbers, roles in re.findall(
-        r'\{"([a-z0-9_]+)",\s*' + _C_STRING + r',\s*"([^"]*)"\}', boards_table.group(1)
+        # A row's last field, `was`, the hash of the map it came with before
+        # the button standard (fos_board_event_map_is_default), is not read here.
+        r'\{"([a-z0-9_]+)",\s*' + _C_STRING + r',\s*"([^"]*)",\s*0x[0-9a-f]+u\}', boards_table.group(1)
     ):
         picked = [rules[ord(number) - 1] for number in _c_unescape(numbers)]
         boards[preset] = ("[" + ",".join(picked) + "]", roles)
