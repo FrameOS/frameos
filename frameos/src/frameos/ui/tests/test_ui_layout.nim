@@ -226,6 +226,25 @@ suite "ui layout":
       el("div", "bg-blue-500", el("div", "truncate", txt("A long line that does not fit")))), 200, 100).rects
     check inside[1].geom == (100, 0, 50, 24)
 
+  test "a truncate text as wide as its box is whole, whatever its alignment":
+    # Up next's round card, the UX bench 2026-11-27: "Room 2" in a centred
+    # row came out "Roo…" at every other text size, though the row had room.
+    # The text was set into a pixel to spare and centred in it: half a pixel
+    # in, its glyphs rounded a pixel wider than its box.
+    proc glyphs(svg: SvgNode): int =
+      for node in svg.children:
+        if node.tag == "path": inc result
+    for size in 12 .. 24:
+      for align in ["", "text-center", "text-right"]:
+        let row = layoutUi(el("div", "flex justify-center w-[200px] " & align & " text-[" & $size & "px]",
+          el("span", "truncate", txt("Room 2"))), 240, 60)
+        check glyphs(row) == 5 # R o o m 2, no ellipsis
+    # A text that does not fit is still cut, centred or not.
+    for align in ["", "text-center", "text-right"]:
+      let cut = layoutUi(el("div", "flex w-[60px] " & align & " text-[20px]",
+        el("span", "truncate", txt("A long line that does not fit"))), 240, 60)
+      check glyphs(cut) < 10
+
   test "a block stacks and stretches; padding is inside the size":
     let r = layoutUi(el("div", "w-20 p-2 bg-black",
       el("div", "h-4 bg-red-500"),

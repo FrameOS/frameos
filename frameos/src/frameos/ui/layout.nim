@@ -986,6 +986,26 @@ proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
     n.memo.claim()
   n.arrangement
 
+proc widest(a: Arrangement): float32 =
+  ## The widest line of `a`, wherever its alignment set it. Its right edge
+  ## (pixie's `layoutBounds`) is not its width: set into the pixel to spare, a
+  ## centred line starts half a pixel in and a right-aligned one a whole one,
+  ## so a `truncate` text exactly as wide as its box overflowed by a rounding
+  ## error and was cut ("Room 2" as "Roo…" at every other size in a centred
+  ## card, the UX bench, 2026-11-27), and right-aligned always.
+  for (first, last) in a.lines:
+    var
+      lo = high(float32)
+      hi = low(float32)
+    for i in first .. min(last, a.runes.high):
+      if a.runes[i] == Rune(10):
+        continue
+      let r = a.selectionRects[i]
+      lo = min(lo, r.x)
+      hi = max(hi, r.x + r.w)
+    if hi > lo:
+      result = max(result, hi - lo)
+
 proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   when defined(testing):
     inc textsSetForTest
@@ -1013,14 +1033,18 @@ proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arr
       return n.arrangement
   n.ensureSpans()
   # A pixel to spare: pixie rounds the bounds it reports, so text measured
-  # at its own width could otherwise wrap when set into it.
+  # at its own width could otherwise wrap when set into it. A line that never
+  # wraps is set into its box itself: centred in a pixel more, it sat half a
+  # pixel in, its glyphs rounded a pixel wider than the box, and a `truncate`
+  # text as wide as its box was cut ("Room 2" as "Roo…" at every other size,
+  # the UX bench, 2026-11-27).
   let
     wrap = not n.text.nowrap
-    bounds = vec2(max(width, 0) + 1, 0)
+    bounds = vec2(max(width, 0) + (if wrap: 1'f32 else: 0'f32), 0)
     lines = n.text.lines
   result = typeset(n.spans, bounds, align, TopAlign, wrap)
   template overflows(a: Arrangement): bool =
-    a.lines.len > lines or (not wrap and a.layoutBounds().x > width + 0.5)
+    a.lines.len > lines or (not wrap and a.widest() > width + 0.5)
   if lines > 0 and result.runes.len > 0 and result.overflows:
     var
       lo = 0
