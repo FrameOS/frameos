@@ -3,6 +3,7 @@
     "id": "1963a421-55ab-477b-bb5b-74c2f58f90c0",
     "name": "Made in Space",
     "settings": {
+      "fullScreen": true,
       "round": true,
       "category": "Art & galleries",
       "backgroundColor": "#000000",

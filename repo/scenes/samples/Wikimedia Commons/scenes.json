@@ -3,6 +3,7 @@
     "id": "89bb1087-7cb1-4a58-92de-27fb70591907",
     "name": "Wikimedia Commons",
     "settings": {
+      "fullScreen": true,
       "category": "Photos",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",

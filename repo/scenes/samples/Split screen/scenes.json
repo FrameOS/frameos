@@ -719,7 +719,7 @@
         "id": "split-round-margin",
         "type": "code",
         "data": {
-          "codeJS": "(() => {\n  // On a round panel the grid goes in the square inside the circle, so no\n  // cell has a corner where the glass is not.\n  if (context.round !== true || !context.imageWidth) return '10'\n  const side = Math.min(context.imageWidth, context.imageHeight || context.imageWidth)\n  return String(Math.round(side * 0.15))\n})()",
+          "codeJS": "(() => {\n  // On a round panel the grid fills the circle's square, all but a thin\n  // margin: each cell a quarter of the disc, its outer corner the glass's\n  // (a cell inside the square inside the circle is half the size).\n  if (context.round !== true || !context.imageWidth) return '10'\n  const side = Math.min(context.imageWidth, context.imageHeight || context.imageWidth)\n  return String(Math.round(side * 0.04))\n})()",
           "codeArgs": [],
           "codeOutputs": [
             {
