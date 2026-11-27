@@ -1415,10 +1415,6 @@ proc parseSvg*(
     var rootProps = initSvgProperties()
     rootProps = root.parseSvgProperties(rootProps)
 
-    if box.minX != 0 or box.minY != 0:
-      let viewBoxMin = vec2(-box.minX, -box.minY)
-      rootProps.transform = rootProps.transform * translate(viewBoxMin)
-
     result = Svg(
       viewBoxWidth: box.width,
       viewBoxHeight: box.height,
@@ -1437,6 +1433,15 @@ proc parseSvg*(
         scaleX = width.float32 / box.width
         scaleY = height.float32 / box.height
       rootProps.transform = rootProps.transform * scale(vec2(scaleX, scaleY))
+
+    # The viewBox's corner at the image's: moved in user units, inside the
+    # scale, as a nested viewport is (tx = x - minX * sx). Moved after it, a
+    # viewBox that starts left of 0 and is drawn at another size landed off
+    # by minX * (1 - scale): a clock laid out round its centre on a panel of
+    # another shape stood to one side (the UX bench, 2026-11-27).
+    if box.minX != 0 or box.minY != 0:
+      let viewBoxMin = vec2(-box.minX, -box.minY)
+      rootProps.transform = rootProps.transform * translate(viewBoxMin)
 
     var
       propertiesStack = @[rootProps]
