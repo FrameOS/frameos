@@ -135,4 +135,10 @@ to reach) have not been checked on the hardware yet.
   `system/sceneSwitcher/scene.nim`.
 - **Frames that exist:** the backend's migration `d1b5e7a9c3f2` gives a frame
   whose stored map is still its preset's old one the new map. A map anyone
-  changed is kept.
+  changed is kept. An ESP32 does the same for itself, for the boards no
+  backend holds (set up in the browser flasher, linked to the cloud): every
+  board stored the map it came with in its settings, and a stored map that is
+  its preset's old one (the `was` hash in `fos_board_keys_gen.h`, from the
+  migration's frozen copies) or today's is the board's own, which the board
+  no longer stores (`fos_board_event_map_is_default`, `fos_config.c`): the
+  next standard comes with the next update.

@@ -4,8 +4,14 @@
  * every board's event map once (`k_board_rules`), each board the rules it
  * has, by number from 1 (`rules`, joined into a map by fos_board_event_map),
  * and its keys' roles (`roles`: LABEL=role, for fos_board_key_role).
+ * `was` is the FNV-1a of the map the board came with before the button
+ * standard, as the firmware wrote it into its settings (the backend
+ * migration d1b5e7a9c3f2's OLD_PRESET_MAPS): a board that stored that one
+ * runs today's (fos_board_event_map_is_default).
  * The longest map is 842 bytes (FOS_EVENT_MAP_LEN holds 1023). */
 #pragma once
+
+#include <stdint.h>
 
 static const char *const k_board_rules[] = {
     "{\"event\":\"button\",\"match\":{\"label\":\"KEY1\",\"action\":\"longPress\"},\"emit\":\"voiceChat\",\"as\":{}}",
@@ -41,35 +47,36 @@ typedef struct {
     const char *preset;
     const char *rules; /* rule numbers, from 1, as bytes */
     const char *roles; /* LABEL=role, space-separated */
+    uint32_t was; /* FNV-1a of the map it came with before the button standard, 0: none */
 } fos_board_keys_t;
 
 static const fos_board_keys_t k_board_keys[] = {
-    {"waveshare_esp32_s3_photopainter", "\x01\x02\x03\x04\x05", "KEY1=primary BOOT=next"},
-    {"waveshare_esp32_s3_epaper_13_3e6", "\x06", "BOOT=primary"},
-    {"trmnl_og", "\x07", "BUTTON=primary"},
-    {"trmnl_bwry", "\x07", "BUTTON=primary"},
-    {"trmnl_og_diy_kit", "\x08\x02\x03\x04\x05", "BOOT=primary KEY3=next"},
-    {"trmnl_4in26_diy_kit", "\x08\x02\x03\x04\x05", "BOOT=primary KEY1=next"},
-    {"xteink_x4", "\x09", "POWER=primary"},
-    {"esp32_c3_042_oled", "\x08", "BOOT=primary"},
-    {"seeed_sensecap_indicator_d1", "\x0a\x07\x0b\x0c\x0d\x0e", "BUTTON=screen"},
-    {"sunton_esp32_8048s070", "\x0f\x08\x0b\x0c\x0d\x0e", "BOOT=screen"},
-    {"guition_esp32_4848s040", "\x0b\x0c\x0d\x0e", ""},
-    {"waveshare_esp32_s3_touch_amoled_1_75", "\x10\x11\x06\x04\x05\x0b\x0c\x0d\x0e", "PWR=screen BOOT=primary"},
-    {"elecrow_crowpanel_advance_7", "\x0f\x08\x0b\x0c\x0d\x0e", "BOOT=screen"},
-    {"elecrow_crowpanel_advance_2in8", "\x0f\x06\x0b\x0c\x0d\x0e", "BOOT=screen"},
-    {"elecrow_crowpanel_watch_2in01", "\x0f\x08\x12\x13\x04\x05\x0b\x0c\x0d\x0e", "BOOT=screen HOME=menu OK=primary NEXT=next PREV=prev"},
-    {"elecrow_crowpanel_rotary_1in46", "\x0f\x08\x14\x04\x05\x0b\x0c\x0d\x0e", "BOOT=screen OK=primary NEXT=next PREV=prev"},
-    {"seeed_reterminal_sticky", "\x15\x02\x03\x04\x05\x0b\x0c\x0d\x0e", "AI=primary UP=left DOWN=right"},
-    {"seeed_reterminal_e1001", "\x16\x02\x03\x04\x05", "REFRESH=primary LEFT=right RIGHT=left"},
-    {"seeed_reterminal_e1002", "\x16\x02\x03\x04\x05", "REFRESH=primary LEFT=right RIGHT=left"},
-    {"seeed_reterminal_e1003", "\x16\x02\x03\x04\x05\x0b\x0c\x0d\x0e", "REFRESH=primary LEFT=right RIGHT=left"},
-    {"seeed_reterminal_e1004", "\x17\x02\x03\x04\x05", "REFRESH=primary LEFT=left RIGHT=right"},
-    {"seeed_xiao_ee02", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next"},
-    {"seeed_xiao_ee03", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next"},
-    {"seeed_xiao_ee04", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next"},
-    {"seeed_xiao_ee05", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next"},
-    {"seeed_xiao_epaper_7in5", "\x08", "BOOT=primary"},
-    {"elecrow_crowpanel_5in79", "\x12\x19\x1a\x1b\x14\x02\x03", "HOME=menu EXIT=back NEXT=next OK=primary PREV=prev"},
-    {"elecrow_crowpanel_epd_4in2", "\x12\x19\x1a\x1b\x14\x02\x03", "HOME=menu EXIT=back NEXT=next OK=primary PREV=prev"},
+    {"waveshare_esp32_s3_photopainter", "\x01\x02\x03\x04\x05", "KEY1=primary BOOT=next", 0xb006bad4u},
+    {"waveshare_esp32_s3_epaper_13_3e6", "\x06", "BOOT=primary", 0xd3557306u},
+    {"trmnl_og", "\x07", "BUTTON=primary", 0x00000000u},
+    {"trmnl_bwry", "\x07", "BUTTON=primary", 0x00000000u},
+    {"trmnl_og_diy_kit", "\x08\x02\x03\x04\x05", "BOOT=primary KEY3=next", 0x00000000u},
+    {"trmnl_4in26_diy_kit", "\x08\x02\x03\x04\x05", "BOOT=primary KEY1=next", 0x00000000u},
+    {"xteink_x4", "\x09", "POWER=primary", 0x00000000u},
+    {"esp32_c3_042_oled", "\x08", "BOOT=primary", 0x00000000u},
+    {"seeed_sensecap_indicator_d1", "\x0a\x07\x0b\x0c\x0d\x0e", "BUTTON=screen", 0x94e09742u},
+    {"sunton_esp32_8048s070", "\x0f\x08\x0b\x0c\x0d\x0e", "BOOT=screen", 0x915e4082u},
+    {"guition_esp32_4848s040", "\x0b\x0c\x0d\x0e", "", 0xbcd5ec8eu},
+    {"waveshare_esp32_s3_touch_amoled_1_75", "\x10\x11\x06\x04\x05\x0b\x0c\x0d\x0e", "PWR=screen BOOT=primary", 0x015e2035u},
+    {"elecrow_crowpanel_advance_7", "\x0f\x08\x0b\x0c\x0d\x0e", "BOOT=screen", 0x915e4082u},
+    {"elecrow_crowpanel_advance_2in8", "\x0f\x06\x0b\x0c\x0d\x0e", "BOOT=screen", 0xb275c3d7u},
+    {"elecrow_crowpanel_watch_2in01", "\x0f\x08\x12\x13\x04\x05\x0b\x0c\x0d\x0e", "BOOT=screen HOME=menu OK=primary NEXT=next PREV=prev", 0xd8c9525cu},
+    {"elecrow_crowpanel_rotary_1in46", "\x0f\x08\x14\x04\x05\x0b\x0c\x0d\x0e", "BOOT=screen OK=primary NEXT=next PREV=prev", 0x915e4082u},
+    {"seeed_reterminal_sticky", "\x15\x02\x03\x04\x05\x0b\x0c\x0d\x0e", "AI=primary UP=left DOWN=right", 0x400cef5du},
+    {"seeed_reterminal_e1001", "\x16\x02\x03\x04\x05", "REFRESH=primary LEFT=right RIGHT=left", 0x2653958eu},
+    {"seeed_reterminal_e1002", "\x16\x02\x03\x04\x05", "REFRESH=primary LEFT=right RIGHT=left", 0x2653958eu},
+    {"seeed_reterminal_e1003", "\x16\x02\x03\x04\x05\x0b\x0c\x0d\x0e", "REFRESH=primary LEFT=right RIGHT=left", 0x46eb76a3u},
+    {"seeed_reterminal_e1004", "\x17\x02\x03\x04\x05", "REFRESH=primary LEFT=left RIGHT=right", 0xecfcc7deu},
+    {"seeed_xiao_ee02", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next", 0x00000000u},
+    {"seeed_xiao_ee03", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next", 0x00000000u},
+    {"seeed_xiao_ee04", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next", 0x00000000u},
+    {"seeed_xiao_ee05", "\x18\x02\x03\x04\x05", "KEY1=prev KEY2=primary KEY3=next", 0x00000000u},
+    {"seeed_xiao_epaper_7in5", "\x08", "BOOT=primary", 0x00000000u},
+    {"elecrow_crowpanel_5in79", "\x12\x19\x1a\x1b\x14\x02\x03", "HOME=menu EXIT=back NEXT=next OK=primary PREV=prev", 0xba4fc999u},
+    {"elecrow_crowpanel_epd_4in2", "\x12\x19\x1a\x1b\x14\x02\x03", "HOME=menu EXIT=back NEXT=next OK=primary PREV=prev", 0xba4fc999u},
 };
