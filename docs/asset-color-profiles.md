@@ -112,7 +112,12 @@ and the JS runtime's draw call fit the rectangle the image landed on, right
 after drawing it (`applyAutoFitToDrawn`). That covers every source — a local
 file, a URL, Immich, OpenAI, a JS app's own fetch — and is idempotent, since
 the canvas is new each render while a producer's output is cached for
-minutes. It takes the rectangle's luminance percentiles 0.5 and 99.5 and
+minutes. A picture drawn straight into the whole canvas around scenes of its
+own (a layout's `<yield />`, a `<Scene>`: the holding scene's `slots`) is
+fitted around them (`applyAutoFitAround`): each scene's own consumer fitted
+its rectangle already, and a second fit squeezed the palette's range twice
+(a Spectra's white came out #949294 under the reTerminal layout, every scene
+in it dithered to confetti). It takes the rectangle's luminance percentiles 0.5 and 99.5 and
 solves for the Whites and Blacks that map that range onto the palette's
 (`autoEndPoints`, the same arithmetic as the editor's Auto preset):
 
