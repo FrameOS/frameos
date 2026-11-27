@@ -780,6 +780,22 @@ proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
     recoverEmergencyReserve("scene load failure")
     result = 0
 
+proc fos_nim_drop_scene_impl() {.exportc, cdecl.} =
+  ## The scene a switch replaces goes before the new one is read off flash,
+  ## when the read found no room for it (fos_scenes.c load_scene_slot): a
+  ## scene that left PSRAM in pieces (Hacker News on the reTerminal Sticky:
+  ## 1.3 MB free in blocks of 30 KB) kept every other scene from loading, and
+  ## the switch did nothing (the hardware bench, 2026-11-27). What the load
+  ## does first anyway (makeRoomForScenes), done before the read, and
+  ## collected; the scene cache stays, so a read that still fails leaves the
+  ## old scene to be built again by the next render.
+  try:
+    makeRoomForScenes(whole = false)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene read")
+  except Defect, CatchableError:
+    discard
+
 proc renderErrorFallback(
     buf: ptr UncheckedArray[uint8];
     bufLen: int;
