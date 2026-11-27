@@ -551,6 +551,41 @@ async def test_a_held_key_switches_scenes_through_the_frames_event_map_in_the_re
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_two_keys_held_together_are_the_frames_back_key_in_the_real_runtime():
+    """docs/buttons.md: a board with no Back key has one in two keys held
+    together, where its map binds Back by role; held, it is Home. The input
+    state asks the maps (`bound`), and setting the frame, which every pull of
+    a board its plane draws does first, used to make it anew without that
+    question: two keys were two presses (the UX bench, 2026-11-27)."""
+    from types import SimpleNamespace
+
+    from app.tasks.embedded_firmware import EMBEDDED_HARDWARE_PRESETS
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
+    both = {"nowMs": 20_000, "events": [
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 4, "label": "LEFT", "level": 0, "action": "down", "atMs": 18_000}},
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 5, "label": "RIGHT", "level": 0, "action": "down", "atMs": 18_030}},
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 4, "label": "LEFT", "level": 1, "action": "up", "atMs": 19_300}},
+        {"origin": "driver", "name": "gpio",
+         "payload": {"pin": 5, "label": "RIGHT", "level": 1, "action": "up", "atMs": 19_310}},
+    ]}
+    # As the plane sends a board's (embedded_device.py): its rotation and its
+    # keys, which set the frame's input anew.
+    preset = EMBEDDED_HARDWARE_PRESETS["seeed_reterminal_e1004"]
+    frame_json = {"eventMap": preset["eventMap"], "palette": [], "colors": {}, "rotate": 0,
+                  "gpioButtons": [dict(button) for button in preset["gpioButtons"]]}
+    held = await render_scene(frame, 16, 16, scene_id="clock", device_input=both, frame_json=frame_json)
+    assert held.rgba is not None, held.error
+    # Held together: Home, the scene list.
+    assert held.state["sceneId"] == "system/sceneSwitcher", held.state
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
 async def test_a_relayed_schedule_entry_switches_and_the_planes_own_origin_does_not():
     from types import SimpleNamespace
 
