@@ -62,6 +62,8 @@ tools/ux-bench/run_all.sh ~/.frameos-bench/ux/wasm ~/.frameos-bench/ux/run      
 tools/ux-bench/run_extra.sh ~/.frameos-bench/ux/wasm ~/.frameos-bench/ux/extra  # the reTerminal layouts both ways, the built-in scenes
 python3 tools/ux-bench/report.py ~/.frameos-bench/ux/run --sheets                # issues.json, report.md, a contact sheet per panel
 python3 tools/ux-bench/report.py ~/.frameos-bench/ux/run --baseline ~/.frameos-bench/ux/run-before  # + what got slower
+# (compare runs made under the same load: run_all.sh beside run_extra.sh on 12 cores made the
+#  E1003's games read 2.5x slower; alone, main and branch timed the same)
 
 node tools/ux-bench/ux.mjs --wasm <dir> --panel sticky-landscape --out <dir> --layout "reTerminal Sticky layout" --builtins 1
 UX_REPO=<other checkout> node tools/ux-bench/ux.mjs ...   # that checkout's samples
