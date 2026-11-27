@@ -6245,7 +6245,7 @@
   ]
  },
  "inputState": {
-  "$comment": "The input state (frameos/src/frameos/input_state.nim) alone: its button half, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). A case's `tripleLabels` names the labels a rule of an event map binds a `triplePress` of (event_loop.nim asks the maps; here the case says), so those keys hold a pair back for a third press. `delivered` = exactly what came out, in order: event name, and a subset of the payload. A pointer case sends pointer events (positions on the 0..32767 wire, an 800x480 frame) and expects scene pixels.",
+  "$comment": "The input state (frameos/src/frameos/input_state.nim) alone: its button half, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). A case's `tripleLabels` names the labels a rule of an event map binds a `triplePress` of (event_loop.nim asks the maps; here the case says), so those keys hold a pair back for a third press. `delivered` = exactly what came out, in order: event name, and a subset of the payload. A pointer case sends pointer events (positions on the 0..32767 wire, an 800x480 frame) and expects scene pixels. A case's `holdLabels` names the labels the frame takes at the hold (a rule of the frame's map binds their `longPress` to `voiceChat`; event_loop.nim asks the map, here the case says): their long press is left to their `up`.",
   "cases": [
    {
     "name": "a tap is down and up at once, and a press when its window closes",
@@ -7579,8 +7579,8 @@
     ]
    },
    {
-    "name": "a hold is one longPress, on its up",
-    "why": "Nothing is delivered while the key is down, however long. The up decides: held at least longPressMs (1000), it is a longPress, after the up, with the same duration and the down's atMs. A long press is not also a press.",
+    "name": "a hold is one longPress, at longPressMs while the key is still down",
+    "why": "The long press comes as soon as a tick finds the key held longPressMs (1000), while it is still down, so whoever holds it knows when to let go: with the down's atMs and how long it was held then. Once: holding on makes nothing more, and the up is the edge alone. A long press is not also a press.",
     "steps": [
      {
       "at": 1000,
@@ -7610,7 +7610,19 @@
      {
       "at": 2000,
       "tick": true,
-      "delivered": []
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "atMs": 1000,
+         "durationMs": 1000
+        }
+       }
+      ]
      },
      {
       "at": 3000,
@@ -7640,17 +7652,6 @@
          "action": "up",
          "durationMs": 2200
         }
-       },
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "atMs": 1000,
-         "durationMs": 2200
-        }
        }
       ]
      },
@@ -7662,8 +7663,93 @@
     ]
    },
    {
+    "name": "a key held 1.2 s acts at 1 s, and its up adds nothing",
+    "why": "The owner's rule (2026-11-26): a key acts the moment holding it longer would change nothing, so nobody guesses whether they held it long enough. The tick at longPressMs makes the longPress; the up 200 ms later is the edge alone, with the whole hold as its durationMs.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "down",
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1500,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 2000,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "atMs": 1000,
+         "durationMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 2200,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "up",
+        "atMs": 2200
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up",
+         "durationMs": 1200
+        }
+       }
+      ]
+     },
+     {
+      "at": 2600,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
     "name": "a hold through a render is a longPress",
-    "why": "Both edges sat in the queue; their stamps say the key was down 2.5 s.",
+    "why": "Both edges sat in the queue; their stamps say the key was down 2.5 s. The up's own time decides: the long press it reached comes first, then the up.",
     "steps": [
      {
       "at": 31000,
@@ -7706,16 +7792,6 @@
       },
       "delivered": [
        {
-        "event": "gpio",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "up",
-         "durationMs": 2500
-        }
-       },
-       {
         "event": "button",
         "payload": {
          "pin": 6,
@@ -7723,6 +7799,16 @@
          "role": "next",
          "action": "longPress",
          "atMs": 1000,
+         "durationMs": 2500
+        }
+       },
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up",
          "durationMs": 2500
         }
        }
@@ -7736,8 +7822,8 @@
     ]
    },
    {
-    "name": "a key still held when the render ends makes nothing until its up",
-    "why": "The down was queued at 1000 and drained at 30000 with the key still down: no tick makes anything of a hold; the up does.",
+    "name": "a key still held when the render ends is a longPress at the next tick",
+    "why": "The down was queued at 1000 and drained at 30000 with the key still down: the first tick after it finds the hold past longPressMs and makes the long press then; the up is the edge alone.",
     "steps": [
      {
       "at": 30000,
@@ -7768,7 +7854,19 @@
      {
       "at": 30000,
       "tick": true,
-      "delivered": []
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "atMs": 1000,
+         "durationMs": 29000
+        }
+       }
+      ]
      },
      {
       "at": 31000,
@@ -7798,17 +7896,6 @@
          "action": "up",
          "durationMs": 30000
         }
-       },
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "atMs": 1000,
-         "durationMs": 30000
-        }
        }
       ]
      }
@@ -7816,7 +7903,7 @@
    },
    {
     "name": "a hold just short of longPressMs is a press, and one exactly that long a longPress",
-    "why": "The line is longPressMs held: 999 ms is a short press (it waits for a second down, then is a press), 1000 ms a long one.",
+    "why": "The line is longPressMs held: 999 ms is a short press (it waits for a second down, then is a press), 1000 ms a long one, which comes before the up it reached.",
     "steps": [
      {
       "at": 1000,
@@ -7931,16 +8018,6 @@
       },
       "delivered": [
        {
-        "event": "gpio",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "up",
-         "durationMs": 1000
-        }
-       },
-       {
         "event": "button",
         "payload": {
          "pin": 6,
@@ -7948,6 +8025,16 @@
          "role": "next",
          "action": "longPress",
          "atMs": 3000,
+         "durationMs": 1000
+        }
+       },
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up",
          "durationMs": 1000
         }
        }
@@ -8160,7 +8247,7 @@
    },
    {
     "name": "a hold that woke the device is a longPress",
-    "why": "Still down when the button task first looks: the press began at the reset (atMs 0), so the hold counts from there, and its up makes the longPress the finger meant.",
+    "why": "Still down when the button task first looks: the press began at the reset (atMs 0), so the hold counts from there, and the first tick finds it past longPressMs: the longPress the finger meant, while it is held, saying it woke the device. Its up is the edge alone.",
     "steps": [
      {
       "at": 6000,
@@ -8193,7 +8280,20 @@
      {
       "at": 6000,
       "tick": true,
-      "delivered": []
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "wake": true,
+         "atMs": 0,
+         "durationMs": 6000
+        }
+       }
+      ]
      },
      {
       "at": 7000,
@@ -8216,18 +8316,6 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 2500
-        }
-       },
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "wake": true,
-         "atMs": 0,
          "durationMs": 2500
         }
        }
@@ -8859,7 +8947,7 @@
    },
    {
     "name": "a press the frame claimed makes no button",
-    "why": "A key whose long press the frame's event map binds to `voiceChat` (REFRESH on a reTerminal E1001/E1002) starts the voice chat at the hold, docs/voice-chat.md: the frame took the press, so its `up` edge says `claimed` and the button layer makes no `longPress` of a hold that was a sentence, nor a `press` of a short one. The edges themselves are delivered, as every edge is. (The case holds two keys at once, as the chord that came before the binding did; one claimed key is the same rule once.)",
+    "why": "A key whose long press the frame's event map binds to `voiceChat` (REFRESH on a reTerminal E1001/E1002) starts the voice chat at the hold, docs/voice-chat.md: the frame took the press, so the button layer leaves its hold to the `up` (`holdLabels`: event_loop.nim asks the frame's map; here the case says) and that `up` says `claimed`: no `longPress` of a hold that was a sentence, nor a `press` of a short one. The edges themselves are delivered, as every edge is. (The case holds two keys at once, as the chord that came before the binding did; one claimed key is the same rule once.)",
     "steps": [
      {
       "at": 1000,
@@ -8980,6 +9068,10 @@
       "tick": true,
       "delivered": []
      }
+    ],
+    "holdLabels": [
+     "LEFT",
+     "RIGHT"
     ]
    },
    {

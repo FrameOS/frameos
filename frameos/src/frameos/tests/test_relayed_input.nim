@@ -59,8 +59,9 @@ block test_two_quick_taps_are_a_double_press:
 
 block test_a_hold_is_a_long_press_with_its_length:
   let output = deliver(%*{"nowMs": 2_700, "edges": [edge("C", "down", 1_000), edge("C", "up", 2_300)]}, at(5))
-  doAssert output.kinds == @["gpio:down", "gpio:up", "button:longPress"]
-  doAssert output[2].payload["durationMs"].getInt() == 1_300
+  # The up's own time decides: the long press its hold reached comes first.
+  doAssert output.kinds == @["gpio:down", "button:longPress", "gpio:up"], $output.kinds
+  doAssert output[1].payload["durationMs"].getInt() == 1_300
 
 block test_taps_on_two_buttons_are_two_presses:
   let output = deliver(%*{"nowMs": 1_800, "edges": [

@@ -142,18 +142,23 @@ proc hasStatePayload*(payload: JsonNode): bool =
   let state = payload{"state"}
   not state.isNil and state.kind == JObject
 
-proc tripleWanted(loop: EventLoop, pin: int, label, role: string): bool =
-  ## Whether the frame's event map or the showing scene's binds this key's
-  ## `triplePress` (a rule whose `match` names the action and fits the key):
-  ## only then does input_state hold a key's pair back for a third press.
-  let probe = %*{"pin": pin, "label": label, "role": role, "action": "triplePress"}
-  let scene = if loop.host.sceneFor.isNil: nil else: loop.host.sceneFor(none(SceneId))
+proc bound(loop: EventLoop, pin: int, label, role, action: string): bool =
+  ## input_state's question of the maps (`InputState.bound`). `triplePress`:
+  ## a rule of the frame's event map or the showing scene's whose `match`
+  ## names it and fits the key; only then does input_state hold a key's pair
+  ## back for a third press. `longPress`: a rule of the frame's map that
+  ## makes it `voiceChat`, the hold the ESP32 takes itself
+  ## (docs/voice-chat.md).
+  let voice = action == "longPress"
+  let probe = %*{"pin": pin, "label": label, "role": role, "action": action}
+  let scene = if voice or loop.host.sceneFor.isNil: nil else: loop.host.sceneFor(none(SceneId))
   for rules in [(if loop.frameConfig.isNil: nil else: loop.frameConfig.eventMap),
                 (if scene.isNil: nil else: scene.eventMap)]:
     if rules.isNil or rules.kind != JArray:
       continue
     for rule in rules.elems:
-      if rule{"match", "action"}.getStr() == "triplePress" and rule.eventMapRuleMatches(evButton, probe):
+      if rule{"match", "action"}.getStr() == action and (not voice or rule{"emit"}.getStr() == evVoiceChat) and
+          rule.eventMapRuleMatches(evButton, probe):
         return true
 
 proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
@@ -162,7 +167,7 @@ proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
     main: initDeque[EventEnvelope](), input: initDeque[EventEnvelope](),
     inputState: initInputState(frameConfig), displayOn: true)
   loop.inputState.keyboardAt = host.keyboardAt
-  loop.inputState.tripleWanted = proc (pin: int, label, role: string): bool = loop.tripleWanted(pin, label, role)
+  loop.inputState.bound = proc (pin: int, label, role, action: string): bool = loop.bound(pin, label, role, action)
   loop
 
 proc pending*(loop: EventLoop): int =
@@ -894,14 +899,18 @@ proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =
     loop.host.requestRender()
 
 proc tick*(loop: EventLoop, now = getMonoTime()): int =
-  ## Time passing for the input state: a held pointer becomes a `longPress`,
-  ## a held button one at every whole second, a short button press whose
+  ## Time passing for the input state: a held pointer or button becomes a
+  ## `longPress` (once, while it is held), a short button press whose
   ## double-press window closed a `press`, an idle cursor hides. And for the
   ## showing scene's UI (ui/events.nim): a `uiTimer` when a key's light is to
   ## go out or a held key types again. What it makes is queued (input lane)
-  ## for the drain that follows; returns how many.
+  ## for the drain that follows; returns how many. Not while input waits in
+  ## the lane: a key's `up` queued there would come after a long press its
+  ## hold never reached; the drain applies it, each edge at its own time, and
+  ## the next tick goes on from there.
   var made: seq[InputDelivery]
-  loop.inputState.tick(now, made)
+  if loop.input.len == 0:
+    loop.inputState.tick(now, made)
   if uiTimersPending():
     let current = loop.host.sceneFor(none(SceneId))
     if not current.isNil and uiTimerDue(current.id.string, now):

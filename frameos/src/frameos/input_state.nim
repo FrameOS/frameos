@@ -68,6 +68,7 @@ type
     atMs: int       ## the down edge's `atMs`, -1 without one: the `press` or `longPress` it becomes says it
     durationMs: int ## a waiting tap's hold
     twice: bool     ## the second (or third) down of a run: no long press, no `press`
+    longPressed: bool ## its `longPress` came while it was held: its `up` makes nothing more
     third: bool     ## the second down, held back: a third may make the run a `triplePress`
     wake: bool      ## began with the down that woke the device: its button-layer event says so
 
@@ -112,11 +113,15 @@ type
     cursorX*, cursorY*: int        ## pointer 0: the one cursor every mouse moves
     pointers: seq[PointerRecord]   ## a handful at most: a search beats a table's code
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
-    tripleWanted*: proc (pin: int, label, role: string): bool
-      ## Whether a rule binds this key's `triplePress` (the frame's event map
-      ## or the showing scene's; event_loop.nim). Only then does its second
-      ## down wait for a third instead of being the `doublePress` at once, so
-      ## a key no rule binds three times is no slower. nil: never.
+    bound*: proc (pin: int, label, role, action: string): bool
+      ## What event_loop.nim asks of the event maps for this key. `triplePress`:
+      ## whether a rule of the frame's map or the showing scene's binds it;
+      ## only then does the key's second down wait for a third instead of
+      ## being the `doublePress` at once, so a key no rule binds three times
+      ## is no slower. `longPress`: whether the frame takes the hold for a
+      ## gesture of its own (the frame's map binds it to `voiceChat`: the
+      ## ESP32 starts listening at the hold and the `up` comes `claimed`);
+      ## such a key's long press is left to its `up`. nil: neither.
     keyboardAt*: proc (x, y: int): bool
       ## Whether the keyboard on the screen (a JSX field's, ui/keyboard.nim) is
       ## under (x, y), from the host (event_loop.nim's EventHost); nil: none.
@@ -224,14 +229,25 @@ proc keyFor(state: InputState, pin: int, label: string): int =
   -1
 
 proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
-  ## Time passing for the button layer: a short press whose double-press
+  ## Time passing for the button layer: a key held `ButtonLongPressMs` is a
+  ## `longPress` then, while it is still down, so whoever holds it knows when
+  ## to let go (its `up` makes nothing more); a short press whose double-press
   ## window has closed is a `press`, a pair held back for a third press whose
-  ## window has closed the `doublePress`. Nothing happens while a key is
-  ## held; a long press is decided by its `up`.
+  ## window has closed the `doublePress`.
   var index = 0
   while index < state.buttons.len:
     let key = state.buttons[index]
-    if not key.down and msSince(now, key.releasedAt) > ButtonDoublePressMs:
+    if key.down:
+      # Not the second down of a run (a double press is that and nothing
+      # more; a held-back pair is decided by its `up`), not a key the frame
+      # takes at the hold.
+      if not key.twice and not key.longPressed and msSince(now, key.downAt) >= ButtonLongPressMs and
+          (state.bound.isNil or not state.bound(key.pin, key.label, key.role, "longPress")):
+        state.buttons[index].longPressed = true
+        output.addButton(evButton, key.origin, key.pin, key.label, key.role, "longPress", key.atMs,
+          msSince(now, key.downAt), wake = key.wake)
+      inc index
+    elif msSince(now, key.releasedAt) > ButtonDoublePressMs:
       if key.third:
         output.addButton(evButton, key.origin, key.pin, key.label, key.role, "doublePress", key.atMs,
           wake = key.wake)
@@ -304,7 +320,7 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
     if index >= 0:
       state.buttons.delete(index)
     # The second down waits for a third only where a rule binds one.
-    let third = twice and not thrice and not state.tripleWanted.isNil and state.tripleWanted(pin, label, role)
+    let third = twice and not thrice and not state.bound.isNil and state.bound(pin, label, role, "triplePress")
     state.buttons.add(ButtonKey(pin: pin, label: label, role: role, origin: origin, down: true,
       downAt: at, atMs: atMs, twice: twice, third: third, wake: startedByWake))
     if thrice:
@@ -319,9 +335,9 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
     let key = state.buttons[index]
     let duration = msSince(at, key.downAt)
     output.addButton(evGpio, origin, pin, label, role, "up", atMs, duration, level = 1, claimed = claimed)
-    if claimed:
-      # The frame's own gesture took this press: the key is done, and the
-      # scene hears no press of it.
+    if claimed or key.longPressed:
+      # The frame's own gesture took this press, or its long press came
+      # while it was held: the key is done, and nothing more follows.
       state.buttons.delete(index)
     elif (not key.twice or key.third) and duration < ButtonLongPressMs:
       # A short press: it waits out its window before it is a `press`; a
@@ -335,9 +351,10 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
         # A held-back pair whose second press was held: no third comes now.
         output.addButton(evButton, key.origin, pin, label, role, "doublePress", key.atMs, wake = key.wake)
       elif not key.twice:
-        # Held at least `ButtonLongPressMs`: a long press, decided now that
-        # it is over, with how long it was. Once, never while held. (A
-        # double press is that and nothing more.)
+        # Held at least `ButtonLongPressMs` with no tick between (a host busy
+        # the whole hold, or a key the frame takes at the hold that it did
+        # not): the long press now, with how long it was. (A double press is
+        # that and nothing more.)
         output.addButton(evButton, key.origin, pin, label, role, "longPress", key.atMs, duration, wake = key.wake)
 
 proc buttonsHeld*(state: InputState): int =
@@ -1030,12 +1047,12 @@ proc applyNamedInput*(state: var InputState, name: string, payload: JsonNode, or
   state.applyNamedPointerOrKey(name, payload, origin, now, output)
 
 proc tick*(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
-  ## Time passing: a pointer held long enough is a `longPress`, a short button
-  ## press whose double-press window closed is a `press`, a cursor nobody
-  ## moved hides. A host calls this between events, never on one's way in:
-  ## an edge that was seen earlier (`atMs`) advances the state to its own
-  ## time. A host that cannot tick (the ESP32 in a render) gets a pointer's
-  ## long press on release instead, and a button's `press` at its next edge
-  ## or tick.
+  ## Time passing: a pointer or a button held long enough is a `longPress`,
+  ## a short button press whose double-press window closed is a `press`, a
+  ## cursor nobody moved hides. A host calls this between events, never on
+  ## one's way in: an edge that was seen earlier (`atMs`) advances the state
+  ## to its own time. A host that cannot tick (the ESP32 in a render) gets a
+  ## long press at its next tick or edge (a pointer's on release), and a
+  ## button's `press` the same.
   state.tickPointers(now, output)
   state.tickButtons(now, output)

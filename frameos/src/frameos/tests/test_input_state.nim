@@ -458,18 +458,25 @@ block test_a_button_has_a_role_and_two_events:
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 0, "action": "press"}, eoDriver, at(0), output)
   doAssert output.kinds == @["gpio:down"] and output[0].payload["role"].getStr() == "menu"
-  # Held: nothing while the key is down, however long.
+  # Held: a long press as soon as a tick finds it held longPressMs, while it
+  # is still down, with how long it was held then. Both keys (6, then 5).
+  output.setLen(0)
+  state.tick(at(ButtonLongPressMs - 1), output)
+  doAssert output.len == 0
+  state.tick(at(ButtonLongPressMs), output)
+  doAssert output.kinds == @["button:longPress", "button:longPress"], $output.kinds
+  doAssert output[1].payload["durationMs"].getInt() == ButtonLongPressMs
+  doAssert output[1].payload["role"].getStr() == "menu" and not output[1].payload.hasKey("level")
+  # Once: holding on makes nothing more.
   output.setLen(0)
   state.tick(at(2 * ButtonLongPressMs), output)
   doAssert output.len == 0
-  # The up says how long, and a hold of at least longPressMs is one longPress,
-  # after the up, with the same duration. A long press is not also a press.
+  # The up says how long, and nothing follows it: the long press came. A long
+  # press is not also a press.
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 1, "action": "release"}, eoDriver,
     at(2500), output)
-  doAssert output.kinds == @["gpio:up", "button:longPress"]
+  doAssert output.kinds == @["gpio:up"]
   doAssert output[0].payload["durationMs"].getInt() == 2500 and output[0].payload["role"].getStr() == "menu"
-  doAssert output[1].payload["durationMs"].getInt() == 2500
-  doAssert not output[1].payload.hasKey("level")
   output.setLen(0)
   state.tick(at(4000), output)
   doAssert output.len == 0
@@ -496,6 +503,42 @@ block test_a_button_has_a_role_and_two_events:
   output.setLen(0)
   discard state.applyNamedInput(evGpio, %*{"pin": 20, "label": "Zork", "level": 0}, eoDriver, at(9000), output)
   doAssert output.kinds == @["gpio:down"] and output[^1].payload["role"].getStr() == ""
+
+block test_a_long_press_comes_at_the_hold:
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  # A host busy the whole hold (an ESP32 in a refresh): the edge's own time
+  # decides, so the long press comes first, then the up it was before, and
+  # once.
+  discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": "RIGHT", "level": 0}, eoDriver, at(0), output)
+  discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": "RIGHT", "level": 1}, eoDriver, at(1300), output)
+  doAssert output.kinds == @["gpio:down", "button:longPress", "gpio:up"], $output.kinds
+  doAssert output[1].payload["durationMs"].getInt() == 1300 and output[2].payload["durationMs"].getInt() == 1300
+  output.setLen(0)
+  state.tick(at(3000), output)
+  doAssert output.len == 0 and state.buttonsBusy == 0
+  # Let go just short of it: a press, never a long press.
+  discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": "RIGHT", "level": 0}, eoDriver, at(5000), output)
+  state.tick(at(5000 + ButtonLongPressMs - 1), output)
+  discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": "RIGHT", "level": 1}, eoDriver,
+    at(5000 + ButtonLongPressMs - 1), output)
+  state.tick(at(7000), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:press"], $output.kinds
+  # A key the frame takes at the hold (the voice key): left to its up, which
+  # comes claimed and makes nothing; unclaimed, the long press then.
+  output.setLen(0)
+  state.bound = proc (pin: int, label, role, action: string): bool = label == "OK" and action == "longPress"
+  discard state.applyNamedInput(evGpio, %*{"pin": 18, "label": "OK", "level": 0}, eoDriver, at(8000), output)
+  state.tick(at(9500), output)
+  discard state.applyNamedInput(evGpio, %*{"pin": 18, "label": "OK", "level": 1, "claimed": true}, eoDriver,
+    at(9600), output)
+  state.tick(at(11000), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up"], $output.kinds
+  output.setLen(0)
+  discard state.applyNamedInput(evGpio, %*{"pin": 18, "label": "OK", "level": 0}, eoDriver, at(12000), output)
+  state.tick(at(13500), output)
+  discard state.applyNamedInput(evGpio, %*{"pin": 18, "label": "OK", "level": 1}, eoDriver, at(13600), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:longPress"], $output.kinds
 
 block test_a_tap_waits_for_a_second_one:
   var state = initInputState(config(800, 480))
@@ -526,7 +569,7 @@ block test_a_third_press_is_waited_for_only_where_a_rule_binds_one:
   # window that closes makes the pair the doublePress, late. Every other key
   # is as fast as before (the test above).
   var state = initInputState(config(800, 480))
-  state.tripleWanted = proc (pin: int, label, role: string): bool = label == "AI"
+  state.bound = proc (pin: int, label, role, action: string): bool = label == "AI" and action == "triplePress"
   var output: seq[InputDelivery]
   proc edge(state: var InputState, label, action: string, ms: int, output: var seq[InputDelivery]) =
     discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": label, "action": action}, eoDriver, at(ms), output)
@@ -837,8 +880,11 @@ block test_the_corpus:
     var tripleLabels: seq[string]
     for label in c{"tripleLabels"}.getElems():
       tripleLabels.add(label.getStr())
-    if tripleLabels.len > 0:
-      state.tripleWanted = proc (pin: int, label, role: string): bool = label in tripleLabels
+    var holdLabels: seq[string]
+    for label in c{"holdLabels"}.getElems():
+      holdLabels.add(label.getStr())
+    state.bound = proc (pin: int, label, role, action: string): bool =
+      label in (if action == "triplePress": tripleLabels else: holdLabels)
     for step in c["steps"]:
       var output: seq[InputDelivery]
       let now = at(step["at"].getInt())
