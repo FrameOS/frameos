@@ -957,7 +957,7 @@
       "agendaPlace": {
         "name": "Agenda place",
         "description": "Where the agenda goes in its half of the split: against the split on a round panel, from the top left with a calendar, the setup hint in the middle.",
-        "category": "logic",
+        "category": "data",
         "version": "1.0.0",
         "fields": [
           {
@@ -980,7 +980,7 @@
         ],
         "sources": {
           "app.ts": "// Where the agenda's text goes in its half of the split. On a round panel\n// the glass makes the halves two half-discs: the agenda is set against the\n// split, each line as long as the circle is wide where it sits (the agenda\n// app breaks the lines so), the block in the middle. Elsewhere the agenda\n// reads from the top left, and the setup hint sits in the middle. (Not a code\n// node: in a split's half `context.round` is false, the half being a room of\n// its own; `app.frame.round` is the panel's.)\nexport function get(app: FrameOSApp) {\n  const round = app.frame.round === true\n  const url = typeof app.state.iCalURL === 'string' && app.state.iCalURL.trim() !== ''\n  if (app.config.what === 'vAlign') return round || !url ? 'middle' : 'top'\n  return round ? 'right' : url ? 'left' : 'center'\n}\n",
-          "config.json": "{\n  \"name\": \"Agenda place\",\n  \"description\": \"Where the agenda goes in its half of the split: against the split on a round panel, from the top left with a calendar, the setup hint in the middle.\",\n  \"category\": \"logic\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"what\",\n      \"type\": \"select\",\n      \"options\": [\n        \"position\",\n        \"vAlign\"\n      ],\n      \"value\": \"position\",\n      \"required\": true,\n      \"label\": \"For the text's\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"place\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
+          "config.json": "{\n  \"name\": \"Agenda place\",\n  \"description\": \"Where the agenda goes in its half of the split: against the split on a round panel, from the top left with a calendar, the setup hint in the middle.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"what\",\n      \"type\": \"select\",\n      \"options\": [\n        \"position\",\n        \"vAlign\"\n      ],\n      \"value\": \"position\",\n      \"required\": true,\n      \"label\": \"For the text's\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"place\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
         }
       }
     }
