@@ -5,7 +5,7 @@
         "id": "e981d9ce-22ca-4994-9319-d36d1b996938",
         "source": "463556ab-e4fe-40c7-93f3-40bc723f454e",
         "sourceHandle": "next",
-        "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
+        "target": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
         "targetHandle": "prev",
         "type": "appNodeEdge"
       },
@@ -21,8 +21,8 @@
         "id": "0f9ed7b3-0c57-483b-9d3e-39f697fa8865",
         "source": "3a48f3b9-2c00-4547-95e4-64ac1429b05e",
         "sourceHandle": "fieldOutput",
-        "target": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
-        "targetHandle": "fieldInput/text",
+        "target": "date-text",
+        "targetHandle": "codeField/date",
         "type": "codeNodeEdge"
       },
       {
@@ -37,8 +37,8 @@
         "id": "2a978cfc-4578-4a61-9806-395baa9fc3ac",
         "source": "e4740c02-cac4-4744-adc6-cbde64b81dc0",
         "sourceHandle": "fieldOutput",
-        "target": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
-        "targetHandle": "fieldInput/text",
+        "target": "aafa48a0-4b6a-4023-9ed1-18e443a539fa",
+        "targetHandle": "codeField/repository",
         "type": "codeNodeEdge"
       },
       {
@@ -55,14 +55,6 @@
         "sourceHandle": "next",
         "target": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
         "targetHandle": "prev",
-        "type": "appNodeEdge"
-      },
-      {
-        "id": "4f853450-fe8c-4b59-9654-0ad1a2e4a2bf",
-        "target": "ed5bcd16-4ad2-453c-8e1e-33ceb5ecb474",
-        "targetHandle": "prev",
-        "source": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
-        "sourceHandle": "next",
         "type": "appNodeEdge"
       },
       {
@@ -128,6 +120,30 @@
         "target": "1b4a231b-bb77-4070-8628-698e0f718d36",
         "targetHandle": "fieldInput/duration",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "date-size-edge",
+        "source": "date-size",
+        "sourceHandle": "fieldOutput",
+        "target": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
+        "targetHandle": "fieldInput/fontSize",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "date-text-edge",
+        "source": "date-text",
+        "sourceHandle": "fieldOutput",
+        "target": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
+        "targetHandle": "fieldInput/text",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "date-count-edge",
+        "source": "3a48f3b9-2c00-4547-95e4-64ac1429b05e",
+        "sourceHandle": "fieldOutput",
+        "target": "aafa48a0-4b6a-4023-9ed1-18e443a539fa",
+        "targetHandle": "codeField/date",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
@@ -167,7 +183,7 @@
         "width": 237
       },
       {
-        "data": { "config": {}, "keyword": "render/text" },
+        "data": { "config": { "richText": "basic-caret" }, "keyword": "render/text" },
         "dragging": false,
         "height": 414,
         "id": "7bae8fb3-f31c-4966-ab75-3b77fba06f79",
@@ -178,18 +194,7 @@
         "width": 418
       },
       {
-        "data": { "config": { "fontSize": "16", "position": "left", "vAlign": "top" }, "keyword": "render/text" },
-        "dragging": false,
-        "height": 414,
-        "id": "22c56bc9-8e12-4f0a-a0cd-77fec8f96870",
-        "position": { "x": 28.693455855844093, "y": -1.4476375735820852 },
-        "positionAbsolute": { "x": 28.693455855844093, "y": -1.4476375735820852 },
-        "selected": false,
-        "type": "app",
-        "width": 418
-      },
-      {
-        "data": { "config": { "fontSize": "16", "position": "right", "vAlign": "bottom" }, "keyword": "render/text" },
+        "data": { "config": { "position": "right", "vAlign": "bottom" }, "keyword": "render/text" },
         "dragging": false,
         "height": 414,
         "id": "a5ec0784-99ef-45bc-b7fb-1350bcfed5fa",
@@ -212,10 +217,13 @@
       },
       {
         "data": {
-          "code": "if stars >= 0: &\"{stars} star\" & (if stars == 1: \"\" else: \"s\") else: \"Error fetching stars\"",
-          "codeArgs": [{ "name": "stars", "type": "integer" }],
+          "codeArgs": [
+            { "name": "stars", "type": "integer" },
+            { "name": "repository", "type": "string" },
+            { "name": "date", "type": "string" }
+          ],
           "codeOutputs": [{ "name": "text", "type": "string" }],
-          "codeJS": "stars >= 0 ? `${stars} star${stars === 1 ? '' : 's'}` : \"Error fetching stars\""
+          "codeJS": "(() => {\n  // The repository's name over its count, the count as big as the panel\n  // allows: each line's size from the room it has (the face's letters are\n  // about 0.6 of the size wide). On a round panel the date goes under them.\n  const W = context.imageWidth, H = context.imageHeight\n  const round = context.round === true\n  const name = String(repository || '')\n  const head = Math.max(12, Math.round(Math.min(H * 0.075, (W * 0.8) / (0.58 * Math.max(10, name.length)))))\n  const when = round && date ? `\\n^(${Math.max(14, Math.round(Math.min(W, H) / 28))})${date}` : ''\n  if (!(stars >= 0)) return `^(${head})${name}\\n^(${head})Could not fetch the stars${when}`\n  const count = String(stars).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',')\n  const big = Math.round(Math.min(H * (round ? 0.3 : 0.4), (W * 0.8) / (0.6 * Math.max(2, count.length))))\n  return `^(${head})${name}\\n^(${big})${count}\\n^(${head})${stars === 1 ? 'star' : 'stars'}${when}`\n})()"
         },
         "dragging": false,
         "height": 146,
@@ -371,6 +379,32 @@
         "selected": false,
         "positionAbsolute": { "x": 2401.890136191655, "y": -38.308794313278554 },
         "dragging": false
+      },
+      {
+        "id": "date-size",
+        "type": "code",
+        "position": { "x": 1942.26, "y": -260 },
+        "style": { "height": 119, "width": 300 },
+        "width": 300,
+        "height": 119,
+        "data": {
+          "codeJS": "Math.max(14, Math.round(Math.min(context.imageWidth, context.imageHeight) / 28))",
+          "codeArgs": [],
+          "codeOutputs": [{ "name": "fontSize", "type": "float" }]
+        }
+      },
+      {
+        "id": "date-text",
+        "type": "code",
+        "position": { "x": 1942.26, "y": -120 },
+        "style": { "height": 119, "width": 300 },
+        "width": 300,
+        "height": 119,
+        "data": {
+          "codeJS": "context.round === true ? '' : date",
+          "codeArgs": [{ "name": "date", "type": "string" }],
+          "codeOutputs": [{ "name": "text", "type": "string" }]
+        }
       }
     ],
     "settings": {
@@ -379,7 +413,8 @@
       "refreshInterval": 300,
       "execution": "interpreted",
       "windowSize": "640x480",
-      "icon": "M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"
+      "icon": "M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z",
+      "renderScale": 1
     },
     "apps": {
       "clock": {
