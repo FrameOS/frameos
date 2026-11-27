@@ -759,18 +759,25 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   pinned by `docs/button-map-fixtures.json`).
   **One header that shrinks.** Over every scene is a thin bar (6.5 units):
   the time and the short date on the left (a tap: the scene list), the Wi-Fi
-  signal and the battery on the right (a tap: the frame's page), a 2 px rule
+  signal and the battery on the right (a tap: the frame's page; nothing there
+  on a frame that tells neither), a 2 px rule
   under it, one ink and no greys, so it stays crisp on the black-and-white
-  panel. When the scene list is open (a swipe up, two keys held), the same
+  panel. Its two taps are pointer handlers, not `onClick`: an `onClick` is a
+  stop of the keys' ring (docs/jsx-ui.md "Keys"), and the bar would take the
+  arrows from every scene with nothing to press, whose arrows are its back and
+  forward (the keys reach the same places by their holds). When the scene list is open (a swipe up, two keys held), the same
   header is big: the layout turns the list into a home screen with the time
   and the date large, the battery and the signal, and under the list how to
   get around, a line each, read off the frame's event map: what Action does
-  (`press: go · hold: talk`), what UP and DOWN do (in the list they move;
-  held, the map's scene back and on), two keys together and the swipes. Held
+  (`press: go · hold: talk`), what UP and DOWN do (in the list a press
+  moves and a hold a page, since the list takes the map's scene back and on as
+  a screenful; in a scene that hold changes the scene), two keys together and
+  the swipes. Held
   sideways (landscape) all of that is a column on the left and the list has
   the whole height: stacked over and under it, they left the list one row of
   tiles. The column is narrow (31 units, its help a phrase a line), so the
-  list beside it is seven tiles across, one short of the glass's eight. That
+  list beside it is seven tiles across, one short of the glass's eight; its
+  help comes right under the date and the battery and the signal at its foot. That
   is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
   nobody used it (removed 2026-11-23; an install that chose it gets the whole
@@ -809,7 +816,15 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   or the bottom of the picture). The layouts hear the keys' `gpio` edges, never
   `button`: a layout that listens for `button` makes every scene it wraps one
   that does, and that scene's arrows would no longer be its `forward` and
-  `back`. On the touch E1003 the name, the gear and the status are buttons too.
+  `back`. On the touch E1003 the name, the gear and the status are buttons too,
+  for a finger only (pointer handlers, as the Sticky's bar). Over the scene
+  list, which has its own title, the bar shows the date where the scene's name
+  was. A scene that asks for the whole glass (a reader's `fullScreen`) gets it,
+  as with the Sticky's. Every cap's words are one size, the largest at which
+  each fits its cap. On a side, the name and the help go in the longer of the
+  two stretches the caps leave (portrait E1001-E1003: under them), and what
+  help does not fit under the name goes on the other side of the keys (beside
+  the time along the top or the bottom), never cut.
 
 Both are on the store's Device layouts shelf (`settings.devices` names the
 boards), the browser flasher starts those boards on them (its Layout select,
