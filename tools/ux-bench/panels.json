@@ -1,0 +1,2086 @@
+{
+ "sensecap": {
+  "preset": "seeed_sensecap_indicator_d1",
+  "panel": "LCD_ST7701S_480x480",
+  "width": 480,
+  "height": 480,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": false,
+  "mic": false,
+  "canvasBits": 16,
+  "memoryBytes": 5957632,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "BUTTON",
+    "role": "screen",
+    "pin": 38
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 38,
+    "label": "BUTTON",
+    "role": "screen"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "BUTTON",
+     "action": "press"
+    },
+    "emit": "toggleScreen",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "BUTTON",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "amoled175": {
+  "preset": "waveshare_esp32_s3_touch_amoled_1_75",
+  "panel": "AMOLED_CO5300_466x466",
+  "width": 466,
+  "height": 466,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": true,
+  "mic": true,
+  "canvasBits": 16,
+  "memoryBytes": 6037096,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "PWR",
+    "role": "screen",
+    "pin": 200
+   },
+   {
+    "label": "BOOT",
+    "role": "primary",
+    "pin": 0
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 200,
+    "label": "PWR",
+    "role": "screen"
+   },
+   {
+    "pin": 0,
+    "label": "BOOT",
+    "role": "primary"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "PWR",
+     "action": "press"
+    },
+    "emit": "toggleScreen",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "PWR",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "crowwatch": {
+  "preset": "elecrow_crowpanel_watch_2in01",
+  "panel": "LCD_GC9309_240x296",
+  "width": 240,
+  "height": 296,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": false,
+  "mic": true,
+  "canvasBits": 16,
+  "memoryBytes": 6913792,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "BOOT",
+    "role": "screen",
+    "pin": 0
+   },
+   {
+    "label": "HOME",
+    "role": "menu",
+    "pin": 200,
+    "hold": false
+   },
+   {
+    "label": "OK",
+    "role": "primary",
+    "pin": 18
+   },
+   {
+    "label": "NEXT",
+    "role": "next",
+    "pin": 201,
+    "hold": false
+   },
+   {
+    "label": "PREV",
+    "role": "prev",
+    "pin": 202,
+    "hold": false
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 0,
+    "label": "BOOT",
+    "role": "screen"
+   },
+   {
+    "pin": 200,
+    "label": "HOME",
+    "role": "menu"
+   },
+   {
+    "pin": 18,
+    "label": "OK",
+    "role": "primary"
+   },
+   {
+    "pin": 201,
+    "label": "NEXT",
+    "role": "next"
+   },
+   {
+    "pin": 202,
+    "label": "PREV",
+    "role": "prev"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "press"
+    },
+    "emit": "toggleScreen",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "HOME",
+     "action": "press"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "OK",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "crowadv7": {
+  "preset": "elecrow_crowpanel_advance_7",
+  "panel": "LCD_SC7277_800x480",
+  "width": 800,
+  "height": 480,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": false,
+  "mic": false,
+  "canvasBits": 16,
+  "memoryBytes": 5036032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "BOOT",
+    "role": "screen",
+    "pin": 0
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 0,
+    "label": "BOOT",
+    "role": "screen"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "press"
+    },
+    "emit": "toggleScreen",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "crowadv28": {
+  "preset": "elecrow_crowpanel_advance_2in8",
+  "panel": "LCD_ST7789_320x240",
+  "width": 320,
+  "height": 240,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": false,
+  "mic": true,
+  "canvasBits": 16,
+  "memoryBytes": 6879232,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "BOOT",
+    "role": "screen",
+    "pin": 0
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 0,
+    "label": "BOOT",
+    "role": "screen"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "press"
+    },
+    "emit": "toggleScreen",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "crowrot146": {
+  "preset": "elecrow_crowpanel_rotary_1in46",
+  "panel": "LCD_ST77961_360x360",
+  "width": 360,
+  "height": 360,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": true,
+  "mic": false,
+  "canvasBits": 16,
+  "memoryBytes": 6562432,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "BOOT",
+    "role": "screen",
+    "pin": 0
+   },
+   {
+    "label": "OK",
+    "role": "primary",
+    "pin": 41
+   },
+   {
+    "label": "NEXT",
+    "role": "next",
+    "pin": 200,
+    "hold": false
+   },
+   {
+    "label": "PREV",
+    "role": "prev",
+    "pin": 201,
+    "hold": false
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 0,
+    "label": "BOOT",
+    "role": "screen"
+   },
+   {
+    "pin": 41,
+    "label": "OK",
+    "role": "primary"
+   },
+   {
+    "pin": 200,
+    "label": "NEXT",
+    "role": "next"
+   },
+   {
+    "pin": 201,
+    "label": "PREV",
+    "role": "prev"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "press"
+    },
+    "emit": "toggleScreen",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "BOOT",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "OK",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "crow579": {
+  "preset": "elecrow_crowpanel_5in79",
+  "panel": "EPD_5in79_BW",
+  "width": 792,
+  "height": 272,
+  "rotate": 0,
+  "pixelFormat": 1,
+  "touch": false,
+  "round": false,
+  "mic": false,
+  "canvasBits": 8,
+  "memoryBytes": 7878592,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "HOME",
+    "role": "menu",
+    "pin": 2
+   },
+   {
+    "label": "EXIT",
+    "role": "back",
+    "pin": 1
+   },
+   {
+    "label": "NEXT",
+    "role": "next",
+    "pin": 4
+   },
+   {
+    "label": "OK",
+    "role": "primary",
+    "pin": 5
+   },
+   {
+    "label": "PREV",
+    "role": "prev",
+    "pin": 6
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 2,
+    "label": "HOME",
+    "role": "menu"
+   },
+   {
+    "pin": 1,
+    "label": "EXIT",
+    "role": "back"
+   },
+   {
+    "pin": 4,
+    "label": "NEXT",
+    "role": "next"
+   },
+   {
+    "pin": 5,
+    "label": "OK",
+    "role": "primary"
+   },
+   {
+    "pin": 6,
+    "label": "PREV",
+    "role": "prev"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "HOME",
+     "action": "press"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "HOME",
+     "action": "longPress"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "EXIT",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "EXIT",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "OK",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   }
+  ]
+ },
+ "crowepd42": {
+  "preset": "elecrow_crowpanel_epd_4in2",
+  "panel": "EPD_4in2_BW",
+  "width": 400,
+  "height": 300,
+  "rotate": 0,
+  "pixelFormat": 1,
+  "touch": false,
+  "round": false,
+  "mic": false,
+  "canvasBits": 8,
+  "memoryBytes": 7640032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "HOME",
+    "role": "menu",
+    "pin": 2
+   },
+   {
+    "label": "EXIT",
+    "role": "back",
+    "pin": 1
+   },
+   {
+    "label": "NEXT",
+    "role": "next",
+    "pin": 4
+   },
+   {
+    "label": "OK",
+    "role": "primary",
+    "pin": 5
+   },
+   {
+    "label": "PREV",
+    "role": "prev",
+    "pin": 6
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 2,
+    "label": "HOME",
+    "role": "menu"
+   },
+   {
+    "pin": 1,
+    "label": "EXIT",
+    "role": "back"
+   },
+   {
+    "pin": 4,
+    "label": "NEXT",
+    "role": "next"
+   },
+   {
+    "pin": 5,
+    "label": "OK",
+    "role": "primary"
+   },
+   {
+    "pin": 6,
+    "label": "PREV",
+    "role": "prev"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "HOME",
+     "action": "press"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "HOME",
+     "action": "longPress"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "EXIT",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "EXIT",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "OK",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   }
+  ]
+ },
+ "sticky": {
+  "preset": "seeed_reterminal_sticky",
+  "panel": "EPD_3in97",
+  "width": 800,
+  "height": 480,
+  "rotate": 270,
+  "pixelFormat": 1,
+  "touch": true,
+  "round": false,
+  "mic": true,
+  "canvasBits": 8,
+  "memoryBytes": 8300032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "AI",
+    "role": "primary",
+    "pin": 4
+   },
+   {
+    "label": "UP",
+    "role": "left",
+    "pin": 5
+   },
+   {
+    "label": "DOWN",
+    "role": "right",
+    "pin": 6
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 4,
+    "label": "AI",
+    "role": "primary"
+   },
+   {
+    "pin": 5,
+    "label": "UP",
+    "role": "left"
+   },
+   {
+    "pin": 6,
+    "label": "DOWN",
+    "role": "right"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "AI",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "sticky-landscape": {
+  "preset": "seeed_reterminal_sticky",
+  "panel": "EPD_3in97",
+  "width": 800,
+  "height": 480,
+  "rotate": 0,
+  "pixelFormat": 1,
+  "touch": true,
+  "round": false,
+  "mic": true,
+  "canvasBits": 8,
+  "memoryBytes": 8300032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "AI",
+    "role": "primary",
+    "pin": 4
+   },
+   {
+    "label": "UP",
+    "role": "left",
+    "pin": 5
+   },
+   {
+    "label": "DOWN",
+    "role": "right",
+    "pin": 6
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 4,
+    "label": "AI",
+    "role": "primary"
+   },
+   {
+    "pin": 5,
+    "label": "UP",
+    "role": "left"
+   },
+   {
+    "pin": 6,
+    "label": "DOWN",
+    "role": "right"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "AI",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "e1002": {
+  "preset": "seeed_reterminal_e1002",
+  "panel": "EPD_7in3e",
+  "width": 800,
+  "height": 480,
+  "rotate": 0,
+  "pixelFormat": 7,
+  "touch": false,
+  "round": false,
+  "mic": true,
+  "canvasBits": 16,
+  "memoryBytes": 7916032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "REFRESH",
+    "role": "primary",
+    "pin": 3
+   },
+   {
+    "label": "LEFT",
+    "role": "right",
+    "pin": 4
+   },
+   {
+    "label": "RIGHT",
+    "role": "left",
+    "pin": 5
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 3,
+    "label": "REFRESH",
+    "role": "primary"
+   },
+   {
+    "pin": 4,
+    "label": "LEFT",
+    "role": "right"
+   },
+   {
+    "pin": 5,
+    "label": "RIGHT",
+    "role": "left"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "REFRESH",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   }
+  ]
+ },
+ "e1002-portrait": {
+  "preset": "seeed_reterminal_e1002",
+  "panel": "EPD_7in3e",
+  "width": 800,
+  "height": 480,
+  "rotate": 90,
+  "pixelFormat": 7,
+  "touch": false,
+  "round": false,
+  "mic": true,
+  "canvasBits": 16,
+  "memoryBytes": 7916032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "REFRESH",
+    "role": "primary",
+    "pin": 3
+   },
+   {
+    "label": "LEFT",
+    "role": "right",
+    "pin": 4
+   },
+   {
+    "label": "RIGHT",
+    "role": "left",
+    "pin": 5
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 3,
+    "label": "REFRESH",
+    "role": "primary"
+   },
+   {
+    "pin": 4,
+    "label": "LEFT",
+    "role": "right"
+   },
+   {
+    "pin": 5,
+    "label": "RIGHT",
+    "role": "left"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "REFRESH",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   }
+  ]
+ },
+ "e1003": {
+  "preset": "seeed_reterminal_e1003",
+  "panel": "EPD_10in3",
+  "width": 1872,
+  "height": 1404,
+  "rotate": 0,
+  "pixelFormat": 8,
+  "touch": true,
+  "round": false,
+  "mic": true,
+  "canvasBits": 4,
+  "memoryBytes": 16539040,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "REFRESH",
+    "role": "primary",
+    "pin": 3
+   },
+   {
+    "label": "LEFT",
+    "role": "right",
+    "pin": 4
+   },
+   {
+    "label": "RIGHT",
+    "role": "left",
+    "pin": 5
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 3,
+    "label": "REFRESH",
+    "role": "primary"
+   },
+   {
+    "pin": 4,
+    "label": "LEFT",
+    "role": "right"
+   },
+   {
+    "pin": 5,
+    "label": "RIGHT",
+    "role": "left"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "REFRESH",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "e1003-portrait": {
+  "preset": "seeed_reterminal_e1003",
+  "panel": "EPD_10in3",
+  "width": 1872,
+  "height": 1404,
+  "rotate": 90,
+  "pixelFormat": 8,
+  "touch": true,
+  "round": false,
+  "mic": true,
+  "canvasBits": 4,
+  "memoryBytes": 15224896,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "REFRESH",
+    "role": "primary",
+    "pin": 3
+   },
+   {
+    "label": "LEFT",
+    "role": "right",
+    "pin": 4
+   },
+   {
+    "label": "RIGHT",
+    "role": "left",
+    "pin": 5
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 3,
+    "label": "REFRESH",
+    "role": "primary"
+   },
+   {
+    "pin": 4,
+    "label": "LEFT",
+    "role": "right"
+   },
+   {
+    "pin": 5,
+    "label": "RIGHT",
+    "role": "left"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "REFRESH",
+     "action": "longPress"
+    },
+    "emit": "voiceChat",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "e1004": {
+  "preset": "seeed_reterminal_e1004",
+  "panel": "EPD_13in3e",
+  "width": 1200,
+  "height": 1600,
+  "rotate": 0,
+  "pixelFormat": 7,
+  "touch": false,
+  "round": false,
+  "mic": false,
+  "canvasBits": 16,
+  "memoryBytes": 11180032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "REFRESH",
+    "role": "primary",
+    "pin": 5
+   },
+   {
+    "label": "LEFT",
+    "role": "left",
+    "pin": 4
+   },
+   {
+    "label": "RIGHT",
+    "role": "right",
+    "pin": 3
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 5,
+    "label": "REFRESH",
+    "role": "primary"
+   },
+   {
+    "pin": 4,
+    "label": "LEFT",
+    "role": "left"
+   },
+   {
+    "pin": 3,
+    "label": "RIGHT",
+    "role": "right"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "REFRESH",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   }
+  ]
+ },
+ "e1004-landscape": {
+  "preset": "seeed_reterminal_e1004",
+  "panel": "EPD_13in3e",
+  "width": 1200,
+  "height": 1600,
+  "rotate": 90,
+  "pixelFormat": 7,
+  "touch": false,
+  "round": false,
+  "mic": false,
+  "canvasBits": 16,
+  "memoryBytes": 10220032,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "REFRESH",
+    "role": "primary",
+    "pin": 5
+   },
+   {
+    "label": "LEFT",
+    "role": "left",
+    "pin": 4
+   },
+   {
+    "label": "RIGHT",
+    "role": "right",
+    "pin": 3
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 5,
+    "label": "REFRESH",
+    "role": "primary"
+   },
+   {
+    "pin": 4,
+    "label": "LEFT",
+    "role": "left"
+   },
+   {
+    "pin": 3,
+    "label": "RIGHT",
+    "role": "right"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "REFRESH",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "back",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   }
+  ]
+ },
+ "pico": {
+  "preset": "pimoroni_inky_frame_7_3_spectra",
+  "panel": "EPD_7in3e",
+  "width": 800,
+  "height": 480,
+  "rotate": 0,
+  "pixelFormat": 7,
+  "touch": false,
+  "round": false,
+  "mic": false,
+  "canvasBits": 32,
+  "memoryBytes": 268435456,
+  "embedded": true,
+  "keys": [
+   {
+    "label": "A",
+    "role": "primary",
+    "pin": 200
+   },
+   {
+    "label": "B",
+    "role": "prev",
+    "pin": 201
+   },
+   {
+    "label": "C",
+    "role": "next",
+    "pin": 202
+   },
+   {
+    "label": "D",
+    "role": "back",
+    "pin": 203
+   },
+   {
+    "label": "E",
+    "role": "menu",
+    "pin": 204
+   }
+  ],
+  "gpioButtons": [
+   {
+    "pin": 200,
+    "label": "A",
+    "role": "primary"
+   },
+   {
+    "pin": 201,
+    "label": "B",
+    "role": "prev"
+   },
+   {
+    "pin": 202,
+    "label": "C",
+    "role": "next"
+   },
+   {
+    "pin": 203,
+    "label": "D",
+    "role": "back"
+   },
+   {
+    "pin": 204,
+    "label": "E",
+    "role": "menu"
+   }
+  ],
+  "eventMap": [
+   {
+    "event": "button",
+    "match": {
+     "label": "A",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "D",
+     "action": "press"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "D",
+     "action": "longPress"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "E",
+     "action": "press"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "label": "E",
+     "action": "longPress"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "prev",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "prev"
+    }
+   },
+   {
+    "event": "button",
+    "match": {
+     "role": "next",
+     "action": "longPress"
+    },
+    "emit": "setCurrentScene",
+    "as": {
+     "direction": "next"
+    }
+   }
+  ]
+ },
+ "pi-hyperpixel-sq": {
+  "preset": "linux",
+  "panel": "pi-hyperpixel-sq",
+  "width": 720,
+  "height": 720,
+  "rotate": 0,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": false,
+  "canvasBits": 32,
+  "memoryBytes": 0,
+  "embedded": false,
+  "keys": [],
+  "gpioButtons": [],
+  "eventMap": [
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ },
+ "pi-hyperpixel": {
+  "preset": "linux",
+  "panel": "pi-hyperpixel",
+  "width": 480,
+  "height": 800,
+  "rotate": 90,
+  "pixelFormat": 9,
+  "touch": true,
+  "round": false,
+  "canvasBits": 32,
+  "memoryBytes": 0,
+  "embedded": false,
+  "keys": [],
+  "gpioButtons": [],
+  "eventMap": [
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "right"
+    },
+    "emit": "forward",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "left"
+    },
+    "emit": "back",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "bottom"
+    },
+    "emit": "sceneSwitcher",
+    "as": {}
+   },
+   {
+    "event": "edgeSwipe",
+    "match": {
+     "edge": "top"
+    },
+    "emit": "sceneSettings",
+    "as": {}
+   }
+  ]
+ }
+}

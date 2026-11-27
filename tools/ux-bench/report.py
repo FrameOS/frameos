@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""Read a UX bench run (ux.mjs results per panel) and list what looks wrong.
+
+  report.py <run-dir> [--sheets]   # issues.json + report.md; --sheets: contact sheets per panel
+
+What it flags, per scene and panel:
+- render: an error frame, an out-of-memory, log errors, a blank picture;
+- keys and edge swipes that did not do what the frame's event map says
+  (a held arrow walks the scenes, Home opens the scene list, a swipe up from
+  the bottom opens the scene list, ...), or that switched or opened something
+  the map does not ask for;
+- pressable regions off the panel, or outside a round glass; content drawn in
+  a round glass's invisible corners;
+- a scene whose whole view scrolls (content below the fold) on a panel where
+  that is not a list;
+- taps on pressable regions that changed nothing, and slow steps.
+"""
+from __future__ import annotations
+
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+SWITCHER = "system/sceneSwitcher"
+SETTINGS = "system/sceneSettings"
+SLOW_STEP_MS = 250  # in wasm on this machine; an ESP32 is 10-40x slower
+
+
+def rule_for(event_map, event, match):
+    for rule in event_map or []:
+        if rule.get("event") != event:
+            continue
+        m = rule.get("match") or {}
+        if all(match.get(k) == v for k, v in m.items()):
+            return rule
+    return None
+
+
+def resolve_role(role, rotate):
+    """A direction key's role as the scene hears it (docs/buttons.md): next is
+    towards the right or bottom of the picture as the frame shows it."""
+    if role not in ("left", "right", "up", "down"):
+        return role
+    # The key's direction on the unturned panel, turned by the frame's rotation.
+    vec = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}[role]
+    x, y = vec
+    # panelToScenePoint (utils/image.nim) applied to a direction.
+    r = rotate % 360
+    if r == 90:
+        x, y = y, -x
+    elif r == 180:
+        x, y = -x, -y
+    elif r == 270:
+        x, y = -y, x
+    return "next" if (x > 0 or y > 0) else "prev"
+
+
+def expected_after(panel, rec, step):
+    """What the scene should be after a key or swipe step: a scene id, or a
+    set of acceptable ones."""
+    me = rec["scene"]
+    order = rec.get("order") or [me]
+    em = panel.get("eventMap") or []
+    rotate = panel.get("rotate", 0)
+    emit = None
+    as_ = {}
+    if step["kind"] == "key":
+        label, action = step["label"].rsplit("-", 1)
+        action = {"press": "press", "hold": "longPress"}[action]
+        if "+" in label:
+            rule = rule_for(em, "button", {"role": "back", "action": action})
+        else:
+            key = next((k for k in panel["keys"] if k["label"] == label), {})
+            role = resolve_role(key.get("role", ""), rotate)
+            rule = rule_for(em, "button", {"label": label, "role": role, "action": action})
+        if rule:
+            emit, as_ = rule.get("emit"), rule.get("as") or {}
+    elif step["kind"] == "swipe":
+        rule = rule_for(em, "edgeSwipe", {"edge": step["label"]})
+        if rule:
+            emit, as_ = rule.get("emit"), rule.get("as") or {}
+    else:
+        return None
+    if emit == "sceneSwitcher":
+        return {SWITCHER}
+    if emit == "sceneSettings":
+        return {SETTINGS, f"{SETTINGS}#{me}"}
+    if emit == "setCurrentScene":
+        i = order.index(me) if me in order else 0
+        if as_.get("direction") == "next":
+            return {order[(i + 1) % len(order)]}
+        if as_.get("direction") == "prev":
+            return {order[(i - 1) % len(order)], me}
+    return {me}
+
+
+def analyze_panel(panel_dir: Path):
+    data = json.loads((panel_dir / "results.json").read_text())
+    key = panel_dir.name.split("@")[0]
+    data["panel"] = panel_dir.name
+    panel = json.loads((Path(__file__).parent / "panels.json").read_text())[key]
+    issues = []
+
+    def add(rec, kind, severity, detail, shot=None):
+        issues.append({"panel": data["panel"], "scene": rec.get("folder"), "kind": kind, "severity": severity,
+                       "detail": detail, **({"shot": str(panel_dir / shot)} if shot else {})})
+
+    for rec in data["results"]:
+        if rec.get("error"):
+            add(rec, "error", "fail", rec["error"][:300])
+            continue
+        r = rec.get("render") or {}
+        a = r.get("analysis") or {}
+        if r.get("code"):
+            add(rec, "render-error", "fail", f"code {r.get('code')}: {r.get('error', '')[:200]}", r.get("shot"))
+        if r.get("logErrors"):
+            add(rec, "log-error", "note", " | ".join(r["logErrors"][:3])[:300], r.get("shot"))
+        if a.get("blank"):
+            add(rec, "blank", "fail", "the picture is one colour", r.get("shot"))
+        if panel.get("round") and a.get("outsideCircle", 0) > 0.05:
+            add(rec, "round-corners", "slow", f"{a['outsideCircle']:.0%} of the invisible corners hold content", r.get("shot"))
+        for p in rec.get("pressProblems") or []:
+            add(rec, "press-" + p["kind"], "slow", f"pressable {p['x0']},{p['y0']}-{p['x1']},{p['y1']}", r.get("shot"))
+        dead_taps = 0
+        taps = 0
+        for s in rec.get("steps", []):
+            if s.get("aborted"):
+                add(rec, "abort", "crash", f"{s['kind']} {s['label']}: {s.get('error')}")
+            if s.get("code") not in (0, None):
+                add(rec, "step-error", "fail", f"{s['kind']} {s['label']}: code {s['code']} {s.get('error', '')[:200]}", s.get("shot"))
+            if s.get("logErrors"):
+                add(rec, "step-log-error", "note", f"{s['kind']} {s['label']}: " + " | ".join(s["logErrors"][:2])[:300], s.get("shot"))
+            exp = expected_after(panel, rec, s)
+            if exp is not None and s["after"] not in exp:
+                add(rec, "unexpected-" + s["kind"], "fail",
+                    f"{s['kind']} {s['label']}: ended on {s['after']}, expected {sorted(exp)}", s.get("shot"))
+            if s["kind"] == "tap":
+                taps += 1
+                if s["changed"] == 0 and s["after"] == rec["scene"]:
+                    dead_taps += 1
+                if s["after"] != rec["scene"] and not s["after"].startswith("system/"):
+                    add(rec, "tap-switched", "note", f"tap {s['label']} switched to {s['after']}", s.get("shot"))
+            if s["kind"] == "scroll" and s.get("scrolls"):
+                dist = max((abs(v[2]) for t in s["scrolls"] for v in t), default=0)
+                if dist > 0 and s["after"] == rec["scene"]:
+                    add(rec, "scrolls", "note", f"a drag up scrolled {dist:.0f}px (content past the panel)", s.get("shot"))
+            if s.get("renderMs", 0) + s.get("inputMs", 0) > SLOW_STEP_MS:
+                add(rec, "slow-step", "slow", f"{s['kind']} {s['label']}: input {s.get('inputMs')} ms + render {s.get('renderMs')} ms", s.get("shot"))
+        if taps >= 2 and dead_taps == taps:
+            add(rec, "dead-taps", "slow", f"none of {taps} taps on pressable regions changed the picture")
+        if (r.get("coldMs") or 0) - 0 > 1500:
+            add(rec, "slow-cold", "note", f"first render {r['coldMs']} ms in wasm ({r.get('fetches')} fetches, {r.get('fetchMs')} ms of them)")
+    return data, panel, issues
+
+
+def contact_sheet(panel_dir: Path, data, out: Path, tag="0-render", cols=8, thumb=260, round_=False):
+    from PIL import Image, ImageDraw
+
+    items = [(rec["folder"], panel_dir / (rec.get("render") or {}).get("shot", "")) for rec in data["results"]
+             if (rec.get("render") or {}).get("shot")] if tag == "0-render" else []
+    if not items:
+        return []
+    first = Image.open(items[0][1])
+    w, h = first.size
+    scale = thumb / max(w, h)
+    tw, th = max(1, int(w * scale)), max(1, int(h * scale))
+    per = cols * 6
+    sheets = []
+    for page in range(0, len(items), per):
+        chunk = items[page:page + per]
+        rows = (len(chunk) + cols - 1) // cols
+        sheet = Image.new("RGB", (cols * (tw + 6), rows * (th + 20)), (128, 128, 128))
+        d = ImageDraw.Draw(sheet)
+        for i, (name, f) in enumerate(chunk):
+            im = Image.open(f).convert("RGB").resize((tw, th))
+            x = (i % cols) * (tw + 6)
+            y = (i // cols) * (th + 20)
+            if round_:
+                # What the round glass shows: the circle inside the square.
+                mask = Image.new("L", (tw, th), 0)
+                ImageDraw.Draw(mask).ellipse((0, 0, tw - 1, th - 1), fill=255)
+                sheet.paste(im, (x, y + 16), mask)
+            else:
+                sheet.paste(im, (x, y + 16))
+            d.text((x + 2, y + 2), name[:34], fill=(255, 255, 255))
+        f = out / f"{data['panel']}-{page // per + 1}.png"
+        sheet.save(f)
+        sheets.append(str(f))
+    return sheets
+
+
+def main():
+    run = Path(sys.argv[1])
+    all_issues = []
+    sheets_dir = run / "sheets"
+    for panel_dir in sorted(p for p in run.iterdir() if (p / "results.json").exists()):
+        data, panel, issues = analyze_panel(panel_dir)
+        all_issues.extend(issues)
+        if "--sheets" in sys.argv:
+            sheets_dir.mkdir(exist_ok=True)
+            contact_sheet(panel_dir, data, sheets_dir, round_=bool(panel.get("round")))
+    (run / "issues.json").write_text(json.dumps(all_issues, indent=1))
+    by_kind = defaultdict(list)
+    for i in all_issues:
+        by_kind[i["kind"]].append(i)
+    lines = [f"# UX bench {run.name}", ""]
+    for kind, items in sorted(by_kind.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        lines.append(f"## {kind} ({len(items)})")
+        scenes = defaultdict(list)
+        for i in items:
+            scenes[i["scene"]].append(i)
+        for scene, its in sorted(scenes.items(), key=lambda kv: -len(kv[1])):
+            panels = sorted({i["panel"] for i in its})
+            lines.append(f"- **{scene}** on {', '.join(panels)}: {its[0]['detail']}")
+        lines.append("")
+    (run / "report.md").write_text("\n".join(lines))
+    print("\n".join(lines[:200]))
+
+
+if __name__ == "__main__":
+    main()

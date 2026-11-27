@@ -1627,6 +1627,14 @@
   never use one someone else holds (`~/.frameos-bench/BOOKINGS.md`; the
   skill's "Booking a board"). `bench.py run` and the flashing scripts book,
   wait and skip by it.
+- **How scenes look and behave on each board, without the boards:**
+  `tools/ux-bench` (its README) runs every sample in the wasm runtime as each
+  bench board's runtime runs (size, rotation, panel format, round glass,
+  keys, event map, touch, memory ceiling), presses and holds every key,
+  swipes every edge, taps what the press map says takes a tap, scrolls, and
+  holds the outcomes to the board's event map; contact sheets per panel for
+  the eye. Run it after a change to samples, layouts, the built-in scenes,
+  render scale or input; `device_ux.py` checks swipes and keys on real boards.
 
 ## End-to-end tooling
 - `e2e/README.md` is the map of every end-to-end suite: the scene-renderer snapshot harness (`e2e/run`, `makescenes.py`, `makesnapshots.py`, baselines in `e2e/snapshots`; `./run dataGradient` renders one scene), the Playwright frontend + cloud-workspace suite (`e2e/frontend-visual`), the opt-in real-SSH deploy test (`e2e/deploy`) and the Docker/ESP32 image jobs. It also carries the local-run recipes (port overrides, `FRONTEND_VISUAL_MAX_DIFF=1`, why a reused server drifts).

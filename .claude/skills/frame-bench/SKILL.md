@@ -210,6 +210,17 @@ Issue severities: `crash` (panic, abort, watchdog, brownout, reboot, OOM),
 `fail` (didn't work), `slow` (a number out of line or a slower path),
 `note` (worth knowing). Thresholds are at the top of `suites.py`.
 
+## The UX bench (no boards needed)
+
+`tools/ux-bench/README.md`: every sample scene on every bench board's size,
+format, rotation, keys and event map in the wasm runtime (`run_all.sh`, then
+`report.py --sheets`), with the reTerminal layouts both ways round and the
+built-in scenes (`run_extra.sh`). It catches what this bench cannot see: a
+scene whose controls fall off a small panel, a key or swipe that does not do
+what the board's map says, text lost to a round panel's rim. Its
+`device_ux.py <port> <board>` runs the edge swipes and keys on a real board
+(booked) and times what they open.
+
 ## Adding things
 
 - **A new board kind**: nothing is required; results are keyed by what
