@@ -788,8 +788,9 @@ export function get(app) {
   its last row four fifths of the way from the circle's centre to its rim,
   each row cut to the chord it sits on (`RoundInset` in from the rim) with
   its keys narrower where the circle is, on no band of its own; the UI is
-  laid out above it (`keyboardBox`, `UiInput.round`). Not on an ESP32: no
-  board of it is round.
+  laid out above it (`keyboardBox`, `UiInput.round`). The same on the round
+  ESP32 boards (the Waveshare 1.75" AMOLED, the CrowPanel 1.46" rotary:
+  `boardPanelRound`).
 - **Inside a layout** the keyboard is the frame's, not the scene's
   ([The frame's keyboard](#the-frames-keyboard)): on a small screen it takes
   the bottom of the panel and the whole layout, its bars included, is laid

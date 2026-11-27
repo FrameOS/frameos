@@ -3,6 +3,7 @@ import pixie
 
 import ../app
 import frameos/types
+import frameos/panel_shape
 
 proc makeConfig(width = 64, height = 32): FrameConfig =
   FrameConfig(width: width, height: height, rotate: 0, assetsPath: "")
@@ -76,3 +77,56 @@ suite "render/text app":
     let frame = makeConfig(2000, 400)
     frame.renderScale = 2.0
     check makeTextApp(frame, "FrameOS").get(ExecutionContext(hasImage: false)).width == plain.width
+
+suite "render/text on a round panel":
+  # Only the circle inside the canvas shows (panel_shape.nim): text drawn on
+  # the whole canvas stays inside it, a setup note in the middle as wide as
+  # the circle is where it stands, text pinned to a corner in the square
+  # inside it. Laid out from the canvas's corner, its first words were under
+  # the bezel (the UX bench, 2026-11-27).
+  proc inked(image: Image): tuple[minX, minY, maxX, maxY: int] =
+    result = (image.width, image.height, -1, -1)
+    for y in 0 ..< image.height:
+      for x in 0 ..< image.width:
+        if image[x, y].a > 0:
+          result.minX = min(result.minX, x)
+          result.minY = min(result.minY, y)
+          result.maxX = max(result.maxX, x)
+          result.maxY = max(result.maxY, y)
+
+  proc outsideCircle(image: Image): int =
+    for y in 0 ..< image.height:
+      for x in 0 ..< image.width:
+        if image[x, y].a > 0 and not insideRound(image.width, image.height, x, y):
+          inc result
+
+  test "text in a corner is drawn in the square inside the circle":
+    let config = FrameConfig(width: 360, height: 360, rotate: 0, assetsPath: "", device: "pimoroni.hyperpixel2r")
+    let app = makeTextApp(config, "Friday, November 27\nNo events found")
+    app.appConfig.position = "left"
+    app.appConfig.vAlign = "top"
+    let context = ExecutionContext(image: newImage(360, 360), hasImage: true)
+    app.run(context)
+    let box = inked(context.image)
+    check box.maxX > 0
+    check outsideCircle(context.image) == 0
+    check box.minX >= 50 and box.minY >= 50
+
+  test "text in the middle uses the circle's width there":
+    let config = FrameConfig(width: 360, height: 360, rotate: 0, assetsPath: "", device: "pimoroni.hyperpixel2r")
+    let app = makeTextApp(config, "Please provide an OpenAI API key in the settings.")
+    let context = ExecutionContext(image: newImage(360, 360), hasImage: true)
+    app.run(context)
+    check outsideCircle(context.image) == 0
+    let box = inked(context.image)
+    # Wider than the square inside the circle (237 px of 360).
+    check box.maxX - box.minX > 250
+
+  test "a rectangle is drawn from its corner as before":
+    let config = FrameConfig(width: 360, height: 360, rotate: 0, assetsPath: "", device: "framebuffer")
+    let app = makeTextApp(config, "Friday, November 27")
+    app.appConfig.position = "left"
+    app.appConfig.vAlign = "top"
+    let context = ExecutionContext(image: newImage(360, 360), hasImage: true)
+    app.run(context)
+    check inked(context.image).minX < 10
