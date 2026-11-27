@@ -4615,6 +4615,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       # corner here is where the last render put this UI in the scene's canvas.
       svg = layoutUiDocked(root, layoutWidth, layoutHeight, target.input, regions, target.memo, sceneId,
         regionScale, target.offsetX, target.offsetY)
+      when defined(frameosWasm):
+        if textsSeenOn:
+          target.texts = takeTextsSeen()
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil

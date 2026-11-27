@@ -46,6 +46,8 @@ type
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
     scale*: float32             ## canvas pixels per layout pixel (render_scale.nim); 0 = 1
     regions*: seq[UiRegion]     ## the last render's, in paint order
+    when defined(frameosWasm):
+      texts*: seq[TextSeen]     ## the last layout's texts, while layout.textsSeenOn (tools/ux-bench)
     input*: UiInput             ## what the pointer and the keyboard are doing, for the next one
     memo*: UiMemo               ## the last layout's type, for the next one
     inputOnly*: bool            ## the pointer changed what it is over or
@@ -1708,6 +1710,29 @@ proc uiElementsReport*(): JsonNode =
         "takes": takes, "field": r.field.int,
         "stop": r.stop(false), # one the keys walk to
       }
+
+when defined(frameosWasm):
+  proc uiTextsReport*(): JsonNode =
+    ## Every text of every UI's last layout (layout.TextSeen), in the scene's
+    ## pixels: its box, its glyphs' extent and what of that shows, its type
+    ## size in canvas pixels, cut with an ellipsis or broken inside a word,
+    ## the box that scrolls around it. For tools/ux-bench to ask whether every
+    ## text is whole, on the screen, big enough and clear of the others
+    ## (wasm_main frameos_wasm_ui_texts); nothing on a frame calls it.
+    result = newJArray()
+    for target in targets:
+      let
+        scale = if target.scale > 0: target.scale else: 1'f32
+        ox = target.offsetX
+        oy = target.offsetY
+      template q(a: array[4, float32]): JsonNode =
+        %*[ox + a[0] * scale, oy + a[1] * scale, ox + a[2] * scale, oy + a[3] * scale]
+      for t in target.texts:
+        result.add %*{
+          "scene": target.sceneId, "node": target.nodeId, "box": q(t.box), "ink": q(t.ink),
+          "visible": q(t.visible), "size": t.size * scale, "cut": t.cut, "broken": t.broken,
+          "scroller": t.scroller, "text": t.text,
+        }
 
 proc handlerPayload(target: UiTarget, r: UiRegion, payload: JsonNode, scale: float32): JsonNode =
   ## What a pointer handler is handed: the event, a coalesced move's `points`

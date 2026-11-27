@@ -18,7 +18,17 @@ What it flags, per scene and panel:
   element to press the ring never reaches, a ring on an element the panel
   does not show, a Next that leaves the scene or does nothing, Action on
   three ringed elements that changes nothing; on a board with keys and no
-  touch, elements that take a tap where no key ever stops.
+  touch, elements that take a tap where no key ever stops;
+- texts (the wasm runtime's text report): under the size a person reads,
+  cut by the panel's edge or a box that clips them, broken inside a word,
+  printed over each other, cut by a round glass;
+- a tap or an Action that went to another page of the scene, and the
+  frame's Back did not bring the page before back (docs/buttons.md);
+- a box that scrolls and does not move under a finger, or ends with what it
+  cannot show;
+- a round panel's scene that leaves the ring around its inscribed square empty.
+
+  report.py <run-dir> --baseline <earlier-run-dir>   # also: interactions slower than the earlier run's
 """
 from __future__ import annotations
 
@@ -144,7 +154,9 @@ def analyze_panel(panel_dir: Path):
                 add(rec, "abort", "crash", f"{s['kind']} {s['label']}: {s.get('error')}")
             if s.get("code") not in (0, None):
                 add(rec, "step-error", "fail", f"{s['kind']} {s['label']}: code {s['code']} {s.get('error', '')[:200]}", s.get("shot"))
-            if s.get("logErrors"):
+            # The scene's own complaint again (a key it has no value for) is no news.
+            if s.get("logErrors") and not set(s["logErrors"]) <= set(r.get("logErrors") or []) and \
+                    not all(any(e.split('"error":')[-1] == x.split('"error":')[-1] for x in (r.get("logErrors") or [])) for e in s["logErrors"]):
                 add(rec, "step-log-error", "note", f"{s['kind']} {s['label']}: " + " | ".join(s["logErrors"][:2])[:300], s.get("shot"))
             exp = expected_after(panel, rec, s)
             if exp is not None and s["after"] not in exp:
@@ -160,8 +172,9 @@ def analyze_panel(panel_dir: Path):
                 dist = max((abs(v[2]) for t in s["scrolls"] for v in t), default=0)
                 if dist > 0 and s["after"] == rec["scene"]:
                     add(rec, "scrolls", "note", f"a drag up scrolled {dist:.0f}px (content past the panel)", s.get("shot"))
-            if s.get("renderMs", 0) + s.get("inputMs", 0) > SLOW_STEP_MS:
-                add(rec, "slow-step", "slow", f"{s['kind']} {s['label']}: input {s.get('inputMs')} ms + render {s.get('renderMs')} ms", s.get("shot"))
+            if s.get("renderMs", 0) + s.get("inputMs", 0) - s.get("fetchMs", 0) > SLOW_STEP_MS:
+                add(rec, "slow-step", "slow", f"{s['kind']} {s['label']}: input {s.get('inputMs')} ms + render {s.get('renderMs')} ms"
+                    + (f" ({s['fetchMs']} ms of it fetching)" if s.get("fetchMs") else ""), s.get("shot"))
         tap_only = rec.get("tapOnly")
         if tap_only and not panel.get("touch") and tap_only["count"] >= max(3, tap_only["stops"]):
             # A keys-only board: what only a tap reaches is out of reach here.
@@ -190,9 +203,88 @@ def analyze_panel(panel_dir: Path):
                     add(rec, "keys-action-dead", "slow", f"Action on {len(acts)} ringed elements ({', '.join(str(a['ring']) for a in acts)}) changed nothing")
         if taps >= 2 and dead_taps == taps:
             add(rec, "dead-taps", "slow", f"none of {taps} taps on pressable regions changed the picture")
+        t = rec.get("texts") or {}
+        for p in t.get("problems") or []:
+            k = p["kind"]
+            if k == "textTiny":
+                ex = ", ".join(f"\"{e['text']}\" {e['size']}px" for e in p["examples"])
+                add(rec, "text-tiny", "slow", f"{p['count']} of {p['of']} texts under the readable size, smallest {p['smallest']} px: {ex}", r.get("shot"))
+            elif k == "textPastCanvas":
+                add(rec, "text-past-panel", "slow", f"\"{p['text']}\" reaches {p['past']}px past the panel at {p['box']}", r.get("shot"))
+            elif k == "textClipped":
+                add(rec, "text-clipped", "slow", f"\"{p['text']}\" cut by the box around it ({p['shown']:.0%} shows) at {p['box']}", r.get("shot"))
+            elif k == "textBrokenWord":
+                add(rec, "text-broken-word", "slow", f"\"{p['text']}\" broken inside a word at {p['box']}", r.get("shot"))
+            elif k == "textsOverlap":
+                add(rec, "texts-overlap", "slow", f"\"{p['a']}\" and \"{p['b']}\" printed over each other ({p['share']:.0%}) at {p['boxes']}", r.get("shot"))
+            elif k == "textCutByCircle":
+                add(rec, "text-cut-by-circle", "slow", f"\"{p['text']}\" {p['shown']:.0%} inside the round glass at {p['box']}", r.get("shot"))
+        if t.get("cut"):
+            add(rec, "text-ellipsis", "note", f"{t['cut']} of {t['texts']} texts cut with an ellipsis", r.get("shot"))
+        if panel.get("round") and a.get("content", 0) > 0.05 and a.get("ring", 1) < 0.03:
+            add(rec, "round-square-only", "note", f"the ring around the inscribed square is {a.get('ring', 0):.1%} used: a square in the middle", r.get("shot"))
+        taps_ = rec.get("taps") or []
+        dead = [x for x in taps_ if x["changed"] == 0 and x["after"] == rec["scene"]]
+        if taps_ and dead and len(dead) < len(taps_):
+            add(rec, "tap-dead-elements", "note", f"{len(dead)} of {len(taps_)} pressed elements changed nothing: {', '.join(str(x['at']) for x in dead[:5])}")
+        backs = [x for x in taps_ if x.get("back")] + [x for x in ((rec.get("focusWalk") or {}).get("actions") or []) if x.get("back")]
+        for x in backs:
+            b = x["back"]
+            if b["after"] != rec["scene"]:
+                add(rec, "back-left-scene", "fail", f"Back ({b['how']}) on a page of the scene went to {b['after']}")
+            elif not b["returned"]:
+                what = f"tap at {x['at']}" if "at" in x else f"Action on {x.get('ring')}"
+                add(rec, "back-no-return", "slow", f"{what} went to another page; Back ({b['how']}) did not bring the page before back (changed {b['changed']:.1%})")
+                break
+        for sc in rec.get("scrollers") or []:
+            if sc.get("left"):
+                add(rec, "scroll-left-scene", "fail", f"a drag in the box at {sc['box']} went to {sc['left']}")
+            elif sc["drags"] == 0 and sc.get("from", 0) == 0:
+                add(rec, "scroll-stuck", "slow", f"the box at {sc['box']} scrolls but did not move under a finger")
+            elif sc.get("endShown") is False or sc.get("lastElementShown") is False:
+                add(rec, "scroll-end-hidden", "slow", f"scrolled to its end ({sc['scrolled']}px), the box at {sc['box']} does not show its last item whole (\"{sc.get('lastText', '')}\")")
         if (r.get("coldMs") or 0) - 0 > 1500:
             add(rec, "slow-cold", "note", f"first render {r['coldMs']} ms in wasm ({r.get('fetches')} fetches, {r.get('fetchMs')} ms of them)")
     return data, panel, issues
+
+
+def collect_timings(run: Path):
+    """Per panel and scene: the first and a warm render, and the median and
+    worst of what each kind of input took to show (input + render, fetching
+    left out), in wasm on this machine."""
+    out = {}
+    for panel_dir in sorted(p for p in run.iterdir() if (p / "results.json").exists()):
+        data = json.loads((panel_dir / "results.json").read_text())
+        for rec in data["results"]:
+            r = rec.get("render") or {}
+            kinds = defaultdict(list)
+            for s in rec.get("steps", []):
+                kinds[s["kind"]].append(max(0, s.get("renderMs", 0) + s.get("inputMs", 0) - s.get("fetchMs", 0)))
+            row = {"cold": (r.get("coldMs") or 0) - (r.get("fetchMs") or 0) if r.get("coldMs") is not None else None, "warm": r.get("warmMs")}
+            for k, v in kinds.items():
+                v.sort()
+                row[k] = {"n": len(v), "median": v[len(v) // 2], "max": v[-1]}
+            out[f"{panel_dir.name}|{rec.get('folder')}"] = row
+    return out
+
+
+def compare_timings(now, base):
+    """What got slower than the earlier run: a median at least 1.5 times and
+    20 ms over the earlier one's, or a first render 1.5 times and 100 ms."""
+    issues = []
+    for key, row in now.items():
+        b = base.get(key)
+        if not b:
+            continue
+        panel, scene = key.split("|", 1)
+        for k in ("tap", "key", "focus", "swipe", "scroll", "scrollall"):
+            if k in row and k in b and row[k]["median"] >= 1.5 * b[k]["median"] + 20:
+                issues.append({"panel": panel, "scene": scene, "kind": "slower-than-baseline", "severity": "slow",
+                               "detail": f"{k}: median {row[k]['median']} ms, was {b[k]['median']} ms"})
+        if row.get("cold") and b.get("cold") and row["cold"] >= 1.5 * b["cold"] + 100:
+            issues.append({"panel": panel, "scene": scene, "kind": "slower-than-baseline", "severity": "slow",
+                           "detail": f"first render {row['cold']} ms, was {b['cold']} ms"})
+    return issues
 
 
 def contact_sheet(panel_dir: Path, data, out: Path, tag="0-render", cols=8, thumb=260, round_=False):
@@ -241,6 +333,11 @@ def main():
         if "--sheets" in sys.argv:
             sheets_dir.mkdir(exist_ok=True)
             contact_sheet(panel_dir, data, sheets_dir, round_=bool(panel.get("round")))
+    timings = collect_timings(run)
+    (run / "timings.json").write_text(json.dumps(timings, indent=1))
+    if "--baseline" in sys.argv:
+        base = collect_timings(Path(sys.argv[sys.argv.index("--baseline") + 1]))
+        all_issues.extend(compare_timings(timings, base))
     (run / "issues.json").write_text(json.dumps(all_issues, indent=1))
     by_kind = defaultdict(list)
     for i in all_issues:
@@ -255,6 +352,17 @@ def main():
             panels = sorted({i["panel"] for i in its})
             lines.append(f"- **{scene}** on {', '.join(panels)}: {its[0]['detail']}")
         lines.append("")
+    # The slowest interactions (wasm on this machine; an ESP32 is 10-40x slower).
+    worst = []
+    for key, row in timings.items():
+        for k, v in row.items():
+            if isinstance(v, dict):
+                worst.append((v["median"], v["max"], k, key))
+    worst.sort(reverse=True)
+    lines.append("## Slowest interactions (median ms, worst ms, in wasm)")
+    for med, mx, k, key in worst[:30]:
+        lines.append(f"- {key.replace('|', ' / ')}: {k} median {med}, worst {mx}")
+    lines.append("")
     (run / "report.md").write_text("\n".join(lines))
     print("\n".join(lines[:200]))
 
