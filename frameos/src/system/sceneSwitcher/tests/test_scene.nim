@@ -494,6 +494,63 @@ proc headings(tree: SvgNode): seq[string] =
     if child.children.len >= 1 and child.children[0].tag == "span":
       result.add child.children[0].children[0].text
 
+block a_wide_room_puts_each_category_beside_its_row:
+  # Wider than 5:4, a category's name goes at the left of its first row and
+  # its heading strip is only the rule's band: the height a heading took is
+  # what such a room runs out of (the Sticky held sideways showed 9 of 43
+  # scenes, 19 upright; the UX bench, 2026-11-27). Upright, and with no
+  # categories, nothing changes.
+  let side = switcherGrid(800, 480, thumbnails = false, headed = true)
+  let over = switcherGrid(800, 480, thumbnails = false)
+  doAssert side.labelW == side.tileW and side.x0 == over.x0 + side.labelW + side.gap, $side
+  doAssert side.headingH < over.headingH and side.cols == over.cols - 1, $side
+  doAssert switcherGrid(480, 800, thumbnails = false, headed = true).labelW == 0
+  doAssert switcherGrid(480, 480, thumbnails = false, headed = true).labelW == 0
+  doAssert switcherGrid(466, 466, thumbnails = false, round = true, headed = true).labelW == 0
+  # The Sticky held sideways, 43 scenes in a dozen categories: more of them
+  # show at once, each still a row of its own.
+  var cats: seq[SwitcherEntry]
+  for (category, n) in [("System", 2), ("AI", 4), ("Art", 4), ("Calendars", 2), ("Clocks", 3), ("Demos", 4)]:
+    for i in 0 ..< n:
+      cats.add SwitcherEntry(id: category & $i, name: category & " " & $i, category: category)
+  listed = cats
+  let wide = newSwitcher(config(800, 480, "framebuffer"), opener = "System0")
+  preview("switcher-800x480-labels-beside", wide.draw(newImage(800, 480)))
+  let g = switcherGrid(800, 480, thumbnails = false, headed = true)
+  let sp = wide.spots(g)
+  var whole = 0
+  for spot in sp:
+    if spot.top + g.tileH <= g.listH: inc whole
+  var whole0 = 0
+  for spot in wide.spots(over):
+    if spot.top + over.tileH <= over.listH: inc whole0
+  doAssert whole > whole0, $whole & " vs " & $whole0
+  doAssert sp[2].col == 0 and sp[2].top == sp[0].top + g.tileH + g.gap + g.headingH, $sp
+
+block a_name_is_never_broken_inside_a_word:
+  # A word wider than its cell is set smaller, down to 9 px, rather than
+  # broken ("Countdow/n", "Sketchboo/k" on the CrowPanel 5.79"'s strip).
+  listed = @[SwitcherEntry(id: "countdown", name: "Countdown"), SwitcherEntry(id: "sketchbook", name: "Sketchbook")]
+  let strip = newSwitcher(config(792, 272, "waveshare.EPD_5in79_BW"), opener = "countdown")
+  preview("switcher-792x272-names", strip.draw(newImage(792, 272)))
+  let grid = switcherGrid(792, 272, thumbnails = false)
+  proc labelOf(n: SvgNode, name: string): SvgNode =
+    if n.tag == "span" and n.children.len == 1 and n.children[0].text == name: return n
+    for c in n.children:
+      result = labelOf(c, name)
+      if not result.isNil: return
+  for name in ["Countdown", "Sketchbook"]:
+    let label = labelOf(strip.tree(792, 272, true), name)
+    doAssert not label.isNil, name
+    let classes = label.attrs[0][1]
+    var size = grid.text
+    var pad = grid.inner
+    for part in classes.split(' '):
+      if part.startsWith("text-[") and part.endsWith("px]"): size = parseInt(part[6 ..< ^3])
+      if part.startsWith("px-[") and part.endsWith("px]"): pad = parseInt(part[4 ..< ^3])
+    let h = measureText([name, "x"], "leading-tight font-bold text-[" & $size & "px]", float32(grid.tileW - 2 * pad))
+    doAssert h[0] <= h[1] * 1.5, name & " wraps at " & $size & " px: " & classes
+
 block categories_head_their_scenes_and_other_comes_last:
   # As the desktops' `grouped`: the categories by name with case aside
   # (Latin-1's capitals too), the raw name breaking a tie, trimmed, "Other"

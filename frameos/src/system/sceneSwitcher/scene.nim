@@ -96,6 +96,11 @@ type
     lift*: int
       ## A round panel's lens (`lens`): how far down its cell a tile drawn
       ## smaller is put, so it stays centred where a full one would be.
+    labelW*: int
+      ## A room wider than tall: each category's name in a column of this
+      ## width at the left of its first row, under a rule, instead of a
+      ## heading over the row (`headingH` is then the rule's band): the
+      ## height a heading took is what such a room runs out of. 0: headings.
 
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
@@ -279,7 +284,7 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
-proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
+proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0, headed = false): SwitcherGrid =
   ## Where the cells go on a `width` x `height` canvas: a folder's icon view
   ## (docs/scene-switcher.md "The tiles"), each scene an icon with its name
   ## centred under it, the cells close together from the left, as many across
@@ -293,6 +298,12 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
   ## UI laid out at its render scale; 400 in a desktop's window); the
   ## canvas's shorter edge without it.
+  ## `headed`: the list has categories. In a room wider than tall (more than
+  ## 5:4) their names then go beside their rows (`labelW`): a heading over
+  ## each row cost a fifth of the height, which such a room runs out of long
+  ## before its width (the Sticky held sideways showed 9 of 43 scenes, 19
+  ## upright; the UX bench, 2026-11-27). Each category keeps a row of its
+  ## own, its name at the left edge where the eye runs down the list.
   let unit = min(if unit > 0: unit else: min(width, height), GridUnitMax)
   let cu = min(unit, CellUnitMax)
   result.pad = clamp(permille(unit, 35), 4, 24)
@@ -332,6 +343,11 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   # under it, the name's two lines, and `inner` under them: a row's names
   # never touch the next row's headings.
   result.tileH = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
+  if headed and not round and width * 4 > height * 5 and gw >= 3 * result.tileW + 2 * result.gap:
+    result.labelW = result.tileW
+    result.headingH = max(2 * result.gap, 6)
+    result.x0 += result.labelW + result.gap
+    gw -= result.labelW + result.gap
   result.cols = clamp((gw + result.gap) div (result.tileW + result.gap), 1, MaxCols)
   result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
   if round:
@@ -368,9 +384,10 @@ proc isRound*(frameConfig: FrameConfig): bool =
 
 proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(width, height, false, round = isRound(self.frameConfig), unit = unit)
+    switcherGrid(width, height, false, round = isRound(self.frameConfig), unit = unit, headed = self.headed)
   else:
-    switcherGrid(width, height, not sceneSwitcherThumbnail.isNil, round = isRound(self.frameConfig), unit = unit)
+    switcherGrid(width, height, not sceneSwitcherThumbnail.isNil, round = isRound(self.frameConfig), unit = unit,
+      headed = self.headed)
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
   ## The grid the last render drew: at the UI's scale (uiRoom), in the room
@@ -932,9 +949,27 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
+  # A word wider than the cell is set smaller, down to 9 px, never broken
+  # inside ("Countdow/n" on the 5.79" strip; the UX bench, 2026-11-27). Its
+  # letters say which words might be (as wide as Ubuntu's widest run them);
+  # only those are set in type to see whether they wrap.
+  var size = grid.text
+  var pad = grid.inner
+  let perMille = if look.paper: 640 else: 600
+  for word in title.split({' ', '-'}):
+    var letters = 0
+    for ch in word:
+      if (ord(ch) and 0xC0) != 0x80: inc letters # a character's first byte
+    while letters * size * perMille > (grid.tileW - 2 * pad) * 1000 and (size > 9 or pad > 0):
+      let classes = "leading-tight text-[" & $size & "px]" & (if look.paper: " font-bold" else: "")
+      let h = measureText([word, "x"], classes, float32(grid.tileW - 2 * pad))
+      if h[0] <= h[1] * 1.5:
+        break # one line: it fits
+      if size > 9: dec size
+      else: pad = 0
   var n = "max-w-full text-center line-clamp-2 leading-tight"
-  n.px("text", grid.text)
-  n.px("px", grid.inner)
+  n.px("text", size)
+  n.px("px", pad)
   n.px("rounded", grid.inner)
   if look.paper: n.add " font-bold"
   elif look.lit: n.add " bg-sky-600 text-white"
@@ -1024,8 +1059,23 @@ proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, pa
 
 proc heading(grid: SwitcherGrid, spot: Spot, span: int, title: string, paper: bool): SvgNode =
   ## A category's name over the row it starts, small, with a rule under it
-  ## across the row: a file manager's sections.
+  ## across the row: a file manager's sections. Beside the row in a room
+  ## wider than tall (`labelW`): a rule over the row and the name, and the
+  ## name at its left, on up to three lines.
   var c: string
+  if grid.labelW > 0:
+    let x = grid.x0 - grid.listX - grid.labelW - grid.gap
+    c.at(x, spot.top - grid.headingH div 2, grid.labelW + grid.gap + span * (grid.tileW + grid.gap) - grid.gap,
+      grid.tileH + grid.headingH div 2)
+    c.add " flex items-start" # the name a box of its column's width, wrapped in it
+    c.px("pt", grid.headingH div 2 + grid.inner)
+    c.px("text", max(grid.text - 1, 10))
+    c.add(if paper: " border-t-2 border-black" else: " border-t border-zinc-500/40")
+    var t = "shrink-0 line-clamp-3 leading-tight font-bold"
+    t.px("w", grid.labelW)
+    t.px("px", grid.inner)
+    if not paper: t.add " text-zinc-400"
+    return el("div", c, el("span", t, txt(if title.len > 0: title else: "Other")).role("muted"))
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top - grid.headingH,
     span * (grid.tileW + grid.gap) - grid.gap, grid.headingH - grid.gap)
   c.add " flex items-end"

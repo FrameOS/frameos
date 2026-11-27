@@ -208,9 +208,21 @@ larger.
   own under a small name with a thin rule across the row (the owner's call,
   2026-11-22; before, the next category went on in the row the last one
   ended in). Only a category's first row has the strip its heading sits in.
+  In a room wider than tall (more than 5:4: a panel held sideways, the
+  5.79" strip, a landscape window) the name goes beside the row instead, in
+  a column a tile wide at the left, wrapped on up to three lines, under a
+  rule over the row (`labelW`): the strip a heading took is height, which
+  such a room runs out of long before its width (the Sticky held sideways
+  showed 9 of 43 scenes, 19 upright; with the names beside, 13; the UX
+  bench, 2026-11-27). Each category still has a row of its own, its name at
+  the left edge where the eye runs down the list.
   They show wherever a scene has a category, from a list of one (`headed`;
   until 2026-11-25 only from a dozen scenes and two a category), and never
   where none has: no lone "Other" over a list with no categories.
+- **Names are never broken inside a word.** A word wider than its cell is
+  set smaller, down to 9 px ("Countdown" on the 5.79" strip broke as
+  "Countdow/n"): its letters say which words might not fit, and only those are
+  set in type to see.
 - **No pictures.** A host's snapshots of its scenes
   (`sceneSwitcherThumbnail`, the Linux runner's) are no longer drawn: the
   icon view is the owner's call (2026-11-21). The hook stays for now.
