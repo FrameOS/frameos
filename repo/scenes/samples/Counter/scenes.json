@@ -85,8 +85,10 @@
         },
         "data": {
           "keyword": "button",
-          "button": "B",
-          "label": "A"
+          "config": {
+            "role": "next",
+            "action": "press"
+          }
         },
         "width": 209,
         "height": 98,
@@ -146,6 +148,29 @@
         "dragging": false
       },
       {
+        "id": "3f0c2a8e-6b1d-4c57-9e2a-7d4b8c1f5a60",
+        "type": "event",
+        "position": {
+          "x": 352.99806254129567,
+          "y": 223.3445129755015
+        },
+        "data": {
+          "keyword": "button",
+          "config": {
+            "role": "primary",
+            "action": "press"
+          }
+        },
+        "width": 209,
+        "height": 98,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 352.99806254129567,
+          "y": 223.3445129755015
+        },
+        "dragging": false
+      },
+      {
         "id": "be079643-cc2e-4bd4-b3be-b8842cdf30b5",
         "type": "event",
         "position": {
@@ -154,8 +179,10 @@
         },
         "data": {
           "keyword": "button",
-          "button": "A",
-          "label": "B"
+          "config": {
+            "role": "prev",
+            "action": "press"
+          }
         },
         "width": 209,
         "height": 98,
@@ -203,7 +230,7 @@
               "type": "json"
             }
           ],
-          "codeJS": "state.number - 1"
+          "codeJS": "(Number(state.number) || 0) - 1"
         },
         "type": "code",
         "style": {
@@ -255,7 +282,7 @@
               "type": "json"
             }
           ],
-          "codeJS": "state.number + 1"
+          "codeJS": "(Number(state.number) || 0) + 1"
         },
         "type": "code",
         "style": {
@@ -297,6 +324,15 @@
         "target": "ea7b68ce-3f94-4597-8221-06ba1db9a76c",
         "targetHandle": "prev",
         "source": "e8631f8c-0b6c-4f28-9711-22a065fdc18a",
+        "sourceHandle": "next",
+        "type": "appNodeEdge",
+        "selected": false
+      },
+      {
+        "id": "b2e7d9c4-1a5f-4e83-a6c0-5f9d3e8b7a21",
+        "target": "ea7b68ce-3f94-4597-8221-06ba1db9a76c",
+        "targetHandle": "prev",
+        "source": "3f0c2a8e-6b1d-4c57-9e2a-7d4b8c1f5a60",
         "sourceHandle": "next",
         "type": "appNodeEdge",
         "selected": false
