@@ -18,7 +18,7 @@ import { ditherPreview } from '../../../../../workers/ditherPreviewClient'
 import type { DitherPreviewInk } from '../../../../../workers/ditherPreviewProtocol'
 import { deviceLabelFor } from '../../Assets/assetColorsLogic'
 
-// The frame's current image as the panel will show it, beside the image as
+// The frame's current image as the panel will show it, under the image as
 // it is. One preview for the Colors and the Dithering sections, running what
 // the plane's render and packer run, in their order (docs/dithering.md,
 // docs/asset-color-profiles.md):
@@ -254,16 +254,16 @@ export function PanelPreview({
             <Spinner className="h-6 w-6" color="white" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-2 @lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3">
             <figure className="space-y-1">
-              <canvas ref={originalRef} className="max-h-[22rem] w-full object-contain" />
+              <canvas ref={originalRef} className="max-h-[32rem] w-full object-contain" />
               <figcaption className="text-center text-xs text-slate-300">Original</figcaption>
             </figure>
             <figure className="space-y-1">
               <div className="relative">
                 <canvas
                   ref={panelRef}
-                  className={`max-h-[22rem] w-full object-contain transition-opacity ${
+                  className={`max-h-[32rem] w-full object-contain transition-opacity ${
                     stage === 'rendering' ? 'opacity-40' : ''
                   }`}
                 />
