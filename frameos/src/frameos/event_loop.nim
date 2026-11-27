@@ -819,6 +819,16 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
     return loop.deliver(envelope, eventPolicy(envelope.name))
   var lifted: seq[int]
   for delivery in deliveries:
+    if not loop.displayOn and delivery.name == evEdgeSwipe:
+      # A swipe in from an edge on a dark screen wakes it too, and is no
+      # swipe: its pointerDown was held back for the swipe (input_state), so
+      # this is the first the dispatcher hears of that touch, and the rest of
+      # it never comes. It opened the scene list in the dark (the UX bench,
+      # the CrowPanel 2.8", 2026-11-27).
+      discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
+        origin: eoSystem, target: envelope.target), eventPolicy(evTurnOn))
+      result = true
+      continue
     let id = pointerIdOf(delivery)
     if id >= 0:
       # A touch on a dark screen turns it on, and nothing of that touch (its
