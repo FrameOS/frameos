@@ -44,6 +44,38 @@ def load_backend():
     return firmware, devices, standard
 
 
+def old_default_maps() -> dict:
+    """Each preset's map before the button standard, as the firmware wrote it
+    into a board's settings (byte for byte the compact JSON of the backend
+    migration's frozen copies, d1b5e7a9c3f2 OLD_PRESET_MAPS)."""
+    import importlib.util
+    import types
+
+    path = ROOT / "backend/migrations/versions/d1b5e7a9c3f2_button_standard_event_maps.py"
+    stubs = {"alembic": types.SimpleNamespace(op=None), "sqlalchemy": types.SimpleNamespace()}
+    saved = {name: sys.modules.get(name) for name in stubs}
+    sys.modules.update(stubs)
+    try:
+        spec = importlib.util.spec_from_file_location("button_standard_migration", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = value
+    return {key: compact(value) for key, value in module.OLD_PRESET_MAPS.items()}
+
+
+def fnv1a(text: str) -> int:
+    h = 2166136261
+    for byte in text.encode("utf-8"):
+        h ^= byte
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
 def compact(value) -> str:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
@@ -60,6 +92,7 @@ def write_c(firmware, standard) -> str:
     }
     rules: list[str] = []
     rows = []
+    old = old_default_maps()
     for key, preset in presets.items():
         indexes = []
         for rule in preset.get("eventMap") or []:
@@ -69,7 +102,8 @@ def write_c(firmware, standard) -> str:
             indexes.append(rules.index(text) + 1)
         keys = firmware.EMBEDDED_BOARD_KEYS[key]
         roles = " ".join(f"{k['label']}={k['role']}" for k in keys)
-        rows.append((key, indexes, roles))
+        was = old.get(key)
+        rows.append((key, indexes, roles, fnv1a(was) if was is not None else 0))
     longest = max(len("[" + ",".join(rules[i - 1] for i in r[1]) + "]") for r in rows)
     if longest > 1023:
         raise SystemExit(f"a board's event map is {longest} bytes: the firmware holds 1023 (FOS_EVENT_MAP_LEN)")
@@ -80,8 +114,14 @@ def write_c(firmware, standard) -> str:
         " * every board's event map once (`k_board_rules`), each board the rules it",
         " * has, by number from 1 (`rules`, joined into a map by fos_board_event_map),",
         " * and its keys' roles (`roles`: LABEL=role, for fos_board_key_role).",
+        " * `was` is the FNV-1a of the map the board came with before the button",
+        " * standard, as the firmware wrote it into its settings (the backend",
+        " * migration d1b5e7a9c3f2's OLD_PRESET_MAPS): a board that stored that one",
+        " * runs today's (fos_board_event_map_is_default).",
         f" * The longest map is {longest} bytes (FOS_EVENT_MAP_LEN holds 1023). */",
         "#pragma once",
+        "",
+        "#include <stdint.h>",
         "",
         "static const char *const k_board_rules[] = {",
     ]
@@ -93,13 +133,14 @@ def write_c(firmware, standard) -> str:
         "    const char *preset;",
         "    const char *rules; /* rule numbers, from 1, as bytes */",
         "    const char *roles; /* LABEL=role, space-separated */",
+        "    uint32_t was; /* FNV-1a of the map it came with before the button standard, 0: none */",
         "} fos_board_keys_t;",
         "",
         "static const fos_board_keys_t k_board_keys[] = {",
     ]
-    for key, indexes, roles in rows:
+    for key, indexes, roles, was in rows:
         numbers = "".join(f"\\x{i:02x}" for i in indexes)
-        out.append(f'    {{"{key}", "{numbers}", {c_string(roles)}}},')
+        out.append(f'    {{"{key}", "{numbers}", {c_string(roles)}, 0x{was:08x}u}},')
     out += ["};", ""]
     return "\n".join(out)
 

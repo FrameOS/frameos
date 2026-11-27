@@ -147,6 +147,39 @@ void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
     out[used] = '\0';
 }
 
+static uint32_t fnv1a(const char *text)
+{
+    uint32_t h = 2166136261u;
+    for (; *text; text++) {
+        h ^= (unsigned char)*text;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+/* Whether `map` is exactly what fos_board_event_map makes for the board,
+ * compared rule by rule: no second 1 KB copy on the stack. */
+static bool is_current_map(const fos_board_keys_t *board, const char *map)
+{
+    if (board->rules[0] == '\0') return map[0] == '\0';
+    const char *at = map;
+    for (const char *n = board->rules; *n; n++) {
+        if (*at++ != (n == board->rules ? '[' : ',')) return false;
+        const char *rule = k_board_rules[(unsigned char)*n - 1];
+        size_t len = strlen(rule);
+        if (strncmp(at, rule, len) != 0) return false;
+        at += len;
+    }
+    return at[0] == ']' && at[1] == '\0';
+}
+
+bool fos_board_event_map_is_default(const char *hardware_preset, const char *map)
+{
+    const fos_board_keys_t *board = board_keys(hardware_preset);
+    if (board == NULL || map == NULL) return false;
+    return is_current_map(board, map) || (board->was != 0 && fnv1a(map) == board->was);
+}
+
 bool fos_board_key_role(const char *hardware_preset, const char *label, char *out, size_t out_len)
 {
     if (out_len) out[0] = '\0';

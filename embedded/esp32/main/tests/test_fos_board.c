@@ -612,6 +612,35 @@ static void test_crowpanel_advance_2in8(void)
     CHECK(strstr(map, "\"edgeSwipe\"") != NULL && map[strlen(map) - 1] == ']', "the edges swipe");
 }
 
+
+/* A map stored before the button standard (every board's settings kept the
+ * map it came with) is the board's own: the firmware runs today's. Their text
+ * is exactly what the old firmware wrote (the backend migration's frozen
+ * copies). A map anyone changed is not. */
+static void test_default_maps(void)
+{
+    static const char *old_rotary =
+        "[{\"event\":\"button\",\"match\":{\"label\":\"BOOT\",\"action\":\"press\"},\"emit\":\"toggleScreen\",\"as\":{}},{\"event\":\"button\",\"match\":{\"label\":\"BOOT\",\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"},\"emit\":\"forward\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"},\"emit\":\"back\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"},\"emit\":\"sceneSettings\",\"as\":{}}]";
+    static const char *old_sticky =
+        "[{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}},{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}},{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"doublePress\"},\"emit\":\"back\",\"as\":{}},{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\",\"as\":{}},{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"},\"emit\":\"forward\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"},\"emit\":\"back\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\",\"as\":{}},{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"},\"emit\":\"sceneSettings\",\"as\":{}}]";
+    CHECK(fos_board_event_map_is_default("elecrow_crowpanel_rotary_1in46", old_rotary), "the rotary's old map is its own");
+    CHECK(fos_board_event_map_is_default("seeed_reterminal_sticky", old_sticky), "the Sticky's old map is its own");
+    CHECK(!fos_board_event_map_is_default("seeed_reterminal_sticky", old_rotary), "another board's old map is not");
+    CHECK(fos_board_event_map_is_default("elecrow_crowpanel_rotary_1in46", event_map("elecrow_crowpanel_rotary_1in46")),
+          "today's map is its own");
+    CHECK(fos_board_event_map_is_default("seeed_reterminal_e1004", event_map("seeed_reterminal_e1004")), "the E1004's too");
+    CHECK(!fos_board_event_map_is_default("elecrow_crowpanel_rotary_1in46", "[]"), "no map, chosen, is not");
+    char changed[1024];
+    snprintf(changed, sizeof(changed), "%s", event_map("elecrow_crowpanel_rotary_1in46"));
+    changed[strlen(changed) - 1] = '\0';
+    strncat(changed, ",{\"event\":\"button\",\"match\":{\"label\":\"OK\",\"action\":\"press\"},\"emit\":\"render\",\"as\":{}}]",
+            sizeof(changed) - strlen(changed) - 1);
+    CHECK(!fos_board_event_map_is_default("elecrow_crowpanel_rotary_1in46", changed), "a rule added is the owner's map");
+    CHECK(!fos_board_event_map_is_default("elecrow_crowpanel_rotary_1in46", ""), "an empty map is not the rotary's");
+    CHECK(fos_board_event_map_is_default("lilygo_unknown", "") == false, "an unknown board has none");
+    CHECK(!fos_board_event_map_is_default("elecrow_crowpanel_rotary_1in46", NULL), "no map at all is not");
+}
+
 int main(void)
 {
     test_crowpanel_advance_2in8();
@@ -626,6 +655,7 @@ int main(void)
     test_buzzer_pins();
     test_event_maps();
     test_key_roles();
+    test_default_maps();
     test_mic_pins();
     test_charge_enable_pin();
     test_power_latch_pins();

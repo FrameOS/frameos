@@ -54,6 +54,13 @@ void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
  * on another board (BOOT, KEY1) is what its board says. False and "" for a
  * key the preset does not list (the runtime then takes the label's
  * default). Case-insensitive on the label. */
+/* Whether a stored event map is the board's own: the one fos_board_event_map
+ * makes, or the one the board came with before the button standard
+ * (docs/buttons.md), which the firmware wrote into every board's settings.
+ * Such a map is not kept (fos_config.c): the board runs the map its firmware
+ * has, so an update brings the new one. A map anyone changed is not. */
+bool fos_board_event_map_is_default(const char *hardware_preset, const char *map);
+
 bool fos_board_key_role(const char *hardware_preset, const char *label, char *out, size_t out_len);
 
 /* The board's PDM microphone for a hardware preset key: clock, data and the

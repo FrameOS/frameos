@@ -240,9 +240,15 @@ esp_err_t fos_config_init(void)
      * the previous and the next scene). A frame provisioned with its preset
      * before this key existed gets the bindings with the update; a control
      * plane's push, an empty list included, stores what it runs with. Read
-     * after `hardware`, which the board default keys on. */
+     * after `hardware`, which the board default keys on. A stored map that is
+     * the board's own (today's, or the one every board stored before the
+     * button standard: fos_board_event_map_is_default) is the board's own
+     * from this firmware: without it a board set up before 2026.11.27 kept
+     * the old map through every update, its knob held opening nothing (the
+     * UX bench). A map anyone changed stays as it is. */
     size_t event_map_len = sizeof(cfg->event_map);
-    if (nvs_get_str(nvs, "event_map", cfg->event_map, &event_map_len) != ESP_OK) {
+    if (nvs_get_str(nvs, "event_map", cfg->event_map, &event_map_len) != ESP_OK ||
+        fos_board_event_map_is_default(cfg->hardware_preset, cfg->event_map)) {
         fos_board_event_map(cfg->hardware_preset, cfg->event_map, sizeof(cfg->event_map));
     }
     if (nvs_get_u32(nvs, "max_http", &u32) == ESP_OK) cfg->max_http_response_bytes = u32;
@@ -431,7 +437,14 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u16(nvs, "render_scale_m", cfg->render_scale_milli), "render_scale_m");
     FOS_NVS_SET(nvs_set_str(nvs, "colors", cfg->colors), "colors");
     FOS_NVS_SET(nvs_set_str(nvs, "palette", cfg->palette), "palette");
-    FOS_NVS_SET(nvs_set_str(nvs, "event_map", cfg->event_map), "event_map");
+    /* The board's own map is not stored: the firmware has it, and an update
+     * brings its new one. Stored, it outlived the standard it came with. */
+    if (fos_board_event_map_is_default(cfg->hardware_preset, cfg->event_map)) {
+        esp_err_t erased = nvs_erase_key(nvs, "event_map");
+        if (erased != ESP_OK && erased != ESP_ERR_NVS_NOT_FOUND) FOS_NVS_SET(erased, "event_map");
+    } else {
+        FOS_NVS_SET(nvs_set_str(nvs, "event_map", cfg->event_map), "event_map");
+    }
     FOS_NVS_SET(nvs_set_str(nvs, "time_zone", cfg->time_zone), "time_zone");
     FOS_NVS_SET(nvs_set_u32(nvs, "max_http", cfg->max_http_response_bytes), "max_http");
     FOS_NVS_SET(nvs_set_u32(nvs, "spill_force", cfg->http_spill_force_bytes), "spill_force");
