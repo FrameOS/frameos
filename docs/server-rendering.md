@@ -23,6 +23,12 @@ It also means the scene runs where the plane is, and fetches from there:
   access says (that switch is about the frame's own network, which the cloud
   is not on).
 
+A request the scene sends without a `User-Agent` goes with
+`FrameOS/1 (rendered by its control plane)`, on both planes (Node sends none
+of its own, and an API that wants one, GitHub's for one, refused every request
+of a frame rendered here while the board itself, `FrameOS-ESP32/1`, was
+answered). A scene that names one keeps it.
+
 And the scene is held to bounds where it runs. On a backend
 (`backend/app/utils/embedded_render.py`, `backend/tools/embedded_wasm_render.mjs`)
 the render process is started with what Node needs and none of the

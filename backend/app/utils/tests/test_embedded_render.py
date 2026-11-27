@@ -328,6 +328,58 @@ def test_renderer_http_child_checks_what_the_socket_connects_to():
     assert metadata["status"] == 0 and "cloud metadata address" in metadata["error"]
 
 
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="no node on PATH")
+def test_renderer_http_child_says_it_is_frameos_unless_the_scene_says_who_it_is():
+    # node sends no User-Agent of its own, and GitHub's API refused a frame
+    # rendered here for it (the UX bench, 2026-11-27). A server on loopback
+    # stands in for the API: the address check is taken out for it.
+    import http.server
+    import threading
+
+    agents: list[str | None] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            agents.append(self.headers.get("User-Agent"))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args):  # noqa: ARG002
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/"
+        script = Path(__file__).resolve().parents[3] / "tools" / "embedded_wasm_render.mjs"
+        runner = _CHILD_RUNNER.replace(
+            "const script = new Function('return `' + literal + '\\n`')();",
+            "const script = new Function('return `' + literal + '\\n`')() + "
+            "\"\\nfunction addressClass() { return 'public'; }\";",
+        )
+        assert runner != _CHILD_RUNNER
+        requests = [
+            {"method": "GET", "url": url, "headers": {}, "networkPolicy": "all"},
+            {"method": "GET", "url": url, "headers": {"user-agent": "scene/2"}, "networkPolicy": "all"},
+        ]
+        completed = subprocess.run(
+            ["node", "-e", runner, str(script), json.dumps(requests)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=True,
+        )
+        plain, own = json.loads(completed.stdout)
+        assert plain["status"] == 200 and own["status"] == 200, completed.stdout
+        assert agents[0] is not None and agents[0].startswith("FrameOS/")
+        assert agents[1] == "scene/2"
+    finally:
+        server.shutdown()
+
 @pytest.mark.asyncio
 async def test_a_thin_clients_presses_go_to_the_harness_with_the_render(monkeypatch, tmp_path):
     """The edges ride the render request; a pull without any sends none, and

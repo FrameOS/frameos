@@ -213,6 +213,25 @@ describe("the HTTP child's redirects", () => {
     expect(landed.body).toBe("secret=1");
   }, 30_000);
 
+  it("says it is FrameOS unless the scene says who it is", async () => {
+    // node sends no User-Agent of its own, and GitHub's API refused a frame
+    // rendered here for it (the UX bench, 2026-11-27).
+    const agents: Array<string | undefined> = [];
+    const server = await listen((request, response) => {
+      agents.push(request.headers["user-agent"] as string | undefined);
+      response.end("ok");
+    });
+    try {
+      const url = `http://127.0.0.1:${server.port}/`;
+      expect((await fetchInChild({ method: "GET", url, headers: {} })).status).toBe(200);
+      expect((await fetchInChild({ method: "GET", url, headers: { "user-agent": "scene/2" } })).status).toBe(200);
+      expect(agents[0]).toMatch(/^FrameOS\//);
+      expect(agents[1]).toBe("scene/2");
+    } finally {
+      await server.close();
+    }
+  }, 30_000);
+
   it("keeps them on a redirect within the origin", async () => {
     const landed = await runThrough(307, true);
     expect(landed.headers.authorization).toBe("Bearer scene-key");
