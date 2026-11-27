@@ -421,7 +421,8 @@ and `toggleScreen` switches it to what it is not; the dispatcher keeps which
 (`displayOn`), and the scene hears the `turnOn` or `turnOff` it became. A
 press on a dark screen turns it back on and goes nowhere else: its down, its
 up and whatever gesture it makes never reach the scene, since nobody could
-see what they were pressing. The same holds for a press on the voice chat's
+see what they were pressing. A swipe in from an edge too, whose down was held
+back until it was a swipe: it wakes the screen and opens nothing. The same holds for a press on the voice chat's
 answer drawn across the bottom of an ESP32's panel: the touch driver keeps
 that finger from the dispatcher and the answer comes off
 ([voice-chat.md](voice-chat.md) "Taking the notice off").

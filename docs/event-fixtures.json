@@ -2996,6 +2996,97 @@
     ]
    },
    {
+    "name": "a swipe in from an edge on a dark screen only wakes it",
+    "why": "A swipe's pointerDown is held back until it is a swipe (input_state), so the edgeSwipe is the first the dispatcher hears of that touch: on a dark screen it turns the screen on and opens nothing (it opened the scene list in the dark on the CrowPanel 2.8\", the UX bench, 2026-11-27). The next swipe is the frame's again.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/darkSwipe",
+      "name": "darkSwipe",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": [],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "bottom"
+      },
+      "emit": "sceneSwitcher"
+     }
+    ],
+    "scene": "fixtures/dispatcher/darkSwipe",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "toggleScreen"
+       }
+      ],
+      "trace": [
+       "power off",
+       "run darkSwipe turnOff"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "bottom",
+         "direction": "up",
+         "x": 2,
+         "y": 0,
+         "startX": 2,
+         "startY": 2,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "power on",
+       "run darkSwipe turnOn"
+      ],
+      "current": "fixtures/dispatcher/darkSwipe"
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "bottom",
+         "direction": "up",
+         "x": 2,
+         "y": 0,
+         "startX": 2,
+         "startY": 2,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSwitcher",
+       "select system/sceneSwitcher",
+       "run darkSwipe close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher"
+     }
+    ]
+   },
+   {
     "name": "a scene that re-dispatches its own event is handed back after a burst",
     "why": "One drain delivers at most its budget and leaves the rest queued, so the host's render loop (or its one task) gets a turn. Nothing is dropped.",
     "scenes": [
