@@ -638,6 +638,25 @@ block test_a_third_press_is_waited_for_only_where_a_rule_binds_one:
   state.tick(at(21000), output)
   doAssert output.kinds.filterIt(it.startsWith("button")) == @["button:doublePress", "button:press"], $output.kinds
 
+block test_two_keys_held_together_are_back_only_before_a_hold:
+  # docs/buttons.md: on a frame whose map binds Back by role, a second key
+  # down with the first is the Back key; a second key down after the first
+  # has been held a long press (the voice key, listening) is a key of its own.
+  var state = initInputState(config(800, 480))
+  state.bound = proc (pin: int, label, role, action: string): bool =
+    (role == "back" and pin == -1 and action == "press") or (label == "REFRESH" and action == "longPress")
+  var output: seq[InputDelivery]
+  proc edge(state: var InputState, pin: int, label: string, level, ms: int, output: var seq[InputDelivery]) =
+    discard state.applyNamedInput(evGpio, %*{"pin": pin, "label": label, "level": level}, eoDriver, at(ms), output)
+  state.edge(3, "REFRESH", 0, 0, output)
+  state.edge(4, "LEFT", 0, 1500, output)
+  state.edge(4, "LEFT", 1, 1600, output)
+  doAssert output.kinds == @["gpio:down", "gpio:down", "gpio:up", "button:press"], $output.kinds
+  doAssert output[3].payload["label"].getStr() == "LEFT"
+  output.setLen(0)
+  state.edge(3, "REFRESH", 1, 3000, output)
+  doAssert output.kinds == @["gpio:up", "button:longPress"], $output.kinds
+
 block test_someone_elses_press_is_delivered_as_said:
   # HTTP, the cloud, a schedule or a scene: no line moved, nothing to time.
   var state = initInputState(config(800, 480))

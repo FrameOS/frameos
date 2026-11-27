@@ -379,7 +379,10 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
     var chord = state.chordLabel.len > 0
     if not chord and not twice:
       for other in state.buttons.mitems:
-        if other.down and not other.longPressed and not other.chord:
+        # Held a long press already (a voice key the frame took at the hold):
+        # no pair.
+        if other.down and not other.longPressed and not other.chord and
+            msSince(at, other.downAt) < ButtonLongPressMs:
           if state.chordWanted():
             other.chord = true
             chord = true
