@@ -57,11 +57,12 @@ suite "text layout helpers":
     check layout.fontScaleRatio < 1.0
     # Plenty of room: as asked, nothing shrunk.
     check typesetIntoBounds(opts, 900, 600).fontScaleRatio == 1.0
-    # A word that would not fit even at 40 % of the size (a long URL) breaks
-    # rather than shrink the text out of sight.
-    opts.text = "https://example.com/a-very-long-path/that-goes-on-and-on"
-    let url = typesetIntoBounds(opts, 90, 600)
-    check url.fontScaleRatio >= 0.39
+    # A token that would not fit even at 40 % of the size (compact JSON, a
+    # long URL) breaks at the box as before, at the size asked: shrunk, it
+    # broke anyway, out of sight (the e2e dataJsonTools scene).
+    opts.text = """{"type":"document","root":{"type":"element","name":"frame"}}"""
+    let json = typesetIntoBounds(opts, 90, 5000) # tall: only the width could shrink it
+    check json.fontScaleRatio == 1.0
 
   test "a render scale makes every length larger: the font, the padding, the border and rich text's sizes":
     var opts = makeOptions(overflow = "visible", borderWidth = 2)
