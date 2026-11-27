@@ -736,20 +736,41 @@ async function runBuiltins() {
     return s
   }
   const ev = (name, payload = {}) => () => call('frameos_wasm_event', 'boolean', ['string', 'string'], [name, JSON.stringify(payload)])
-  // boot with the big set
-  await newModule()
-  call('frameos_wasm_init', 'boolean', ['number', 'number', 'string', 'string', 'string'], [W, H, `ux ${PANEL_KEY}`, 'Europe/Brussels', '{}'])
-  if (panel.embedded !== false) call('frameos_wasm_set_embedded', null, ['boolean'], [true])
-  if (panel.canvasBits) call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [panel.canvasBits])
-  call('frameos_wasm_set_frame_page', null, ['boolean'], [true])
-  if (typeof Module._frameos_wasm_note_texts === 'function') call('frameos_wasm_note_texts', null, ['boolean'], [true])
-  call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ eventMap: panel.eventMap?.length ? panel.eventMap : null,
-    pixelFormat: panel.pixelFormat, gpioButtons: panel.gpioButtons || [], rotate: panel.rotate || 0, round: !!panel.round, panel: panel.panel })])
-  const payload = [...set, ...(layoutScene ? [layoutScene] : [])].map(({ __folder, ...x }) => x)
-  call('frameos_wasm_load_scenes', 'number', ['string'], [JSON.stringify(payload)])
-  if (layoutScene) call('frameos_wasm_choose_layout', 'boolean', ['string'], [layoutScene.id])
-  if (panel.memoryBytes) call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [panel.memoryBytes, 0])
-  call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
+  // The runtime with the big set, home on its home scene. Again after a
+  // section the runtime quit in (the wasm model's memory ceiling: a switch
+  // the board makes, the E1004 held sideways from Clock's settings to 2048,
+  // 2026-11-28), so the sections after it still run.
+  const bootBig = async () => {
+    await newModule()
+    call('frameos_wasm_init', 'boolean', ['number', 'number', 'string', 'string', 'string'], [W, H, `ux ${PANEL_KEY}`, 'Europe/Brussels', '{}'])
+    if (panel.embedded !== false) call('frameos_wasm_set_embedded', null, ['boolean'], [true])
+    if (panel.canvasBits) call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [panel.canvasBits])
+    call('frameos_wasm_set_frame_page', null, ['boolean'], [true])
+    if (typeof Module._frameos_wasm_note_texts === 'function') call('frameos_wasm_note_texts', null, ['boolean'], [true])
+    call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ eventMap: panel.eventMap?.length ? panel.eventMap : null,
+      pixelFormat: panel.pixelFormat, gpioButtons: panel.gpioButtons || [], rotate: panel.rotate || 0, round: !!panel.round, panel: panel.panel })])
+    const payload = [...set, ...(layoutScene ? [layoutScene] : [])].map(({ __folder, ...x }) => x)
+    call('frameos_wasm_load_scenes', 'number', ['string'], [JSON.stringify(payload)])
+    if (layoutScene) call('frameos_wasm_choose_layout', 'boolean', ['string'], [layoutScene.id])
+    if (panel.memoryBytes) call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [panel.memoryBytes, 0])
+    call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
+  }
+  // Each section: an exit of the runtime in it is recorded, and the next
+  // starts in a fresh one. builtins.json is written after every step.
+  const section = async (name, fn) => {
+    try {
+      fn()
+    } catch (e) {
+      const why = e && e.name === 'ExitStatus' ? `the runtime quit (${e.message})` : String((e && e.message) || e)
+      results.push({ tag: `${name}-runtime-exit`, error: why, logs: takeLogs().slice(-6) })
+      console.error(`[${PANEL_KEY}] ${name}: ${why}`)
+      saveResults()
+      await bootBig()
+    }
+  }
+  const saveResults = () =>
+    writeFileSync(join(outDir, 'builtins.json'), JSON.stringify({ panel: PANEL_KEY, layout: LAYOUT, W, H, results }, null, 1))
+  await bootBig()
   step('00-home-scene', () => 0)
   const keys = panel.keys || []
   // By the role the scene hears, as the frame hangs (a key that points
@@ -775,29 +796,35 @@ async function runBuiltins() {
     return primary
   }
   // The scene list.
-  step('10-switcher-open', ev('sceneSwitcher'))
-  const primary = walk('11-switcher')
-  if (primary && currentScene() === SWITCHER_ID) step('12-switcher-primary-press', () => key(primary.label, primary.pin, 90))
-  call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
-  step('19-back-home', () => 0)
+  await section('switcher', () => {
+    step('10-switcher-open', ev('sceneSwitcher'))
+    const primary = walk('11-switcher')
+    if (primary && currentScene() === SWITCHER_ID) step('12-switcher-primary-press', () => key(primary.label, primary.pin, 90))
+    call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
+    step('19-back-home', () => 0)
+  })
   // Settings of scenes with many fields.
   for (const folder of ['Clock', 'Weather', 'Form showcase', 'Kitchen sink', 'Browser']) {
     const sc = set.find((x) => x.__folder === folder) || sceneList.find((x) => x.__folder === folder)
     if (!set.includes(sc)) continue
-    call('frameos_wasm_select_scene', 'boolean', ['string'], [sc.id])
-    render()
-    takeLogs()
     const tag = folder.replace(/[^a-zA-Z0-9]+/g, '-')
-    step(`20-settings-${tag}`, ev('sceneSettings'))
-    walk(`21-settings-${tag}`)
-    step(`22-settings-${tag}-close`, ev('sceneSettings'))
+    await section(`settings-${tag}`, () => {
+      call('frameos_wasm_select_scene', 'boolean', ['string'], [sc.id])
+      render()
+      takeLogs()
+      step(`20-settings-${tag}`, ev('sceneSettings'))
+      walk(`21-settings-${tag}`)
+      step(`22-settings-${tag}-close`, ev('sceneSettings'))
+    })
   }
   // The frame page.
-  call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
-  render()
-  step('30-frame-page', ev('sceneSettings', { page: 'frame' }))
-  walk('31-frame-page')
-  writeFileSync(join(outDir, 'builtins.json'), JSON.stringify({ panel: PANEL_KEY, layout: LAYOUT, W, H, results }, null, 1))
+  await section('frame-page', () => {
+    call('frameos_wasm_select_scene', 'boolean', ['string'], [home.id])
+    render()
+    step('30-frame-page', ev('sceneSettings', { page: 'frame' }))
+    walk('31-frame-page')
+  })
+  saveResults()
 }
 const SWITCHER_ID = 'system/sceneSwitcher'
 if (BUILTINS) {

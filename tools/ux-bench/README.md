@@ -71,7 +71,12 @@ python3 tools/ux-bench/sheet.py out.png 300 4 a.png b.png ...                   
 ```
 
 - `--builtins 1`: the scene list with 45 scenes, dragged and walked by the
-  keys; the settings of scenes with many fields; the frame page.
+  keys; the settings of scenes with many fields; the frame page. Each is a
+  section: one the runtime quits in (the model's memory ceiling) is a
+  `<section>-runtime-exit` entry in `builtins.json`, and the next starts in a
+  fresh runtime. The model can be stricter than a board: the E1004 held
+  sideways went from Clock's settings to 2048 on the board (6.9 s, no
+  shortage) where the wasm runtime quit.
 - `--layout <folder>`: every scene wears that layout sample.
 - HTTP goes through the backend renderer's guarded fetch child and is cached
   in `~/.frameos-bench/ux/http-cache`, so a run is repeatable and does not
