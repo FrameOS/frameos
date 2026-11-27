@@ -930,8 +930,11 @@ for (const scene of tested) {
           const em = panel.eventMap || []
           const screenRule = em.find((r) => r.event === 'button' && r.emit === 'toggleScreen' && r.match &&
             (!r.match.label || r.match.label === k.label) && (r.match.action || 'press') === (action === 'press' ? 'press' : 'longPress'))
-          if (screenRule) {
-            try { call('frameos_wasm_event', 'boolean', ['string', 'string'], ['turnOn', '{}']) } catch {}
+          if (screenRule && action === 'press') {
+            // The same key again, as a person would: a command from outside
+            // (frameos_wasm_event turnOn) did not wake it.
+            key(k.label, k.pin ?? -1, ms)
+            render()
           }
           restore()
         }
@@ -964,7 +967,10 @@ for (const scene of tested) {
       // held key in the keys step) are not on the glass any more.
       const ours = (e) => e.scene === scene.id || e.scene.startsWith(scene.id + '#') || (layoutScene && e.scene === layoutScene.id)
       const els = (uiElements() || []).filter((e) => ours(e) && e.box[2] - e.box[0] >= 1 && e.box[3] - e.box[1] >= 1)
-      const takers = els.filter((e) => e.stop ?? e.takes)
+      // What the keys stop at: what takes a press, and a box that scrolls
+      // (with nothing to press showing in it, it is a stop of its own and
+      // pages: docs/jsx-ui.md "Keys").
+      const takers = els.filter((e) => (e.stop ?? e.takes) || e.scrolls)
       // What takes a press but no key ever stops at (a board game's cells
       // with an onPointerDown, a canvas to draw on): a tap's alone.
       const tapOnly = els.filter((e) => e.takes && e.stop === false)
