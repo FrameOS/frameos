@@ -144,6 +144,38 @@
         "target": "ccbf9c4c-4a6f-412b-9e2c-952edba32d6e",
         "targetHandle": "prev",
         "type": "appNodeEdge"
+      },
+      {
+        "id": "agenda-hint-to-agenda",
+        "source": "agenda-hint",
+        "sourceHandle": "fieldOutput",
+        "target": "f354fc8e-9f82-42f9-9de1-c85fe7a3f0e6",
+        "targetHandle": "fieldInput/setupHint",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "agenda-position-to-text",
+        "source": "agenda-position",
+        "sourceHandle": "fieldOutput",
+        "target": "38541584-fef2-4306-ba02-c3d77bd316b4",
+        "targetHandle": "fieldInput/position",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "agenda-valign-to-text",
+        "source": "agenda-valign",
+        "sourceHandle": "fieldOutput",
+        "target": "38541584-fef2-4306-ba02-c3d77bd316b4",
+        "targetHandle": "fieldInput/vAlign",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "split-widths-to-split",
+        "source": "split-widths",
+        "sourceHandle": "fieldOutput",
+        "target": "cf744507-48e4-4b09-87ee-6e1b208a4cf6",
+        "targetHandle": "fieldInput/width_ratios",
+        "type": "codeNodeEdge"
       }
     ],
     "fields": [
@@ -563,7 +595,7 @@
           "y": 440
         },
         "data": {
-          "codeJS": "(() => {\n  // On a round panel both halves go in the square inside the circle, so the\n  // agenda's words are where the glass shows them.\n  if (!context.round) return ''\n  const side = Math.floor((Math.min(context.imageWidth, context.imageHeight) / 2 - 12) * Math.SQRT2)\n  return String(Math.ceil((Math.min(context.imageWidth, context.imageHeight) - side) / 2))\n})()",
+          "codeJS": "(() => {\n  // On a round panel both halves go in the square inside the circle, so the\n  // agenda's words are where the glass shows them (the text keeps its own\n  // padding from the square's corner).\n  if (!context.round) return ''\n  const side = Math.floor((Math.min(context.imageWidth, context.imageHeight) / 2 - 4) * Math.SQRT2)\n  return String(Math.ceil((Math.min(context.imageWidth, context.imageHeight) - side) / 2))\n})()",
           "codeArgs": [],
           "codeOutputs": [
             {
@@ -574,6 +606,86 @@
         },
         "width": 420,
         "height": 220
+      },
+      {
+        "id": "agenda-hint",
+        "type": "code",
+        "position": {
+          "x": 41.09117478171754,
+          "y": 159.6283046931287
+        },
+        "data": {
+          "codeJS": "// No URL yet: the agenda asks for one instead of saying \"No events found\".\nstate.iCalURL ? '' : \"Add the calendar's iCal URL in the scene's settings\"",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "setupHint",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 420,
+        "height": 140
+      },
+      {
+        "id": "agenda-position",
+        "type": "code",
+        "position": {
+          "x": 84.39831238717261,
+          "y": 723.7491829571068
+        },
+        "data": {
+          "codeJS": "// The setup hint in the middle, the agenda from the top left.\nstate.iCalURL ? 'left' : 'center'",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "position",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 420,
+        "height": 140
+      },
+      {
+        "id": "agenda-valign",
+        "type": "code",
+        "position": {
+          "x": 84.39831238717261,
+          "y": 883.7491829571068
+        },
+        "data": {
+          "codeJS": "state.iCalURL ? 'top' : 'middle'",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "vAlign",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 420,
+        "height": 120
+      },
+      {
+        "id": "split-widths",
+        "type": "code",
+        "position": {
+          "x": -760,
+          "y": 680
+        },
+        "data": {
+          "codeJS": "// In a round panel's square the agenda gets the wider share, the photo the rest.\ncontext.round ? '3 2' : ''",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "width_ratios",
+              "type": "string"
+            }
+          ]
+        },
+        "width": 420,
+        "height": 120
       }
     ],
     "settings": {
@@ -649,8 +761,8 @@
         "origin": "repo/apps/text/eventsToAgenda",
         "sources": {
           "app.test.ts": "import { get } from './app'\n\nconst config = {\n  baseFontSize: 24,\n  titleFontSize: 48,\n  textColor: '#445566',\n  timeColor: '#778899',\n  titleColor: '#112233',\n  startWithToday: false,\n}\n\nfunction agenda(events: unknown, extra: Record<string, unknown> = {}, timeZone = 'UTC') {\n  return get(makeApp({ config: { ...config, ...extra, events }, frame: { timeZone } })) as string\n}\n\n// The clock at noon UTC on `day` for the length of `run`.\nfunction onDay<T>(day: string, run: () => T): T {\n  const real = Date.now\n  Date.now = () => Date.parse(`${day}T12:00:00Z`)\n  try {\n    return run()\n  } finally {\n    Date.now = real\n  }\n}\n\ndescribe('eventsToAgenda', () => {\n  it('formats and sorts events across days', () => {\n    const output = agenda([\n      { summary: 'Holiday', startTime: '2024-12-25', endTime: '2024-12-25' },\n      { summary: 'Breakfast', startTime: '2024-12-24T08:00:00', endTime: '2024-12-24T09:00:00' },\n    ])\n    expect(output).toBe(\n      '\\n^(48,#112233)Tuesday, December 24\\n^(24,#445566)\\n' +\n        '^(24,#778899)08:00 - 09:00  ^(24,#445566)Breakfast\\n' +\n        '\\n^(48,#112233)Wednesday, December 25\\n^(24,#445566)\\n' +\n        '^(24,#778899)All day  ^(24,#445566)Holiday\\n',\n    )\n  })\n\n  it('shows until text for multi-day events', () => {\n    const output = agenda([{ summary: 'Conference', startTime: '2024-12-25', endTime: '2024-12-27' }])\n    expect(output).toContain('^(48,#112233)Wednesday, December 25')\n    expect(output).toContain('^(24,#778899)Until Friday, December 27  ^(24,#445566)Conference')\n  })\n\n  it('shows an ongoing multi-day event under today when starting with today', () => {\n    const output = onDay('2024-12-26', () =>\n      agenda([{ summary: 'Retreat', startTime: '2024-12-23', endTime: '2024-12-27' }], { startWithToday: true }),\n    )\n    expect(output).not.toContain('No events today')\n    expect(output.split('^(48,#112233)Thursday, December 26').length).toBe(2)\n    expect(output).toContain('^(24,#778899)Until Friday, December 27  ^(24,#445566)Retreat')\n  })\n\n  it('says when today has nothing before the days that do', () => {\n    const output = onDay('2024-12-26', () =>\n      agenda([{ summary: 'Dinner', startTime: '2024-12-28T19:00:00', endTime: '2024-12-28T21:00:00' }], {\n        startWithToday: true,\n      }),\n    )\n    expect(output).toBe(\n      '^(48,#112233)Thursday, December 26\\n^(24,#445566)\\nNo events today\\n' +\n        '\\n^(48,#112233)Saturday, December 28\\n^(24,#445566)\\n' +\n        '^(24,#778899)19:00 - 21:00  ^(24,#445566)Dinner\\n',\n    )\n  })\n\n  it('titles today over \"No events found\" without events', () => {\n    for (const events of [[], null, undefined, 'nope']) {\n      expect(onDay('2024-12-26', () => agenda(events))).toBe(\n        '^(48,#112233)Thursday, December 26\\n^(24,#445566)\\nNo events found\\n',\n      )\n    }\n  })\n\n  it('writes a font size without trailing zeros', () => {\n    const output = agenda([{ summary: 'A', startTime: '2024-12-25', endTime: '2024-12-25' }], {\n      baseFontSize: 24.5,\n      titleFontSize: 0.1 + 0.2,\n    })\n    expect(output).toContain('^(0.3,#112233)Wednesday, December 25')\n    expect(output).toContain('^(24.5,#778899)All day')\n  })\n\n  it('fits its sizes to the box it is drawn in, in the text node\\'s pixels', () => {\n    const drawn = (box: Record<string, number>, extra: Record<string, unknown> = {}, frame: Record<string, unknown> = {}) =>\n      onDay('2024-12-25', () =>\n        get(makeApp({ config: { ...config, ...extra, events: [] }, frame }), makeContext(box)) as string,\n      )\n    // Half an 800x480 frame: as asked.\n    expect(drawn({ imageWidth: 400, imageHeight: 480 })).toBe(\n      '^(48,#112233)Wednesday,\\nDecember 25\\n^(24,#445566)\\nNo events found\\n',\n    )\n    // A 240 px column: 0.6 of them, the title in two lines at its comma.\n    expect(drawn({ imageWidth: 240, imageHeight: 480 })).toBe(\n      '^(29,#112233)Wednesday,\\nDecember 25\\n^(14,#445566)\\nNo events found\\n',\n    )\n    // A wide one keeps it on one line.\n    expect(drawn({ imageWidth: 800, imageHeight: 480 })).toContain('^(48,#112233)Wednesday, December 25\\n')\n    // At render scale 2 the text node's pixels are half the panel's.\n    expect(drawn({ imageWidth: 800, imageHeight: 960 }, {}, { scale: 2 })).toContain('^(48,#112233)')\n    // A title too big for its column keeps \"Wednesday,\" on one line.\n    expect(drawn({ imageWidth: 400, imageHeight: 480 }, { titleFontSize: 96 })).toContain('^(63,#112233)')\n  })\n\n  it('fails the node on a date it cannot read', () => {\n    expect(() => agenda([{ summary: 'A', startTime: 'soon', endTime: 'later' }])).toThrow('Invalid date: soon')\n  })\n})\n",
-          "app.ts": "// Events to Agenda: calendar events (as the iCal JSON app gives them) as an\n// agenda in basic-caret text, a day title over each day's events.\nconst WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',\n  'October', 'November', 'December']\n\nconst str = (value) => (typeof value === 'string' ? value : '')\n\n// A font size as caret text writes it: 24, 24.5, never 24.000000.\nconst size = (value) => String(Number((Number(value) || 0).toFixed(6)))\n\n// \"Tuesday, December 24\" for \"2024-12-24\": the date as written, in no zone.\nfunction dayTitle(day) {\n  const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(day)\n  if (!match) throw new Error(`Invalid date: ${day}`)\n  const [year, month, date] = [Number(match[1]), Number(match[2]), Number(match[3])]\n  const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay()\n  return `${WEEKDAYS[weekday]}, ${MONTHS[month - 1]} ${date}`\n}\n\n// Today as YYYY-MM-DD in `zone`. JavaScript's clock is in the frame's zone,\n// as the Nim runtime's is, and knows no other, so a calendar in a third zone\n// gets the frame's day: the two differ only between their midnights.\nfunction today(zone) {\n  const now = new Date(Date.now())\n  const utc = zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT'\n  const parts = utc\n    ? [now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()]\n    : [now.getFullYear(), now.getMonth() + 1, now.getDate()]\n  return parts.map((part, i) => String(part).padStart(i === 0 ? 4 : 2, '0')).join('-')\n}\n\n// The font sizes are for a box 400 px wide and 480 high, half an 800x480\n// frame: the box the text is drawn in (a split's cell) gets the same share of\n// them, in the text node's pixels (the panel's over the render scale), and a\n// day title's longest word (\"Wednesday,\") always fits its width, so no word\n// breaks in two on a narrow panel. A title too long for one line breaks after\n// its weekday (\"Friday,\", \"November 27\"), not before the date's number.\n// Without a box the sizes are as asked.\nfunction fitted(app, context) {\n  const c = app.config\n  const scale = Number(app.frame?.scale) > 0 ? Number(app.frame.scale) : 1\n  const w = Number(context?.imageWidth) / scale\n  const h = Number(context?.imageHeight) / scale\n  if (!(w > 0 && h > 0)) return { titleSize: c.titleFontSize, baseSize: c.baseFontSize, oneLine: () => true }\n  const share = Math.min(w / 400, h / 480)\n  const widest = (w - 20) / (10 * 0.6)\n  const titleSize = Math.round(Math.max(12, Math.min(c.titleFontSize * share, widest)))\n  return {\n    titleSize,\n    baseSize: Math.round(Math.max(10, c.baseFontSize * share)),\n    oneLine: (text) => text.length * titleSize * 0.58 <= w - 20,\n  }\n}\n\nexport function get(app, context) {\n  const c = app.config\n  const { titleSize, baseSize, oneLine } = fitted(app, context)\n  const title = `^(${size(titleSize)},${c.titleColor})`\n  const normal = `^(${size(baseSize)},${c.textColor})`\n  const time = `^(${size(baseSize)},${c.timeColor})`\n  const events = c.events\n  const noEvents = !Array.isArray(events) || events.length === 0\n  // The first event that names its zone, else the frame's.\n  const zone = (noEvents ? '' : str(events.find((event) => str(event?.timezone))?.timezone)) ||\n    app.frame.timeZone || 'UTC'\n  const h1 = (text) => `${title}${oneLine(text) ? text : text.replace(', ', ',\\n')}\\n${normal}\\n`\n\n  let result = ''\n  let currentDay = ''\n  if (c.startWithToday || noEvents) {\n    currentDay = today(zone)\n    result += h1(dayTitle(currentDay))\n  }\n  if (noEvents) return result + 'No events found\\n'\n\n  const sorted = [...events].sort((a, b) => {\n    const x = str(a?.startTime)\n    const y = str(b?.startTime)\n    return x < y ? -1 : x > y ? 1 : 0\n  })\n  let hasAny = false\n  for (const event of sorted) {\n    const summary = str(event?.summary)\n    const startDay = str(event?.startTime)\n    const endDay = str(event?.endTime)\n    const withTime = startDay.includes('T')\n    const startDate = startDay.split('T')[0]\n    const endDate = endDay.split('T')[0]\n    let displayDay = startDate\n    // A day that is on now shows under today.\n    if (c.startWithToday && currentDay && startDate <= currentDay && currentDay <= endDate) displayDay = currentDay\n\n    if (displayDay !== currentDay) {\n      if (!hasAny && c.startWithToday) result += 'No events today\\n'\n      result += '\\n' + h1(dayTitle(displayDay))\n      currentDay = displayDay\n    }\n    hasAny = true\n\n    if (withTime) {\n      const startTime = startDay.split('T')[1].slice(0, 5)\n      const endTime = endDay.includes('T') ? endDay.split('T')[1].slice(0, 5) : ''\n      result += `${time}${startTime} - ${endTime}  ${normal}${summary}\\n`\n    } else if (startDay === currentDay && endDay === currentDay) {\n      result += `${time}All day  ${normal}${summary}\\n`\n    } else {\n      result += `${time}Until ${dayTitle(endDay)}  ${normal}${summary}\\n`\n    }\n  }\n  return result\n}\n",
-          "config.json": "{\n  \"name\": \"Events to Agenda\",\n  \"description\": \"Convert events to a basic-caret formatted agenda string\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"events\",\n      \"type\": \"json\",\n      \"required\": true,\n      \"label\": \"Events\"\n    },\n    {\n      \"name\": \"baseFontSize\",\n      \"type\": \"float\",\n      \"value\": \"24\",\n      \"required\": true,\n      \"label\": \"Base font size\"\n    },\n    {\n      \"name\": \"titleFontSize\",\n      \"type\": \"float\",\n      \"value\": \"48\",\n      \"required\": true,\n      \"label\": \"Title font size\"\n    },\n    {\n      \"name\": \"titleColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Day title color\"\n    },\n    {\n      \"name\": \"textColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Base text color\"\n    },\n    {\n      \"name\": \"timeColor\",\n      \"type\": \"color\",\n      \"value\": \"#FF0000\",\n      \"required\": true,\n      \"label\": \"Time color\"\n    },\n    {\n      \"name\": \"startWithToday\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": true,\n      \"label\": \"Always start with today's date\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"result\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
+          "app.ts": "// Events to Agenda: calendar events (as the iCal JSON app gives them) as an\n// agenda in basic-caret text, a day title over each day's events.\nconst WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',\n  'October', 'November', 'December']\n\nconst str = (value) => (typeof value === 'string' ? value : '')\n\n// A font size as caret text writes it: 24, 24.5, never 24.000000.\nconst size = (value) => String(Number((Number(value) || 0).toFixed(6)))\n\n// \"Tuesday, December 24\" for \"2024-12-24\": the date as written, in no zone.\nfunction dayTitle(day) {\n  const match = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(day)\n  if (!match) throw new Error(`Invalid date: ${day}`)\n  const [year, month, date] = [Number(match[1]), Number(match[2]), Number(match[3])]\n  const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay()\n  return `${WEEKDAYS[weekday]}, ${MONTHS[month - 1]} ${date}`\n}\n\n// Today as YYYY-MM-DD in `zone`. JavaScript's clock is in the frame's zone,\n// as the Nim runtime's is, and knows no other, so a calendar in a third zone\n// gets the frame's day: the two differ only between their midnights.\nfunction today(zone) {\n  const now = new Date(Date.now())\n  const utc = zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT'\n  const parts = utc\n    ? [now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()]\n    : [now.getFullYear(), now.getMonth() + 1, now.getDate()]\n  return parts.map((part, i) => String(part).padStart(i === 0 ? 4 : 2, '0')).join('-')\n}\n\n// The font sizes are for a box 400 px wide and 480 high, half an 800x480\n// frame: the box the text is drawn in (a split's cell) gets the same share of\n// them, in the text node's pixels (the panel's over the render scale), and a\n// day title's longest word (\"Wednesday,\") always fits its width, so no word\n// breaks in two on a narrow panel. A title too long for one line breaks after\n// its weekday (\"Friday,\", \"November 27\"), not before the date's number.\n// Without a box the sizes are as asked.\n// The setup hint's size: about a thirteenth of the box it is drawn in, 14 to\n// 80 px.\nfunction hintSize(app, context) {\n  const scale = Number(app.frame?.scale) > 0 ? Number(app.frame.scale) : 1\n  const w = Number(context?.imageWidth) / scale\n  const h = Number(context?.imageHeight) / scale\n  if (!(w > 0 && h > 0)) return Number(app.config.titleFontSize) || 28\n  return Math.round(Math.max(14, Math.min(80, Math.min(w, h * 1.2) / 13)))\n}\n\nfunction fitted(app, context) {\n  const c = app.config\n  const scale = Number(app.frame?.scale) > 0 ? Number(app.frame.scale) : 1\n  const w = Number(context?.imageWidth) / scale\n  const h = Number(context?.imageHeight) / scale\n  if (!(w > 0 && h > 0)) return { titleSize: c.titleFontSize, baseSize: c.baseFontSize, oneLine: () => true }\n  const share = Math.min(w / 400, h / 480)\n  const widest = (w - 20) / (10 * 0.6)\n  const titleSize = Math.round(Math.max(12, Math.min(c.titleFontSize * share, widest)))\n  return {\n    titleSize,\n    baseSize: Math.round(Math.max(10, c.baseFontSize * share)),\n    oneLine: (text) => text.length * titleSize * 0.58 <= w - 20,\n  }\n}\n\nexport function get(app, context) {\n  const c = app.config\n  const { titleSize, baseSize, oneLine } = fitted(app, context)\n  const title = `^(${size(titleSize)},${c.titleColor})`\n  const normal = `^(${size(baseSize)},${c.textColor})`\n  const time = `^(${size(baseSize)},${c.timeColor})`\n  const events = c.events\n  const noEvents = !Array.isArray(events) || events.length === 0\n  // The first event that names its zone, else the frame's.\n  const zone = (noEvents ? '' : str(events.find((event) => str(event?.timezone))?.timezone)) ||\n    app.frame.timeZone || 'UTC'\n  const h1 = (text) => `${title}${oneLine(text) ? text : text.replace(', ', ',\\n')}\\n${normal}\\n`\n\n  let result = ''\n  let currentDay = ''\n  // Nothing to show because nothing is set up (the scene passes the hint\n  // while its URL is empty): the hint alone, larger, instead of a day that\n  // says \"No events found\".\n  const hint = str(c.setupHint).trim()\n  if (noEvents && hint) return `^(${size(hintSize(app, context))},${c.textColor})${hint}\\n`\n  if (c.startWithToday || noEvents) {\n    currentDay = today(zone)\n    result += h1(dayTitle(currentDay))\n  }\n  if (noEvents) return result + 'No events found\\n'\n\n  const sorted = [...events].sort((a, b) => {\n    const x = str(a?.startTime)\n    const y = str(b?.startTime)\n    return x < y ? -1 : x > y ? 1 : 0\n  })\n  let hasAny = false\n  for (const event of sorted) {\n    const summary = str(event?.summary)\n    const startDay = str(event?.startTime)\n    const endDay = str(event?.endTime)\n    const withTime = startDay.includes('T')\n    const startDate = startDay.split('T')[0]\n    const endDate = endDay.split('T')[0]\n    let displayDay = startDate\n    // A day that is on now shows under today.\n    if (c.startWithToday && currentDay && startDate <= currentDay && currentDay <= endDate) displayDay = currentDay\n\n    if (displayDay !== currentDay) {\n      if (!hasAny && c.startWithToday) result += 'No events today\\n'\n      result += '\\n' + h1(dayTitle(displayDay))\n      currentDay = displayDay\n    }\n    hasAny = true\n\n    if (withTime) {\n      const startTime = startDay.split('T')[1].slice(0, 5)\n      const endTime = endDay.includes('T') ? endDay.split('T')[1].slice(0, 5) : ''\n      result += `${time}${startTime} - ${endTime}  ${normal}${summary}\\n`\n    } else if (startDay === currentDay && endDay === currentDay) {\n      result += `${time}All day  ${normal}${summary}\\n`\n    } else {\n      result += `${time}Until ${dayTitle(endDay)}  ${normal}${summary}\\n`\n    }\n  }\n  return result\n}\n",
+          "config.json": "{\n  \"name\": \"Events to Agenda\",\n  \"description\": \"Convert events to a basic-caret formatted agenda string\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"events\",\n      \"type\": \"json\",\n      \"required\": true,\n      \"label\": \"Events\"\n    },\n    {\n      \"name\": \"baseFontSize\",\n      \"type\": \"float\",\n      \"value\": \"24\",\n      \"required\": true,\n      \"label\": \"Base font size\"\n    },\n    {\n      \"name\": \"titleFontSize\",\n      \"type\": \"float\",\n      \"value\": \"48\",\n      \"required\": true,\n      \"label\": \"Title font size\"\n    },\n    {\n      \"name\": \"titleColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Day title color\"\n    },\n    {\n      \"name\": \"textColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Base text color\"\n    },\n    {\n      \"name\": \"timeColor\",\n      \"type\": \"color\",\n      \"value\": \"#FF0000\",\n      \"required\": true,\n      \"label\": \"Time color\"\n    },\n    {\n      \"name\": \"startWithToday\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": true,\n      \"label\": \"Always start with today's date\"\n    },\n    {\n      \"name\": \"setupHint\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Shown instead, while there are no events\",\n      \"hint\": \"What to say where nothing came in because nothing is set up yet (the iCal URL): drawn alone, larger.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"result\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
         }
       },
       "frameOSGallery": {
