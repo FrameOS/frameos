@@ -26,8 +26,7 @@ visitor's own browser.
   through the `frameos-wasm` package. It runs `windowed` (scenes side by side,
   `docs/scene-layouts.md` "Windows"), with the `framePage` (the Control
   Panel is the frame's own page, `docs/scene-settings.md`; its Restart and
-  Reboot start the runtime again, a new scale is kept across them; it starts
-  at 1, since the window's CSS pixels are no panel's) and the Windows 98 layout chosen for every
+  Reboot start the runtime again, a new scale is kept across them) and the Windows 98 layout chosen for every
   scene (`chooseLayout`) once it is ready. The visitor can choose another
   layout in the Control Panel; a reload starts in Windows 98 again.
 - **The scenes**: `scripts/build-playground-scenes.mjs` (predev / prebuild)

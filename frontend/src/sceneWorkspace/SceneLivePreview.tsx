@@ -139,6 +139,10 @@ type SceneLivePreviewPanelProps = {
   initialDevice?: string | undefined;
   /** The Memory limit's board to start on (`esp32`). */
   initialMemoryDevice?: string | undefined;
+  /** The frame's panel diagonal in inches (renderScale.ts `panelInches` of its
+   * device), 0 or undefined when unknown: the automatic render scale goes by
+   * its density, as on the frame. A device from the Device menu brings its own. */
+  panelInches?: number | undefined;
   /** False: the panel neither reads nor writes this browser's remembered
    * preview settings (Dither, Auto apply, the device, Fit photos), so it
    * starts the same for everyone — a workspace embedded in another site's
@@ -359,6 +363,7 @@ export function SceneLivePreviewPanel({
   onViewportChange,
   initialDevice,
   initialMemoryDevice,
+  panelInches: framePanelInches,
   rememberSettings = true,
 }: SceneLivePreviewPanelProps) {
   const [error, setError] = useState<string | null>(null);
@@ -1003,6 +1008,7 @@ export function SceneLivePreviewPanel({
         framePage: true,
         renderScale: frameRenderScaleRef.current,
         round: roundRef.current,
+        panelInches: panelInchesRef.current,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,
         deviceLimits: deviceLimitsFor(
@@ -1310,6 +1316,11 @@ export function SceneLivePreviewPanel({
   // A round panel at its size: drawn round, and the runtime told so.
   const round = Boolean(panelDevice?.round) && shownDeviceKey !== "";
   const roundRef = useRef(round);
+  // The panel's size for the automatic render scale: the Device menu's at its
+  // size, else the frame's. Read when the runtime starts (a device changes the
+  // size, which starts it again).
+  const panelInchesRef = useRef(0);
+  panelInchesRef.current = (shownDeviceKey !== "" ? panelDevice?.inches : framePanelInches) ?? 0;
   useEffect(() => {
     if (roundRef.current !== round) {
       roundRef.current = round;

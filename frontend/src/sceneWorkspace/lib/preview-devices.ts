@@ -17,22 +17,25 @@ export type PreviewDevice = {
   /** Only the circle inside the panel shows: the preview is drawn round and
    * the runtime told so (`context.round`, docs/scene-guide.md "Round panels"). */
   round?: boolean;
+  /** The panel's diagonal where the frame's runtime knows it (its driver's name
+   * says it): the automatic render scale goes by its density, as on the frame. */
+  inches?: number;
 };
 
 export const previewDevices: PreviewDevice[] = [
-  { group: "E-paper", height: 480, key: "reterminal-e1001", label: 'Seeed reTerminal E1001, 7.5" black and white', panel: "blackWhite", width: 800 },
-  { group: "E-paper", height: 480, key: "reterminal-e1002", label: 'Seeed reTerminal E1002, 7.3" Spectra 6', panel: "spectra6", width: 800 },
-  { group: "E-paper", height: 1404, key: "reterminal-e1003", label: 'Seeed reTerminal E1003, 10.3" 16 greys', panel: "sixteenGray", width: 1872 },
-  { group: "E-paper", height: 1200, key: "reterminal-e1004", label: 'Seeed reTerminal E1004, 13.3" Spectra 6', panel: "spectra6", width: 1600 },
-  { group: "E-paper", height: 480, key: "reterminal-sticky", label: 'Seeed reTerminal Sticky, 3.97" 4 greys', panel: "fourGray", width: 800 },
+  { group: "E-paper", height: 480, inches: 7.5, key: "reterminal-e1001", label: 'Seeed reTerminal E1001, 7.5" black and white', panel: "blackWhite", width: 800 },
+  { group: "E-paper", height: 480, inches: 7.3, key: "reterminal-e1002", label: 'Seeed reTerminal E1002, 7.3" Spectra 6', panel: "spectra6", width: 800 },
+  { group: "E-paper", height: 1404, inches: 10.3, key: "reterminal-e1003", label: 'Seeed reTerminal E1003, 10.3" 16 greys', panel: "sixteenGray", width: 1872 },
+  { group: "E-paper", height: 1200, inches: 13.3, key: "reterminal-e1004", label: 'Seeed reTerminal E1004, 13.3" Spectra 6', panel: "spectra6", width: 1600 },
+  { group: "E-paper", height: 480, inches: 3.97, key: "reterminal-sticky", label: 'Seeed reTerminal Sticky, 3.97" 4 greys', panel: "fourGray", width: 800 },
   { group: "E-paper", height: 480, key: "waveshare-photopainter", label: 'Waveshare PhotoPainter, 7.3" Spectra 6', panel: "spectra6", width: 800 },
-  { group: "E-paper", height: 1200, key: "waveshare-13in3e6", label: 'Waveshare 13.3" Spectra 6', panel: "spectra6", width: 1600 },
-  { group: "E-paper", height: 480, key: "waveshare-7in5", label: 'Waveshare 7.5" black and white', panel: "blackWhite", width: 800 },
+  { group: "E-paper", height: 1200, inches: 13.3, key: "waveshare-13in3e6", label: 'Waveshare 13.3" Spectra 6', panel: "spectra6", width: 1600 },
+  { group: "E-paper", height: 480, inches: 7.5, key: "waveshare-7in5", label: 'Waveshare 7.5" black and white', panel: "blackWhite", width: 800 },
   { group: "E-paper", height: 272, key: "crowpanel-5in79", label: 'Elecrow CrowPanel 5.79" 4 greys', panel: "fourGray", width: 792 },
   { group: "E-paper", height: 300, key: "crowpanel-epd-4in2", label: 'Elecrow CrowPanel 4.2" black and white', panel: "blackWhite", width: 400 },
   { group: "E-paper", height: 448, key: "inky-impression-5in7", label: 'Pimoroni Inky Impression 5.7" 7 colour', panel: "sevenColor", width: 600 },
   { group: "E-paper", height: 480, key: "inky-impression-7in3", label: 'Pimoroni Inky Impression 7.3" Spectra 6', panel: "spectra6", width: 800 },
-  { group: "E-paper", height: 1200, key: "inky-impression-13in3", label: 'Pimoroni Inky Impression 13.3" Spectra 6', panel: "spectra6", width: 1600 },
+  { group: "E-paper", height: 1200, inches: 13.3, key: "inky-impression-13in3", label: 'Pimoroni Inky Impression 13.3" Spectra 6', panel: "spectra6", width: 1600 },
   { group: "E-paper", height: 480, key: "inky-frame-7in3", label: 'Pimoroni Inky Frame 7.3" Spectra 6', panel: "spectra6", width: 800 },
   { group: "Screens", height: 480, key: "sensecap-indicator", label: 'Seeed SenseCAP Indicator, 4" LCD', panel: null, width: 480 },
   { group: "Screens", height: 480, key: "hyperpixel-4", label: "Pimoroni HyperPixel 4.0", panel: null, width: 800 },

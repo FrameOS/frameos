@@ -14,10 +14,13 @@ import type { StateField } from '../types'
  *   a control panel can change it), else
  * - the scene's `settings.renderScale`, else
  * - the frame's (`render_scale` on both control planes, frame.json
- *   `renderScale`), where 0 is automatic: the largest of 1, 1.25, 1.5, 2,
- *   2.5, 3 and 4 that leaves a layout 640 px on the panel's shorter edge
- *   (1080 on HDMI, a screen seen from across a room), 1 where there is no
- *   panel.
+ *   `renderScale`), where 0 is automatic, a whole number: by the panel's
+ *   density, its pixels per inch over 130 (the 7" to 7.5" 800x480 panels
+ *   scenes are made on) to the nearest whole number, never below 1 and never
+ *   leaving a layout under 576 px on the shorter edge; 1 for a panel of
+ *   unknown size. HDMI is the largest whole number that leaves 1080 px, and
+ *   no panel (web_only) is 1. Whole numbers keep lines and box edges on
+ *   pixels; a fraction stays the owner's to set.
  *
  * The runtime applies the same rules (`frameos/src/frameos/render_scale.nim`);
  * keep the two in step. docs/jsx-ui.md "Scale" is the spec.
@@ -29,11 +32,22 @@ export const MAX_RENDER_SCALE = 4
 const HDMI_DEVICE = 'framebuffer'
 /** A frame that draws for nobody: no panel to fit. */
 const NO_PANEL = 'web_only'
-/** The layout's shorter edge automatic leaves at least: on a panel, and on HDMI (seen from across a room). */
-const PANEL_ROOM = 640
+/** The density a scene's pixels are drawn at as made: the 7" to 7.5" 800x480 panels. */
+const REFERENCE_PPI = 130
+/** The shortest edge a layout is left: a smaller screen is seen closer, and a scene has to fit. */
+const MIN_LAYOUT_EDGE = 576
+/** HDMI: the layout's shorter edge automatic leaves at least. */
 const HDMI_ROOM = 1080
-/** What the automatic scale picks from: the steps from 1 up. */
-const AUTO_STEPS: readonly number[] = [1, 1.25, 1.5, 2, 2.5, 3, 4]
+/**
+ * Panels whose name does not say their size, with a shorter edge of 720 px or
+ * more (no other can scale). The runtime's `NamedPanelInches`
+ * (frameos/src/frameos/render_scale.nim); docs/render-scale-fixtures.json pins both.
+ */
+const NAMED_PANEL_INCHES: Readonly<Record<string, number>> = {
+  'pimoroni.inky_impression_13': 13.3,
+  'pimoroni.hyperpixel4sq': 3.95,
+  'pimoroni.hyperpixel4sq_touch': 3.95,
+}
 /** The scales the settings offer; any other number up to 4 still works. */
 /** Below 1 a layout gets more room than the panel has: everything drawn smaller. */
 export const RENDER_SCALE_STEPS: readonly number[] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4]
@@ -43,23 +57,39 @@ export const RENDER_SCALE_HELP =
   "so a scene made for a small screen fills a big one. The frame's own pages and text follow it too."
 export const SCENE_RENDER_SCALE_HELP = "Overrides the frame's scale for this scene."
 
+/** The panel's diagonal in inches from its driver's name ("EPD_10in3" 10.3, "EPD_2in13_V4" 2.13); 0 when unknown. */
+export function panelInches(device?: string | null): number {
+  if (!device) {
+    return 0
+  }
+  const named = NAMED_PANEL_INCHES[device]
+  if (named !== undefined) {
+    return named
+  }
+  const match = /(\d+)in(\d+)/.exec(device)
+  return match ? Number(`${match[1]}.${match[2]}`) : 0
+}
+
 /**
- * The automatic scale: the largest step that leaves a layout 640 px on the
- * panel's shorter edge (1080 on HDMI); 1 without a panel (no device, or web_only).
+ * The automatic scale, a whole number: by the panel's density when its size is
+ * known (from its driver's name), by the room it leaves on HDMI, else 1.
  */
 export function autoRenderScale(width: number, height: number, device?: string | null): number {
-  if (!device || device === NO_PANEL) {
+  const edge = Math.min(width, height)
+  if (!device || device === NO_PANEL || !(edge > 0)) {
     return 1
   }
-  const room = device === HDMI_DEVICE ? HDMI_ROOM : PANEL_ROOM
-  const edge = Math.min(width, height)
-  let scale = 1
-  for (const step of AUTO_STEPS) {
-    if (edge >= room * step) {
-      scale = step
-    }
+  if (device === HDMI_DEVICE) {
+    return Math.min(MAX_RENDER_SCALE, Math.max(1, Math.floor(edge / HDMI_ROOM)))
   }
-  return scale
+  const inches = panelInches(device)
+  if (!(inches > 0)) {
+    return 1
+  }
+  const ppi = Math.sqrt(width * width + height * height) / inches
+  const dense = Math.floor(ppi / REFERENCE_PPI + 0.5)
+  const fits = Math.floor(edge / MIN_LAYOUT_EDGE)
+  return Math.min(MAX_RENDER_SCALE, Math.max(1, Math.min(dense, fits)))
 }
 
 /** A scale in (0, 4], or 0 for anything else (0 itself means "not set"). Lenient: forms hold numbers as strings. */

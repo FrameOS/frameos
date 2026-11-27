@@ -405,11 +405,14 @@ block forward_and_back_move_a_screenful:
 block e_paper_scrolls_where_the_finger_lifts:
   # The reTerminal E1003 (1872x1404, sixteen greys): no render while the
   # finger moves (each is seconds of refresh), one where it lifts, and a tap
-  # after that opens the tile it lands on. At its automatic scale of 2 its
-  # 10" screen holds fifty tiles and more (GridUnitMax): four hundred scroll.
+  # after that opens the tile it lands on. At its automatic scale of 2 (its
+  # display says a 10.3" panel: 227 ppi) its screen holds fifty tiles and more
+  # (GridUnitMax): four hundred scroll.
   listed = entries(400)
   sent.setLen(0)
-  let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
+  let e1003 = config(1872, 1404, "embedded")
+  e1003.panelInches = 10.3
+  let scene = newSwitcher(e1003, opener = "scene-1")
   discard scene.draw(newImageGray8(1872, 1404))
   doAssert scene.paper and scene.slow
   let (roomW, roomH) = uiRoom(scene.frameConfig, 1872, 1404)

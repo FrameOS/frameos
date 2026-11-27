@@ -162,12 +162,14 @@ export type RenderPanelPack = {
  * SceneRenderOptions.frame: what `frameos_wasm_set_frame` takes (every key
  * optional). `pixelFormat` is the panel's `fos_pixel_format_t`, which the
  * automatic fit aims at; `rotate` the frame's, by which a relayed touch's
- * panel position becomes the scene's point.
+ * panel position becomes the scene's point; `panel` the panel's driver name
+ * ("EPD_10in3"), whose size the automatic render scale goes by.
  */
 export type RenderFrameConfig = {
   colors?: unknown;
   eventMap?: unknown;
   palette?: unknown;
+  panel?: string;
   pixelFormat?: number;
   rotate?: number;
 };

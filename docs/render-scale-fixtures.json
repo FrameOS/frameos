@@ -1,0 +1,263 @@
+{
+  "about": "The automatic render scale (frameos/src/frameos/render_scale.nim autoRenderScale, frontend/src/utils/renderScale.ts autoRenderScale) and a panel's size from its name (panelInches). Both test suites replay it: frameos/src/frameos/tests/test_render_scale.nim and cloud/apps/auth-web/src/test/shared-spa/render-scale.test.ts. docs/jsx-ui.md \"Scale\" is the spec.",
+  "automatic": [
+    {
+      "width": 800,
+      "height": 480,
+      "device": "waveshare.EPD_7in3e",
+      "scale": 1,
+      "why": "7.3\" 800x480 e-paper (reTerminal E1002): the density scenes are made at"
+    },
+    {
+      "width": 800,
+      "height": 480,
+      "device": "waveshare.EPD_7in5_V2",
+      "scale": 1,
+      "why": "7.5\" 800x480"
+    },
+    {
+      "width": 480,
+      "height": 800,
+      "device": "waveshare.EPD_7in5_V2",
+      "scale": 1,
+      "why": "the same, hung tall"
+    },
+    {
+      "width": 1872,
+      "height": 1404,
+      "device": "waveshare.EPD_10in3",
+      "scale": 2,
+      "why": "10.3\" 1872x1404 (reTerminal E1003): 227 ppi, 1.75 rounded to a whole number"
+    },
+    {
+      "width": 1872,
+      "height": 1404,
+      "device": "EPD_10in3",
+      "scale": 2,
+      "why": "the same as an ESP32 names it"
+    },
+    {
+      "width": 1404,
+      "height": 1872,
+      "device": "EPD_10in3",
+      "scale": 2,
+      "why": "the same, hung tall"
+    },
+    {
+      "width": 1200,
+      "height": 1600,
+      "device": "waveshare.EPD_13in3e",
+      "scale": 1,
+      "why": "13.3\" 1200x1600 (reTerminal E1004): 150 ppi, 1.16"
+    },
+    {
+      "width": 1600,
+      "height": 1200,
+      "device": "pimoroni.inky_impression_13",
+      "scale": 1,
+      "why": "13.3\" Inky Impression, named without its size: 150 ppi"
+    },
+    {
+      "width": 1200,
+      "height": 825,
+      "device": "waveshare.EPD_9in7",
+      "scale": 1,
+      "why": "9.7\" 1200x825: 150 ppi"
+    },
+    {
+      "width": 1304,
+      "height": 984,
+      "device": "waveshare.EPD_12in48b",
+      "scale": 1,
+      "why": "12.48\" 1304x984: 131 ppi"
+    },
+    {
+      "width": 1448,
+      "height": 1072,
+      "device": "waveshare.EPD_6in",
+      "scale": 1,
+      "why": "a name with no number after `in` says no size"
+    },
+    {
+      "width": 800,
+      "height": 480,
+      "device": "waveshare.EPD_3in97",
+      "scale": 1,
+      "why": "3.97\" 800x480 (reTerminal Sticky): 235 ppi, but no room to scale"
+    },
+    {
+      "width": 720,
+      "height": 720,
+      "device": "pimoroni.hyperpixel4sq_touch",
+      "scale": 1,
+      "why": "4\" 720x720: 258 ppi, but a layout of 576 px or more leaves no room for 2"
+    },
+    {
+      "width": 800,
+      "height": 480,
+      "device": "pimoroni.hyperpixel4",
+      "scale": 1,
+      "why": "4\" 800x480: unknown size and no room"
+    },
+    {
+      "width": 480,
+      "height": 480,
+      "device": "lcd.st7701s_480x480",
+      "scale": 1,
+      "why": "an LCD of unknown size"
+    },
+    {
+      "width": 1872,
+      "height": 1404,
+      "device": "embedded",
+      "scale": 1,
+      "why": "an ESP32 that did not say its panel"
+    },
+    {
+      "width": 1872,
+      "height": 1404,
+      "device": "wasm",
+      "scale": 1,
+      "why": "a render that was not told the panel (the playground)"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "device": "framebuffer",
+      "scale": 1,
+      "why": "HDMI 1080p: seen from across a room"
+    },
+    {
+      "width": 2560,
+      "height": 1440,
+      "device": "framebuffer",
+      "scale": 1,
+      "why": "HDMI 1440p: not 1080 px at 2"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "device": "framebuffer",
+      "scale": 2,
+      "why": "HDMI 4K"
+    },
+    {
+      "width": 2160,
+      "height": 3840,
+      "device": "framebuffer",
+      "scale": 2,
+      "why": "HDMI 4K hung tall"
+    },
+    {
+      "width": 720,
+      "height": 1280,
+      "device": "framebuffer",
+      "scale": 1,
+      "why": "a DSI screen on the framebuffer: HDMI's rule"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "device": "web_only",
+      "scale": 1,
+      "why": "no panel"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "device": "",
+      "scale": 1,
+      "why": "no device"
+    },
+    {
+      "width": 0,
+      "height": 0,
+      "device": "waveshare.EPD_10in3",
+      "scale": 1,
+      "why": "no size"
+    },
+    {
+      "width": 1872,
+      "height": 1404,
+      "device": "waveshare.EPD_7in8",
+      "scale": 2,
+      "why": "7.8\" 1872x1404: 300 ppi, 2.3"
+    },
+    {
+      "width": 5120,
+      "height": 2880,
+      "device": "framebuffer",
+      "scale": 2,
+      "why": "HDMI 5K: whole numbers only"
+    },
+    {
+      "width": 7680,
+      "height": 4320,
+      "device": "framebuffer",
+      "scale": 4,
+      "why": "HDMI 8K"
+    }
+  ],
+  "panelInches": [
+    {
+      "device": "waveshare.EPD_10in3",
+      "inches": 10.3
+    },
+    {
+      "device": "EPD_10in3",
+      "inches": 10.3
+    },
+    {
+      "device": "waveshare.EPD_2in13_V4",
+      "inches": 2.13
+    },
+    {
+      "device": "waveshare.EPD_13in3e",
+      "inches": 13.3
+    },
+    {
+      "device": "waveshare.EPD_7in5_V2",
+      "inches": 7.5
+    },
+    {
+      "device": "waveshare.EPD_4in01f",
+      "inches": 4.01
+    },
+    {
+      "device": "waveshare.EPD_12in48b",
+      "inches": 12.48
+    },
+    {
+      "device": "pimoroni.inky_impression_13",
+      "inches": 13.3
+    },
+    {
+      "device": "pimoroni.hyperpixel4sq",
+      "inches": 3.95
+    },
+    {
+      "device": "pimoroni.hyperpixel4sq_touch",
+      "inches": 3.95
+    },
+    {
+      "device": "pimoroni.inky_impression_7",
+      "inches": 0
+    },
+    {
+      "device": "lcd.st7701s_480x480",
+      "inches": 0
+    },
+    {
+      "device": "framebuffer",
+      "inches": 0
+    },
+    {
+      "device": "embedded",
+      "inches": 0
+    },
+    {
+      "device": "",
+      "inches": 0
+    }
+  ]
+}

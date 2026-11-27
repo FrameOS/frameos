@@ -21,11 +21,21 @@
 ##   (so a control panel or frameos.setState can change it), else
 ## - the scene's `settings.renderScale`, else
 ## - the frame's (frame.json `renderScale`, the control planes'
-##   `render_scale`), where 0 is automatic: the largest of 1, 1.25, 1.5, 2,
-##   2.5, 3 and 4 that leaves a layout 640 px on the panel's shorter edge
-##   (1080 on HDMI, a screen seen from across a room), 1 where there is no
-##   panel. An 800x480 or 1024x600 panel stays at 1, the 1872x1404 of a
-##   10.3" e-paper is 2, a 4K screen on HDMI 2.
+##   `render_scale`), where 0 is automatic: by the panel's density, so a
+##   scene's letters come out about the size they have on the 7" to 7.5"
+##   800x480 panels scenes are made on (`ReferencePpi`): the pixels per inch
+##   over 130 to the nearest whole number, never below 1 and never leaving a
+##   layout under 576 px on the shorter edge (`MinLayoutEdge`: a smaller
+##   screen is seen closer, and a scene has to fit). Whole numbers only: at
+##   2 a line one pixel wide is two, every box edge lands on a pixel and
+##   pixie fills it in solid spans; at 1.75 every edge is antialiased and a
+##   hairline comes out one pixel and a grey (dithered on e-paper). A
+##   fraction stays the owner's to set. The panel's size comes from its name
+##   (`EPD_10in3`) or `NamedPanelInches`; one of unknown size is 1. HDMI, a
+##   screen of unknown size seen from across a room, is the largest whole
+##   number that leaves 1080 px (a 4K screen is 2), and no panel (`web_only`)
+##   is 1. The reTerminal E1003 (10.3", 1872x1404, 227 ppi) is 2, a 13.3"
+##   1200x1600 e-paper (150 ppi) and a 7.3" 800x480 one 1.
 ##
 ## docs/jsx-ui.md "Scale" is the spec. The same automatic rule lives in
 ## `frontend/src/utils/renderScale.ts`; keep the two in step.
@@ -38,26 +48,70 @@ const
   RenderScaleRole* = "renderScale"
   HdmiDevice = "framebuffer"
   NoPanel = "web_only" ## a frame that draws for nobody: no panel to fit
-  ## The layout's shorter edge the automatic scale leaves at least: a panel
-  ## held or hung near (the 800x480 most scenes are made for, with room to
-  ## spare), and HDMI, a screen seen from across a room (1080: a 4K one is 2).
-  PanelRoom = 640
+  ## The density a scene's pixels are drawn at as made: the 7" to 7.5" 800x480
+  ## panels most scenes are made on (124 to 133 ppi).
+  ReferencePpi = 130.0
+  ## The shortest edge a layout is left: 480, the edge scenes are made for,
+  ## and a fifth more, so a small screen (seen closer) scales less: a 7"
+  ## 720x1280 one stays at 1, not its density's 2.
+  MinLayoutEdge = 576
+  ## HDMI: the layout's shorter edge the automatic scale leaves at least.
   HdmiRoom = 1080
-  ## What the automatic scale picks from, the settings' steps from 1 up.
-  AutoSteps = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0]
+  ## Panels whose name does not say their size: only those with a shorter edge
+  ## of 720 px or more, as no other can scale (MinLayoutEdge). Keep in step
+  ## with `NAMED_PANEL_INCHES` in frontend/src/utils/renderScale.ts
+  ## (docs/render-scale-fixtures.json pins both).
+  NamedPanelInches = [
+    ("pimoroni.inky_impression_13", 13.3),
+    ("pimoroni.hyperpixel4sq", 3.95),
+    ("pimoroni.hyperpixel4sq_touch", 3.95),
+  ]
   MaxRenderScale* = 4.0
 
-proc autoRenderScale*(width, height: int, device: string): float =
-  ## The automatic scale: the largest step that leaves a layout `PanelRoom`
-  ## px on the panel's shorter edge (`HdmiRoom` on HDMI); 1 without a panel.
+proc panelInches*(device: string): float =
+  ## The panel's diagonal in inches from its driver's name: the number around
+  ## its `in` ("EPD_10in3" 10.3, "waveshare.EPD_2in13_V4" 2.13, "EPD_13in3e"
+  ## 13.3), else `NamedPanelInches`; 0 when unknown.
+  for (name, inches) in NamedPanelInches:
+    if device == name:
+      return inches
+  for i in 1 .. device.len - 3:
+    if device[i] == 'i' and device[i + 1] == 'n' and device[i - 1] in {'0' .. '9'} and
+        device[i + 2] in {'0' .. '9'}:
+      var whole = 0
+      var at = i - 1
+      var scale = 1
+      while at >= 0 and device[at] in {'0' .. '9'}:
+        whole += (ord(device[at]) - ord('0')) * scale
+        scale *= 10
+        dec at
+      var fraction = 0.0
+      var place = 0.1
+      at = i + 2
+      while at < device.len and device[at] in {'0' .. '9'}:
+        fraction += (ord(device[at]) - ord('0')).float * place
+        place /= 10.0
+        inc at
+      return whole.float + fraction
+  0.0
+
+proc autoRenderScale*(width, height: int, device: string, inches = 0.0): float =
+  ## The automatic scale (the module's comment), a whole number: by the
+  ## panel's density when its size is known (`inches`, else from `device`'s
+  ## name), by the room it leaves on HDMI, else 1.
   result = 1.0
-  if device.len == 0 or device == NoPanel:
-    return
-  let room = if device == HdmiDevice: HdmiRoom else: PanelRoom
   let edge = min(width, height)
-  for step in AutoSteps:
-    if edge.float >= room.float * step:
-      result = step
+  if device.len == 0 or device == NoPanel or edge <= 0:
+    return
+  if device == HdmiDevice:
+    return clamp(float(edge div HdmiRoom), 1.0, MaxRenderScale)
+  let diagonal = if inches > 0.0: inches else: panelInches(device)
+  if diagonal <= 0.0:
+    return
+  let ppi = sqrt(float(width * width + height * height)) / diagonal
+  let dense = floor(ppi / ReferencePpi + 0.5)
+  let fits = float(edge div MinLayoutEdge)
+  result = clamp(min(dense, fits), 1.0, MaxRenderScale)
 
 proc usableScale(scale: float): float {.inline.} =
   if scale > 0.0 and scale <= MaxRenderScale: scale else: 0.0
@@ -77,12 +131,19 @@ proc renderScaleFieldKey*(fields: seq[StateField]): string =
       return field.name
   ""
 
+proc autoFrameRenderScale*(config: FrameConfig): float =
+  ## The automatic scale for the frame's panel: its size the host's
+  ## (`panelInches`: an ESP32's display, a plane's render for a board), else
+  ## its device's name.
+  if config.isNil: 1.0
+  else: autoRenderScale(config.width, config.height, config.device, config.panelInches)
+
 proc frameRenderScale*(config: FrameConfig): float {.inline.} =
   ## The frame's scale: its own setting, or the automatic one for its panel.
   if config.isNil:
     return 1.0
   let own = usableScale(config.renderScale)
-  if own > 0.0: own else: autoRenderScale(config.width, config.height, config.device)
+  if own > 0.0: own else: autoFrameRenderScale(config)
 
 proc sceneRenderScale*(scene: FrameScene): float {.inline.} =
   ## The scene's own override: its role field's state, else its setting. 0 =

@@ -1453,7 +1453,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   ## what the frame page offers its scales for; the canvas's without it.
   let unit = if sizeUnit > 0: sizeUnit else: min(width, height)
   let edge = if panel > 0: panel else: min(width, height)
-  let autoScale = scaleText(autoRenderScale(edge, edge, if self.frameConfig.isNil: "" else: self.frameConfig.device))
+  let autoScale = scaleText(autoFrameRenderScale(self.frameConfig))
   var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
   look.gap = look.size

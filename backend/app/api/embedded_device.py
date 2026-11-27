@@ -964,7 +964,8 @@ def _hardware_preset(frame: Frame) -> dict:
 def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
     """What else of frame.json the frame's own runtime keeps, for its render
     here (frameos_wasm_set_frame): its event map, its palette and colours,
-    its buttons, its panel's format and its rotation. A board the backend
+    its buttons, its panel's format, name and rotation (the name says the
+    panel's size, which the automatic render scale goes by). A board the backend
     holds no event map or buttons for runs its preset's (fos_board.c), so the
     render does too; `/embedded/settings` still sends them only when the
     backend holds them, the board having the preset itself. A stored empty
@@ -976,6 +977,9 @@ def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
         "pixelFormat": int(pixel_format),
         "rotate": int(getattr(frame, "rotate", 0) or 0) % 360,
     }
+    device = getattr(frame, "device", None)
+    if isinstance(device, str) and device:
+        frame_json["panel"] = device
     preset = _hardware_preset(frame)
     event_map = getattr(frame, "event_map", None)
     if not isinstance(event_map, list):

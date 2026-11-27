@@ -487,13 +487,24 @@ Handwriting notes, which grew themselves, while the setting moved only some).
 - **Which scale.** A field with `role: "renderScale"` whose state holds a
   number, else the scene's `settings.renderScale`, else the frame's
   (frame.json `renderScale`, the control planes' `render_scale`). The
-  frame's 0 is automatic: the largest of 1, 1.25, 1.5, 2, 2.5, 3 and 4 that
-  leaves a layout 640 px on the panel's shorter edge (`PanelRoom`), or 1080
-  on HDMI (the `framebuffer` device, a screen seen from across a room:
-  `HdmiRoom`), and 1 where there is no panel (`web_only`). So an 800x480,
-  1024x600 or 720x1280 panel stays at 1, a 1280x800 one is 1.25, the
-  13.3" 1200x1600 e-paper 1.5, the 10.3" 1872x1404 e-paper 2, a 1080p
-  screen on HDMI 1 and a 4K one 2. Anything else is the owner's to set.
+  frame's 0 is automatic, a whole number, by the panel's **density**: its
+  pixels per inch over 130 (the 7" to 7.5" 800x480 panels scenes are made
+  on, 124 to 133 ppi) to the nearest whole number, never below 1, and never
+  leaving a layout under 576 px on the shorter edge (480 and a fifth: a
+  smaller screen is seen closer, and a scene has to fit). The panel's size
+  comes from its driver's name (`EPD_10in3` is 10.3") or a short table of
+  those whose name does not say it (`NamedPanelInches`), handed over by an
+  ESP32's display (`fos_display_name`) and by a plane rendering for a board
+  (`frameos_wasm_set_frame` `panel`); a panel of unknown size is 1. HDMI (the
+  `framebuffer` device), a screen of unknown size seen from across a room, is
+  the largest whole number that leaves 1080 px, and no panel (`web_only`) is
+  1. So the reTerminal E1003 (10.3", 1872x1404, 227 ppi) and a 4K screen are
+  2; a 13.3" 1200x1600 e-paper (150 ppi), every 800x480 panel and a 1080p
+  screen 1. `docs/render-scale-fixtures.json` pins the runtime's rule and the
+  SPA's. **Whole numbers only**: at 2 a one-pixel line is two, every box edge
+  lands on a pixel and pixie fills in solid spans; at 1.25 or 1.75 every edge
+  is antialiased (slower, and soft) and a hairline is a pixel and a grey,
+  dithered on e-paper. A fraction stays the owner's to set.
   A scale below 1 (0.25, 0.5 and 0.75 are offered) works the other way: the
   layout gets more room than the panel has and everything is drawn smaller.
   Out-of-range values (above 4) are ignored.

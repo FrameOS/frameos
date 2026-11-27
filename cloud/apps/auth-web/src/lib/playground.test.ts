@@ -96,8 +96,6 @@ describe("the playground", () => {
       framePage: true,
       height: 900,
       proxyUrl: "/api/store/preview-proxy",
-      // The window's CSS pixels: 1, never the scale a 1440x900 panel gets.
-      renderScale: 1,
       sceneId: "first",
       storeUrl: "https://playground.frameos.net",
       width: 1440,

@@ -887,6 +887,20 @@ function applyRenderScale(scale, force) {
   }
 }
 
+// The panel's diagonal (a frame's, or the Device menu's): the automatic
+// render scale goes by its density, as on the frame (render_scale.nim). Every
+// init starts unknown, which is 1.
+function applyPanelInches(inches) {
+  if (!(typeof inches === 'number' && inches > 0)) {
+    return
+  }
+  try {
+    call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ panelInches: inches })])
+  } catch (e) {
+    // older bundle without the export
+  }
+}
+
 // A round panel (panel_shape.boardPanelRound): `context.round` and
 // `app.frame.round` say so, and the built-in scenes keep inside the circle.
 // Every init starts square.
@@ -1154,6 +1168,7 @@ async function init(msg) {
     applyEmbedded(msg.embedded === true || Boolean(msg.deviceLimits && msg.deviceLimits.embedded))
     applyRenderScale(msg.renderScale)
     applyRound(msg.round === true)
+    applyPanelInches(msg.panelInches)
     // The Scene store app may browse the store and preview its scenes here
     // (frameos/scene_store_preview.nim); installing stays a frame's. Only
     // this worker turns it on: a plane's renders are a fresh runtime each.

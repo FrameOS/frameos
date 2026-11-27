@@ -73,11 +73,7 @@ export function startPlayground(options: PlaygroundOptions): Playground {
   let detachInput: Array<() => void> = [];
   let size = playgroundSize(options.viewport().width, options.viewport().height);
   let destroyed = false;
-  // 1, not automatic: the canvas is the window's CSS pixels, which the
-  // browser already sizes for its screen, and automatic would take a big
-  // window for a big panel (render_scale.nim: 1.25 from 800 px of height).
-  // The frame page's Scale still changes it.
-  let renderScale = 1;
+  let renderScale = 0;
 
   // The keyboard is the frame's while it has the focus: the browser's default
   // for a key never runs, so Cmd+L, Cmd+F or Cmd+1 reach a desktop's Super

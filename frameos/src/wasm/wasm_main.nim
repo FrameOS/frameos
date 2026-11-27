@@ -13,6 +13,7 @@ import std/[json, locks, math, monotimes, options, sequtils, strformat, strutils
 import pixie
 
 import frameos/types
+from frameos/render_scale import panelInches
 import frameos/channels
 import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
@@ -728,7 +729,10 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
   ## board's runtime says of it (`app.frame.color` and `paper`, the switcher's
   ## and the settings' look: panel_shape.boardPanelFormat); `rotate` is the frame's,
   ## for the relayed pointers' panel positions; `round` a panel that shows
-  ## only the circle inside it (panel_shape.boardPanelRound).
+  ## only the circle inside it (panel_shape.boardPanelRound); `panel` the
+  ## frame's panel by its driver's name ("waveshare.EPD_10in3", "EPD_10in3")
+  ## or `panelInches` its diagonal, so the automatic render scale is the
+  ## board's (render_scale.nim: by the panel's density).
   try:
     if frameConfig.isNil:
       setLastError("setFrame: init not called")
@@ -758,6 +762,11 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
       let colors = if node["colors"].kind == JObject: node["colors"] else: newJObject()
       frameConfig.colors = colors
       setFrameColorSettings(parseFrameColorSettings(colors))
+    let inches = node{"panelInches"}
+    if not inches.isNil and inches.kind in {JInt, JFloat} and inches.getFloat() >= 0.0:
+      frameConfig.panelInches = inches.getFloat()
+    elif not node{"panel"}.isNil and node["panel"].kind == JString:
+      frameConfig.panelInches = panelInches(node["panel"].getStr())
     var rebuildInput = false
     if node.hasKey("gpioButtons") and node["gpioButtons"].kind == JArray:
       var buttons: seq[GPIOButton] = @[]

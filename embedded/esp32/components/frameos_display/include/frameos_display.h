@@ -69,6 +69,10 @@ bool fos_display_is_lcd(void);
  * Waveshare 1.75" AMOLED): the runtime keeps what it draws by itself inside
  * it (frameos/panel_shape.nim `boardPanelRound`). */
 bool fos_display_round(void);
+/* The selected panel's name in the panel table ("EPD_10in3"), "" when
+ * headless: the runtime reads its size from it for the automatic render
+ * scale (frameos/render_scale.nim `panelInches`). */
+const char *fos_display_name(void);
 /* The panel's power, for turnOn / turnOff / toggleScreen: an LCD's
  * backlight, an AMOLED's display on/off. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
  * holds its image unpowered). */

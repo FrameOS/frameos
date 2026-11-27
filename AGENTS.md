@@ -912,9 +912,12 @@
   laid out at that size, and pixie stretches the root to the full target as
   vectors. The scale is a `role: "renderScale"` field's state, else the
   scene's `settings.renderScale`, else the frame's `render_scale` (0 =
-  automatic: the largest step leaving a layout 640 px on the panel's shorter
-  edge, 1080 on HDMI, 1 with no panel: 2 on the E1003's 1872x1404 and on 4K;
-  the SPA's copy is `utils/renderScale.ts`). It is the ONE setting that sizes
+  automatic, a WHOLE number by the panel's density: ppi over 130, rounded,
+  never leaving a layout under 576 px; the size from the driver's name
+  `EPD_10in3` or `NamedPanelInches`, an ESP32's display and a plane's render
+  passing theirs; HDMI by the room it leaves, 1080 px; unknown 1: 2 on the
+  E1003 and on 4K. The SPA's copy is `utils/renderScale.ts`, both pinned by
+  `docs/render-scale-fixtures.json`). It is the ONE setting that sizes
   every scene: the built-in scenes are sized for a 480 px panel and laid out
   at it, render/text, a split's gaps and margins and data/qr's pixels are
   multiplied by it (`nodeRenderScale`), and a scene's UI never zooms itself

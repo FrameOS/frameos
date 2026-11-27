@@ -1,12 +1,16 @@
 // The render scale (frontend/src/utils/renderScale.ts): what a scene is laid
 // out and sized for. The automatic rule is the runtime's
-// (frameos/src/frameos/render_scale.nim): the largest step that leaves a
-// layout 640 px on the panel's shorter edge (1080 on HDMI), 1 without a panel.
+// (frameos/src/frameos/render_scale.nim), both pinned by
+// docs/render-scale-fixtures.json: by the panel's density where its size is
+// known, by the steps leaving 1080 px on HDMI, else 1.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   autoRenderScale,
   automaticRenderScaleLabel,
+  panelInches,
   frameRenderScaleOptions,
   frameRenderScaleSelectValue,
   parseRenderScale,
@@ -17,38 +21,36 @@ import {
 } from "../../../../../../frontend/src/utils/renderScale";
 import type { StateField } from "../../../../../../frontend/src/types";
 
-describe("autoRenderScale", () => {
-  it.each([
-    [800, 480, "waveshare.EPD_3in97", 1],
-    [1024, 600, "embedded", 1],
-    [720, 1280, "pimoroni.hyperpixel4", 1],
-    [1280, 800, "embedded", 1.25],
-    [1200, 825, "waveshare.EPD_9in7", 1.25],
-    [1200, 1600, "waveshare.EPD_13in3e", 1.5],
-    [1872, 1404, "waveshare.EPD_10in3", 2],
-    [1872, 1404, "embedded", 2],
-    [1920, 1080, "framebuffer", 1],
-    [2560, 1440, "framebuffer", 1.25],
-    [3840, 2160, "framebuffer", 2],
-    [2160, 3840, "framebuffer", 2],
-    [7680, 4320, "framebuffer", 4],
-    [3840, 2160, "web_only", 1],
-  ])("%ix%i on %s is %s×", (width, height, device, scale) => {
+const fixtures = JSON.parse(
+  readFileSync(join(__dirname, "../../../../../../docs/render-scale-fixtures.json"), "utf8")
+) as {
+  automatic: { width: number; height: number; device: string; scale: number; why: string }[];
+  panelInches: { device: string; inches: number }[];
+};
+
+describe("docs/render-scale-fixtures.json", () => {
+  it.each(fixtures.automatic)("$width x $height on '$device' is $scale×: $why", ({ width, height, device, scale }) => {
     expect(autoRenderScale(width, height, device)).toBe(scale);
   });
 
+  it.each(fixtures.panelInches)("'$device' is $inches\"", ({ device, inches }) => {
+    expect(panelInches(device)).toBeCloseTo(inches, 9);
+  });
+});
+
+describe("autoRenderScale", () => {
   it("is 1 for a panel of unknown size or kind", () => {
     expect(autoRenderScale(0, 0, "framebuffer")).toBe(1);
     expect(autoRenderScale(Number.NaN, 480, "framebuffer")).toBe(1);
     expect(autoRenderScale(3840, 2160)).toBe(1);
-    expect(autoRenderScale(1872, 1404, "")).toBe(1);
+    expect(autoRenderScale(1872, 1404, null)).toBe(1);
   });
 });
 
 describe("the Scale selects", () => {
   it("name the automatic scale on this panel, or just Automatic", () => {
     expect(automaticRenderScaleLabel(3840, 2160, "framebuffer")).toBe("Automatic (2× on this panel)");
-    expect(automaticRenderScaleLabel(1200, 1600, "waveshare.EPD_13in3e")).toBe("Automatic (1.5× on this panel)");
+    expect(automaticRenderScaleLabel(1200, 1600, "waveshare.EPD_13in3e")).toBe("Automatic (1× on this panel)");
     expect(automaticRenderScaleLabel(1872, 1404, "waveshare.EPD_10in3")).toBe("Automatic (2× on this panel)");
     expect(automaticRenderScaleLabel(800, 480)).toBe("Automatic (1× on this panel)");
     expect(automaticRenderScaleLabel(undefined, 480)).toBe("Automatic");

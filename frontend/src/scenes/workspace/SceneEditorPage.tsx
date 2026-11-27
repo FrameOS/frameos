@@ -29,6 +29,7 @@ import { applyAiEventToFrame, sceneEditorPageLogic, scenesAsJson } from './scene
 import { workspaceLogic } from './workspaceLogic'
 import { workspaceMode } from './workspaceSurfaces'
 import { previewDeviceKeyForFrame } from '../../sceneWorkspace/lib/preview-devices'
+import { panelInches } from '../../utils/renderScale'
 
 /** An embedded frame short of memory (utils/frameMemory.ts): what the next
  * scene will run out of, under the bar. */
@@ -166,6 +167,8 @@ export function SceneEditorPage({ frameId }: { frameId: FrameId }): JSX.Element 
                   scenes: previewScenes,
                   // A round frame's scenes previewed in its circle.
                   initialDevice: previewDeviceKeyForFrame(frame.device),
+                  // At the frame's automatic scale, which goes by its panel's size.
+                  panelInches: panelInches(frame.device || frame.hardware?.device),
                 }}
               />
             ) : (
