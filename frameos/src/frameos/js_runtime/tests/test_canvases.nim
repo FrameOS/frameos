@@ -7,6 +7,7 @@ import frameos/values
 import frameos/ui/events
 import frameos/utils/font # the typeface resolver the layout's text uses
 import frameos/utils/svg_frames
+import frameos/utils/memory
 
 # Canvases a JS app draws into (`frameos.canvas` / `draw` / `clear`,
 # docs/jsx-ui.md "Canvases"): kept between renders, shown with <img>, and a
@@ -186,6 +187,27 @@ suite "canvases":
     discard ui.render()
     check dispatchUiEvent("tests/canvas-handlers", "tap", %*{"x": 5, "y": 5, "pointerId": 0, "pointerType": "touch"})
     check ui.scene.state{"tapped"}.getBool() == true
+
+  test "a canvas there is no room for is null, not an out-of-memory abort":
+    # On an ESP32 an allocation that does not fit ends the render, and four
+    # in a row restart the frame: a panel-sized canvas on the reTerminal
+    # E1004 (1200x1600 RGB565, 3.84 MB beside its own) did (the UX bench,
+    # 2026-11-27). Asked first, the app gets null and draws without it.
+    let ui = newUi("""
+      export function get(app) {
+        const big = frameos.canvas('big', 1200, 1600, '#ffffff')
+        const small = frameos.canvas('small', 20, 10, '#ffffff')
+        frameos.setState('big', big === null)
+        frameos.setState('small', small !== null)
+        return <div className="bg-white" />
+      }
+    """, "tests/canvas-room")
+    let saved = availableRenderBytesOverride
+    availableRenderBytesOverride = 1_000_000 # an RGBX 1200x1600 is 7.68 MB
+    discard ui.render()
+    availableRenderBytesOverride = saved
+    check ui.scene.state{"big"}.getBool() == true
+    check ui.scene.state{"small"}.getBool() == true
 
   test "draw and clear refuse what is not a canvas":
     let ui = newUi("""

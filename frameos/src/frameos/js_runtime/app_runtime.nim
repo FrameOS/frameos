@@ -3122,6 +3122,22 @@ proc jsCanvas(ctx: ptr JSContext, key: JSValue, optionsJson: JSValue): JSValue {
           runtime.images.del(runtime.canvases[i].id)
           runtime.canvases.delete(i)
       let like = pictureFormatLike(e.context)
+      # One buffer the size of the canvas, asked for first: on an ESP32 one
+      # that does not fit is an out-of-memory abort, not an exception, and
+      # four in a row restart the frame. A panel-sized canvas on the
+      # reTerminal E1004 (1200x1600 RGB565, 3.84 MB) is more than the board
+      # has beside its own (Sketchbook, Touch test, Handwriting notes: the UX
+      # bench, 2026-11-27). Without the room the app gets null, which it
+      # already draws without (docs/scene-guide.md).
+      let bytes = case (if like.isNil: pfRgbx else: like.format)
+        of pfRgbx: width * height * 4
+        of pfRgb565: width * height * 2
+        of pfGray8: width * height
+        of pfGray4: ((width + 1) div 2) * height
+      if not roomForImage(bytes):
+        frameos_apps.logError(e.owner, "frameos.canvas: no room for a " & $width & "x" & $height &
+          " canvas (" & $bytes & " bytes)")
+        return nimStringToJS(ctx, "null")
       let image = if like.isNil: newImage(width, height) else: newImageLike(like, width, height)
       if not like.isNil:
         image.ditherStores = like.ditherStores
