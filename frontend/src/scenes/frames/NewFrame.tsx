@@ -3,9 +3,7 @@ import { useActions, useValues } from 'kea'
 import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
-  ArrowTopRightOnSquareIcon,
   ArrowUpTrayIcon,
-  BoltIcon,
   CommandLineIcon,
   ComputerDesktopIcon,
   CpuChipIcon,
@@ -57,6 +55,8 @@ import { framesModel } from '../../models/framesModel'
 import { useState } from 'react'
 import { AdoptFields, AdoptMethod, adoptCanSubmit, adoptCodeInput, adoptPaste, adoptRequestBody } from './adoptFrame'
 import { flasherUrl } from '../../utils/flasherBridge'
+import { webSerialNeedsFlasher } from '../../utils/webSerial'
+import { workspaceMode } from '../workspace/workspaceSurfaces'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -70,9 +70,6 @@ function errorText(error: unknown): string | null {
   return String(error)
 }
 
-const MODE_BUTTON_CLASS_NAME =
-  'frameos-install-method-button frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
-
 function ModeButton({
   children,
   onClick,
@@ -85,38 +82,17 @@ function ModeButton({
   description: string
 }): JSX.Element {
   return (
-    <button type="button" onClick={onClick} className={MODE_BUTTON_CLASS_NAME}>
+    <button
+      type="button"
+      onClick={onClick}
+      className="frameos-install-method-button frameos-segment flex flex-1 flex-col items-start justify-start rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-left text-slate-600 transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
       <span className="flex items-center gap-2 text-sm font-semibold">
         {children}
         {title}
       </span>
       <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
     </button>
-  )
-}
-
-// An installation method that happens on another site: a card like the others
-// that opens it in a new tab instead of a form here.
-function ModeLink({
-  children,
-  href,
-  title,
-  description,
-}: {
-  children: JSX.Element | string
-  href: string
-  title: string
-  description: string
-}): JSX.Element {
-  return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={MODE_BUTTON_CLASS_NAME}>
-      <span className="flex items-center gap-2 text-sm font-semibold">
-        {children}
-        {title}
-        <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
-      </span>
-      <span className="mt-1 text-xs leading-4 text-slate-500">{description}</span>
-    </a>
   )
 }
 
@@ -1361,6 +1337,12 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const embeddedHardwarePreset = normalizeEmbeddedHardwarePreset(
     newFrame.embedded?.hardwarePreset ?? newFrame.device_config?.hardwarePreset
   )
+  // On a page with no Web Serial (plain http, a frame that was not given the
+  // permission) the frame's USB card hands the USB part to flash.frameos.net
+  // with this frame's settings (EmbeddedUsbConnect -> FlasherBridgeCard), so
+  // the board comes up as this frame: say so before the frame is added.
+  const embeddedUsbFlasherHost =
+    webSerialNeedsFlasher() && workspaceMode() === 'backend' ? new URL(flasherUrl()).host : null
 
   const setEmbeddedHardwarePreset = (hardwarePreset: FrameEmbeddedHardwarePreset): void => {
     if (hardwarePreset === 'custom') {
@@ -1492,21 +1474,15 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             <ModeButton
               onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
               title="Flash embedded device"
-              description="ESP32-S3/C3 boards and e-ink devices like the TRMNL, XTEINK X4, Inky Frame (Pico W), reTerminal, and CrowPanel."
+              description={
+                'ESP32-S3/C3 boards and e-ink devices like the TRMNL, XTEINK X4, Inky Frame (Pico W), reTerminal, and CrowPanel.' +
+                (embeddedUsbFlasherHost
+                  ? ` This page can't reach USB, so the USB part goes through ${embeddedUsbFlasherHost}, with this frame's settings.`
+                  : '')
+              }
             >
               <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
-            {/* flash.frameos.net (cloud/docs/flasher.md): an ESP32-S3 flashed
-                there runs as a standalone frame, and Adopt frame below brings it
-                here with the code on its screen. flasherUrl() honours the
-                backend's FRAMEOS_FLASHER_URL. */}
-            <ModeLink
-              href={flasherUrl()}
-              title="Use the web flasher"
-              description={`Flash an ESP32-S3 frame at ${new URL(flasherUrl()).host} with only a browser and a USB cable. It starts as a standalone frame: bring it here afterwards with Adopt frame.`}
-            >
-              <BoltIcon className="h-4 w-4" />
-            </ModeLink>
             <ModeButton
               onClick={() => setNewFrameValues(setVirtualInstallValues(savedSettings))}
               title="Virtual frame"
@@ -1900,6 +1876,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             same USB cable. The firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the
             air.
           </p>
+          {embeddedUsbFlasherHost ? (
+            <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+              This page can't reach USB, so once the frame is added, its USB card opens {embeddedUsbFlasherHost} in a
+              window of its own and hands it this frame's settings, or saves them as a setup file for{' '}
+              {embeddedUsbFlasherHost} on another computer. The board comes up as this frame.
+            </p>
+          ) : null}
           <FormField label="Name" error={newFrameErrors.name}>
             <input
               className={textInputClassName()}
