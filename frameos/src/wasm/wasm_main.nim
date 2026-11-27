@@ -22,7 +22,8 @@ import frameos/relayed_input
 from frameos/input_state import initInputState, CursorHideMs
 import frameos/cursor_sprite
 from frameos/loading_mark import MarkView
-from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput, uiOpenLink
+from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput, uiOpenLink,
+  uiElementsReport
 from frameos/ui/layout import uiClipboard, setUiClipboard, uiClipboardChanges
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
   urlImagesOneARender
@@ -1194,6 +1195,18 @@ proc frameos_wasm_scene_interval(): cdouble {.exportc, cdecl.} =
   if not host.exported.isNil and host.exported.refreshInterval > 0:
     return host.exported.refreshInterval.cdouble
   0.0
+
+var uiElementsBuffer: string
+
+proc frameos_wasm_ui_elements(): cstring {.exportc, cdecl.} =
+  ## Every UI element of the last render, whole and as it shows
+  ## (ui/events.uiElementsReport), as JSON: for tools/ux-bench to ask whether
+  ## every element is on the screen.
+  try:
+    uiElementsBuffer = $uiElementsReport()
+  except Exception:
+    uiElementsBuffer = "[]"
+  uiElementsBuffer.cstring
 
 proc frameos_wasm_scene_info(): cstring {.exportc, cdecl.} =
   let scenes = getInterpretedScenes()

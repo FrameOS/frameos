@@ -1630,6 +1630,35 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
         into.add [target.offsetX + r.visible[0] * scale, target.offsetY + r.visible[1] * scale,
                   target.offsetX + r.visible[2] * scale, target.offsetY + r.visible[3] * scale]
 
+proc uiElementsReport*(): JsonNode =
+  ## Every element of every UI's last render, where the layout put it whole
+  ## (`box`, not cut by the canvas or a scroller) and what of it shows
+  ## (`visible`: what no scrolling box cut off), in the scene's pixels, and
+  ## whether it sits in a box that scrolls. For a harness to ask whether
+  ## every element is on the screen (tools/ux-bench, wasm_main
+  ## frameos_wasm_ui_elements); nothing on a frame calls it.
+  result = newJArray()
+  for target in targets:
+    let scale = if target.scale > 0: target.scale else: 1'f32
+    for r in target.regions:
+      if r.scene:
+        continue
+      var takes = r.field > 0 or r.labelFor > 0
+      for handler in r.handlers:
+        if handler > 0:
+          takes = true
+      let
+        ox = target.offsetX
+        oy = target.offsetY
+      result.add %*{
+        "scene": target.sceneId,
+        "box": [ox + r.x * scale, oy + r.y * scale, ox + (r.x + r.w) * scale, oy + (r.y + r.h) * scale],
+        "visible": [ox + r.visible[0] * scale, oy + r.visible[1] * scale,
+                    ox + r.visible[2] * scale, oy + r.visible[3] * scale],
+        "scroller": r.scroller, "scrolls": r.scrollX > 0 or r.scrollY > 0,
+        "takes": takes, "field": r.field.int,
+      }
+
 proc handlerPayload(target: UiTarget, r: UiRegion, payload: JsonNode, scale: float32): JsonNode =
   ## What a pointer handler is handed: the event, a coalesced move's `points`
   ## (docs/events.md "Pointer") in the element's own pixels, as localX and
