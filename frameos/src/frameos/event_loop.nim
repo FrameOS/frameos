@@ -852,11 +852,12 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
     if delivery.name in [evGpio, evButton, evKeyDown, evKeyUp]:
       # A key pressed on a dark screen turns it on and goes nowhere else, as
       # a touch does: the Screen key's press does not turn it off again, a
-      # Home key held opens no scene list in the dark. Only a key someone
-      # pressed at the frame: a press sent over the API acts as it always did.
+      # Home key held opens no scene list in the dark. Only a key pressed at
+      # the frame (its driver, or the ESP32 console's `event gpio` standing in
+      # for it, origin system): a press sent over the API acts as it always did.
       let key = keyOf(delivery)
       let action = delivery.payload{"action"}.getStr()
-      if not loop.displayOn and delivery.origin == eoDriver and not loop.wakesFor(key) and
+      if not loop.displayOn and delivery.origin in {eoDriver, eoSystem} and not loop.wakesFor(key) and
           (delivery.name == evKeyDown or delivery.name == evGpio and action == "down" or
            delivery.name == evButton):
         discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
