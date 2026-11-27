@@ -577,7 +577,7 @@ if (BUILTINS) {
 }
 
 for (const scene of tested) {
-  const rec = { scene: scene.id, folder: scene.__folder, name: scene.name, order: frameScenes(scene).map((s) => s.id), steps: [] }
+  const rec = { scene: scene.id, folder: scene.__folder, name: scene.name, order: frameScenes(scene).filter((s) => !s.settings?.isLayout).map((s) => s.id), steps: [] }
   const base = safe(scene.__folder)
   const shot = (tag, r) => {
     if (!r.pixels) return null
