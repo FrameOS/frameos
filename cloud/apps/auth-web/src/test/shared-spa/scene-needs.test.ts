@@ -56,7 +56,8 @@ describe("scene needs", () => {
     expect(needsOf("Snake")).toEqual(["touch", "keys", "buttons", "round"]);
     expect(needsOf("Sudoku")).not.toContain("fast");
     expect(needsOf("Sudoku")).toContain("touch");
-    expect(needsOf("Weather")).toEqual([]);
+    // Weather keeps its place, date and hours inside a round panel's circle.
+    expect(needsOf("Weather")).toEqual(["round"]);
     expect(needsOf("Webcam RSTP")).toEqual(["linux"]);
     expect(needsOf("Windows 98 layout")).not.toContain("fast");
     // Round: the clocks lay out in the circle, a photo fills it, a layout says nothing.
