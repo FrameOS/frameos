@@ -136,6 +136,10 @@ type
     # screen's, never the scene's, until it lifts (`waking`, by pointer id).
     displayOn*: bool
     waking: seq[int]
+    wakingKeys: seq[string]
+      ## Keys that went down on a dark screen and turned it on: nothing of
+      ## them (their up, their press or long press, a pair they make) reaches
+      ## anyone until they come up.
 
 proc hasStatePayload*(payload: JsonNode): bool =
   ## Whether an event's payload carries a `state` object. `payload{"state"}` is
@@ -804,6 +808,30 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
       loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender, delivery.origin)
       result = true
 
+proc keyOf(delivery: InputDelivery): string =
+  ## Which key a key event is about: its label, else its pin, else a
+  ## keyboard's code.
+  let p = delivery.payload
+  if p.isNil or p.kind != JObject:
+    return ""
+  result = p{"label"}.getStr()
+  if result.len == 0 and p.hasKey("pin") and p{"pin"}.getInt(-1) >= 0:
+    result = "#" & $p{"pin"}.getInt()
+  if result.len == 0:
+    result = "key:" & p{"code"}.getStr(p{"key"}.getStr())
+
+proc wakesFor(loop: EventLoop, key: string): bool =
+  ## Whether a key event is about a key that woke the screen, or a pair of
+  ## keys one of which did (two keys together: "A+B").
+  for k in loop.wakingKeys:
+    if k == key:
+      return true
+    # A pair: "A+B", this key one of the two (no strutils for two compares).
+    let n = k.len
+    if key.len > n and (key[n] == '+' and key[0 ..< n] == k or
+        key[key.len - n - 1] == '+' and key[key.len - n .. ^1] == k):
+      return true
+
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   ## What a person did, through the input state: the position every pointer
   ## event carries, the key a code means, the gestures, the button's role and
@@ -817,8 +845,32 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   elif not loop.inputState.applyNamedInput(envelope.name, envelope.payload, envelope.origin,
       envelope.tMono, deliveries):
     return loop.deliver(envelope, eventPolicy(envelope.name))
-  var lifted: seq[int]
+  var
+    lifted: seq[int]
+    liftedKeys: seq[string]
   for delivery in deliveries:
+    if delivery.name in [evGpio, evButton, evKeyDown, evKeyUp]:
+      # A key pressed on a dark screen turns it on and goes nowhere else, as
+      # a touch does: the Screen key's press does not turn it off again, a
+      # Home key held opens no scene list in the dark. Only a key someone
+      # pressed at the frame: a press sent over the API acts as it always did.
+      let key = keyOf(delivery)
+      let action = delivery.payload{"action"}.getStr()
+      if not loop.displayOn and delivery.origin == eoDriver and not loop.wakesFor(key) and
+          (delivery.name == evKeyDown or delivery.name == evGpio and action == "down" or
+           delivery.name == evButton):
+        discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
+          origin: eoSystem, target: envelope.target), eventPolicy(evTurnOn))
+        if delivery.name != evButton:
+          # Its up, press or hold follow; a `button` with no edges (a host
+          # that sends presses) is all there is of it.
+          loop.wakingKeys.add(key)
+        result = true
+        continue
+      if loop.wakesFor(key):
+        if delivery.name == evKeyUp or delivery.name == evGpio and action == "up":
+          liftedKeys.add(key)
+        continue
     if not loop.displayOn and delivery.name == evEdgeSwipe:
       # A swipe in from an edge on a dark screen wakes it too, and is no
       # swipe: its pointerDown was held back for the swipe (input_state), so
@@ -848,6 +900,8 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
       result = true
   for id in lifted:
     loop.waking.keepItIf(it != id)
+  for key in liftedKeys:
+    loop.wakingKeys.keepItIf(it != key)
 
 proc process(loop: EventLoop, envelope: EventEnvelope): bool =
   ## False when the event came to nothing: refused, or no scene to take it.
