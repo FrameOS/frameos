@@ -592,7 +592,21 @@ proc reveal(self: SceneSwitcherScene, index: int, centred = false) =
   let bottom = spot.top + grid.tileH + margin
   let y = listScroll()
   if centred and (top.float32 < y or bottom.float32 > y + grid.listH.float32):
-    scrollList(float32(top - max(grid.listH - (bottom - top), 0) div 2))
+    # To the middle, then up to where a row starts, its heading's strip with
+    # it: the list's first row shows whole, never a row of names whose
+    # icons are above the edge. Short of the end, which the list scrolls no
+    # further than: there the last row ends the list and the first one may
+    # be cut.
+    let spots = self.spots(grid)
+    let want = min(top - max(grid.listH - (bottom - top), 0) div 2,
+      spots[^1].top + grid.tileH + grid.pad - grid.listH)
+    var at = want
+    for i in 0 ..< spots.len:
+      if i == 0 or spots[i].top != spots[i - 1].top:
+        # A row's top is where the one above it ends (its names' last line).
+        let rowTop = if i == 0: 0 else: spots[i].top - grid.gap - (if self.heads(i): grid.headingH else: 0)
+        if rowTop <= want and bottom - rowTop <= grid.listH: at = rowTop
+    scrollList(max(at, 0).float32)
   elif top.float32 < y:
     scrollList(top.float32)
   elif bottom.float32 > y + grid.listH.float32:
