@@ -198,7 +198,7 @@ const CloudContractSettings* = @[
         KeyRule(name: "label", rule:
           Rule(kind: rkString, format: sfGpioLabel)),
         KeyRule(name: "role", rule:
-          Rule(kind: rkString, strEnum: @["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]))])]),
+          Rule(kind: rkString, strEnum: @["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh", "screen", "left", "right"]))])]),
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.8.31", restart: true),
     ProfileSpec(profile: "esp32", since: "2026.8.31", restart: true, hasRule: true, rule:

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h> /* strncasecmp */
 
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
@@ -107,150 +108,66 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     return index < 0 ? 0 : k_buzzers[index].tone_hz;
 }
 
-/* The reTerminal E-series front panel: a refresh key between two arrows.
- * Held, the arrows walk the frame's scene list (a short press stays the
- * scene's to hear), and on the two models with a microphone the refresh key
- * held talks to the frame (docs/voice-chat.md: `voiceChat` is the emit the
- * button task reads off the map, fos_voice_binding.c). The E1004 wires GPIO3
- * and GPIO5 the other way round from the E1001/E1002, which is why the rules
- * name labels, never pins. */
-#define RETERMINAL_ARROWS \
-    "{\"event\":\"button\",\"match\":{\"label\":\"LEFT\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"RIGHT\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}"
-#define RETERMINAL_VOICE \
-    "{\"event\":\"button\",\"match\":{\"label\":\"REFRESH\",\"action\":\"longPress\"}," \
-    "\"emit\":\"voiceChat\",\"as\":{}}"
-/* A touch screen's swipes in from an edge (`edgeSwipe`: the scene hears none
- * of it): from the left `back` and from the right `forward`, the scene's own
- * (never another scene), up from the bottom the scene switcher
- * (docs/scene-switcher.md) and down from the top the scene's settings
- * (docs/scene-settings.md). */
-#define TOUCH_EDGE_SWIPES \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"}," \
-    "\"emit\":\"forward\",\"as\":{}}," \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"}," \
-    "\"emit\":\"back\",\"as\":{}}," \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"}," \
-    "\"emit\":\"sceneSettings\",\"as\":{}}"
-/* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list.
- * The AI key (Seeed's "AI/Power", GPIO4) is the one key a hand finds: pressed
- * once it is the scene's (its role is primary: Enter, the layout's refresh),
- * twice back, three times the scene list, and held it talks to the frame.
- * The edges swipe (TOUCH_EDGE_SWIPES). */
-#define STICKY_KEYS \
-    "{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"doublePress\"}," \
-    "\"emit\":\"back\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"}," \
-    "\"emit\":\"voiceChat\",\"as\":{}}"
-/* The Waveshare boards with a codec microphone (fos_codec.c): the one user
- * key each has, held, talks — KEY1 on the PhotoPainter, BOOT on the 13.3E6. */
-#define ONE_KEY_VOICE(label) \
-    "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
-    "\"emit\":\"voiceChat\",\"as\":{}}"
-/* The SenseCAP Indicator: one key and a touch screen, no microphone. The key
- * pressed switches the screen off and on, and pressed twice opens the scene
- * switcher; held it does nothing (on a board with a microphone that is the
- * voice key). The edges swipe (TOUCH_EDGE_SWIPES). */
-#define ONE_BUTTON_TOGGLE(label) \
-    "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"press\"}," \
-    "\"emit\":\"toggleScreen\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"doublePress\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
-#define INDICATOR_KEY ONE_BUTTON_TOGGLE("BUTTON")
-/* The Waveshare ESP32-S3-Touch-AMOLED-1.75: a PWR key (read through the
- * board's IO expander) and BOOT, a touch screen and two microphones. PWR
- * works like the Indicator's key; BOOT held talks. */
-#define AMOLED_175_KEYS ONE_BUTTON_TOGGLE("PWR")
-/* The Elecrow CrowPanel 2.01" watch: BOOT works like the Indicator's key, the
- * crown's knob turns the keys' ring (NEXT / PREV, fos_buttons.c) and its
- * press is Enter (OK), and held it talks; the edges swipe. Its power key is
- * HOME (fos_board_toggle_key) and opens the scene switcher. */
-#define CROWPANEL_WATCH_KEYS ONE_BUTTON_TOGGLE("BOOT")
-#define CROWPANEL_WATCH_HOME \
-    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
-/* The Elecrow CrowPanel e-paper boards (the 5.79"): HOME, EXIT and a rocker
- * that tilts NEXT and PREV and presses OK. With the picture turned to its
- * keys, HOME (GPIO2) is the top key and opens the scene switcher, held the
- * scene's settings; EXIT (GPIO1) the bottom one is back (the Sticky's back);
- * the rocker held walks the scene list. */
-#define CROWPANEL_EPAPER_KEYS \
-    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"press\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"HOME\",\"action\":\"longPress\"}," \
-    "\"emit\":\"sceneSettings\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"EXIT\",\"action\":\"press\"}," \
-    "\"emit\":\"back\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"PREV\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"NEXT\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}"
+/* What each board's keys do (docs/buttons.md): its event map and its keys'
+ * roles, generated from the backend's presets and the one function that
+ * makes a board's map (frameos/tools/generate_board_keys.py; the backend
+ * suite checks the file is current). */
+#include "fos_board_keys_gen.h"
 
-/* Each group of rules once, joined when a frame needs its map: whole maps
- * spelled out per preset held the arrows three times and the swipes three. */
-static const struct {
-    const char *preset;
-    const char *keys;
-    const char *voice;
-    bool edge_swipes;
-} k_event_maps[] = {
-    {"waveshare_esp32_s3_photopainter", ONE_KEY_VOICE("KEY1"), NULL, false},
-    {"waveshare_esp32_s3_epaper_13_3e6", ONE_KEY_VOICE("BOOT"), NULL, false},
-    {"seeed_reterminal_sticky", STICKY_KEYS, NULL, true},
-    {"seeed_reterminal_e1001", RETERMINAL_ARROWS, RETERMINAL_VOICE, false},
-    {"seeed_reterminal_e1002", RETERMINAL_ARROWS, RETERMINAL_VOICE, false},
-    /* The E1003 has the E1001's keys and microphone, and a touch screen. */
-    {"seeed_reterminal_e1003", RETERMINAL_ARROWS, RETERMINAL_VOICE, true},
-    {"seeed_reterminal_e1004", RETERMINAL_ARROWS, NULL, false},
-    {"seeed_sensecap_indicator_d1", INDICATOR_KEY, NULL, true},
-    /* The Sunton ESP32-8048S070: the BOOT key (GPIO0) and a touch screen,
-     * no microphone. The key works like the Indicator's; the edges swipe. */
-    {"sunton_esp32_8048s070", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
-    /* The Guition ESP32-4848S040: a touch screen and no key (its BOOT pad,
-     * GPIO0, is the glass's R4 data line), so the edges are the whole map. */
-    {"guition_esp32_4848s040", "", NULL, true},
-    {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
-    {"elecrow_crowpanel_watch_2in01", CROWPANEL_WATCH_KEYS "," CROWPANEL_WATCH_HOME, ONE_KEY_VOICE("OK"), true},
-    /* The CrowPanel 1.46" rotary: the watch's keys (BOOT, the knob pressed
-     * OK and turned NEXT / PREV) and no microphone; the edges swipe. */
-    {"elecrow_crowpanel_rotary_1in46", CROWPANEL_WATCH_KEYS, NULL, true},
-    {"elecrow_crowpanel_5in79", CROWPANEL_EPAPER_KEYS, NULL, false},
-    /* The CrowPanel 4.2" e-paper: the 5.79"'s keys on the same pins
-     * (Elecrow's schematic: IO2_MENU, IO1_EXIT, the rocker IO6_UP, IO4_DOWN
-     * and IO5_CONF). */
-    {"elecrow_crowpanel_epd_4in2", CROWPANEL_EPAPER_KEYS, NULL, false},
-    /* The Elecrow CrowPanel Advance 7.0": BOOT and a touch screen; the edges
-     * swipe, BOOT twice opens the switcher. */
-    {"elecrow_crowpanel_advance_7", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
-    /* The CrowPanel Advance 2.8": BOOT and a touch screen, like the 7.0", and
-     * a microphone: BOOT held talks. */
-    {"elecrow_crowpanel_advance_2in8", ONE_BUTTON_TOGGLE("BOOT"), ONE_KEY_VOICE("BOOT"), true},
-};
+static const fos_board_keys_t *board_keys(const char *hardware_preset)
+{
+    if (hardware_preset == NULL) return NULL;
+    for (size_t i = 0; i < sizeof(k_board_keys) / sizeof(k_board_keys[0]); i++) {
+        if (strcmp(hardware_preset, k_board_keys[i].preset) == 0) return &k_board_keys[i];
+    }
+    return NULL;
+}
 
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
 {
+    if (out_len == 0) return;
     out[0] = '\0';
-    if (hardware_preset == NULL) return;
-    for (size_t i = 0; i < sizeof(k_event_maps) / sizeof(k_event_maps[0]); i++) {
-        if (strcmp(hardware_preset, k_event_maps[i].preset) != 0) continue;
-        /* A board with no key (the Guition) has "" for keys: no comma after it. */
-        const char *keys = k_event_maps[i].keys;
-        const char *voice = k_event_maps[i].voice;
-        bool swipes = k_event_maps[i].edge_swipes;
-        snprintf(out, out_len, "[%s%s%s%s%s]", keys, keys[0] && voice ? "," : "", voice ? voice : "",
-                 (keys[0] || voice) && swipes ? "," : "", swipes ? TOUCH_EDGE_SWIPES : "");
+    const fos_board_keys_t *board = board_keys(hardware_preset);
+    if (board == NULL || board->rules[0] == '\0') return;
+    size_t used = 0;
+    for (const char *n = board->rules; *n && used + 1 < out_len; n++) {
+        const char *rule = k_board_rules[(unsigned char)*n - 1];
+        int wrote = snprintf(out + used, out_len - used, "%c%s", n == board->rules ? '[' : ',', rule);
+        if (wrote < 0 || (size_t)wrote >= out_len - used) {
+            out[0] = '\0'; /* a map cut short is no map */
+            return;
+        }
+        used += (size_t)wrote;
+    }
+    if (used + 2 > out_len) {
+        out[0] = '\0';
         return;
     }
+    out[used++] = ']';
+    out[used] = '\0';
+}
+
+bool fos_board_key_role(const char *hardware_preset, const char *label, char *out, size_t out_len)
+{
+    if (out_len) out[0] = '\0';
+    const fos_board_keys_t *board = board_keys(hardware_preset);
+    if (board == NULL || label == NULL || label[0] == '\0' || out_len == 0) return false;
+    size_t label_len = strlen(label);
+    for (const char *p = board->roles; *p;) {
+        const char *eq = strchr(p, '=');
+        if (eq == NULL) break;
+        const char *end = strchr(eq, ' ');
+        if (end == NULL) end = eq + strlen(eq);
+        if ((size_t)(eq - p) == label_len && strncasecmp(p, label, label_len) == 0) {
+            size_t n = (size_t)(end - eq - 1);
+            if (n >= out_len) n = out_len - 1;
+            memcpy(out, eq + 1, n);
+            out[n] = '\0';
+            return true;
+        }
+        p = *end ? end + 1 : end;
+    }
+    return false;
 }
 
 /* Boards with a PDM microphone: the reTerminal E1001/E1002/E1003 share one

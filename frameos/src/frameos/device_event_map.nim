@@ -13,20 +13,25 @@
 ## page before or after, never another scene), up from the bottom the scene
 ## switcher (docs/scene-switcher.md) and down from the top the scene's
 ## settings (docs/scene-settings.md), as on the SenseCAP Indicator
-## (`edgeSwipe`: the scene hears none of that touch). Keep in step with
-## `deviceEventMap` in frontend/src/utils/frameEventMap.ts.
+## (`edgeSwipe`: the scene hears none of that touch). An Inky Impression has
+## A to D down its side (docs/buttons.md): A held is the scene list, B and C
+## held the previous and the next scene, D pressed is `back` and held the
+## scene list. The maps are generated with every board's
+## (device_event_map_gen.nim, frameos/tools/generate_board_keys.py), as is
+## the SPA's `deviceEventMap` (frontend/src/utils/frameEventMap.ts).
 
-import std/[json, strutils]
-
-const hyperPixelEventMap = """[
-  {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
-  {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
-  {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
-  {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}}
-]"""
+import std/json
+when not defined(frameosEmbedded):
+  import std/strutils
+  import ./device_event_map_gen
 
 proc deviceEventMap*(device: string): JsonNode =
-  ## A fresh copy of the device's own map; nil when it comes with none.
-  if device.startsWith("pimoroni.hyperpixel"):
-    return parseJson(hyperPixelEventMap)
+  ## A fresh copy of the device's own map; nil when it comes with none. An
+  ## ESP32 has its board's from the firmware (fos_board_keys_gen.h): none of
+  ## these is in its flash.
+  when not defined(frameosEmbedded):
+    if device.startsWith("pimoroni.hyperpixel"):
+      return parseJson(HyperPixelEventMap)
+    if device in InkyImpressionDevices:
+      return parseJson(InkyImpressionEventMap)
   nil

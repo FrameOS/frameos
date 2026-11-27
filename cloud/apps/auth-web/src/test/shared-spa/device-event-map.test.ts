@@ -1,7 +1,8 @@
 // The event map a device comes with (frontend/src/utils/frameEventMap.ts
 // `deviceEventMap`): what a frame never given one runs with. The runtime's
-// copy is frameos/src/frameos/device_event_map.nim; the two must agree, or
-// "Button actions" shows a backend frame one thing while it does another.
+// copy is frameos/src/frameos/device_event_map_gen.nim; both are generated
+// (frameos/tools/generate_board_keys.py) and must agree, or "Button actions"
+// shows a backend frame one thing while it does another.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -9,11 +10,11 @@ import { deviceEventMap } from "../../../../../../frontend/src/utils/frameEventM
 
 const repoRoot = fileURLToPath(new URL("../../../../../../", import.meta.url));
 
-function nimHyperPixelMap(): unknown {
-  const nim = readFileSync(`${repoRoot}frameos/src/frameos/device_event_map.nim`, "utf8");
-  const body = nim.match(/const hyperPixelEventMap = """([\s\S]*?)"""/)?.[1];
-  if (body === undefined) throw new Error("hyperPixelEventMap not found in device_event_map.nim");
-  return JSON.parse(body);
+function nimMap(name: string): unknown {
+  const nim = readFileSync(`${repoRoot}frameos/src/frameos/device_event_map_gen.nim`, "utf8");
+  const body = nim.match(new RegExp(`const ${name}\\* = (".*")`))?.[1];
+  if (body === undefined) throw new Error(`${name} not found in device_event_map_gen.nim`);
+  return JSON.parse(JSON.parse(body));
 }
 
 describe("deviceEventMap", () => {
@@ -38,8 +39,21 @@ describe("deviceEventMap", () => {
     expect(deviceEventMap(undefined)).toBeNull();
   });
 
+  it("gives an Inky Impression its keys: A and D held the scene list, D pressed back, the arrows held the scenes", () => {
+    const map = deviceEventMap("pimoroni.inky_impression_7");
+    expect(map).toContainEqual({ event: "button", match: { label: "A", action: "longPress" }, emit: "sceneSwitcher", as: {} });
+    expect(map).toContainEqual({ event: "button", match: { label: "D", action: "press" }, emit: "back", as: {} });
+    expect(map).toContainEqual({
+      event: "button",
+      match: { role: "next", action: "longPress" },
+      emit: "setCurrentScene",
+      as: { direction: "next" },
+    });
+  });
+
   it("matches the runtime's table", () => {
-    expect(deviceEventMap("pimoroni.hyperpixel4sq_touch")).toEqual(nimHyperPixelMap());
+    expect(deviceEventMap("pimoroni.hyperpixel4sq_touch")).toEqual(nimMap("HyperPixelEventMap"));
+    expect(deviceEventMap("pimoroni.inky_impression_13")).toEqual(nimMap("InkyImpressionEventMap"));
   });
 
   it("hands out a fresh copy each time", () => {

@@ -835,11 +835,10 @@
           "secondary",
           "next",
           "prev",
-          "up",
-          "down",
           "back",
           "menu",
-          "refresh"
+          "refresh",
+          "screen"
         ]
       },
       {
@@ -904,11 +903,10 @@
           "secondary",
           "next",
           "prev",
-          "up",
-          "down",
           "back",
           "menu",
-          "refresh"
+          "refresh",
+          "screen"
         ]
       },
       {

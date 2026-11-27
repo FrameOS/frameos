@@ -18,9 +18,10 @@
 // Import-light on purpose (types, the contract tables, the scene map helpers, showIf's coercion):
 // the cloud's node test suite exercises it directly.
 import type { EventMapRule, FrameScene, StateField } from '../types'
+import { HYPERPIXEL_EVENT_MAP, INKY_IMPRESSION_DEVICES, INKY_IMPRESSION_EVENT_MAP } from '../generated/boardKeys.gen'
 import { cloudFrameSupportsSettingsFrom, isEventMapRule } from './cloudFrameSettings'
 import { buttonTriplePressSince, contractEventSpecs, screenEdges } from './eventsContract.gen'
-import { type ButtonGesture, gestureTitle, gestureValue, parseGestureValue } from './sceneEventMap'
+import { actionTitle, type ButtonGesture, gestureTitle, gestureValue, parseGestureValue } from './sceneEventMap'
 import { coerceStateFieldValue } from './showIf'
 
 export type FrameActionKind =
@@ -56,8 +57,25 @@ export interface EdgeGesture {
   edge: string
 }
 
-/** What a row binds: a press of one of the frame's buttons, or a swipe in from an edge. */
-export type FrameGesture = ButtonGesture | EdgeGesture
+/** A press of whichever key plays a role (docs/buttons.md): the arrows held,
+ * which turn with the frame, and Back, which two keys held together are on a
+ * board with no Back key. A hardware preset's map binds these by role. */
+export interface RoleGesture {
+  role: string
+  action: string
+}
+
+/** What a row binds: a press of one of the frame's buttons, of a key by its role, or a swipe in from an edge. */
+export type FrameGesture = ButtonGesture | EdgeGesture | RoleGesture
+
+const ROLE_TITLES: Record<string, string> = {
+  next: 'Next key',
+  prev: 'Previous key',
+  back: 'Back key (two keys together where there is none)',
+  primary: 'Action key',
+  menu: 'Home key',
+  screen: 'Screen key',
+}
 
 /** One row of the section: a press of one of the frame's buttons (or a swipe), and its action. */
 export interface ButtonBinding {
@@ -177,21 +195,35 @@ export function isEdgeGesture(gesture: FrameGesture): gesture is EdgeGesture {
   return 'edge' in gesture
 }
 
-/** Whether a press can carry voice chat: a key's long press alone. */
+export function isRoleGesture(gesture: FrameGesture): gesture is RoleGesture {
+  return 'role' in gesture && !('label' in gesture)
+}
+
+/** Whether a press can carry voice chat: a key's long press alone, by its
+ * label (the firmware finds its voice key by label, docs/voice-chat.md). */
 export function gestureCanVoiceChat(gesture: FrameGesture): boolean {
-  return !isEdgeGesture(gesture) && gesture.action === 'longPress'
+  return !isEdgeGesture(gesture) && !isRoleGesture(gesture) && gesture.action === 'longPress'
 }
 
 /** A row's press or swipe as one select value, and back. */
 export function frameGestureValue(gesture: FrameGesture): string {
-  return isEdgeGesture(gesture) ? JSON.stringify({ edge: gesture.edge }) : gestureValue(gesture)
+  if (isEdgeGesture(gesture)) {
+    return JSON.stringify({ edge: gesture.edge })
+  }
+  if (isRoleGesture(gesture)) {
+    return JSON.stringify({ role: gesture.role, action: gesture.action })
+  }
+  return gestureValue(gesture)
 }
 
 export function parseFrameGestureValue(value: string): FrameGesture | null {
   try {
     const parsed = JSON.parse(value) as unknown
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const edge = (parsed as { edge?: unknown }).edge
+      const { edge, role, action } = parsed as { edge?: unknown; role?: unknown; action?: unknown }
+      if (typeof role === 'string' && typeof action === 'string') {
+        return { role, action }
+      }
       return typeof edge === 'string' && screenEdges.includes(edge) ? { edge } : null
     }
   } catch {
@@ -201,7 +233,25 @@ export function parseFrameGestureValue(value: string): FrameGesture | null {
 }
 
 export function frameGestureTitle(gesture: FrameGesture): string {
-  return isEdgeGesture(gesture) ? (EDGE_TITLES[gesture.edge] ?? `Swipe in from ${gesture.edge}`) : gestureTitle(gesture)
+  if (isEdgeGesture(gesture)) {
+    return EDGE_TITLES[gesture.edge] ?? `Swipe in from ${gesture.edge}`
+  }
+  if (isRoleGesture(gesture)) {
+    return `${ROLE_TITLES[gesture.role] ?? `${gesture.role} key`} · ${actionTitle(gesture.action)}`
+  }
+  return gestureTitle(gesture)
+}
+
+/** The keys a frame's map binds by role (docs/buttons.md), offered as rows:
+ * the arrows held, which turn with the frame, and Back pressed and held,
+ * which two keys held together are on a board with no Back key. */
+export function roleGestures(): RoleGesture[] {
+  return [
+    { role: 'next', action: 'longPress' },
+    { role: 'prev', action: 'longPress' },
+    { role: 'back', action: 'press' },
+    { role: 'back', action: 'longPress' },
+  ]
 }
 
 /** The swipes a touch screen offers as rows, one per edge. */
@@ -326,7 +376,9 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
   const event = isEdgeGesture(gesture) ? 'edgeSwipe' : 'button'
   const match: Record<string, string> = isEdgeGesture(gesture)
     ? { edge: gesture.edge }
-    : { label: gesture.label, action: gesture.action }
+    : isRoleGesture(gesture)
+      ? { role: gesture.role, action: gesture.action }
+      : { label: gesture.label, action: gesture.action }
   switch (binding.action.kind) {
     case 'nextScene':
       return { event, match, emit: 'setCurrentScene', as: { direction: 'next' } }
@@ -369,7 +421,7 @@ const SCENE_LESS_EMITS: readonly string[] = [
 
 /**
  * The binding a rule means, when it is one the section writes: a `button`
- * rule matching one label and one press, or an `edgeSwipe` rule matching
+ * rule matching one label (or one role) and one press, or an `edgeSwipe` rule matching
  * one edge, that emits a scene switch (by direction, or by id with the
  * scene's settings to show it with), back or
  * forward, the scene switcher, a render or a display switch with nothing
@@ -386,6 +438,13 @@ export function bindingOfRule(rule: EventMapRule): ButtonBinding | null {
     Object.keys(match).length === 2
   ) {
     gesture = { label: match.label, action: match.action }
+  } else if (
+    rule.event === 'button' &&
+    typeof match.role === 'string' &&
+    typeof match.action === 'string' &&
+    Object.keys(match).length === 2
+  ) {
+    gesture = { role: match.role, action: match.action }
   } else if (
     rule.event === 'edgeSwipe' &&
     typeof match.edge === 'string' &&
@@ -545,17 +604,16 @@ export function frameOffersEdgeGestures(
 /** The event map a device comes with, which a frame never given one (no
  * stored `event_map`) runs with: a HyperPixel's edge swipes, in from the left
  * `back`, in from the right `forward`, up from the bottom the scene switcher
- * and down from the top the scene's settings. Keep in step
- * with frameos/src/frameos/device_event_map.nim
- * (device-event-map.test.ts reads it). null for a device that comes with none. */
+ * and down from the top the scene's settings; an Inky Impression's A to D
+ * (docs/buttons.md). Generated with frameos/src/frameos/device_event_map.nim's
+ * (frameos/tools/generate_board_keys.py; device-event-map.test.ts reads both).
+ * null for a device that comes with none. */
 export function deviceEventMap(device: string | null | undefined): EventMapRule[] | null {
-  if (!device?.startsWith('pimoroni.hyperpixel')) {
-    return null
+  if (device?.startsWith('pimoroni.hyperpixel')) {
+    return JSON.parse(JSON.stringify(HYPERPIXEL_EVENT_MAP))
   }
-  return [
-    { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'forward', as: {} },
-    { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'back', as: {} },
-    { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
-    { event: 'edgeSwipe', match: { edge: 'top' }, emit: 'sceneSettings', as: {} },
-  ]
+  if (device && INKY_IMPRESSION_DEVICES.includes(device)) {
+    return JSON.parse(JSON.stringify(INKY_IMPRESSION_EVENT_MAP))
+  }
+  return null
 }

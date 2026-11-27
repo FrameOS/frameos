@@ -799,10 +799,14 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   the UI lays text out level), reading down on the right and up on the left,
   the battery's percentage under it. On a board rendered on
   its plane `app.frame.rotate` is the board's, as on the board, though the
-  wasm runtime draws the canvas already turned. The green key pressed twice opens the scene list, where the caps
-  say what a press does there, and holding it closes the list where the map
-  leaves the hold free (the E1004; the others talk). On the touch E1003 the name, the gear and the
-  status are buttons too.
+  wasm runtime draws the canvas already turned. Over the scene list (both
+  arrows held, the E1004's green key held: docs/buttons.md) the caps say what a
+  press does there. The caps read the frame's map by label and by role, a
+  key's role as the frame hangs (an arrow is Next where it points to the right
+  or the bottom of the picture). The layouts hear the keys' `gpio` edges, never
+  `button`: a layout that listens for `button` makes every scene it wraps one
+  that does, and that scene's arrows would no longer be its `forward` and
+  `back`. On the touch E1003 the name, the gear and the status are buttons too.
 
 Both are on the store's Device layouts shelf (`settings.devices` names the
 boards), the browser flasher starts those boards on them (its Layout select,
@@ -812,8 +816,7 @@ hours, or none), whether the small hold words and the help lines do (the
 E-series' hint under the name; the Sticky's date, in its bar and on its home
 screen, and its help under the list), the Sticky's bar or nothing around a scene,
 whether the Refresh key or Action draws the picture again when pressed (off: the
-press is the scene's alone, and its cap says "To scene") and opens the scene
-list when pressed twice, white on black or black on white, and the text size
+press is the scene's alone, and its cap says "To scene"), white on black or black on white, and the text size
 (0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is
 on until it is turned off, so an install from before keeps its look; the
 Sticky's bar is the one new look an install gets without asking (it was

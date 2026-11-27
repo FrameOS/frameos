@@ -437,7 +437,7 @@ for the two Spectra boards most of the bench work runs on:
   and a lent bus survives the console's `i2c` rescan. Its preset binds the
   Indicator's edge swipes besides the keys: in from the left `back`, from the
   right `forward`, up from the bottom the scene switcher, down from the top
-  the scene's settings (`fos_board.c` `TOUCH_EDGE_SWIPES`). The 8 MB module renders
+  the scene's settings (docs/buttons.md; `fos_board_keys_gen.h`). The 8 MB module renders
   on-device in pixie's **8-bit luma canvas** (`pfGray8`; every grey or black-
   and-white panel gets one whatever fits, a colour panel too big for RGBX gets
   565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the
@@ -1411,7 +1411,7 @@ same stamps and the contract's numbers) says so:
 | --- | --- |
 | `gpio` `down` | 1× 14 |
 | `gpio` `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
-| `doublePress` | its second down is 1.5× 14 instead of 1× |
+| `doublePress` | its second down is 1.5× 14 instead of 1× (a key the frame's map binds a double press of; any other key's quick second press clicks as a first, docs/buttons.md) |
 | `triplePress` | its third down is 2× 14 instead of 1× (a key the frame's map binds three times) |
 | a key held | 1× 8 then 0.5× 20 once, at 1 s, when its long press comes |
 | `press` | none of its own: its clicks were the down and the up |
@@ -1429,7 +1429,7 @@ moment the edge is queued, so the feedback does not wait for a render that
 may be 30 s into a panel refresh. A press that wakes the chip from deep sleep
 clicks down as soon as the chip boots (`fos_buttons_wake_boot`) and is a press
 like any other from then on: held, it duns each second and its up is a
-`longPress`; a tap followed by a quick second tap is a `doublePress`. The
+`longPress`; a tap followed by a quick second tap is a second press (a `doublePress` on a key a rule binds one of). The
 chip cannot see its keys while it boots: 0.75 s on the E1002 from the reset
 to the button task's first look, 0.6 s of it the bootloader checking the
 3 MB app. That first look decides the stamps. A key still down
@@ -1449,7 +1449,7 @@ for the whole burst). Each queued edge carries when the button task saw it
 (`atMs`, the esp_timer clock, which is also the Nim side's monotonic clock),
 so the dispatcher measures a hold between the two edges and not from the
 drain: a tap made 5 s into a 30 s refresh is a tap with its `durationMs`,
-two taps in that time are a `doublePress`, and a hold that was long enough
+two taps in that time are two presses, and a hold that was long enough
 is a `longPress` with its `up`. Until 2026.10.16 every edge was timed when it
 was drained, so a tap during a render arrived as a 30 s hold.
 

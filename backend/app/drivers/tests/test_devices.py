@@ -130,11 +130,12 @@ def test_native_inky_2025_frame_uses_nim_driver_and_gpio_buttons():
     assert "spi" in drivers
     assert "gpioButton" in drivers
     assert drivers["bootconfig"].lines == ["dtoverlay=spi0-0cs"]
+    # A is Action, B and C point up and down, D is Back (docs/buttons.md).
     assert test_frame.gpio_buttons == [
-        {"pin": 5, "label": "A"},
-        {"pin": 6, "label": "B"},
-        {"pin": 16, "label": "C"},
-        {"pin": 24, "label": "D"},
+        {"pin": 5, "label": "A", "role": "primary"},
+        {"pin": 6, "label": "B", "role": "up"},
+        {"pin": 16, "label": "C", "role": "down"},
+        {"pin": 24, "label": "D", "role": "back"},
     ]
 
 
@@ -145,11 +146,12 @@ def test_native_inky_legacy_impression_uses_nim_driver_and_gpio_buttons():
     assert "inky" in drivers
     assert "inkyPython" not in drivers
     assert "gpioButton" in drivers
+    # A is Action, B and C point up and down, D is Back (docs/buttons.md).
     assert test_frame.gpio_buttons == [
-        {"pin": 5, "label": "A"},
-        {"pin": 6, "label": "B"},
-        {"pin": 16, "label": "C"},
-        {"pin": 24, "label": "D"},
+        {"pin": 5, "label": "A", "role": "primary"},
+        {"pin": 6, "label": "B", "role": "up"},
+        {"pin": 16, "label": "C", "role": "down"},
+        {"pin": 24, "label": "D", "role": "back"},
     ]
 
 
@@ -199,10 +201,10 @@ def test_native_inky_13_uses_its_button_c_pin():
 
     assert "inky" in drivers
     assert test_frame.gpio_buttons == [
-        {"pin": 5, "label": "A"},
-        {"pin": 6, "label": "B"},
-        {"pin": 25, "label": "C"},
-        {"pin": 24, "label": "D"},
+        {"pin": 5, "label": "A", "role": "primary"},
+        {"pin": 6, "label": "B", "role": "up"},
+        {"pin": 25, "label": "C", "role": "down"},
+        {"pin": 24, "label": "D", "role": "back"},
     ]
 
 

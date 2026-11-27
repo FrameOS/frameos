@@ -17,6 +17,7 @@ import {
   bindingConflicts,
   deviceEventMap,
   edgeGestures,
+  roleGestures,
   esp32EventMapMaxBytes,
   eventMapBytes,
   frameActionKindsFor,
@@ -179,7 +180,11 @@ export function ButtonActionsSection(): JSX.Element {
   // A touch screen's rows include the swipes in from its edges.
   const touch = frameOffersEdgeGestures(frame.hardware?.touch, device, [...rules, ...(reported ?? [])])
   const triplePress = frameSupportsTriplePress(frame.frameos_version, cloudProfile)
-  const gestures: FrameGesture[] = [...buttonGestures(buttons, { triplePress }), ...(touch ? edgeGestures() : [])]
+  const gestures: FrameGesture[] = [
+    ...buttonGestures(buttons, { triplePress }),
+    ...(buttons.length > 0 ? roleGestures() : []),
+    ...(touch ? edgeGestures() : []),
+  ]
   // What this frame can do with a press: Display on / off only where the
   // device switches the panel (not e-paper), Voice chat only on a frame with a
   // microphone, and then for a long press alone, the scene switcher from the
@@ -210,7 +215,7 @@ export function ButtonActionsSection(): JSX.Element {
   const gestureOptions = (binding: ButtonBinding): SelectOptionEntry[] => {
     const groups = new Map<string, { value: string; label: string }[]>()
     for (const gesture of gestures) {
-      const group = 'edge' in gesture ? 'Touch screen' : gesture.label
+      const group = 'edge' in gesture ? 'Touch screen' : 'role' in gesture ? 'Keys by what they do' : gesture.label
       const entry = { value: frameGestureValue(gesture), label: frameGestureTitle(gesture) }
       groups.set(group, [...(groups.get(group) ?? []), entry])
     }

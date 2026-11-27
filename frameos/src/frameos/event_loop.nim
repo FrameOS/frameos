@@ -35,6 +35,7 @@ import ./event_map
 import ./layout_choice
 import ./scene_rhythm
 import ./frame_settings_hooks
+import ./frame_keys
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
@@ -446,9 +447,11 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
         return loop.refused(envelope, "direction")
       let current = loop.host.sceneFor(none(SceneId))
       if not current.isNil and current.id.string == SceneSwitcherId:
+        # Said with its direction: a plain `back` there is the way out.
         var heard = envelope
         heard.name = if direction == "next": evForward else: evBack
         heard.payload = newJObject()
+        heard.payload["direction"] = newJString(direction)
         return loop.deliver(heard, eventPolicy(heard.name))
       let order = loop.sceneOrderOf()
       if order.len == 0:
@@ -535,6 +538,12 @@ proc backFrom(loop: EventLoop, current: FrameScene): string =
   if current.state{"home"}.getBool():
     return SceneSwitcherId
   result = current.state{"from"}.getStr()
+  # A frame whose keys move nothing (one key, docs/buttons.md): its list walks
+  # on a press, and the hold that opened it opens the scene it highlights.
+  if current.id.string == SceneSwitcherId and frameHasNoArrows(loop.frameConfig):
+    let lit = current.state{"highlight"}.getStr()
+    if lit.len > 0 and SceneId(lit) in loop.sceneOrderOf():
+      result = lit
   if result.len == 0:
     let order = loop.sceneOrderOf()
     if order.len > 0:
@@ -563,7 +572,7 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   # frame page (its gear, the way back from a layout that broke the scenes).
   let swap = current.isBuiltIn and (if sceneId == SceneSwitcherId:
       isSceneSettings(current.id.string) and (envelope.payload{"swap"}.getBool() or builtInScenesStay)
-    else: current.id.string == SceneSwitcherId and page == "frame")
+    else: current.id.string == SceneSwitcherId and page in ["frame", "scene"])
   # `{page: "safe"}` (safe mode): the frame page with no layout around it,
   # opened or not already. The scene it came from, and its layout, stay as they
   # are, so closing it unsaved changes nothing.
@@ -576,7 +585,14 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     let worn = current.state{"layout"}
     if not worn.isNil:
       state.put("layout", copy(worn))
-    if sceneId == SceneSettingsId:
+    if sceneId == SceneSettingsId and page == "scene":
+      # From the list's gear, the settings of the scene it was opened from:
+      # read when the list opened, as the scene may be gone since.
+      for key in ["fields", "values"]:
+        let kept = current.state{key}
+        if not kept.isNil:
+          state.put(key, copy(kept))
+    elif sceneId == SceneSettingsId:
       state.put("opened", newJString("frame"))
     payload.put("state", state)
   elif not current.isBuiltIn or safe:
@@ -589,9 +605,11 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
       let worn = layoutAround(current)
       if not worn.isNil:
         state.put("layout", worn)
-    if sceneId == SceneSettingsId:
+    if sceneId == SceneSettingsId or (sceneId == SceneSwitcherId and not current.isBuiltIn and not safe):
+      # The list keeps them too: its gear opens these settings (docs/buttons.md).
       if not current.isBuiltIn:
         current.settingsOf(state)
+    if sceneId == SceneSettingsId:
       # `{page: "frame"}`: straight to the frame's own page, if it has one.
       if safe or page == "frame":
         state.put("opened", newJString("frame"))
@@ -761,6 +779,16 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if loop.listens(scene, delivery.name):
     loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender, delivery.origin)
     result = true
+  elif delivery.name == evButton and payload{"action"}.getStr() == "press":
+    # A scene with nothing to press and no ear for buttons (a photo frame):
+    # its next and prev keys are its `forward` and `back`, as the edge
+    # swipes are (docs/buttons.md), so a scene written for swipes works
+    # with keys as it is. One with a UI moves its focus with them instead.
+    let role = payload{"role"}.getStr()
+    if role in ["next", "prev", "down", "up"]:
+      let name = if role in ["next", "down"]: evForward else: evBack
+      return loop.deliver(EventEnvelope(name: name, payload: newJObject(), origin: eoSystem, target: target,
+        fromRender: fromRender), eventPolicy(name))
   # The old names are pointer events' (docs/events-contract.json `aliasOf`),
   # on every host: store scenes are immutable, and a touch scene written for
   # `mouseMove` runs on an ESP32's glass too.

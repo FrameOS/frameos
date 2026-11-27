@@ -217,6 +217,8 @@ def load():
     buttons = doc["buttons"]
     if not buttons.get("roles") or any(not NAME_RE.fullmatch(r) for r in buttons["roles"]):
         fail("buttons.roles: camelCase identifiers")
+    if buttons.get("facing") != ["left", "right", "up", "down"] or not set(buttons["facing"]) <= set(buttons["roles"]):
+        fail("buttons.facing: left, right, up, down, each one of buttons.roles (delivered as next or prev)")
     if buttons.get("edges") != ["down", "up"]:
         fail("buttons.edges: down, up (the `gpio` event)")
     if buttons.get("actions") != ["press", "doublePress", "triplePress", "longPress"]:
@@ -284,7 +286,9 @@ def unit_options(doc):
     """The payload units whose values are a list the contract already keeps: the
     editor offers these as a select instead of a free text filter."""
     return {
-        "button-role": doc["buttons"]["roles"],
+        # What a scene hears: a key configured as a direction (`facing`) is
+        # delivered as `next` or `prev`.
+        "button-role": [r for r in doc["buttons"]["roles"] if r not in doc["buttons"]["facing"]],
         "button-action": doc["buttons"]["actions"],
         "gpio-action": doc["buttons"]["edges"],
         "swipe-direction": doc["gestures"]["directions"],
@@ -880,6 +884,8 @@ def gen_ts_frontend(doc):
     out.append("")
     out.append("/** GPIO button roles (`gpioButtons[].role`), and the default by label for a button without one. */")
     out.append(f"export const buttonRoles: readonly string[] = {ts_json(doc['buttons']['roles'], None)}")
+    out.append("/** The roles that name where a key sits (configured, never heard: delivered as next or prev). */")
+    out.append(f"export const buttonFacing: readonly string[] = {ts_json(doc['buttons']['facing'], None)}")
     out.append(f"export const buttonRoleByLabel: Record<string, string> = {ts_json(doc['buttons']['roleByLabel'])}")
     out.append(f"export const buttonActions: readonly string[] = {ts_json(doc['buttons']['actions'], None)}")
     out.append("/** The first FrameOS that makes a `triplePress` (`buttons.triplePressSince`): an older one never matches a rule for it. */")

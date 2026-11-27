@@ -56,12 +56,18 @@ frame has no key hold and no microphone path (yet).
   the session. Within the map the first rule matching a label's long press
   wins, as the dispatcher's own walk has it, so a rule that sends REFRESH held
   somewhere else first keeps it from being a voice key; a rule matching by
-  `role` is not read (the firmware knows its keys by label). The E1001/E1002/E1003
-  presets ship the REFRESH rule next to the arrows' (`fos_board.c`, the
-  backend's `EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP`, the SPA's preset
-  table); the E1004, without a microphone, ships the arrows alone. In Settings
+  `role` is not read (the firmware knows its keys by label). Every preset's
+  map comes from docs/buttons.md's one function: the voice key is the board's
+  Action key held (REFRESH on the E1001/E1002/E1003, AI on the Sticky, KEY1 on
+  the PhotoPainter, the crown on the watch), the Screen key on a board with
+  no Action key (the CrowPanel Advance 2.8"'s BOOT), and the rule names it by
+  label (`backend/app/utils/button_standard.py`, generated into the
+  firmware's `fos_board_keys_gen.h`). The E1004, without a microphone, has
+  REFRESH held open the scene list instead. A voice key held together with
+  another key is no voice hold: the two are the frame's Back key
+  (`fos_voice_hold.c`). In Settings
   → Button actions "Voice chat" is offered for a long press on a frame that
-  has voice chat at all, and for a long press only: a press or a double press
+  has voice chat at all, and for a long press only: a press (or a double press, where a rule binds one)
   is over before the frame hears of it and has no release to end a sentence
   on (a press-to-start, press-to-stop toggle would leave the microphone open
   until the 30 s cap on a stray press, and start only after the double-press

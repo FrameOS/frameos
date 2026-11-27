@@ -35,7 +35,7 @@ static fos_voice_hold_event_t hold(fos_voice_hold_t *h, bool down, int64_t start
 {
     for (int i = 0; i < polls; i++) {
         int64_t now = start_ms + 20 * i;
-        fos_voice_hold_event_t event = fos_voice_hold_sample(h, down, now);
+        fos_voice_hold_event_t event = fos_voice_hold_sample(h, down, false, now);
         if (event != FOS_VOICE_HOLD_NONE) {
             if (at) *at = now;
             return event;
@@ -62,12 +62,12 @@ static void test_a_shorter_press_is_nothing(void)
     fos_voice_hold_init(&h);
     int64_t t = 5000;
     for (; t < 5000 + FOS_VOICE_HOLD_MS - 20; t += 20) {
-        CHECK(fos_voice_hold_sample(&h, true, t) == FOS_VOICE_HOLD_NONE, "down, not long enough yet");
+        CHECK(fos_voice_hold_sample(&h, true, false, t) == FOS_VOICE_HOLD_NONE, "down, not long enough yet");
     }
-    CHECK(fos_voice_hold_sample(&h, false, t) == FOS_VOICE_HOLD_NONE, "let go before the hold: nothing");
+    CHECK(fos_voice_hold_sample(&h, false, false, t) == FOS_VOICE_HOLD_NONE, "let go before the hold: nothing");
     CHECK(!fos_voice_hold_claimed(&h), "an ordinary press is not claimed");
     /* Down again: the hold counts from the new press, not the old one. */
-    CHECK(fos_voice_hold_sample(&h, true, t + 100) == FOS_VOICE_HOLD_NONE, "a new press starts counting");
+    CHECK(fos_voice_hold_sample(&h, true, false, t + 100) == FOS_VOICE_HOLD_NONE, "a new press starts counting");
     int64_t at = 0;
     CHECK(hold(&h, true, t + 120, 100, &at) == FOS_VOICE_HOLD_START, "the new press held starts");
     CHECK(at >= t + 100 + FOS_VOICE_HOLD_MS, "counted from the new press, got %lld", (long long)at);
@@ -81,12 +81,12 @@ static void test_letting_go_ends_and_releases_the_claim(void)
     CHECK(hold(&h, true, 0, 100, &at) == FOS_VOICE_HOLD_START, "starts");
     /* Still held: nothing more, still claimed (no hold sounds, no clicks). */
     for (int64_t t = at + 20; t < at + 3000; t += 20) {
-        CHECK(fos_voice_hold_sample(&h, true, t) == FOS_VOICE_HOLD_NONE, "held on: nothing");
+        CHECK(fos_voice_hold_sample(&h, true, false, t) == FOS_VOICE_HOLD_NONE, "held on: nothing");
     }
     CHECK(fos_voice_hold_claimed(&h), "claimed while held");
-    CHECK(fos_voice_hold_sample(&h, false, at + 3000) == FOS_VOICE_HOLD_END, "let go: end");
+    CHECK(fos_voice_hold_sample(&h, false, false, at + 3000) == FOS_VOICE_HOLD_END, "let go: end");
     CHECK(!fos_voice_hold_claimed(&h), "the claim ends with the release");
-    CHECK(fos_voice_hold_sample(&h, false, at + 3020) == FOS_VOICE_HOLD_NONE, "up: nothing");
+    CHECK(fos_voice_hold_sample(&h, false, false, at + 3020) == FOS_VOICE_HOLD_NONE, "up: nothing");
 }
 
 static void test_a_second_hold_starts_a_second_session(void)
@@ -95,9 +95,9 @@ static void test_a_second_hold_starts_a_second_session(void)
     fos_voice_hold_init(&h);
     int64_t at = 0;
     CHECK(hold(&h, true, 0, 100, &at) == FOS_VOICE_HOLD_START, "first starts");
-    CHECK(fos_voice_hold_sample(&h, false, at + 500) == FOS_VOICE_HOLD_END, "first ends");
+    CHECK(fos_voice_hold_sample(&h, false, false, at + 500) == FOS_VOICE_HOLD_END, "first ends");
     CHECK(hold(&h, true, at + 600, 100, &at) == FOS_VOICE_HOLD_START, "second starts");
-    CHECK(fos_voice_hold_sample(&h, false, at + 100) == FOS_VOICE_HOLD_END, "second ends");
+    CHECK(fos_voice_hold_sample(&h, false, false, at + 100) == FOS_VOICE_HOLD_END, "second ends");
 }
 
 static void test_held_since_time_zero(void)
@@ -111,6 +111,23 @@ static void test_held_since_time_zero(void)
     CHECK(at == FOS_VOICE_HOLD_MS, "at the long press from the reset, got %lld", (long long)at);
 }
 
+static void test_two_keys_held_together_are_no_voice_hold(void)
+{
+    /* docs/buttons.md: another key down with the voice key makes the two
+     * the Back key. No session, and the next press of the key alone talks. */
+    fos_voice_hold_t h;
+    fos_voice_hold_init(&h);
+    CHECK(fos_voice_hold_sample(&h, true, false, 1000) == FOS_VOICE_HOLD_NONE, "the voice key down");
+    CHECK(fos_voice_hold_sample(&h, true, true, 1100) == FOS_VOICE_HOLD_NONE, "a second key down with it");
+    CHECK(fos_voice_hold_sample(&h, true, false, 1100 + FOS_VOICE_HOLD_MS) == FOS_VOICE_HOLD_NONE,
+          "held long, the other let go: still no session");
+    CHECK(!fos_voice_hold_claimed(&h), "and not claimed: the dispatcher hears the keys");
+    CHECK(fos_voice_hold_sample(&h, false, false, 3000) == FOS_VOICE_HOLD_NONE, "let go: nothing to end");
+    CHECK(fos_voice_hold_sample(&h, true, false, 4000) == FOS_VOICE_HOLD_NONE, "alone again");
+    CHECK(fos_voice_hold_sample(&h, true, false, 4000 + FOS_VOICE_HOLD_MS) == FOS_VOICE_HOLD_START,
+          "held alone, it talks");
+}
+
 int main(void)
 {
     test_held_a_long_press_starts();
@@ -118,6 +135,7 @@ int main(void)
     test_letting_go_ends_and_releases_the_claim();
     test_a_second_hold_starts_a_second_session();
     test_held_since_time_zero();
+    test_two_keys_held_together_are_no_voice_hold();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

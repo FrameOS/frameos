@@ -187,15 +187,13 @@
   `set_settings` key and an ESP32 NVS slot; "Button actions" in Settings,
   `utils/frameEventMap.ts`) binds a key to the frame whatever scene shows —
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
-  hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
-  scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
-  and the E1003, the Sticky, the SenseCAP Indicator, the Guition 4848S040,
-  the Sunton S070, the CrowPanel 2.01" watch, the CrowPanel 1.46" rotary and the CrowPanel Advance 2.8" the edge swipes (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset
-  table: keep the three alike). A Linux frame never given a map runs its device's:
+  hears it; every hardware preset's map is the button standard's
+  (docs/buttons.md, below), never written by hand. A Linux frame never given
+  a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
-  own, never a scene switch: the switcher moves a screenful on them), up from the bottom
+  own, never a scene switch), up from the bottom
   the scene switcher and down from the top the settings (as the SenseCAP
-  preset does)
+  preset does), every Inky Impression's A to D the standard's
   (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
   together by `device-event-map.test.ts`). `setCurrentScene {direction}` is resolved by the
   dispatcher from the host's `sceneOrder`, never by a host. **An installed
@@ -207,6 +205,31 @@
   (`cloudFrameScenesSave.ts`) and templates never carry it; the dialog is
   "Map buttons" in the scene menu (`buttonMapLogic.ts`,
   `utils/sceneEventMap.ts`). A scene update must keep it on both planes.
+
+## Buttons: `docs/buttons.md` is the standard
+
+- Every board's keys play five roles (Action `primary`, Next/Prev, Back,
+  Home `menu`, Screen), each a press and a hold, **no double or triple press
+  in any default** (two presses are two presses; a press is delivered at its
+  `up`, and only a key some rule binds a `doublePress` of waits). Holds are
+  the frame's: Action held talks (a microphone) or is Home, the arrows held
+  walk the scenes, Back held and a Home key pressed are the scene list, a
+  Home key held the scene's settings. A board with no Back key gets one from
+  two keys held together (`input_state.nim`, only where a map binds Back by
+  role). A key that points somewhere is configured as its direction
+  (`left`/`right`/`up`/`down`) and delivered as `next`/`prev` through the
+  frame's rotation (`facing`). A `next`/`prev` press no scene hears is its
+  `forward`/`back` (`event_loop.nim`).
+- **One function makes every preset's map**: `default_event_map` in
+  `backend/app/utils/button_standard.py`, from `EMBEDDED_BOARD_KEYS` (every
+  key of every preset and its role) in `embedded_firmware.py`.
+  `frameos/tools/generate_board_keys.py` writes the copies (the firmware's
+  `fos_board_keys_gen.h`, the SPA's `frontend/src/generated/boardKeys.gen.ts`,
+  the Linux devices' `device_event_map_gen.nim`); the backend suite runs its
+  `--check`. Change a board in the backend and run the generator; never edit a
+  copy, and never add a hand-written map. An ESP32 sends each key's role with
+  its edges (`fos_board_key_role`). The firmware finds its voice key by label,
+  so a voice rule always names a label.
 
 ## The scene switcher: `docs/scene-switcher.md`
 
@@ -279,8 +302,8 @@
   Save is `setCurrentScene {sceneId: from, state}`, which every host already
   applies to public fields; the same command again, or `sceneSwitcher`,
   goes back unsaved.
-- Bound to a swipe down from the top in every touch preset (`TOUCH_EDGE_SWIPES`
-  and its two copies, `device_event_map.nim`): keep the presets alike. Both
+- Bound to a swipe down from the top in every touch preset, a Home key held,
+  and the scene list's gear (docs/buttons.md; the generated maps). Both
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
 - A gear left of Save opens the **frame page** (doc section "The frame page"):
   Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot (under the
@@ -894,8 +917,8 @@
   `case event` in a host.
 - **Keys** (`docs/jsx-ui.md` "Keys"): Tab / Shift+Tab ring every element
   there is to press (one stop per element), Enter presses it, Escape lets
-  go; a frame's buttons are those keys by role (a press once, a double press
-  twice, a long press the event map's). The scene's own code hears a key
+  go; a frame's buttons are those keys by role (a press once, the moment the
+  key is up; a long press the event map's). The scene's own code hears a key
   first and keeps it with an event node or an `onEvent` that returns true
   (the desktops' Alt+Tab, the Commander's Tab). The scene's UI and its
   layout's are ONE walk with one ring (`interpreter.keysPlanned` / `keysTo`,

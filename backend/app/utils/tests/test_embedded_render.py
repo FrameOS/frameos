@@ -521,10 +521,12 @@ async def test_a_held_key_switches_scenes_through_the_frames_event_map_in_the_re
     """docs/server-rendering.md "Keys, touch and the schedule": an ESP32's
     RIGHT held a second, relayed as its driver's two `gpio` edges, is the
     `longPress` the frame's event map makes the next scene, in the render
-    the pull asked for. What the plane sent it itself is not delivered."""
+    the pull asked for: the reTerminal's map matches the arrows by role, and
+    RIGHT (role `right`) is `next` on a frame that is not turned. What the
+    plane sent it itself is not delivered."""
     from types import SimpleNamespace
 
-    from app.tasks.embedded_firmware import EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP
+    from app.tasks.embedded_firmware import EMBEDDED_HARDWARE_PRESETS
     from app.utils.embedded_render import render_scene
 
     frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=RELAY_SCENES)
@@ -534,7 +536,7 @@ async def test_a_held_key_switches_scenes_through_the_frames_event_map_in_the_re
         {"origin": "driver", "name": "gpio",
          "payload": {"pin": 3, "label": "RIGHT", "level": 1, "action": "up", "atMs": 19_200}},
     ]}
-    frame_json = {"eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP, "palette": [], "colors": {}}
+    frame_json = {"eventMap": EMBEDDED_HARDWARE_PRESETS["seeed_reterminal_e1004"]["eventMap"], "palette": [], "colors": {}}
 
     switched = await render_scene(frame, 16, 16, scene_id="clock", device_input=held, frame_json=frame_json)
     assert switched.rgba is not None, switched.error
@@ -581,9 +583,10 @@ async def test_the_scene_switcher_opens_again_where_the_plane_left_it_in_the_rea
     assert reopened.state["state"]["from"] == "clock"
     assert reopened.state["state"]["highlight"] == "photos"
 
-    # `B` is a `next` key (buttons.roleByLabel): one step on, wrapping round.
+    # `C` is a `next` key (buttons.roleByLabel; `B` is `prev`): one step on,
+    # wrapping round.
     tap = {"nowMs": 10_600, "edges": [
-        {"label": "B", "action": "down", "atMs": 10_000}, {"label": "B", "action": "up", "atMs": 10_080}]}
+        {"label": "C", "action": "down", "atMs": 10_000}, {"label": "C", "action": "up", "atMs": 10_080}]}
     walked = await render_scene(frame, 64, 64, scene_id="system/sceneSwitcher", scene_states=kept, device_input=tap)
     assert walked.state["sceneId"] == "system/sceneSwitcher"
     assert walked.state["state"]["highlight"] == "clock"

@@ -656,7 +656,10 @@ enum CloudFramesContractSource {
               "down",
               "back",
               "menu",
-              "refresh"
+              "refresh",
+              "screen",
+              "left",
+              "right"
             ],
             "type": "string"
           }

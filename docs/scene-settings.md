@@ -12,7 +12,7 @@ from the left (the frame's `back`) goes back as it was.
 | The event that opens it, `sceneSettings` | `docs/events-contract.json` (a `scene-command`), resolved by `frameos/src/frameos/event_loop.nim` |
 | The scene, `system/sceneSettings` (the contract's `scenes.settings`) | `frameos/src/system/sceneSettings/scene.nim`, one module for every host |
 | The fields, the keyboard on the screen, the list that scrolls | the JSX layer's (`docs/jsx-ui.md` "Fields and the keyboard", "Scrolling and clipping") |
-| The default bindings | `TOUCH_EDGE_SWIPES` in `fos_board.c` (the SenseCAP Indicator, the reTerminal E1003), `EMBEDDED_TOUCH_EDGE_SWIPES` and the SPA's `NewFrame.tsx`, every HyperPixel's `frameos/device_event_map.nim` |
+| The default bindings | every touch board's swipe down from the top, a Home key held, the scene list's gear (docs/buttons.md): `TOUCH_EDGE_SWIPES` in `backend/app/utils/button_standard.py`, generated into the firmware's `fos_board_keys_gen.h`, the SPA's `boardKeys.gen.ts` and the Linux devices' `device_event_map_gen.nim` |
 | "Button actions" | `frontend/src/utils/frameEventMap.ts` (the action "Scene settings"); the cloud contract's `event_map` rule allows the emit |
 
 ## Opening and closing it

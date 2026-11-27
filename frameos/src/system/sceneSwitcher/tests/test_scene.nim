@@ -366,10 +366,11 @@ block it_opens_scrolled_to_the_scene_showing_in_a_layouts_hole:
   doAssert listScroll() == 0 and shownWhole(2)
 
 block forward_and_back_move_a_screenful:
-  # What turned a page (the frame's forward and back, a swipe in from an
-  # edge, a scene direction, which the dispatcher hands the switcher as
-  # them): the highlight a screenful on or back, the list with it, wrapping
-  # at the ends, and no scene switch.
+  # What turned a page (the frame's forward, a swipe in from the right edge,
+  # and a scene direction, which the dispatcher hands the switcher as
+  # forward or back with its `direction`): the highlight a screenful on or
+  # back, the list with it, wrapping at the ends, and no scene switch. A
+  # plain back is the way out (the next block).
   listed = entries(40)
   sent.setLen(0)
   let scene = newSwitcher(config(480, 480, "embedded"), opener = "scene-1")
@@ -380,9 +381,9 @@ block forward_and_back_move_a_screenful:
   doAssert scene.highlighted() == screen, $scene.highlighted()
   discard scene.draw(newImage565(480, 480))
   doAssert listScroll() > 0 and shownWhole(screen)
-  scene.send(evBack, %*{})
+  scene.send(evBack, %*{"direction": "prev"})
   doAssert scene.highlighted() == 0 and listScroll() == 0
-  scene.send(evBack, %*{})
+  scene.send(evBack, %*{"direction": "prev"})
   doAssert scene.highlighted() == 39, "back from the first: the last"
   scene.send(evForward, %*{})
   doAssert scene.highlighted() == 0, "on from the last: the first"
@@ -401,6 +402,16 @@ block forward_and_back_move_a_screenful:
   doAssert scene.highlighted() == screen
   scene.send("keyDown", %*{"code": "PageUp", "key": "PageUp"})
   doAssert scene.highlighted() == 0
+
+block back_leaves:
+  # The frame's back (its Back key, two keys held together, a swipe in from
+  # the left edge) goes back to the scene it was opened from, as on a phone.
+  listed = entries(10)
+  sent.setLen(0)
+  let scene = newSwitcher(config(480, 480, "embedded"), opener = "scene-3")
+  discard scene.draw(newImage565(480, 480))
+  scene.send(evBack, %*{})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSwitcher, $sent
 
 block e_paper_scrolls_where_the_finger_lifts:
   # The reTerminal E1003 (1872x1404, sixteen greys): no render while the

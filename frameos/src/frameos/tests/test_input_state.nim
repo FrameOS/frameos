@@ -451,7 +451,7 @@ block test_a_button_has_a_role_and_two_events:
   # The line at once, as `gpio`: the down edge, with the role its label carries.
   doAssert state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "level": 0}, eoDriver, at(0), output)
   doAssert output.kinds == @["gpio:down"]
-  doAssert output[0].payload["role"].getStr() == "next" and output[0].payload["level"].getInt() == 0
+  doAssert output[0].payload["role"].getStr() == "prev" and output[0].payload["level"].getInt() == 0
   # The configured role wins over the label's default. A producer from before
   # 2026.10.16 sent its edges as `button` (named press / release before that):
   # the level decides, and they are `gpio` edges all the same.
@@ -488,8 +488,8 @@ block test_a_button_has_a_role_and_two_events:
     "durationMs": 3400}, eoDriver, at(4500), output)
   doAssert output.kinds == @["gpio:up"]
   doAssert output[0].payload["durationMs"].getInt() == 3400
-  # The down that woke the device is a press like any other: it waits for its
-  # up, and the press it becomes says it woke the device.
+  # The down that woke the device is a press like any other: its up is the
+  # press, which says it woke the device.
   output.setLen(0)
   discard state.applyNamedInput(evGpio, %*{"pin": 9, "label": "BOOT", "level": 0, "action": "down", "wake": true},
     eoDriver, at(5000), output)
@@ -540,8 +540,24 @@ block test_a_long_press_comes_at_the_hold:
   discard state.applyNamedInput(evGpio, %*{"pin": 18, "label": "OK", "level": 1}, eoDriver, at(13600), output)
   doAssert output.kinds == @["gpio:down", "gpio:up", "button:longPress"], $output.kinds
 
-block test_a_tap_waits_for_a_second_one:
+block test_a_tap_is_a_press_at_its_up:
+  # No rule binds a double press of the key: its up is the press, at once,
+  # and two quick taps are two presses (the same digit twice on a
+  # calculator, two steps of next).
   var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "action": "down"}, eoDriver, at(0), output)
+  discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "action": "up"}, eoDriver, at(80), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:press"], $output.kinds
+  doAssert output[2].payload["durationMs"].getInt() == 80 and state.buttonsBusy == 0
+  output.setLen(0)
+  discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "action": "down"}, eoDriver, at(150), output)
+  discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "action": "up"}, eoDriver, at(200), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "button:press"], $output.kinds
+
+block test_a_tap_waits_for_a_second_one_where_a_rule_binds_one:
+  var state = initInputState(config(800, 480))
+  state.bound = proc (pin: int, label, role, action: string): bool = label == "B" and action == "doublePress"
   var output: seq[InputDelivery]
   discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "action": "down"}, eoDriver, at(0), output)
   discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "action": "up"}, eoDriver, at(80), output)
@@ -566,10 +582,11 @@ block test_a_third_press_is_waited_for_only_where_a_rule_binds_one:
   # Only a key whose `triplePress` a rule binds (event_loop.nim asks the
   # maps) holds its pair back: the second down is no doublePress yet, a third
   # down inside the window after the second up is the triplePress, and a
-  # window that closes makes the pair the doublePress, late. Every other key
-  # is as fast as before (the test above).
+  # window that closes makes the pair the doublePress, late. A key bound
+  # twice and not three times is as fast as before (the test above).
   var state = initInputState(config(800, 480))
-  state.bound = proc (pin: int, label, role, action: string): bool = label == "AI" and action == "triplePress"
+  state.bound = proc (pin: int, label, role, action: string): bool =
+    (label == "AI" and action == "triplePress") or (label == "UP" and action == "doublePress")
   var output: seq[InputDelivery]
   proc edge(state: var InputState, label, action: string, ms: int, output: var seq[InputDelivery]) =
     discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": label, "action": action}, eoDriver, at(ms), output)
@@ -611,8 +628,8 @@ block test_a_third_press_is_waited_for_only_where_a_rule_binds_one:
     state.edge("AI", action, ms, output)
   state.tick(at(13000), output)
   doAssert output.kinds.filterIt(it.startsWith("button")) == @["button:triplePress", "button:press"], $output.kinds
-  # A key no rule binds three times: the doublePress at the second down, and
-  # the third down starts over.
+  # A key a rule binds twice and not three times: the doublePress at the
+  # second down, and the third down starts over.
   output.setLen(0)
   for (action, ms) in [("down", 20000), ("up", 20050), ("down", 20150), ("up", 20200), ("down", 20300),
                        ("up", 20350)]:
@@ -620,6 +637,25 @@ block test_a_third_press_is_waited_for_only_where_a_rule_binds_one:
   doAssert output.kinds[3] == "button:doublePress", $output.kinds
   state.tick(at(21000), output)
   doAssert output.kinds.filterIt(it.startsWith("button")) == @["button:doublePress", "button:press"], $output.kinds
+
+block test_two_keys_held_together_are_back_only_before_a_hold:
+  # docs/buttons.md: on a frame whose map binds Back by role, a second key
+  # down with the first is the Back key; a second key down after the first
+  # has been held a long press (the voice key, listening) is a key of its own.
+  var state = initInputState(config(800, 480))
+  state.bound = proc (pin: int, label, role, action: string): bool =
+    (role == "back" and pin == -1 and action == "press") or (label == "REFRESH" and action == "longPress")
+  var output: seq[InputDelivery]
+  proc edge(state: var InputState, pin: int, label: string, level, ms: int, output: var seq[InputDelivery]) =
+    discard state.applyNamedInput(evGpio, %*{"pin": pin, "label": label, "level": level}, eoDriver, at(ms), output)
+  state.edge(3, "REFRESH", 0, 0, output)
+  state.edge(4, "LEFT", 0, 1500, output)
+  state.edge(4, "LEFT", 1, 1600, output)
+  doAssert output.kinds == @["gpio:down", "gpio:down", "gpio:up", "button:press"], $output.kinds
+  doAssert output[3].payload["label"].getStr() == "LEFT"
+  output.setLen(0)
+  state.edge(3, "REFRESH", 1, 3000, output)
+  doAssert output.kinds == @["gpio:up", "button:longPress"], $output.kinds
 
 block test_someone_elses_press_is_delivered_as_said:
   # HTTP, the cloud, a schedule or a scene: no line moved, nothing to time.
@@ -649,11 +685,9 @@ block test_a_stamped_edge_is_timed_by_its_stamp:
   output.setLen(0)
   discard state.applyNamedInput(evGpio, %*{"pin": 6, "label": "B", "level": 1, "action": "up",
     "atMs": base + 1200}, eoDriver, at(31000), output)
-  doAssert output.kinds == @["gpio:up"] and output[0].payload["durationMs"].getInt() == 200
-  # Its window closed long ago: the next tick makes it a press, not a long one.
-  output.setLen(0)
-  state.tick(at(31000), output)
-  doAssert output.kinds == @["button:press"] and output[0].payload["atMs"].getInt() == base + 1000
+  # Its up is the press, not a long one: 200 ms by the stamps, not 30 s.
+  doAssert output.kinds == @["gpio:up", "button:press"] and output[0].payload["durationMs"].getInt() == 200
+  doAssert output[1].payload["atMs"].getInt() == base + 1000
   doAssert state.buttonsBusy == 0
 
 block test_a_stamped_touch_is_timed_by_its_stamps:
@@ -876,7 +910,16 @@ block test_the_corpus:
 
   var ran = 0
   for c in fixtures["inputState"]["cases"]:
-    var state = initInputState(config(800, 480))
+    # `rotate`: the frame turned (a key's direction turns with it);
+    # `doubleLabels` / `tripleLabels`: the keys a rule binds twice or three
+    # times; `holdLabels`: the keys the frame takes at the hold;
+    # `backByRole`: a rule binds a `back` press by role (two keys held
+    # together are the Back key).
+    var state = initInputState(config(800, 480, c{"rotate"}.getInt()))
+    var doubleLabels: seq[string]
+    for label in c{"doubleLabels"}.getElems():
+      doubleLabels.add(label.getStr())
+    let backByRole = c{"backByRole"}.getBool()
     var tripleLabels: seq[string]
     for label in c{"tripleLabels"}.getElems():
       tripleLabels.add(label.getStr())
@@ -884,7 +927,11 @@ block test_the_corpus:
     for label in c{"holdLabels"}.getElems():
       holdLabels.add(label.getStr())
     state.bound = proc (pin: int, label, role, action: string): bool =
-      label in (if action == "triplePress": tripleLabels else: holdLabels)
+      case action
+      of "triplePress": label in tripleLabels
+      of "doublePress": label in doubleLabels
+      of "press": backByRole and role == "back" and pin == -1
+      else: label in holdLabels
     for step in c["steps"]:
       var output: seq[InputDelivery]
       let now = at(step["at"].getInt())

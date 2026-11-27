@@ -1055,15 +1055,18 @@ export const sceneChangedLogEvents: readonly string[] = ["render:scene", "render
 export const sceneStateChangedLogEvents: readonly string[] = ["event:setSceneState", "event:setCurrentScene", "event:uploadScenes"]
 
 /** GPIO button roles (`gpioButtons[].role`), and the default by label for a button without one. */
-export const buttonRoles: readonly string[] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
+export const buttonRoles: readonly string[] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh", "screen", "left", "right"]
+/** The roles that name where a key sits (configured, never heard: delivered as next or prev). */
+export const buttonFacing: readonly string[] = ["left", "right", "up", "down"]
 export const buttonRoleByLabel: Record<string, string> = {
   "A": "primary",
-  "B": "next",
-  "C": "prev",
+  "B": "prev",
+  "C": "next",
   "D": "back",
+  "E": "menu",
   "BOOT": "primary",
-  "KEY1": "next",
-  "KEY2": "prev",
+  "KEY1": "prev",
+  "KEY2": "primary",
   "KEY3": "next",
   "BUTTON": "primary",
   "AI": "primary",
@@ -1076,12 +1079,14 @@ export const buttonRoleByLabel: Record<string, string> = {
   "EXIT": "back",
   "BACK": "back",
   "NEXT": "next",
-  "RIGHT": "next",
+  "RIGHT": "right",
   "PREV": "prev",
-  "LEFT": "prev",
+  "LEFT": "left",
   "UP": "up",
   "DOWN": "down",
-  "REFRESH": "primary"
+  "REFRESH": "primary",
+  "PWR": "screen",
+  "SCREEN": "screen"
 }
 export const buttonActions: readonly string[] = ["press", "doublePress", "triplePress", "longPress"]
 /** The first FrameOS that makes a `triplePress` (`buttons.triplePressSince`): an older one never matches a rule for it. */

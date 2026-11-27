@@ -87,17 +87,20 @@ WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_PINS = {
     "mosi": 10,
     "pwr": 27,
 }
+# An Inky Impression's keys down its side, A at the top (docs/buttons.md):
+# A is Action, B and C point up and down (they turn with the frame), D is
+# Back. Keep in step with frontend/src/utils/deviceGpioButtons.ts.
 INKY_GPIO_BUTTONS = [
-    {"pin": 5, "label": "A"},
-    {"pin": 6, "label": "B"},
-    {"pin": 16, "label": "C"},
-    {"pin": 24, "label": "D"},
+    {"pin": 5, "label": "A", "role": "primary"},
+    {"pin": 6, "label": "B", "role": "up"},
+    {"pin": 16, "label": "C", "role": "down"},
+    {"pin": 24, "label": "D", "role": "back"},
 ]
 INKY_13_GPIO_BUTTONS = [
-    {"pin": 5, "label": "A"},
-    {"pin": 6, "label": "B"},
-    {"pin": 25, "label": "C"},
-    {"pin": 24, "label": "D"},
+    {"pin": 5, "label": "A", "role": "primary"},
+    {"pin": 6, "label": "B", "role": "up"},
+    {"pin": 25, "label": "C", "role": "down"},
+    {"pin": 24, "label": "D", "role": "back"},
 ]
 WAVESHARE_DEVICE_VARIANTS = {
     WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_DEVICE: WAVESHARE_RPI_ZERO_PHOTOPAINTER_7IN3E_VARIANT,

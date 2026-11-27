@@ -37,6 +37,12 @@ size_t fos_voice_binding_labels(const char *event_map_json, char labels[][FOS_VO
  * as a first. */
 size_t fos_voice_binding_triple_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
                                        size_t max);
+/* The labels a rule naming `doublePress` matches: the keys whose press the
+ * dispatcher holds for a second (every other key's press is a press at its
+ * `up`, docs/buttons.md), so the button task sounds a second down as a
+ * double press only on them (fos_button_timing.h `pair`). */
+size_t fos_voice_binding_double_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
+                                       size_t max);
 
 /* How a person at the frame opens its own page (docs/scene-settings.md "The
  * frame page") by hand, for the voice key's words when there is no Wi-Fi to

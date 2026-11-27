@@ -234,3 +234,18 @@ block test_a_hyperpixel_never_given_an_event_map_swipes_back_forward_and_to_the_
         {"event": "tap", "emit": "render", "as": {}}]}))
     doAssert own.eventMap.len == 1 and own.eventMap[0]["event"].getStr == "tap"
     doAssert parseFrameConfig($(%*{"device": "framebuffer"})).eventMap.isNil
+
+block test_an_inky_impression_never_given_an_event_map_has_the_standard_keys:
+    # docs/buttons.md: A held is the scene list, D pressed back and held the
+    # scene list, B and C held (they point up and down, and turn with the
+    # frame) the previous and the next scene.
+    let config = parseFrameConfig($(%*{"device": "pimoroni.inky_impression_7"}))
+    doAssert config.eventMap.kind == JArray
+    var seen: seq[string]
+    for rule in config.eventMap:
+        let match = rule["match"]
+        seen.add(match{"label"}.getStr(match{"role"}.getStr()) & " " & match["action"].getStr() & " " & rule["emit"].getStr())
+    doAssert "A longPress sceneSwitcher" in seen, $seen
+    doAssert "D press back" in seen and "D longPress sceneSwitcher" in seen, $seen
+    doAssert "next longPress setCurrentScene" in seen and "prev longPress setCurrentScene" in seen, $seen
+    doAssert parseFrameConfig($(%*{"device": "pimoroni.inky_impression_13_2025"})).eventMap.len == config.eventMap.len

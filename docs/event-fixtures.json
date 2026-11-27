@@ -3274,7 +3274,7 @@
       ],
       "trace": [
        "mapped scene button",
-       "run eventMap button {\"pin\":17,\"label\":\"A\",\"role\":\"next\",\"action\":\"press\"}"
+       "run eventMap button {\"pin\":17,\"label\":\"A\",\"role\":\"prev\",\"action\":\"press\"}"
       ],
       "state": {
        "heardA": true
@@ -3683,7 +3683,7 @@
    },
    {
     "name": "a press three times is the event map's only where a rule binds one, and any other key is as fast as before",
-    "why": "A key whose `triplePress` a rule binds (the frame's map, or the showing scene's) holds its second down back: the third down inside doublePressMs of the second up is the `triplePress`, which the map replaces or rewrites like any press. A key no rule binds three times is a `doublePress` on its second down, as before. Edges with no `atMs` are timed when they are delivered, so these taps, sent together, are quick ones.",
+    "why": "A key whose `triplePress` a rule binds (the frame's map, or the showing scene's) holds its second down back: the third down inside doublePressMs of the second up is the `triplePress`, which the map replaces or rewrites like any press. A key no rule binds twice or three times is a `press` at each up (UP: its first tap is a press, its second down nothing yet). Edges with no `atMs` are timed when they are delivered, so these taps, sent together, are quick ones.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/triple",
@@ -3886,7 +3886,7 @@
       ],
       "trace": [
        "mapped scene button",
-       "run triple button {\"pin\":6,\"label\":\"A\",\"role\":\"next\",\"action\":\"press\"}",
+       "run triple button {\"pin\":6,\"label\":\"A\",\"role\":\"prev\",\"action\":\"press\"}",
        "render"
       ],
       "state": {
@@ -3927,8 +3927,145 @@
        }
       ],
       "trace": [
-       "run triple button {\"pin\":5,\"label\":\"UP\",\"role\":\"up\",\"action\":\"doublePress\"}"
+       "run triple button {\"pin\":5,\"label\":\"UP\",\"role\":\"prev\",\"action\":\"press\",\"durationMs\":0}"
       ]
+     }
+    ]
+   },
+   {
+    "name": "a scene with nothing to press hears its next and prev keys as forward and back",
+    "why": "A photo scene written for the edge swipes (`forward`, `back`) and with no ear for buttons and no UI: the dispatcher hands it a press of a `next` key as `forward` and of a `prev` key as `back` (origin `system`), so it works with keys as it is (docs/buttons.md). A scene that listens for `button`, or has a UI the keys walk, hears the press itself.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/photos",
+      "name": "photos",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "f",
+        "type": "event",
+        "data": {
+         "keyword": "forward",
+         "config": {}
+        }
+       },
+       {
+        "id": "fa",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "wentForward",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "b",
+        "type": "event",
+        "data": {
+         "keyword": "back",
+         "config": {}
+        }
+       },
+       {
+        "id": "ba",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "wentBack",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "f",
+        "sourceHandle": "next",
+        "target": "fa",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "b",
+        "sourceHandle": "next",
+        "target": "ba",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/photos",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "level": 1,
+         "action": "up"
+        }
+       }
+      ],
+      "trace": [
+       "run photos forward",
+       "render"
+      ],
+      "state": {
+       "wentForward": true,
+       "wentBack": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "level": 1,
+         "action": "up"
+        }
+       }
+      ],
+      "trace": [
+       "run photos back",
+       "render"
+      ],
+      "state": {
+       "wentBack": true
+      }
      }
     ]
    },
@@ -4119,8 +4256,8 @@
     ]
    },
    {
-    "name": "the scene switcher opens from the scene showing, and the same again goes back; back, forward and a scene direction move its highlight a screenful",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` is its `forward` (for `next`) or `back` (for `prev`) instead: the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) move its highlight a screenful of tiles back or on (here one tile: the frame is 4x3), its list scrolling with it, wrapping around at the ends, and the frame stays on it. The switcher is in no scene list.",
+    "name": "the scene switcher opens from the scene showing, and the same again goes back; forward and a scene direction move its highlight a screenful, back leaves",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` is its `forward` (for `next`) or `back` (for `prev`) instead: the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `forward` (a swipe in from the right edge) moves its highlight a screenful of tiles on (here one tile: the frame is 4x3), its list scrolling with it, wrapping around at the ends, and the frame stays on it; a scene direction (said as `forward` or `back` with its `direction`) moves it a screenful either way. The frame's `back` (its Back key, a swipe in from the left edge) goes back to the scene it was opened from, as on a phone. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -4539,13 +4676,12 @@
       "trace": [
        "mapped frame edgeSwipe -> back",
        "run sceneSwitcher back",
+       "select fixtures/dispatcher/switcherB",
+       "run sceneSwitcher close",
+       "run switcherB open",
        "render"
       ],
-      "current": "system/sceneSwitcher",
-      "state": {
-       "from": "fixtures/dispatcher/switcherB",
-       "highlight": "fixtures/dispatcher/switcherB"
-      }
+      "current": "fixtures/dispatcher/switcherB"
      }
     ]
    },
@@ -4822,6 +4958,93 @@
       "state": {
        "from": "fixtures/dispatcher/switcherA",
        "home": null
+      }
+     }
+    ]
+   },
+   {
+    "name": "the scene list's gear opens the settings of the scene it was opened from",
+    "why": "The list reads the settings of the scene it opens over (`fields`, `values`), as the settings panel does, because a host that holds one scene lets that scene go while the list shows. Its gear sends `sceneSettings {page: \"scene\"}`: the settings open in the list's place with those fields and values and `from` the scene, and going back from them is going back to the list (docs/buttons.md \"Scene settings\"). `{page: \"frame\"}` is the frame page, as before.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/weather",
+      "name": "weather",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": [],
+      "fields": [
+       {
+        "name": "city",
+        "label": "City",
+        "type": "string",
+        "value": "Tallinn",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/weather",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run weather close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/weather",
+       "fields": [
+        {
+         "name": "city",
+         "label": "City",
+         "type": "string",
+         "placeholder": "",
+         "secret": false
+        },
+        {
+         "name": "refreshInterval",
+         "label": "Refresh interval (seconds)",
+         "type": "float",
+         "placeholder": "",
+         "secret": false
+        }
+       ]
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings",
+        "payload": {
+         "page": "scene"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run sceneSwitcher close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/weather",
+       "opened": null
       }
      }
     ]
@@ -6248,8 +6471,8 @@
   "$comment": "The input state (frameos/src/frameos/input_state.nim) alone: its button half, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). A case's `tripleLabels` names the labels a rule of an event map binds a `triplePress` of (event_loop.nim asks the maps; here the case says), so those keys hold a pair back for a third press. `delivered` = exactly what came out, in order: event name, and a subset of the payload. A pointer case sends pointer events (positions on the 0..32767 wire, an 800x480 frame) and expects scene pixels. A case's `holdLabels` names the labels the frame takes at the hold (a rule of the frame's map binds their `longPress` to `voiceChat`; event_loop.nim asks the map, here the case says): their long press is left to their `up`.",
   "cases": [
    {
-    "name": "a tap is down and up at once, and a press when its window closes",
-    "why": "The hardware layer is immediate. The button layer waits doublePressMs (350) after the up for a second down; none came, so the tap is a press, carrying its down's atMs and how long it was.",
+    "name": "a tap is down and up at once, and its up the press",
+    "why": "No rule binds a doublePress of the key: nothing waits for a second tap (buttons.pressAtUpSince). The press comes with the up, and says how long the key was down.",
     "steps": [
      {
       "at": 1000,
@@ -6270,7 +6493,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "level": 0,
          "atMs": 1000
@@ -6297,42 +6520,36 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "level": 1,
          "atMs": 1080,
          "durationMs": 80
         }
-       }
-      ]
-     },
-     {
-      "at": 1430,
-      "tick": true,
-      "delivered": []
-     },
-     {
-      "at": 1431,
-      "tick": true,
-      "delivered": [
+       },
        {
         "event": "button",
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "press",
          "atMs": 1000,
          "durationMs": 80
         }
        }
       ]
+     },
+     {
+      "at": 1431,
+      "tick": true,
+      "delivered": []
      }
     ]
    },
    {
     "name": "a fast double tap is one doublePress and no press",
-    "why": "Two 40 ms taps 100 ms apart, as a thumb does them. The second down is the doublePress; the pair is that and nothing more.",
+    "why": "Two 40 ms taps 100 ms apart, as a thumb does them. The second down is the doublePress; the pair is that and nothing more. (B is a key a rule binds a doublePress of: only such a key waits.)",
     "steps": [
      {
       "at": 1000,
@@ -6353,7 +6570,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -6379,7 +6596,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 40
         }
@@ -6405,7 +6622,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1140
         }
@@ -6415,7 +6632,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "doublePress",
          "atMs": 1140
         }
@@ -6441,7 +6658,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 40
         }
@@ -6453,11 +6670,14 @@
       "tick": true,
       "delivered": []
      }
+    ],
+    "doubleLabels": [
+     "B"
     ]
    },
    {
     "name": "the down that closes the window is the double press, the one after it starts over",
-    "why": "A second down exactly doublePressMs after the up still pairs. A third down right after a double press is a new first tap.",
+    "why": "A second down exactly doublePressMs after the up still pairs. A third down right after a double press is a new first tap. (B is a key a rule binds a doublePress of: only such a key waits.)",
     "steps": [
      {
       "at": 1000,
@@ -6478,7 +6698,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -6503,7 +6723,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 50
         }
@@ -6529,7 +6749,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        },
@@ -6538,7 +6758,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "doublePress",
          "atMs": 1400
         }
@@ -6564,7 +6784,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 50
         }
@@ -6590,7 +6810,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1500
         }
@@ -6616,7 +6836,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 50
         }
@@ -6632,7 +6852,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "press",
          "atMs": 1500,
          "durationMs": 50
@@ -6640,6 +6860,9 @@
        }
       ]
      }
+    ],
+    "doubleLabels": [
+     "B"
     ]
    },
    {
@@ -7101,8 +7324,8 @@
     ]
    },
    {
-    "name": "a slow second tap is two presses",
-    "why": "The window closed between the taps: the first is a press on the tick, the second its own.",
+    "name": "two taps are two presses",
+    "why": "A key no rule binds twice: each up is a press, however quickly the next tap comes (the same digit twice on a calculator).",
     "steps": [
      {
       "at": 1000,
@@ -7123,7 +7346,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -7148,22 +7371,16 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up"
         }
-       }
-      ]
-     },
-     {
-      "at": 1401,
-      "tick": true,
-      "delivered": [
+       },
        {
         "event": "button",
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "press",
          "atMs": 1000
         }
@@ -7189,7 +7406,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1500
         }
@@ -7215,22 +7432,16 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up"
         }
-       }
-      ]
-     },
-     {
-      "at": 1901,
-      "tick": true,
-      "delivered": [
+       },
        {
         "event": "button",
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "press",
          "atMs": 1500
         }
@@ -7262,7 +7473,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -7288,9 +7499,20 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "atMs": 1200,
+         "durationMs": 200
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
+         "atMs": 1000,
          "durationMs": 200
         }
        }
@@ -7299,25 +7521,13 @@
      {
       "at": 31000,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "press",
-         "atMs": 1000,
-         "durationMs": 200
-        }
-       }
-      ]
+      "delivered": []
      }
     ]
    },
    {
     "name": "a double tap during a render is a doublePress",
-    "why": "The four edges arrive together after the refresh; their stamps say the second down came 100 ms after the first up.",
+    "why": "The four edges arrive together after the refresh; their stamps say the second down came 100 ms after the first up. (B is a key a rule binds a doublePress of: only such a key waits.)",
     "steps": [
      {
       "at": 31000,
@@ -7338,7 +7548,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -7364,7 +7574,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 40
         }
@@ -7390,7 +7600,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1140
         }
@@ -7400,7 +7610,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "doublePress",
          "atMs": 1140
         }
@@ -7426,7 +7636,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 40
         }
@@ -7438,11 +7648,14 @@
       "tick": true,
       "delivered": []
      }
+    ],
+    "doubleLabels": [
+     "B"
     ]
    },
    {
     "name": "two slow taps during a render are two presses, in order",
-    "why": "The first tap's window closed before the second down: it is delivered as a press before that down, then the second becomes one on the tick.",
+    "why": "Four edges arrive together after the refresh: each up is a press, in the order the taps were made.",
     "steps": [
      {
       "at": 31000,
@@ -7463,7 +7676,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -7489,8 +7702,19 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
+         "durationMs": 50
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
+         "atMs": 1000,
          "durationMs": 50
         }
        }
@@ -7511,22 +7735,11 @@
       },
       "delivered": [
        {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "press",
-         "atMs": 1000,
-         "durationMs": 50
-        }
-       },
-       {
         "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1500
         }
@@ -7552,8 +7765,19 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
+         "durationMs": 50
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
+         "atMs": 1500,
          "durationMs": 50
         }
        }
@@ -7562,19 +7786,7 @@
      {
       "at": 31000,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "press",
-         "atMs": 1500,
-         "durationMs": 50
-        }
-       }
-      ]
+      "delivered": []
      }
     ]
    },
@@ -7601,7 +7813,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -7616,7 +7828,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "longPress",
          "atMs": 1000,
          "durationMs": 1000
@@ -7648,7 +7860,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 2200
         }
@@ -7685,7 +7897,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -7706,7 +7918,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "longPress",
          "atMs": 1000,
          "durationMs": 1000
@@ -7733,7 +7945,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 1200
         }
@@ -7770,7 +7982,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -7796,7 +8008,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "longPress",
          "atMs": 1000,
          "durationMs": 2500
@@ -7807,7 +8019,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 2500
         }
@@ -7844,7 +8056,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1000
         }
@@ -7860,7 +8072,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "longPress",
          "atMs": 1000,
          "durationMs": 29000
@@ -7892,7 +8104,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 30000
         }
@@ -7903,7 +8115,7 @@
    },
    {
     "name": "a hold just short of longPressMs is a press, and one exactly that long a longPress",
-    "why": "The line is longPressMs held: 999 ms is a short press (it waits for a second down, then is a press), 1000 ms a long one, which comes before the up it reached.",
+    "why": "The line is longPressMs held: 999 ms is a short press (its up the press), 1000 ms a long one, which comes before the up it reached.",
     "steps": [
      {
       "at": 1000,
@@ -7924,7 +8136,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -7949,34 +8161,28 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 999
         }
-       }
-      ]
-     },
-     {
-      "at": 2349,
-      "tick": true,
-      "delivered": []
-     },
-     {
-      "at": 2350,
-      "tick": true,
-      "delivered": [
+       },
        {
         "event": "button",
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "press",
          "atMs": 1000,
          "durationMs": 999
         }
        }
       ]
+     },
+     {
+      "at": 2350,
+      "tick": true,
+      "delivered": []
      },
      {
       "at": 3000,
@@ -7997,7 +8203,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -8022,7 +8228,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "longPress",
          "atMs": 3000,
          "durationMs": 1000
@@ -8033,7 +8239,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 1000
         }
@@ -8044,7 +8250,7 @@
    },
    {
     "name": "the second down of a double press makes no longPress",
-    "why": "Each press is exactly one of press, doublePress or longPress: a double press held is still a double press, and its up makes nothing more.",
+    "why": "Each press is exactly one of press, doublePress or longPress: a double press held is still a double press, and its up makes nothing more. (B is a key a rule binds a doublePress of: only such a key waits.)",
     "steps": [
      {
       "at": 1000,
@@ -8065,7 +8271,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -8090,7 +8296,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up"
         }
        }
@@ -8115,7 +8321,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        },
@@ -8124,7 +8330,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "doublePress"
         }
        }
@@ -8154,7 +8360,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 1160
         }
@@ -8166,11 +8372,14 @@
       "tick": true,
       "delivered": []
      }
+    ],
+    "doubleLabels": [
+     "B"
     ]
    },
    {
     "name": "the tap that woke the device is a press like any other",
-    "why": "An ESP32 cannot see its keys while it boots (about a second). A wake key already up by then was a tap: the button task stamps its down and up when it first saw them (1180), and the scene's first pass, seconds later, gets down, up, and the press once the window is over, marked wake.",
+    "why": "An ESP32 cannot see its keys while it boots (about a second). A wake key already up by then was a tap: the button task stamps its down and up when it first saw them (1180), and the scene's first pass, seconds later, gets down, up and the press, marked wake.",
     "steps": [
      {
       "at": 6000,
@@ -8192,7 +8401,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "wake": true,
          "atMs": 1180
@@ -8219,9 +8428,20 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 0
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
+         "wake": true,
+         "atMs": 1180
         }
        }
       ]
@@ -8229,19 +8449,7 @@
      {
       "at": 6000,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "press",
-         "wake": true,
-         "atMs": 1180
-        }
-       }
-      ]
+      "delivered": []
      }
     ]
    },
@@ -8269,7 +8477,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "wake": true,
          "atMs": 0
@@ -8286,7 +8494,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "longPress",
          "wake": true,
          "atMs": 0,
@@ -8314,7 +8522,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 2500
         }
@@ -8330,7 +8538,7 @@
    },
    {
     "name": "a double press can start with the tap that woke the device",
-    "why": "The wake tap's up is stamped when the button task first saw it (1180); a second down within doublePressMs of that pairs with it.",
+    "why": "The wake tap's up is stamped when the button task first saw it (1180); a second down within doublePressMs of that pairs with it. (B is a key a rule binds a doublePress of: only such a key waits.)",
     "steps": [
      {
       "at": 6000,
@@ -8352,7 +8560,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "wake": true
         }
@@ -8378,7 +8586,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up"
         }
        }
@@ -8403,7 +8611,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 1400
         }
@@ -8413,7 +8621,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "doublePress",
          "wake": true,
          "atMs": 1400
@@ -8440,7 +8648,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "durationMs": 60
         }
@@ -8452,6 +8660,9 @@
       "tick": true,
       "delivered": []
      }
+    ],
+    "doubleLabels": [
+     "B"
     ]
    },
    {
@@ -8476,7 +8687,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down"
         }
        }
@@ -8500,8 +8711,18 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
+         "durationMs": 100
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
          "durationMs": 100
         }
        }
@@ -8510,24 +8731,13 @@
      {
       "at": 1451,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "press",
-         "durationMs": 100
-        }
-       }
-      ]
+      "delivered": []
      }
     ]
    },
    {
     "name": "two buttons with no pin are two keys",
-    "why": "The preview's buttons have no GPIO line, so every one is pin -1; a key is its pin and its label. A tap on A and then one on B inside A's window is two presses, each when its own window closes, not a doublePress of B.",
+    "why": "The preview's buttons have no GPIO line, so every one is pin -1; a key is its pin and its label. A tap on A and then one on B is two presses, each at its own up.",
     "steps": [
      {
       "at": 1000,
@@ -8575,6 +8785,16 @@
          "level": 1,
          "durationMs": 80
         }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "press",
+         "durationMs": 80
+        }
        }
       ]
      },
@@ -8595,7 +8815,7 @@
         "payload": {
          "pin": -1,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "level": 0
         }
@@ -8619,40 +8839,18 @@
         "payload": {
          "pin": -1,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "level": 1,
          "durationMs": 80
         }
-       }
-      ]
-     },
-     {
-      "at": 1431,
-      "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": -1,
-         "label": "A",
-         "role": "primary",
-         "action": "press",
-         "durationMs": 80
-        }
-       }
-      ]
-     },
-     {
-      "at": 1631,
-      "tick": true,
-      "delivered": [
+       },
        {
         "event": "button",
         "payload": {
          "pin": -1,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "press",
          "durationMs": 80
         }
@@ -8684,7 +8882,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "atMs": 999999
         }
@@ -8709,8 +8907,18 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
+         "durationMs": 100
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
          "durationMs": 100
         }
        }
@@ -8793,7 +9001,7 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "down",
          "level": 0
         }
@@ -8818,9 +9026,19 @@
         "payload": {
          "pin": 6,
          "label": "B",
-         "role": "next",
+         "role": "prev",
          "action": "up",
          "level": 1,
+         "durationMs": 60
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "prev",
+         "action": "press",
          "durationMs": 60
         }
        }
@@ -8829,18 +9047,7 @@
      {
       "at": 1411,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "press",
-         "durationMs": 60
-        }
-       }
-      ]
+      "delivered": []
      }
     ]
    },
@@ -8890,13 +9097,7 @@
          "action": "up",
          "durationMs": 100
         }
-       }
-      ]
-     },
-     {
-      "at": 1451,
-      "tick": true,
-      "delivered": [
+       },
        {
         "event": "button",
         "payload": {
@@ -8908,6 +9109,11 @@
         }
        }
       ]
+     },
+     {
+      "at": 1451,
+      "tick": true,
+      "delivered": []
      }
     ]
    },
@@ -9139,6 +9345,582 @@
       "at": 2500,
       "tick": true,
       "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "two keys held together are the Back key's press",
+    "why": "A frame whose map binds a back press by role (a board with no key of its own for Back): the second key down while the first is held makes the two one key, Back. The first up is its press, with both labels in alphabetical order and pin -1; neither key makes a button of its own, and their lines are delivered as ever.",
+    "backByRole": true,
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1040,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1040
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "down",
+         "level": 0,
+         "atMs": 1040
+        }
+       }
+      ]
+     },
+     {
+      "at": 1300,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 1,
+        "action": "up",
+        "atMs": 1300
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "up",
+         "level": 1,
+         "atMs": 1300,
+         "durationMs": 300
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "LEFT+RIGHT",
+         "role": "back",
+         "action": "press",
+         "atMs": 1040,
+         "durationMs": 260
+        }
+       }
+      ]
+     },
+     {
+      "at": 1350,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 1,
+        "action": "up",
+        "atMs": 1350
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "up",
+         "level": 1,
+         "atMs": 1350,
+         "durationMs": 310
+        }
+       }
+      ]
+     },
+     {
+      "at": 2500,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "two keys held together a second are the Back key's long press",
+    "why": "The pair's hold is timed from the second down, and is one longPress while both are down; neither key's own hold counts (the first was held a second at 2000, and makes nothing).",
+    "backByRole": true,
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1100,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1100
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "down",
+         "level": 0,
+         "atMs": 1100
+        }
+       }
+      ]
+     },
+     {
+      "at": 2099,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 2100,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "LEFT+RIGHT",
+         "role": "back",
+         "action": "longPress",
+         "atMs": 1100,
+         "durationMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 2600,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 1,
+        "action": "up",
+        "atMs": 2600
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "up",
+         "level": 1,
+         "atMs": 2600,
+         "durationMs": 1500
+        }
+       }
+      ]
+     },
+     {
+      "at": 2700,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 1,
+        "action": "up",
+        "atMs": 2700
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "up",
+         "level": 1,
+         "atMs": 2700,
+         "durationMs": 1700
+        }
+       }
+      ]
+     },
+     {
+      "at": 4000,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "two keys held together are two keys where nothing binds Back by role",
+    "why": "No rule would hear a Back key made of two (a board with EXIT, a map of somebody's own, a game that wants both arrows at once): each key is its own press.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1040,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1040
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "down",
+         "level": 0,
+         "atMs": 1040
+        }
+       }
+      ]
+     },
+     {
+      "at": 1300,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 1,
+        "action": "up",
+        "atMs": 1300
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "up",
+         "level": 1,
+         "atMs": 1300,
+         "durationMs": 300
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "press",
+         "atMs": 1000,
+         "durationMs": 300
+        }
+       }
+      ]
+     },
+     {
+      "at": 1350,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 1,
+        "action": "up",
+        "atMs": 1350
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "up",
+         "level": 1,
+         "atMs": 1350,
+         "durationMs": 310
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "press",
+         "atMs": 1040,
+         "durationMs": 310
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a key that points somewhere turns with the frame",
+    "why": "LEFT and RIGHT (and UP and DOWN) are where a key sits on the board unrotated. On a frame turned 180 degrees the key on the viewer's right is LEFT: it is next, the way a touch on that frame turns.",
+    "rotate": 180,
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "next",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1050,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 1,
+        "action": "up",
+        "atMs": 1050
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "next",
+         "action": "up",
+         "level": 1,
+         "atMs": 1050,
+         "durationMs": 50
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "next",
+         "action": "press",
+         "atMs": 1000,
+         "durationMs": 50
+        }
+       }
+      ]
+     },
+     {
+      "at": 1200,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1200
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1200
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a quarter turn makes the keys on the top edge a column",
+    "why": "Turned 90 degrees (the picture's left edge along the board's top), LEFT sits at the bottom of the picture and RIGHT at its top: down is next.",
+    "rotate": 90,
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "next",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1100,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1100
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1100
+        }
+       }
+      ]
      }
     ]
    },

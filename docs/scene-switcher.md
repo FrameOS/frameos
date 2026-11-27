@@ -35,7 +35,12 @@ like `setCurrentScene {direction}`:
   of their own, the other one always opens: `sceneSwitcher` over a scene's
   settings opens the list, `sceneSettings` over the list the settings of the
   scene it was opened from.
-- **The gear** in the header goes the other way: `sceneSettings {page:
+- **The gear** in the header opens the settings of the scene the list was
+  opened from (`sceneSettings {page: "scene"}`, with the `fields` and
+  `values` the list read when it opened, because a host that holds one scene
+  let that scene go; docs/buttons.md "Home"), whose own gear is the frame
+  page. Opened with no scene behind it (the frame's home), or over a scene
+  with no settings, the gear goes the other way: `sceneSettings {page:
   "frame"}` while the switcher shows opens the frame page
   ([scene-settings.md](scene-settings.md) "The frame page") over the scene
   the switcher was opened from, in its layout, instead of going back to that
@@ -74,11 +79,11 @@ screen changes the scene. In from the left and the right are `back` and
 `forward`, the scene's own (docs/events.md), which the switcher takes as a
 screenful back and on. Down from the top is the scene's settings
 (`sceneSettings`, [scene-settings.md](scene-settings.md)), the other scene
-the runtime draws itself. The SenseCAP Indicator's one key opens the
-switcher too, pressed twice (pressed once it switches the screen off and on,
-and held it does nothing). E-paper without glass ships no binding; the
-owner adds one under "Button actions" (a REFRESH double press, say), and
-every frame can be sent to it by name.
+the runtime draws itself. Every board's keys open it too (docs/buttons.md:
+it is Home): a Home key pressed, a Back key held, two keys held together on
+a board without a Back key, an Action key held on a board without a
+microphone, a Screen key held (the SenseCAP Indicator's one key: pressed it
+switches the screen off and on). Every frame can be sent to it by name.
 
 ## The frame's home
 
@@ -222,11 +227,14 @@ down: measured in the room that render has (a layout's hole, a window), never
 the panel's, which is all the open knows (`revealing`; the reTerminal
 Sticky's home screen left it below the hole, 2026-11-25).
 
-The header ends with the gear and Close. **A frame that takes no taps has
-neither**: e-paper whose event map binds its keys and nothing else
+The header ends with the gear and Close. **A frame that takes no taps has no
+Close**: e-paper whose event map binds its keys and nothing else
 (`takesNoTaps`; every touch preset binds the edge swipes, so a map of keys
 alone is a board of keys alone, the reTerminal E1001, E1002 and E1004). Its
-header is the title; its keys open, walk and go back. The gear is there only while the
+keys open, walk and go back, and its gear is a stop for them after the last
+tile, so the scene's settings and the frame page are a key's walk away
+(docs/buttons.md); a board whose keys move nothing (one key, no glass:
+`frameHasNoArrows`) has no gear. The gear is there only while the
 frame offers its page (`frameSettingsRead` answers, as the scene settings'
 gear): not in an editor's preview, and not while the frame's control plane
 turned the settings on the screen off (`frame_settings_on_screen`), where it
@@ -308,9 +316,10 @@ The preview lists names only.
 - **Touch:** tap a tile to show that scene, drag the list up or down to
   scroll it (on e-paper it shows where it got to when the finger lifts, one
   refresh, and a tap after that opens the tile under the finger), swipe in
-  from the right or the left edge (the frame's `forward` and `back`) to move
-  the highlight a screenful on or back, tap the gear for the frame's
-  settings, tap Close (or swipe up from the bottom again) to go back. A
+  from the right edge (the frame's `forward`) to move the highlight a
+  screenful on, tap the gear for the scene's settings, tap Close, swipe in
+  from the left (the frame's `back`) or swipe up from the bottom again to go
+  back. A
   mouse's wheel scrolls the list (Linux, the preview).
 - **Keys**, by role (`buttons.roles`, `roleByLabel`): `next` / `down` move the
   highlight one tile on, `prev` / `up` one back (wrapping, and through the
@@ -320,18 +329,21 @@ The preview lists names only.
   follow;
   `primary` (OK, the reTerminal's green REFRESH, BOOT; `refresh` too, for a
   key given it by hand) shows the highlighted scene, or opens the frame page
-  on the gear; `back` and `menu` (HOME, MENU) go back. A press is one step and a double press
-  two, so pressing NEXT three times moves three tiles whatever the button
-  layer made of the taps, and presses made during an e-paper refresh land
-  together with their timing, so the next refresh shows where they got to.
-  A long press stays the frame's: on a reTerminal LEFT and RIGHT held walk
-  the scenes, which in the switcher is a screenful back and on
-  (`setCurrentScene {direction}` is `back` and `forward` there). One the
-  frame's map leaves free goes back from a `primary`, `refresh`, `menu` or
-  `back` key: the E1004's REFRESH held closes the list (the E1001-E1003's
-  talks, as their map says).
-- **A screenful** (`forward` and `back`, a scene direction, Page Down and
-  Up): the highlight moves as many tiles as a screen holds (the grid's
+  on the gear; `back` and `menu` (HOME, MENU) go back, and so does the
+  frame's `back` (the Back key the default maps make `back`, two keys held
+  together). A press is one step, so pressing NEXT three times moves three
+  tiles, and presses made during an e-paper refresh land together with their
+  timing, so the next refresh shows where they got to. A long press stays the
+  frame's: the arrows held walk the scenes, which in the switcher is a
+  screenful back and on (`setCurrentScene {direction}` is `back` and
+  `forward` there, said with its `direction`: a plain `back` leaves), and the
+  key held that opened it (Home) closes it. One the frame's map leaves free
+  goes back from a `primary`, `refresh`, `menu` or `back` key.
+- **One key** (a board whose keys move nothing, `frameHasNoArrows`: a TRMNL,
+  a C3; docs/buttons.md): its press walks the tiles one on, and its hold,
+  which opened the list, opens the tile it is on (the dispatcher goes back to
+  the highlighted scene, `backFrom`).
+- **A screenful** (`forward`, a scene direction, Page Down and Up): the highlight moves as many tiles as a screen holds (the grid's
   columns times its rows, in the room the last render had), no further than
   the last tile or the first, and the list scrolls with it; from the last
   tile on goes to the first, from the first back to the last. It is what a
@@ -351,11 +363,11 @@ The preview lists names only.
 
 ### Why not "press the key N times for the Nth scene"
 
-The button layer (`frameos/input_state.nim`) makes one event of each press:
-two quick taps are one `doublePress` and a third starts over, so "five taps"
-is not something a key can say, and counting `gpio` edges would need a
-timeout the dispatcher does not keep. The switcher counts instead: every
-press of a `next` key is a step (a double press two), the tiles are in
+The button layer (`frameos/input_state.nim`) makes one event of each press,
+the moment the key is up, so "five taps" is five presses and nothing waits
+to count them; a count that meant something else would need a timeout after
+the last one. The switcher counts instead: every press of a `next` key is a
+step, the tiles are in
 order, and a press of the primary key opens the highlighted one. Open
 the switcher, press NEXT n times, press OK: the scene n after the one
 showing.

@@ -43,6 +43,7 @@ import frameos/types
 import frameos/channels
 import frameos/events_gen
 import frameos/frame_settings_hooks
+import frameos/frame_keys
 import frameos/panel_shape
 import frameos/render_scale
 import frameos/scene_rhythm
@@ -640,7 +641,13 @@ proc choose(self: SceneSwitcherScene, index: int) =
     wentBack = not builtInScenesStay
     sendEvent(evSetCurrentScene, payload, eoScene)
   elif index == self.entries.len and self.gear:
-    payload.put("page", newJString("frame"))
+    # The settings of the scene it was opened from (read when it opened:
+    # `fields`), whose own gear is the frame page; the frame page itself
+    # when there are none (opened as the frame's home, a scene with no
+    # settings). docs/buttons.md "Scene settings".
+    let fields = self.state{"fields"}
+    let scene = not fields.isNil and fields.kind == JArray and fields.len > 0 and self.opener().len > 0
+    payload.put("page", newJString(if scene: "scene" else: "frame"))
     sendEvent(evSceneSettings, payload, eoScene)
 
 proc leave(self: SceneSwitcherScene) =
@@ -680,7 +687,10 @@ proc opened(self: SceneSwitcherScene) =
   ## knows the room (`revealing`; a layout's hole is not the panel).
   self.list()
   self.keysOnly = takesNoTaps(self.frameConfig, panelLook(self.frameConfig).paper)
-  self.gear = framePageOffered() and not self.keysOnly
+  # The gear is a stop for the keys too (docs/buttons.md "Scene settings"),
+  # but on a board whose keys move nothing (one key and no glass), whose
+  # hold opens the scene it highlights.
+  self.gear = framePageOffered() and not (self.keysOnly and frameHasNoArrows(self.frameConfig))
   if self.state.hasKey("query"):
     # A search is for this time: opened again, every scene shows.
     self.state.delete("query")
@@ -714,7 +724,12 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     if self.entries.len == 0:
       self.list()
     var acted = true
-    case payload{"role"}.getStr()
+    var role = payload{"role"}.getStr()
+    # A board whose keys move nothing (docs/buttons.md): its key walks the
+    # tiles, and its hold (the frame's Home again) opens the one it is on.
+    if role in ["primary", "refresh"] and frameHasNoArrows(self.frameConfig):
+      role = "next"
+    case role
     of "next", "down": self.highlight(self.highlighted() + steps)
     of "prev", "up": self.highlight(self.highlighted() - steps)
     of "primary", "refresh": self.choose(self.highlighted())
@@ -1203,11 +1218,14 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   case context.event
   of "setCurrentScene":
     # What the dispatcher says it was opened from (event_loop.nim), and
-    # whether it is the frame's home (`isHome`).
-    for key in ["from", "layout", "home"]:
+    # whether it is the frame's home (`isHome`); that scene's settings, for
+    # the gear (`fields`, `values`: none kept from an earlier opening).
+    for key in ["from", "layout", "home", "fields", "values"]:
       let value = payload{"state", key}
       if not value.isNil:
         self.state.put(key, value)
+      elif key in ["fields", "values"] and self.state.hasKey(key):
+        self.state.delete(key)
   of "open":
     wentBack = false
     builtInAway(self.id.string, false)
@@ -1245,10 +1263,14 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   of "button":
     self.pressed(payload)
   of evBack, evForward:
-    # The frame's back and forward (a swipe in from the left or the right
-    # edge, and a scene direction while it shows, event_loop.nim): a
-    # screenful of tiles back or on, the list with it.
-    self.screenful(if context.event == evForward: 1 else: -1)
+    # The frame's back (its Back key, a swipe in from the left edge) leaves,
+    # as on a phone; forward (a swipe in from the right) and a scene
+    # direction while it shows (a held arrow, event_loop.nim, said with its
+    # `direction`) move a screenful of tiles on or back, the list with it.
+    if context.event == evBack and payload{"direction"}.getStr().len == 0:
+      self.leave()
+    else:
+      self.screenful(if context.event == evForward: 1 else: -1)
     self.touch()
   else:
     when not defined(frameosEmbedded):

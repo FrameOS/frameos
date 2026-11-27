@@ -26,6 +26,7 @@ from arq import ArqRedis as Redis
 from sqlalchemy.orm import Session
 
 from app.drivers.waveshare import convert_waveshare_source, get_variant_folder, get_variant_keys
+from app.utils.button_standard import default_event_map
 from app.models.frame import (
     DEFAULT_MAX_HTTP_RESPONSE_BYTES,
     Frame,
@@ -333,26 +334,6 @@ EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS = {
     "pwr": -1,
 }
 EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS = [{"pin": 38, "label": "BUTTON"}]
-# A touch screen's swipes in from an edge: from the left `back` and from the
-# right `forward`, the scene's own (never another scene), up from the bottom
-# the scene switcher
-# (docs/scene-switcher.md) and down from the top the scene's settings
-# (docs/scene-settings.md). fos_board.c's TOUCH_EDGE_SWIPES is the device copy.
-EMBEDDED_TOUCH_EDGE_SWIPES = [
-    {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
-    {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
-    {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
-]
-# The one key pressed switches the screen off and on, and pressed twice opens
-# the scene switcher; held it does nothing (on a board with a microphone that
-# is the voice key). The edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
-# fos_board.c's INDICATOR_EVENT_MAP is the device copy.
-EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP = [
-    {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
-]
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the FT6336U
 # on the LCD's bus, polled (no INT, no reset, no load switch at the chip).
 EMBEDDED_SEEED_SENSECAP_INDICATOR_TOUCH = {"touchPins": "sda=39,scl=40,int=-1,rst=-1,en=-1"}
@@ -378,15 +359,6 @@ EMBEDDED_SUNTON_ESP32_8048S070_PINS = {
     "pwr": -1,
 }
 EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS = [{"pin": 0, "label": "BOOT"}]
-# The one key (BOOT, GPIO0) works like the Indicator's: pressed it switches
-# the screen off and on, pressed twice it opens the scene switcher; held it
-# does nothing. The edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
-# fos_board.c's ONE_BUTTON_TOGGLE("BOOT") is the device copy.
-EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP = [
-    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
-]
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the GT911 on
 # the chip's I2C pins, polled (INT unwired), reset GPIO38, no load switch.
 EMBEDDED_SUNTON_ESP32_8048S070_TOUCH = {"touchPins": "sda=19,scl=20,int=-1,rst=38,en=-1"}
@@ -432,15 +404,6 @@ EMBEDDED_WAVESHARE_AMOLED_1_75_PINS = {
     "pwr": -1,
 }
 EMBEDDED_WAVESHARE_AMOLED_1_75_GPIO_BUTTONS = [{"pin": 0, "label": "BOOT"}]
-# PWR works like the Indicator's key (pressed the screen off and on, pressed
-# twice the scene switcher), BOOT held talks (two microphones), the edges
-# swipe. fos_board.c's AMOLED_175_KEYS + ONE_KEY_VOICE("BOOT") is the device copy.
-EMBEDDED_WAVESHARE_AMOLED_1_75_EVENT_MAP = [
-    {"event": "button", "match": {"label": "PWR", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "PWR", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
-]
 EMBEDDED_WAVESHARE_AMOLED_1_75_TOUCH = {"touchPins": "sda=15,scl=14,int=11,rst=40,en=-1"}
 EMBEDDED_WAVESHARE_AMOLED_1_75_CODEC = {
     "codecPins": "mclk=42,bclk=9,ws=45,din=10,dout=8,pa=46",
@@ -471,18 +434,6 @@ EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS = {
 EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_GPIO_BUTTONS = [
     {"pin": 0, "label": "BOOT"},
     {"pin": 18, "label": "OK"},
-]
-# BOOT works like the Indicator's key (pressed the screen off and on, pressed
-# twice the scene switcher), the power key is HOME and opens the scene switcher
-# (the firmware's own presses, fos_board_toggle_key), the crown held talks, the
-# edges swipe. fos_board.c's CROWPANEL_WATCH_KEYS + CROWPANEL_WATCH_HOME +
-# ONE_KEY_VOICE("OK") is the device copy.
-EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP = [
-    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "OK", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_TOUCH = {
     "touchPins": "sda=4,scl=3,int=2,rst=5,en=-1",
@@ -525,21 +476,6 @@ EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH = {
     "touchPins": "sda=15,scl=16,int=-1,rst=-1,en=-1",
     "i2cBuses": "sda=15,scl=16",
 }
-# Elecrow CrowPanel Advance 2.8" (ESP32-S3-WROOM-1-N16R8, hardware V1.2): a
-# 320x240 IPS glass, an ST7789 on one SPI lane that keeps its own picture, the
-# watch's driver (CS40, SCLK42, MOSI39, D/C41, no reset, backlight 38), so the
-# EPD pin slots carry nothing. The FT6336U touch panel (INT 47, reset 48) on
-# SDA15/SCL16; no clock chip and no coprocessor on this size.
-# BOOT (GPIO0) works like the 7.0"'s and, the board having a PDM microphone
-# (clock 9, data 10, through a switch GPIO45 turns to it), held it talks; the
-# edges swipe. The buzzer is a passive one on GPIO8. fos_board.c's
-# ONE_BUTTON_TOGGLE("BOOT") + ONE_KEY_VOICE("BOOT") is the device copy.
-EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP = [
-    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
-]
 EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_PERIPHERALS = {
     "touchPins": "sda=15,scl=16,int=47,rst=48,en=-1",
     "micClkPin": 9,
@@ -561,14 +497,6 @@ EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_PERIPHERALS = {
 EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_GPIO_BUTTONS = [
     {"pin": 0, "label": "BOOT"},
     {"pin": 41, "label": "OK"},
-]
-# The watch's keys without its voice key: BOOT pressed the screen off and on,
-# pressed twice the scene switcher; the edges swipe. fos_board.c's
-# CROWPANEL_WATCH_KEYS is the device copy.
-EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP = [
-    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
@@ -624,18 +552,6 @@ EMBEDDED_SEEED_STICKY_GPIO_BUTTONS = [
     {"pin": 5, "label": "UP"},
     {"pin": 6, "label": "DOWN"},
 ]
-# UP and DOWN held walk the scene list; the AI key pressed once is the
-# scene's, twice back, three times the scene list, held it talks to the
-# frame (docs/voice-chat.md); the edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
-# fos_board.c's STICKY_KEYS is the device copy.
-EMBEDDED_SEEED_STICKY_EVENT_MAP = [
-    {"event": "button", "match": {"label": "UP", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
-    {"event": "button", "match": {"label": "DOWN", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-    {"event": "button", "match": {"label": "AI", "action": "doublePress"}, "emit": "back", "as": {}},
-    {"event": "button", "match": {"label": "AI", "action": "triplePress"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "AI", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
-]
 # The Sticky's MSM261 PDM microphone: PDM_CLK GPIO19, PDM_DATA GPIO20 (the
 # S3's native USB pads; its USB is a CH343 on UART0, and fos_mic.c detaches
 # the USB PHY), powered through PDM_EN GPIO38.
@@ -682,9 +598,6 @@ EMBEDDED_WAVESHARE_13IN3E6_CODEC = {
     "i2cBuses": "sda=41,scl=42",
 }
 
-
-def _one_key_voice_event_map(label: str) -> list[dict[str, Any]]:
-    return [{"event": "button", "match": {"label": label, "action": "longPress"}, "emit": "voiceChat", "as": {}}]
 # Seeed reTerminal E1001/E1002 (ESP32-S3, 32MB flash, 8MB PSRAM): same EPD
 # wiring on both — SCK7/MOSI9, CS10, DC11, RST12, BUSY13 (Zephyr board DTS
 # and the open usetrmnl/trmnl-firmware agree). Buttons: GPIO3 refresh (green),
@@ -714,27 +627,6 @@ EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS = [
     {"pin": 3, "label": "RIGHT"},
     {"pin": 4, "label": "LEFT"},
     {"pin": 5, "label": "REFRESH"},
-]
-# What the reTerminal's keys do whatever scene shows (frame.json `eventMap`,
-# docs/events.md "Event map"): the arrows held are the previous and the next
-# scene, and on the two models with a microphone the refresh key held talks
-# to the frame (docs/voice-chat.md; `voiceChat` is the emit the firmware's
-# button task reads off the map). Seeded onto a new frame like the buttons;
-# the owner edits it under Settings → Button actions. Keep in step with the
-# firmware's board table (embedded/esp32/main/fos_board.c) and the SPA's
-# preset table (NewFrame.tsx).
-EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP = [
-    {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
-    {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-]
-EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP = [
-    *EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
-    {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-]
-# The E1003 has the E1001's keys and microphone, and a touch screen.
-EMBEDDED_SEEED_RETERMINAL_E1003_EVENT_MAP = [
-    *EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
-    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
@@ -901,26 +793,6 @@ EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS = [
     {"pin": 5, "label": "OK"},
     {"pin": 6, "label": "PREV"},
 ]
-# HOME, the top key, opens the scene switcher and held the scene's settings;
-# EXIT, the bottom one, is back; the rocker held walks the scene list.
-# fos_board.c's CROWPANEL_EPAPER_KEYS is the device copy.
-EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP = [
-    {"event": "button", "match": {"label": "HOME", "action": "press"}, "emit": "sceneSwitcher", "as": {}},
-    {"event": "button", "match": {"label": "HOME", "action": "longPress"}, "emit": "sceneSettings", "as": {}},
-    {"event": "button", "match": {"label": "EXIT", "action": "press"}, "emit": "back", "as": {}},
-    {
-        "event": "button",
-        "match": {"label": "PREV", "action": "longPress"},
-        "emit": "setCurrentScene",
-        "as": {"direction": "prev"},
-    },
-    {
-        "event": "button",
-        "match": {"label": "NEXT", "action": "longPress"},
-        "emit": "setCurrentScene",
-        "as": {"direction": "next"},
-    },
-]
 # Pimoroni Inky Frame (all sizes share the carrier wiring): EPD on SPI0
 # SCK18/MOSI19, CS17, DC28, RST27; BUSY and the five front buttons read
 # through a shift register on CLOCK8/LATCH9/DATA10 (busy = bit 7). The sr_*
@@ -1005,7 +877,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS,
         "gpioButtons": EMBEDDED_WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
-        "eventMap": _one_key_voice_event_map("KEY1"),
         **EMBEDDED_WAVESHARE_PHOTOPAINTER_CODEC,
         "sdCardAssets": {
             "enabled": True,
@@ -1028,7 +899,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # BOOT and Reset only: BOOT (GPIO0) is a key once booted, and held it
         # talks into the codec microphone.
         "gpioButtons": [{"pin": 0, "label": "BOOT"}],
-        "eventMap": _one_key_voice_event_map("BOOT"),
         **EMBEDDED_WAVESHARE_13IN3E6_CODEC,
         "sdCardAssets": {
             "enabled": True,
@@ -1095,7 +965,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS,
         "gpioButtons": EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP,
         **EMBEDDED_SEEED_SENSECAP_INDICATOR_TOUCH,
     },
     # Sunton (GUITION) ESP32-8048S070: the 7" 800x480 RGB LCD, its wiring in
@@ -1106,7 +975,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SUNTON_ESP32_8048S070_PINS,
         "gpioButtons": EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP,
         **EMBEDDED_SUNTON_ESP32_8048S070_TOUCH,
         "sdCardAssets": {
             "enabled": True,
@@ -1122,7 +990,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_GUITION_ESP32_4848S040_PINS,
         "gpioButtons": [],
-        "eventMap": EMBEDDED_TOUCH_EDGE_SWIPES,
         **EMBEDDED_GUITION_ESP32_4848S040_TOUCH,
     },
     # Waveshare ESP32-S3-Touch-AMOLED-1.75 (-B: the same board in a case): the
@@ -1133,7 +1000,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_WAVESHARE_AMOLED_1_75_PINS,
         "gpioButtons": EMBEDDED_WAVESHARE_AMOLED_1_75_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_WAVESHARE_AMOLED_1_75_EVENT_MAP,
         **EMBEDDED_WAVESHARE_AMOLED_1_75_TOUCH,
         **EMBEDDED_WAVESHARE_AMOLED_1_75_CODEC,
         "sdCardAssets": {
@@ -1152,7 +1018,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_PINS,
         "gpioButtons": EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP,
         **EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_TOUCH,
     },
     "elecrow_crowpanel_advance_2in8": {
@@ -1161,7 +1026,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_ADVANCE_7_PINS,
         "gpioButtons": EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_EVENT_MAP,
         **EMBEDDED_ELECROW_CROWPANEL_ADVANCE_2IN8_PERIPHERALS,
         "sdCardAssets": {
             "enabled": True,
@@ -1177,7 +1041,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS,
         "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_EVENT_MAP,
         **EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_TOUCH,
         **EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PERIPHERALS,
     },
@@ -1189,7 +1052,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_WATCH_2IN01_PINS,
         "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_ELECROW_CROWPANEL_ROTARY_1IN46_EVENT_MAP,
         "touchPins": "sda=6,scl=7,int=5,rst=13,en=-1",
         "ledPin": 40,
         "ledType": "gpio_inverted",
@@ -1203,7 +1065,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "rotate": 270,
         "pins": EMBEDDED_SEEED_STICKY_PINS,
         "gpioButtons": EMBEDDED_SEEED_STICKY_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_STICKY_EVENT_MAP,
         "buzzerPin": 48,
         "buzzerToneHz": 4000,
         **EMBEDDED_SEEED_STICKY_MIC,
@@ -1227,7 +1088,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
@@ -1243,7 +1103,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
@@ -1262,7 +1121,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E1003_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_E1003_EVENT_MAP,
         **EMBEDDED_SEEED_RETERMINAL_E1003_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
         **EMBEDDED_SEEED_RETERMINAL_MIC,
@@ -1283,7 +1141,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E1004_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
         # 5000 mAh cell through the E-series divider (verified on hardware).
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
@@ -1348,7 +1205,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
         "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP,
         "ledPin": 41,
         "ledType": "gpio",
         "sdCardAssets": {
@@ -1371,7 +1227,6 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_ELECROW_CROWPANEL_5IN79_PINS,
         "gpioButtons": EMBEDDED_ELECROW_CROWPANEL_5IN79_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_ELECROW_CROWPANEL_5IN79_EVENT_MAP,
         "ledPin": 41,
         "ledType": "gpio",
         "sdCardAssets": {
@@ -1431,6 +1286,134 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "gpioButtons": EMBEDDED_INKY_FRAME_GPIO_BUTTONS,
     },
 }
+# What every preset's keys are for (docs/buttons.md): each key the board has,
+# its GPIO buttons and the ones its firmware makes itself (a crown's turns,
+# an IO expander's key, a power key another chip answers, an Inky Frame's
+# shift register), in the order the board shows them, with the role it plays
+# (docs/events-contract.json `buttons.roles`; a key that points somewhere is
+# configured as its direction on the board, unrotated, and turns with the
+# frame). `hold: False` is a key that is only ever pressed. The preset's
+# `gpioButtons` take their roles from here, and its `eventMap` is
+# `default_event_map` of these keys, its glass and its microphone: there is
+# no hand-written map. frameos/tools/generate_board_keys.py writes the
+# firmware's and the SPA's copies from it.
+_CROWPANEL_EPAPER_KEYS = [
+    {"label": "HOME", "role": "menu"},
+    {"label": "EXIT", "role": "back"},
+    {"label": "NEXT", "role": "next"},
+    {"label": "OK", "role": "primary"},
+    {"label": "PREV", "role": "prev"},
+]
+# The E1001-E1003's keys are on the top edge, their arrows printed for someone
+# behind the frame: seen from the front, the one labelled RIGHT is the left one
+# of the pair and LEFT the one beside the green REFRESH key (Seeed's drawings;
+# the reTerminal layout sample draws them so). So unrotated, RIGHT points left
+# and is the previous key, LEFT the next.
+_RETERMINAL_TOP_KEYS = [
+    {"label": "REFRESH", "role": "primary"},
+    {"label": "LEFT", "role": "right"},
+    {"label": "RIGHT", "role": "left"},
+]
+# The E1004's touch keys are printed on the front, under its upright
+# (1200x1600) picture: REFRESH, LEFT and RIGHT from the left.
+_RETERMINAL_E1004_KEYS = [
+    {"label": "REFRESH", "role": "primary"},
+    {"label": "LEFT", "role": "left"},
+    {"label": "RIGHT", "role": "right"},
+]
+# The three keys' order on the XIAO ePaper boards is not confirmed on the
+# hardware: a row, KEY2 in the middle, is assumed.
+_XIAO_EE_KEYS = [
+    {"label": "KEY1", "role": "prev"},
+    {"label": "KEY2", "role": "primary"},
+    {"label": "KEY3", "role": "next"},
+]
+_INKY_FRAME_KEYS = [
+    {"label": "A", "role": "primary"},
+    {"label": "B", "role": "prev"},
+    {"label": "C", "role": "next"},
+    {"label": "D", "role": "back"},
+    {"label": "E", "role": "menu"},
+]
+_ONE_SCREEN_KEY_BOOT = [{"label": "BOOT", "role": "screen"}]
+EMBEDDED_BOARD_KEYS: dict[str, list[dict[str, Any]]] = {
+    # KEY1 is the Action key (the voice key), BOOT the next one.
+    "waveshare_esp32_s3_photopainter": [{"label": "KEY1", "role": "primary"}, {"label": "BOOT", "role": "next"}],
+    "waveshare_esp32_s3_epaper_13_3e6": [{"label": "BOOT", "role": "primary"}],
+    "trmnl_og": [{"label": "BUTTON", "role": "primary"}],
+    "trmnl_bwry": [{"label": "BUTTON", "role": "primary"}],
+    "trmnl_og_diy_kit": [{"label": "BOOT", "role": "primary"}, {"label": "KEY3", "role": "next"}],
+    "trmnl_4in26_diy_kit": [{"label": "BOOT", "role": "primary"}, {"label": "KEY1", "role": "next"}],
+    "xteink_x4": [{"label": "POWER", "role": "primary"}],
+    "esp32_c3_042_oled": [{"label": "BOOT", "role": "primary"}],
+    "seeed_sensecap_indicator_d1": [{"label": "BUTTON", "role": "screen"}],
+    "sunton_esp32_8048s070": _ONE_SCREEN_KEY_BOOT,
+    "guition_esp32_4848s040": [],
+    "waveshare_esp32_s3_touch_amoled_1_75": [{"label": "PWR", "role": "screen"}, {"label": "BOOT", "role": "primary"}],
+    "elecrow_crowpanel_advance_7": _ONE_SCREEN_KEY_BOOT,
+    "elecrow_crowpanel_advance_2in8": _ONE_SCREEN_KEY_BOOT,
+    "elecrow_crowpanel_watch_2in01": [
+        {"label": "BOOT", "role": "screen"},
+        {"label": "HOME", "role": "menu", "hold": False},
+        {"label": "OK", "role": "primary"},
+        {"label": "NEXT", "role": "next", "hold": False},
+        {"label": "PREV", "role": "prev", "hold": False},
+    ],
+    "elecrow_crowpanel_rotary_1in46": [
+        {"label": "BOOT", "role": "screen"},
+        {"label": "OK", "role": "primary"},
+        {"label": "NEXT", "role": "next", "hold": False},
+        {"label": "PREV", "role": "prev", "hold": False},
+    ],
+    # UP and DOWN are up and down in the portrait the Sticky is held in (its
+    # preset turns the 800x480 panel 270 degrees): on the panel unrotated, UP
+    # sits to the left of DOWN.
+    "seeed_reterminal_sticky": [
+        {"label": "AI", "role": "primary"},
+        {"label": "UP", "role": "left"},
+        {"label": "DOWN", "role": "right"},
+    ],
+    "seeed_reterminal_e1001": _RETERMINAL_TOP_KEYS,
+    "seeed_reterminal_e1002": _RETERMINAL_TOP_KEYS,
+    "seeed_reterminal_e1003": _RETERMINAL_TOP_KEYS,
+    "seeed_reterminal_e1004": _RETERMINAL_E1004_KEYS,
+    "seeed_xiao_ee02": _XIAO_EE_KEYS,
+    "seeed_xiao_ee03": _XIAO_EE_KEYS,
+    "seeed_xiao_ee04": _XIAO_EE_KEYS,
+    "seeed_xiao_ee05": _XIAO_EE_KEYS,
+    "seeed_xiao_epaper_7in5": [{"label": "BOOT", "role": "primary"}],
+    "elecrow_crowpanel_5in79": _CROWPANEL_EPAPER_KEYS,
+    "elecrow_crowpanel_epd_4in2": _CROWPANEL_EPAPER_KEYS,
+    "pimoroni_inky_frame_4": _INKY_FRAME_KEYS,
+    "pimoroni_inky_frame_5_7": _INKY_FRAME_KEYS,
+    "pimoroni_inky_frame_7_3": _INKY_FRAME_KEYS,
+    "pimoroni_inky_frame_7_3_pico2": _INKY_FRAME_KEYS,
+    "pimoroni_inky_frame_7_3_spectra": _INKY_FRAME_KEYS,
+}
+
+
+def embedded_preset_has_microphone(preset: dict[str, Any]) -> bool:
+    """A PDM microphone or a codec's: the board can talk (docs/voice-chat.md)."""
+    mic_clk = preset.get("micClkPin")
+    return (isinstance(mic_clk, int) and mic_clk >= 0) or bool(preset.get("codecPins"))
+
+
+def _apply_board_keys() -> None:
+    for preset_key, preset in EMBEDDED_HARDWARE_PRESETS.items():
+        keys = EMBEDDED_BOARD_KEYS[preset_key]
+        roles = {key["label"]: key["role"] for key in keys}
+        preset["gpioButtons"] = [
+            {**button, "role": roles[button["label"]]} if button["label"] in roles else dict(button)
+            for button in preset.get("gpioButtons") or []
+        ]
+        event_map = default_event_map(keys, touch=bool(preset.get("touchPins")), mic=embedded_preset_has_microphone(preset))
+        if event_map:
+            preset["eventMap"] = event_map
+        else:
+            preset.pop("eventMap", None)
+
+
+_apply_board_keys()
 # FOSB pixel formats. Keep in sync with fos_pixel_format_t in
 # embedded/esp32/components/frameos_display/include/frameos_display.h.
 FOS_PIXEL_1BPP = 1

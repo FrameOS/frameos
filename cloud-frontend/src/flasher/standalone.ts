@@ -17,10 +17,11 @@ export const CUSTOM_BOARD = 'custom'
 // The touch boards: their on-screen frame page joins a network (a swipe down
 // from the top, then the gear), so Wi-Fi may wait (docs/scene-settings.md
 // "A boot that does not wait for the network"). A standalone frame runs its
-// firmware's event map (fos_board.c k_event_maps), and these are the boards
-// whose map has more than button rules (`edge_swipes`): the frames that take
-// taps (`takesNoTaps` in system/sceneSwitcher/scene.nim says the rest take
-// none). flasher-standalone.test.ts reads fos_board.c for it.
+// firmware's event map (fos_board_keys_gen.h, generated with BOARD_KEYS in
+// frontend/src/generated/boardKeys.gen.ts), and these are the boards whose map
+// has more than button rules (the edge swipes): the frames that take taps
+// (`takesNoTaps` in system/sceneSwitcher/scene.nim says the rest take none).
+// flasher-standalone.test.ts reads BOARD_KEYS for it.
 export const TOUCH_PRESETS = new Set([
   'seeed_reterminal_sticky',
   'seeed_reterminal_e1003',

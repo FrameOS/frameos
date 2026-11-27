@@ -1,10 +1,9 @@
 // A standalone ESP32 set up by flash.frameos.net
 // (cloud-frontend/src/flasher/standalone.ts, cloud/docs/flasher.md): what the
 // console is told, in what order, and which scenes the frame starts with.
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { FlasherLayout, FlasherSample } from "../../../../../../cloud-frontend/src/flasher/sampleCatalog";
+import { BOARD_KEYS } from "../../../../../../frontend/src/generated/boardKeys.gen";
 import {
   CUSTOM_BOARD,
   TOUCH_PRESETS,
@@ -246,12 +245,13 @@ describe("the layout picked for a board", () => {
 });
 
 describe("the boards' screens", () => {
-  const repoRoot = fileURLToPath(new URL("../../../../../../", import.meta.url));
-
   it("takes taps on exactly the boards whose firmware event map swipes", () => {
     // A standalone frame runs the event map its firmware has for its preset.
-    const board = readFileSync(`${repoRoot}embedded/esp32/main/fos_board.c`, "utf8");
-    const swiping = [...board.matchAll(/\{"([a-z0-9_]+)",[^\n]*\btrue\},/g)].map((match) => match[1]);
+    // Every board's map, generated from the backend's presets
+    // (frameos/tools/generate_board_keys.py): the firmware's copy is the same.
+    const swiping = Object.entries(BOARD_KEYS)
+      .filter(([, keys]) => keys.eventMap.some((rule) => rule.event === "edgeSwipe"))
+      .map(([key]) => key);
     expect(swiping.length).toBeGreaterThan(3);
     expect(new Set(swiping)).toEqual(TOUCH_PRESETS);
     for (const option of standaloneBoards) {

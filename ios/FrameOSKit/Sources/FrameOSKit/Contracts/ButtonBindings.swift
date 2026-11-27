@@ -12,6 +12,10 @@ public struct ButtonBinding: Hashable, Sendable, Identifiable {
         case button(label: String, action: String)
         /// A swipe in from an edge of a touch screen: left, right, top, bottom.
         case edge(String)
+        /// A press of whichever key plays a role (docs/buttons.md): the arrows
+        /// held, which turn with the frame, and Back, which two keys held
+        /// together are on a board with no Back key.
+        case role(role: String, action: String)
     }
 
     public var gesture: Gesture
@@ -85,6 +89,10 @@ public enum ButtonBindings {
     /// reTerminal Sticky's `AI` is the Action key (the SPA's keyTitle).
     static let keyTitles = ["AI": "Action"]
 
+    static let roleTitles = ["next": "Next key", "prev": "Previous key",
+                             "back": "Back key (two keys together where there is none)", "primary": "Action key",
+                             "menu": "Home key", "screen": "Screen key"]
+
     public static func keyTitle(_ label: String) -> String {
         keyTitles[label.trimmingCharacters(in: .whitespaces).uppercased()] ?? label
     }
@@ -93,6 +101,7 @@ public enum ButtonBindings {
         switch gesture {
         case .button(let label, let action): return "\(keyTitle(label)) · \(pressTitles[action] ?? action)"
         case .edge(let edge): return edgeTitles[edge] ?? "Swipe from \(edge)"
+        case .role(let role, let action): return "\(roleTitles[role] ?? "\(role) key") · \(pressTitles[action] ?? action)"
         }
     }
 
@@ -115,6 +124,9 @@ public enum ButtonBindings {
         case .edge(let edge):
             event = "edgeSwipe"
             match = ["edge": .string(edge)]
+        case .role(let role, let action):
+            event = "button"
+            match = ["role": .string(role), "action": .string(action)]
         }
         switch binding.kind {
         case "nextScene":
@@ -138,6 +150,10 @@ public enum ButtonBindings {
            let action = match["action"]?.stringValueIfString, match.count == 2
         {
             gesture = .button(label: label, action: action)
+        } else if rule["event"]?.stringValueIfString == "button", let role = match["role"]?.stringValueIfString,
+                  let action = match["action"]?.stringValueIfString, match.count == 2
+        {
+            gesture = .role(role: role, action: action)
         } else if rule["event"]?.stringValueIfString == "edgeSwipe", let edge = match["edge"]?.stringValueIfString,
                   screenEdges.contains(edge), match.count == 1
         {

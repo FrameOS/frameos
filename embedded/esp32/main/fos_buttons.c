@@ -134,6 +134,17 @@ static void refresh_voice_keys(const fos_config_t *config)
         }
         s_timing[i].triple = triple;
     }
+    /* The keys a rule binds a double press of: only their second down sounds
+     * as one. Any other key's quick second press is a press like the first
+     * (docs/buttons.md: two presses are two presses). */
+    bound = fos_voice_binding_double_labels(config->event_map, labels, FOS_GPIO_BUTTONS_MAX);
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        bool pair = s_timing[i].triple;
+        for (size_t j = 0; j < bound && !pair; j++) {
+            pair = strcasecmp(config->gpio_buttons[i].label, labels[j]) == 0;
+        }
+        s_timing[i].pair = pair;
+    }
 }
 
 static bool key_claimed(size_t index)
@@ -152,7 +163,11 @@ static void voice_keys_sample(const fos_config_t *config, int64_t now)
 {
     for (size_t i = 0; i < s_button_count; i++) {
         if (!s_voice_key[i] && !s_hold[i].active) continue;
-        switch (fos_voice_hold_sample(&s_hold[i], s_timing[i].down, now)) {
+        /* Another key down too: the two held together are the Back key
+         * (docs/buttons.md), not a voice hold. */
+        bool others = false;
+        for (size_t j = 0; j < s_button_count && !others; j++) others = j != i && s_timing[j].down;
+        switch (fos_voice_hold_sample(&s_hold[i], s_timing[i].down, others, now)) {
         case FOS_VOICE_HOLD_START:
             if (!fos_voice_begin()) fos_buzzer_reject_down();
             break;
@@ -595,19 +610,38 @@ esp_err_t fos_buttons_start(void)
     return ESP_OK;
 }
 
+/* `,"role":"<role>"` for a key its board names a role of (fos_board_key_role:
+ * the PhotoPainter's KEY1 is its Action key, an LCD's BOOT its Screen key,
+ * a reTerminal's LEFT points left), "" for one it does not: the runtime then
+ * takes the label's default (docs/buttons.md). */
+static void role_field(const char *label, char *out, size_t out_len)
+{
+    char role[16];
+    out[0] = '\0';
+    if (fos_board_key_role(fos_config()->hardware_preset, label, role, sizeof(role))) {
+        snprintf(out, out_len, ",\"role\":\"%s\"", role);
+    }
+}
+
 void fos_buttons_process_events(void)
 {
     if (!s_queue) return;
     /* The crown's detents, one press each (encoder_isr). */
     for (int n = __atomic_exchange_n(&s_enc_detents, 0, __ATOMIC_RELAXED); n != 0; n += n > 0 ? -1 : 1) {
-        char payload[64];
-        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\",\"action\":\"press\"}",
-                 s_enc_pin[n > 0 ? 0 : 1], n > 0 ? "NEXT" : "PREV");
+        char payload[96];
+        char role[32];
+        const char *label = n > 0 ? "NEXT" : "PREV";
+        role_field(label, role, sizeof(role));
+        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"%s\"%s,\"action\":\"press\"}",
+                 s_enc_pin[n > 0 ? 0 : 1], label, role);
         fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload);
     }
     for (int n = __atomic_exchange_n(&s_toggle_presses, 0, __ATOMIC_RELAXED); n > 0; n--) {
-        char payload[64];
-        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"HOME\",\"action\":\"press\"}", s_toggle_pin);
+        char payload[96];
+        char role[32];
+        role_field("HOME", role, sizeof(role));
+        snprintf(payload, sizeof(payload), "{\"pin\":%d,\"label\":\"HOME\"%s,\"action\":\"press\"}", s_toggle_pin,
+                 role);
         fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload);
     }
 
@@ -617,16 +651,19 @@ void fos_buttons_process_events(void)
         const fos_gpio_button_t *button = &s_buttons[event.index];
         char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
         json_escape(button->label, label, sizeof(label));
+        char role[32];
+        role_field(button->label, role, sizeof(role));
         /* A `gpio` edge and when it was seen, nothing more: `action` is
          * `down` or `up`, `wake` whether it booted the chip, `atMs` the button
          * task's clock (esp_timer, the CLOCK_MONOTONIC the Nim side reads
-         * too). The role, the `up`'s `durationMs` and the `button` the edges
-         * add up to (`press`, `doublePress`, `longPress`) are the Nim
-         * dispatcher's (input_state.nim), timed from `atMs`. */
-        char payload[240];
+         * too), and the role the board gives the key. The `up`'s `durationMs`
+         * and the `button` the edges add up to (`press`, `longPress`, two keys
+         * held together) are the Nim dispatcher's (input_state.nim), timed
+         * from `atMs`. */
+        char payload[272];
         snprintf(payload, sizeof(payload),
-                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s%s,\"atMs\":%lld}",
-                 button->pin, label, event.level,
+                 "{\"pin\":%d,\"label\":\"%s\"%s,\"level\":%d,\"action\":\"%s\"%s%s,\"atMs\":%lld}",
+                 button->pin, label, role, event.level,
                  event.level == 0 ? FOS_GPIO_ACTION_DOWN : FOS_GPIO_ACTION_UP,
                  event.wake ? ",\"wake\":true" : "",
                  /* A voice hold took this press: the dispatcher makes no

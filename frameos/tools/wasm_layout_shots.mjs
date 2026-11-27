@@ -21,6 +21,7 @@
 //   "steps": [["event", "sceneSwitcher", {}], ["tap", x, y], ["wait", ms], ["render"]],
 //   "framePage": true                 // offer the frame page (the gear)
 // }] }
+import { readFileSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -39,35 +40,24 @@ const { ditherFrame, panelPaletteFor } = await import(pathToFileURL(join(root, '
 // A touch position on the wire: 0..WIRE_MAX across the panel (fos_touch.c).
 const WIRE_MAX = 32767
 
-// The reTerminal family and its event maps, as the planes seed them
-// (backend/app/tasks/embedded_firmware.py, embedded/esp32/main/fos_board.c).
-const ARROWS = [
-  { event: 'button', match: { label: 'LEFT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'button', match: { label: 'RIGHT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
-]
-const VOICE = [{ event: 'button', match: { label: 'REFRESH', action: 'longPress' }, emit: 'voiceChat', as: {} }]
-const SWIPES = [
-  { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'back', as: {} },
-  { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'forward', as: {} },
-  { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'edgeSwipe', match: { edge: 'top' }, emit: 'sceneSettings', as: {} },
-]
-const STICKY_KEYS = [
-  { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'button', match: { label: 'DOWN', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
-  { event: 'button', match: { label: 'AI', action: 'doublePress' }, emit: 'back', as: {} },
-  { event: 'button', match: { label: 'AI', action: 'triplePress' }, emit: 'sceneSwitcher', as: {} },
-  { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
-]
+// The boards' event maps as the planes and the firmware have them
+// (frontend/src/generated/boardKeys.gen.ts, written by
+// frameos/tools/generate_board_keys.py; docs/buttons.md).
+const boardKeysText = readFileSync(join(root, 'frontend', 'src', 'generated', 'boardKeys.gen.ts'), 'utf8')
+function boardMap(preset) {
+  const at = boardKeysText.indexOf(`  ${JSON.stringify(preset)}: {`)
+  const line = boardKeysText.slice(at).split('\n').find((text) => text.trimStart().startsWith('eventMap: '))
+  return JSON.parse(line.trim().slice('eventMap: '.length).replace(/,$/, ''))
+}
 const BOARDS = {
-  seeed_reterminal_sticky: { width: 800, height: 480, pixelFormat: 4, canvasBits: 8, palette: 'fourGray', eventMap: [...STICKY_KEYS, ...SWIPES], buttons: ['AI', 'UP', 'DOWN'] },
-  seeed_reterminal_e1001: { width: 800, height: 480, pixelFormat: 1, canvasBits: 8, palette: 'blackWhite', eventMap: [...ARROWS, ...VOICE], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
-  seeed_reterminal_e1002: { width: 800, height: 480, pixelFormat: 7, canvasBits: 32, palette: 'spectra6', eventMap: [...ARROWS, ...VOICE], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
-  seeed_reterminal_e1003: { panel: 'EPD_10in3', width: 1872, height: 1404, pixelFormat: 8, canvasBits: 4, palette: 'sixteenGray', eventMap: [...ARROWS, ...VOICE, ...SWIPES], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
+  seeed_reterminal_sticky: { width: 800, height: 480, pixelFormat: 4, canvasBits: 8, palette: 'fourGray', eventMap: boardMap('seeed_reterminal_sticky'), buttons: ['AI', 'UP', 'DOWN'] },
+  seeed_reterminal_e1001: { width: 800, height: 480, pixelFormat: 1, canvasBits: 8, palette: 'blackWhite', eventMap: boardMap('seeed_reterminal_e1001'), buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
+  seeed_reterminal_e1002: { width: 800, height: 480, pixelFormat: 7, canvasBits: 32, palette: 'spectra6', eventMap: boardMap('seeed_reterminal_e1002'), buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
+  seeed_reterminal_e1003: { panel: 'EPD_10in3', width: 1872, height: 1404, pixelFormat: 8, canvasBits: 4, palette: 'sixteenGray', eventMap: boardMap('seeed_reterminal_e1003'), buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
   // Round: only the circle inside the square shows (panel_shape.nim
   // boardPanelRound). Its picture greys out the corners the glass hides.
-  waveshare_esp32_s3_touch_amoled_1_75: { width: 466, height: 466, pixelFormat: 9, canvasBits: 16, round: true, eventMap: SWIPES, buttons: ['BOOT'] },
-  seeed_reterminal_e1004: { panel: 'EPD_13in3e', width: 1200, height: 1600, pixelFormat: 7, canvasBits: 16, palette: 'spectra6', eventMap: [...ARROWS], buttons: ['RIGHT', 'LEFT', 'REFRESH'] },
+  waveshare_esp32_s3_touch_amoled_1_75: { width: 466, height: 466, pixelFormat: 9, canvasBits: 16, round: true, eventMap: boardMap('waveshare_esp32_s3_touch_amoled_1_75'), buttons: ['BOOT'] },
+  seeed_reterminal_e1004: { panel: 'EPD_13in3e', width: 1200, height: 1600, pixelFormat: 7, canvasBits: 16, palette: 'spectra6', eventMap: boardMap('seeed_reterminal_e1004'), buttons: ['RIGHT', 'LEFT', 'REFRESH'] },
 }
 
 const spec = JSON.parse(await readFile(resolve(specArg), 'utf8'))
