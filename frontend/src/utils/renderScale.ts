@@ -38,6 +38,8 @@ const REFERENCE_PPI = 130
 const MIN_LAYOUT_EDGE = 576
 /** HDMI: the layout's shorter edge automatic leaves at least. */
 const HDMI_ROOM = 1080
+/** A panel this big or bigger hangs like a poster and is read from across a room: at least 2 where it fits. */
+const POSTER_INCHES = 12
 /**
  * Panels whose name does not say their size, with a shorter edge of 720 px or
  * more (no other can scale). The runtime's `NamedPanelInches`
@@ -87,7 +89,10 @@ export function autoRenderScale(width: number, height: number, device?: string |
     return 1
   }
   const ppi = Math.sqrt(width * width + height * height) / inches
-  const dense = Math.floor(ppi / REFERENCE_PPI + 0.5)
+  let dense = Math.floor(ppi / REFERENCE_PPI + 0.5)
+  if (inches >= POSTER_INCHES) {
+    dense = Math.max(dense, 2)
+  }
   const fits = Math.floor(edge / MIN_LAYOUT_EDGE)
   return Math.min(MAX_RENDER_SCALE, Math.max(1, Math.min(dense, fits)))
 }

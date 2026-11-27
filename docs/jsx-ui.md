@@ -498,8 +498,10 @@ Handwriting notes, which grew themselves, while the setting moved only some).
   (`frameos_wasm_set_frame` `panel`); a panel of unknown size is 1. HDMI (the
   `framebuffer` device), a screen of unknown size seen from across a room, is
   the largest whole number that leaves 1080 px, and no panel (`web_only`) is
-  1. So the reTerminal E1003 (10.3", 1872x1404, 227 ppi) and a 4K screen are
-  2; a 13.3" 1200x1600 e-paper (150 ppi), every 800x480 panel and a 1080p
+  1. A panel of 12" or more hangs like a poster and is read from across a
+  room: at least 2 where that keeps its layout's 576 px. So the reTerminal
+  E1003 (10.3", 1872x1404, 227 ppi), a 13.3" 1200x1600 e-paper (150 ppi, laid
+  out at 600x800) and a 4K screen are 2; every 800x480 panel and a 1080p
   screen 1. `docs/render-scale-fixtures.json` pins the runtime's rule and the
   SPA's. **Whole numbers only**: at 2 a one-pixel line is two, every box edge
   lands on a pixel and pixie fills in solid spans; at 1.25 or 1.75 every edge

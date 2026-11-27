@@ -47,15 +47,15 @@
       "width": 1200,
       "height": 1600,
       "device": "waveshare.EPD_13in3e",
-      "scale": 1,
-      "why": "13.3\" 1200x1600 (reTerminal E1004): 150 ppi, 1.16"
+      "scale": 2,
+      "why": "13.3\" 1200x1600 (reTerminal E1004): 150 ppi, 1.16, but a panel of 12\" or more is read from across a room: 2 (a 600x800 layout)"
     },
     {
       "width": 1600,
       "height": 1200,
       "device": "pimoroni.inky_impression_13",
-      "scale": 1,
-      "why": "13.3\" Inky Impression, named without its size: 150 ppi"
+      "scale": 2,
+      "why": "13.3\" Inky Impression, named without its size: 150 ppi, read from across a room: 2"
     },
     {
       "width": 1200,
@@ -69,7 +69,7 @@
       "height": 984,
       "device": "waveshare.EPD_12in48b",
       "scale": 1,
-      "why": "12.48\" 1304x984: 131 ppi"
+      "why": "12.48\" 1304x984: 131 ppi; read from across a room, but a 2 would leave a 492 px layout: 1"
     },
     {
       "width": 1448,
