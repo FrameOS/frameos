@@ -769,7 +769,9 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   held, the map's scene back and on), two keys together and the swipes. Held
   sideways (landscape) all of that is a column on the left and the list has
   the whole height: stacked over and under it, they left the list one row of
-  tiles. That is the one place the layout teaches
+  tiles. The column is narrow (31 units, its help a phrase a line), so the
+  list beside it is seven tiles across, one short of the glass's eight. That
+  is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
   nobody used it (removed 2026-11-23; an install that chose it gets the whole
   glass, as "Around the scene: Nothing" does).
