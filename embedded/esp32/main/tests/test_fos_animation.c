@@ -124,6 +124,47 @@ static void test_logging_cadence(void)
     CHECK(stats.frames == 1 && stats.max_ms == 80, "of what ran since: %u / %u", stats.frames, stats.max_ms);
 }
 
+static void test_the_period_is_what_the_scene_asked_for(void)
+{
+    /* The hardware bench, 2026-11-27: the Kitchen sink's interval is 0.05 s
+     * for its Motion page, and its other pages ask for one render a second
+     * (frameos.setNextSleep, for the header's clock). It drew at 1 fps, as
+     * asked, and the summary said `periodMs` 50: "1 fps against a 20 fps
+     * target" on every LCD. */
+    fos_animation_t a;
+    memset(&a, 0, sizeof(a));
+    fos_animation_stats_t stats;
+    int64_t t = 200 * S;
+    fos_animation_update(&a, true, 0.050, t);
+    fos_animation_take_stats(&a, t, true, &stats);
+    int64_t at = t;
+    for (int i = 0; i < 10; i++) {
+        fos_animation_frame_done(&a, at, at + 30 * MS);
+        fos_animation_asked(&a, at, 1 * S);
+        CHECK(fos_animation_wait_us(&a, at + 30 * MS) == 970 * MS, "due when it asked: %lld",
+              (long long)fos_animation_wait_us(&a, at + 30 * MS));
+        at += 1 * S;
+    }
+    CHECK(fos_animation_take_stats(&a, at, true, &stats), "a summary");
+    CHECK(stats.fps_x10 == 10, "1.0 fps: %u", stats.fps_x10);
+    CHECK(stats.period_ms == 1000, "against the second it asked for, not its interval: %u", stats.period_ms);
+    /* Half the frames ask, half wait the interval: the average of the two. */
+    for (int i = 0; i < 4; i++) {
+        fos_animation_frame_done(&a, at, at + 30 * MS);
+        if (i % 2) fos_animation_asked(&a, at, 250 * MS);
+        at += 250 * MS;
+    }
+    CHECK(fos_animation_take_stats(&a, at, true, &stats), "the next summary");
+    CHECK(stats.period_ms == 150, "(50 + 250) / 2: %u", stats.period_ms);
+    /* A scene's start asks too, but is no frame of the window. */
+    fos_animation_scene_started(&a, at, at + 500 * MS);
+    fos_animation_asked(&a, at, 5 * S);
+    at += 5 * S;
+    fos_animation_frame_done(&a, at, at + 30 * MS);
+    CHECK(fos_animation_take_stats(&a, at + 50 * MS, true, &stats), "after the start");
+    CHECK(stats.frames == 1 && stats.period_ms == 50, "the start's ask is not the frame's: %u", stats.period_ms);
+}
+
 static void test_a_scene_start_is_not_a_frame(void)
 {
     /* The hardware bench, 2026-11-16, SenseCAP Indicator: from the Kitchen
@@ -495,6 +536,7 @@ int main(void)
     test_pacing();
     test_logging_cadence();
     test_a_scene_start_is_not_a_frame();
+    test_the_period_is_what_the_scene_asked_for();
     test_bursts();
     test_a_fast_loop_is_a_burst();
     test_input_hold();

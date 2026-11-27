@@ -73,6 +73,13 @@ typedef struct {
     uint32_t frames;
     int64_t render_us_sum;
     int64_t render_us_max;
+    /* Of the window's frames, the waits the scene asked for after each: its
+     * next sleep (fos_animation_asked) or else its interval. The summary's
+     * `periodMs` is their average: a scene at 0.05 s that asks for its next
+     * frame in a second (a page that only ticks a clock) is not 1 fps against
+     * a 20 fps target (the Kitchen sink, the hardware bench, 2026-11-27). */
+    int64_t wait_us_sum;
+    bool wait_open;          /* the last frame counted can still be asked for */
     /* Of the window, the time scenes took to start (fos_animation_scene_started):
      * not animation, so not in its frame rate. */
     int64_t started_us;
@@ -89,7 +96,7 @@ typedef struct {
     uint32_t fps_x10;     /* frames per second, times ten */
     uint32_t avg_ms;      /* render time per frame */
     uint32_t max_ms;
-    uint32_t period_ms;
+    uint32_t period_ms;   /* the wait the scene asked for between frames, on average */
 } fos_animation_stats_t;
 
 /* Whether a scene interval is an animation here: positive and below a
@@ -144,6 +151,11 @@ bool fos_animation_take_stats(fos_animation_t *a, int64_t now_us, bool logged_fr
  * the next one is due a period after this one started — at once when this
  * one took longer than that (no catch-up burst after a slow frame). */
 void fos_animation_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_us);
+
+/* The scene asked for its next frame `asked_us` after the one that started at
+ * `start_us` (logic/nextSleepDuration): due then, and the window's period is
+ * what it asked for, not its interval. */
+void fos_animation_asked(fos_animation_t *a, int64_t start_us, int64_t asked_us);
 
 /* The frame that started at `start_us` was a scene's first, its start: the
  * runtime compiled its code and drew it for the first time (the Pixel toys
