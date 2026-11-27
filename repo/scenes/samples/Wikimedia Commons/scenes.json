@@ -82,19 +82,11 @@
       },
       {
         "name": "metadataBorderColor",
-        "label": "Metadata border color",
+        "label": "Metadata band color",
         "type": "color",
         "persist": "disk",
         "access": "public",
         "value": "#000000"
-      },
-      {
-        "name": "metadataBorderWidth",
-        "label": "Metadata border width",
-        "type": "integer",
-        "persist": "disk",
-        "access": "public",
-        "value": "2"
       },
       {
         "name": "metadataPadding",
@@ -108,14 +100,6 @@
         "name": "wikimediaMetadata",
         "label": "Metadata",
         "type": "json",
-        "value": "",
-        "persist": "disk",
-        "access": "private"
-      },
-      {
-        "name": "text",
-        "label": "Text",
-        "type": "text",
         "value": "",
         "persist": "disk",
         "access": "private"
@@ -327,53 +311,6 @@
         "dragging": false
       },
       {
-        "id": "65cc5be7-7507-487b-8b1c-5db77632c2ad",
-        "position": {
-          "x": 870,
-          "y": -220
-        },
-        "data": {
-          "code": "state{\"wikimediaMetadata\"}{\"description\"}.getStr(state{\"wikimediaMetadata\"}{\"title\"}.getStr(\"\"))",
-          "codeArgs": [],
-          "codeOutputs": [
-            {
-              "name": "text",
-              "type": "text"
-            }
-          ],
-          "codeJS": "(() => { const meta = state.wikimediaMetadata || {}; const lines = []; const title = meta.description || meta.title || ''; if (title) lines.push(title); if (meta.author) lines.push('By ' + meta.author); const details = []; if (meta.license) details.push(meta.license); if (meta.mode) details.push(meta.mode); if (details.length) lines.push(details.join(' - ')); return lines.join('\\n'); })()"
-        },
-        "type": "code",
-        "style": {
-          "width": 560,
-          "height": 220
-        },
-        "width": 560,
-        "height": 220
-      },
-      {
-        "id": "5f3948a9-61c3-4d22-b1ef-467497392dd0",
-        "position": {
-          "x": 1460,
-          "y": -65
-        },
-        "data": {
-          "keyword": "logic/setAsState",
-          "config": {
-            "stateKey": "text"
-          }
-        },
-        "type": "app",
-        "width": 329,
-        "height": 162,
-        "selected": false,
-        "positionAbsolute": {
-          "x": 1460,
-          "y": -65
-        },
-        "dragging": false
-      },
-      {
         "id": "a0cc0f15-9d58-49a8-9cc7-11950d16f569",
         "position": {
           "x": 1980,
@@ -399,19 +336,7 @@
           "x": 2470,
           "y": 410
         },
-        "data": {
-          "keyword": "render/text",
-          "config": {
-            "borderColor": "#000000",
-            "borderWidth": "2",
-            "fontColor": "#ffffff",
-            "fontSize": "22",
-            "overflow": "fit-bounds",
-            "padding": "12",
-            "position": "left",
-            "vAlign": "bottom"
-          }
-        },
+        "data": { "keyword": "render/image", "config": {} },
         "type": "app",
         "width": 418,
         "height": 414,
@@ -438,25 +363,6 @@
         "positionAbsolute": {
           "x": 1850,
           "y": 50
-        },
-        "dragging": false
-      },
-      {
-        "id": "9dd8ae7c-7837-4f12-8633-0eb275e2e6c9",
-        "position": {
-          "x": 2420,
-          "y": 295
-        },
-        "data": {
-          "keyword": "text"
-        },
-        "type": "state",
-        "width": 151,
-        "height": 48,
-        "selected": false,
-        "positionAbsolute": {
-          "x": 2420,
-          "y": 295
         },
         "dragging": false
       },
@@ -556,25 +462,6 @@
         "dragging": false
       },
       {
-        "id": "183738d9-6dc5-4c9b-a80d-07cff3ddff80",
-        "position": {
-          "x": 2340,
-          "y": 140
-        },
-        "data": {
-          "keyword": "metadataBorderWidth"
-        },
-        "type": "state",
-        "width": 342,
-        "height": 48,
-        "selected": false,
-        "positionAbsolute": {
-          "x": 2340,
-          "y": 140
-        },
-        "dragging": false
-      },
-      {
         "id": "a203c83d-2868-4e3d-af53-8f6a6a6fa025",
         "position": {
           "x": 2370,
@@ -592,6 +479,14 @@
           "y": 220
         },
         "dragging": false
+      },
+      {
+        "id": "caption-app",
+        "type": "app",
+        "position": { "x": 2470, "y": 60 },
+        "data": { "keyword": "caption", "config": {} },
+        "width": 300,
+        "height": 280
       }
     ],
     "edges": [
@@ -631,7 +526,7 @@
         "id": "aab9bb3c-b488-419c-b06a-c587a421db0b",
         "source": "dbf7d3bd-9c7f-45bc-adb7-dd5a2bcaf768",
         "sourceHandle": "next",
-        "target": "5f3948a9-61c3-4d22-b1ef-467497392dd0",
+        "target": "a0cc0f15-9d58-49a8-9cc7-11950d16f569",
         "targetHandle": "prev",
         "type": "appNodeEdge"
       },
@@ -657,22 +552,6 @@
         "targetHandle": "prev",
         "source": "6f173db6-e47f-451e-8207-ec90b3fd5294",
         "sourceHandle": "next",
-        "type": "appNodeEdge"
-      },
-      {
-        "id": "20caa192-6f81-4ff3-8c26-e8482f1e045d",
-        "source": "65cc5be7-7507-487b-8b1c-5db77632c2ad",
-        "sourceHandle": "fieldOutput",
-        "target": "5f3948a9-61c3-4d22-b1ef-467497392dd0",
-        "targetHandle": "fieldInput/valueString",
-        "type": "codeNodeEdge"
-      },
-      {
-        "id": "c703db78-0dcf-47de-b192-bdf383ba561b",
-        "source": "5f3948a9-61c3-4d22-b1ef-467497392dd0",
-        "sourceHandle": "next",
-        "target": "a0cc0f15-9d58-49a8-9cc7-11950d16f569",
-        "targetHandle": "prev",
         "type": "appNodeEdge"
       },
       {
@@ -703,7 +582,7 @@
         "id": "327b95fd-b2ff-4a62-b615-db2c7ab48de6",
         "source": "83b3b4e5-ff17-47cd-982b-09c6b84e823d",
         "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
+        "target": "caption-app",
         "targetHandle": "fieldInput/position",
         "type": "codeNodeEdge"
       },
@@ -711,7 +590,7 @@
         "id": "e75cbf15-eb85-48db-912f-86d79b90d7db",
         "source": "6c5ab4ce-0eee-4b8b-b1ff-7c42ab214861",
         "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
+        "target": "caption-app",
         "targetHandle": "fieldInput/vAlign",
         "type": "codeNodeEdge"
       },
@@ -719,7 +598,7 @@
         "id": "a30230f3-076b-4301-9135-4a4c48a8b6d8",
         "source": "b734bb0b-8e81-4e69-9923-b51459fdf1e5",
         "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
+        "target": "caption-app",
         "targetHandle": "fieldInput/fontSize",
         "type": "codeNodeEdge"
       },
@@ -727,7 +606,7 @@
         "id": "1f8f264d-8c5b-4670-af7c-a33b8b8a3d1f",
         "source": "4a732b1a-d8fb-45c7-80f7-6936fd33e9aa",
         "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
+        "target": "caption-app",
         "targetHandle": "fieldInput/fontColor",
         "type": "codeNodeEdge"
       },
@@ -735,32 +614,24 @@
         "id": "7aee3a5d-29cb-4922-91e5-e36f544a2f0d",
         "source": "158ef5a9-a437-43e6-bd40-b5b1157b21ef",
         "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
-        "targetHandle": "fieldInput/borderColor",
-        "type": "codeNodeEdge"
-      },
-      {
-        "id": "9fa9fd2a-e7a3-4017-bd86-55d21b9e9428",
-        "source": "183738d9-6dc5-4c9b-a80d-07cff3ddff80",
-        "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
-        "targetHandle": "fieldInput/borderWidth",
+        "target": "caption-app",
+        "targetHandle": "fieldInput/bandColor",
         "type": "codeNodeEdge"
       },
       {
         "id": "f5e475f4-5a43-4119-a8dc-cc36ee2e72f6",
         "source": "a203c83d-2868-4e3d-af53-8f6a6a6fa025",
         "sourceHandle": "fieldOutput",
-        "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
+        "target": "caption-app",
         "targetHandle": "fieldInput/padding",
         "type": "codeNodeEdge"
       },
       {
-        "id": "ea0d440b-81f5-4f41-80ff-ce03b466f519",
-        "source": "9dd8ae7c-7837-4f12-8633-0eb275e2e6c9",
+        "id": "caption-to-image",
+        "source": "caption-app",
         "sourceHandle": "fieldOutput",
         "target": "3be7c4b7-4f8f-46c7-a0e7-ec5e47f9372b",
-        "targetHandle": "fieldInput/text",
+        "targetHandle": "fieldInput/image",
         "type": "codeNodeEdge"
       }
     ],
@@ -812,6 +683,43 @@
         "sources": {
           "app.ts": "// Wikimedia Commons pictures of the day or random files; frameos.fetchImage decodes them natively.\nconst UA = 'FrameOS Wikimedia Commons app (https://github.com/FrameOS/frameos)'\nconst str = (v, d = '') => (typeof v === 'string' ? v : d)\nconst rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1))\nconst pad = (n) => String(n).padStart(2, '0')\nconst days = (y, m) =>\n  m === 2 ? ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28) : [4, 6, 9, 11].includes(m) ? 30 : 31\nconst text = (v) =>\n  str(v)\n    .replace(/<[^>]*>?|>/g, '')\n    .replace(/&quot;/g, '\"')\n    .replace(/&amp;/g, '&')\n    .replace(/&#039;|&apos;/g, \"'\")\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .trim()\n\nfunction find(query, width) {\n  const r = frameos.httpRequest(\n    `https://commons.wikimedia.org/w/api.php?format=json&formatversion=2&action=query&${query}&prop=imageinfo` +\n      `&iiprop=url%7Cmime%7Cextmetadata&iiextmetadatafilter=ImageDescription%7CObjectName%7CArtist%7CLicenseShortName&iiurlwidth=${width}`,\n    { headers: { Accept: 'application/json', 'User-Agent': UA }, timeoutMs: 60000 }\n  )\n  if (!r.status) throw new Error(r.error)\n  if (r.status >= 400) throw new Error(`Wikimedia Commons API HTTP ${r.status}`)\n  const j = JSON.parse(r.body)\n  if (j?.error !== undefined) {\n    throw new Error(`Wikimedia Commons API error: ${str(j.error?.info, JSON.stringify(j.error))}`)\n  }\n  for (const page of j?.query?.pages ?? []) {\n    const i = page.imageinfo?.[0]\n    const mime = str(i?.mime)\n    const imageUrl = str(i?.thumburl, str(i?.url))\n    if (!mime.startsWith('image/') || !imageUrl) continue\n    const md = (key) => text(i.extmetadata?.[key]?.value)\n    return {\n      title: str(page.title),\n      description: md('ImageDescription') || md('ObjectName'),\n      author: md('Artist'),\n      license: md('LicenseShortName'),\n      pageUrl: str(i.descriptionurl),\n      imageUrl,\n      mime,\n    }\n  }\n  throw new Error('No supported image returned from Wikimedia Commons.')\n}\n\nfunction retry(what, attempt) {\n  let last = ''\n  for (let i = 0; i < 10; i++) {\n    try {\n      return attempt()\n    } catch (e) {\n      last = e.message\n    }\n  }\n  throw new Error(`Could not find a random Wikimedia Commons ${what}: ${last}`)\n}\n\nexport function get(app, context) {\n  const { config: c, frame: f } = app\n  // The size the picture is drawn at: the box it feeds, else the canvas. Both\n  // are in scene pixels, already turned with the frame.\n  const w = context.targetWidth || context.imageWidth || 0\n  const h = context.targetHeight || context.imageHeight || 0\n  if (!(w > 0 && h > 0)) throw new Error('No canvas to draw on: this app runs on render.')\n  const mode = c.mode.trim()\n  const sub = (c.submode ?? '').trim()\n  const stateKey = c.metadataStateKey.trim()\n  const save = c.saveAssets\n  const norm = ['', 'potd', 'pictureOfTheDay'].includes(mode)\n    ? ['', 'day'].includes(sub)\n      ? 'pictureOfTheDay'\n      : ['onthisday', 'onThisDay'].includes(sub)\n      ? 'onThisDay'\n      : ['month', 'random', 'randomPotd', 'randomPictureOfTheDay'].includes(sub)\n      ? 'randomPictureOfTheDay'\n      : mode\n    : mode === 'random'\n    ? 'randomImage'\n    : mode\n  const width = Math.max(w, h, 1)\n  const now = new Date()\n  const [Y, M, D] = [now.getFullYear(), now.getMonth() + 1, now.getDate()]\n  const potd = (y, m, d) =>\n    find(`generator=images&titles=Template%3APotd%2F${y}-${pad(m)}-${pad(d)}&gimlimit=20`, width)\n\n  let img\n  try {\n    if (norm === 'pictureOfTheDay') img = potd(Y, M, D)\n    else if (norm === 'onThisDay') {\n      let y = 0\n      for (let i = 0; i < 100 && !y; i++) {\n        const t = rand(2008, Math.max(2008, Y - 1))\n        if (D <= days(t, M)) y = t\n      }\n      if (!y) throw new Error('No previous Wikimedia Commons picture of the day exists for this date.')\n      img = potd(y, M, D)\n    } else if (norm === 'randomPictureOfTheDay') {\n      img = retry('picture of the day', () => {\n        const y = rand(2008, Y)\n        const m = rand(1, y === Y ? M : 12)\n        return potd(y, m, rand(1, y === Y && m === M ? Math.min(days(y, m), D) : days(y, m)))\n      })\n    } else if (norm === 'randomImage') {\n      img = retry('image', () => find('generator=random&grnnamespace=6&grnlimit=20', width))\n    } else throw new Error(`Invalid Wikimedia Commons mode: ${mode}`)\n  } catch (e) {\n    throw new Error(`Error fetching image from Wikimedia Commons: ${e.message}`)\n  }\n\n  if (f.debug) frameos.log(`Downloading Wikimedia Commons image: ${img.imageUrl}`)\n  const path = img.imageUrl.split('?')[0].toLowerCase()\n  const extension =\n    /\\.(jpe?g|png|gif|webp|svg)$/.exec(path)?.[1].replace('jpeg', 'jpg') ??\n    { jpeg: 'jpg', png: 'png', gif: 'gif', webp: 'webp', 'svg+xml': 'svg' }[img.mime.slice(6)] ??\n    'img'\n  const photo = frameos.fetchImage(img.imageUrl, {\n    headers: { 'User-Agent': UA },\n    saveAsset:\n      save === 'auto' || save === 'always'\n        ? { name: img.title.replace(/File:/g, ''), extension, mode: save }\n        : undefined,\n  })\n  if (!photo.image) throw new Error(`Error fetching image from Wikimedia Commons: ${photo.error}`)\n  if (stateKey) frameos.setState(stateKey, { source: 'wikimedia-commons', mode: norm, ...img })\n  return photo.image\n}\n",
           "config.json": "{\n  \"name\": \"Wikimedia Commons\",\n  \"description\": \"Images from Wikimedia Commons\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"value\": \"pictureOfTheDay\",\n      \"options\": [\"pictureOfTheDay\", \"onThisDay\", \"randomPictureOfTheDay\", \"randomImage\"],\n      \"label\": \"Mode\",\n      \"hint\": \"Today's Picture of the Day, this date's in an earlier year, a random earlier one, or a random Commons image.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the image to the frame's assets folder. auto follows the frame's save-assets setting.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"placeholder\": \"e.g. wikimediaMetadata\",\n      \"hint\": \"Stores {title, description, author, license, pageUrl, imageUrl, mime} under this key.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"3600\" }\n}\n"
+        }
+      },
+      "caption": {
+        "name": "Picture caption",
+        "description": "The picture's description, author and licence in a band along one edge",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "position",
+            "type": "select",
+            "options": ["left", "center", "right"],
+            "value": "left",
+            "label": "Align"
+          },
+          {
+            "name": "vAlign",
+            "type": "select",
+            "options": ["top", "middle", "bottom"],
+            "value": "bottom",
+            "label": "Align V"
+          },
+          {
+            "name": "fontSize",
+            "type": "float",
+            "value": "22",
+            "label": "Font size",
+            "hint": "On a panel 480 px or more on its shorter side; smaller ones get less."
+          },
+          { "name": "fontColor", "type": "color", "value": "#ffffff", "label": "Font color" },
+          { "name": "bandColor", "type": "color", "value": "#000000", "label": "Band color" },
+          { "name": "padding", "type": "float", "value": "12", "label": "Padding" }
+        ],
+        "output": [{ "name": "image", "type": "image" }],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Picture caption\",\n  \"description\": \"The picture's description, author and licence in a band along one edge\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"name\": \"position\", \"type\": \"select\", \"options\": [\"left\", \"center\", \"right\"], \"value\": \"left\", \"label\": \"Align\" },\n    { \"name\": \"vAlign\", \"type\": \"select\", \"options\": [\"top\", \"middle\", \"bottom\"], \"value\": \"bottom\", \"label\": \"Align V\" },\n    { \"name\": \"fontSize\", \"type\": \"float\", \"value\": \"22\", \"label\": \"Font size\", \"hint\": \"On a panel 480 px or more on its shorter side; smaller ones get less.\" },\n    { \"name\": \"fontColor\", \"type\": \"color\", \"value\": \"#ffffff\", \"label\": \"Font color\" },\n    { \"name\": \"bandColor\", \"type\": \"color\", \"value\": \"#000000\", \"label\": \"Band color\" },\n    { \"name\": \"padding\", \"type\": \"float\", \"value\": \"12\", \"label\": \"Padding\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n",
+          "app.tsx": "// The picture's caption: what it shows, then who made it and its licence, in\n// a band along one edge. The description is cut to a few lines so the photo\n// stays the picture, the type is sized for the panel (a .tsx app is told the\n// canvas over the render scale), and on a round panel the words stay inside\n// the circle. The band is see-through where the panel is fast and solid on\n// e-paper, where a dithered shade would eat the letters.\nconst words = (value) => (typeof value === 'string' ? value.replace(/\\s+/g, ' ').trim() : '')\n\n// At most `max` characters, cut at a word, with an ellipsis.\nfunction cut(text, max) {\n  if (text.length <= max) return text\n  const head = text.slice(0, max)\n  const space = head.lastIndexOf(' ')\n  return (space > max * 0.6 ? head.slice(0, space) : head).replace(/[\\s,.;:]+$/, '') + '…'\n}\n\nexport function get(app, context) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const c = app.config\n  const meta = app.state.wikimediaMetadata || {}\n  const description = words(meta.description) || words(meta.title).replace(/^File:/, '').replace(/\\.\\w+$/, '')\n  const credit = [words(meta.author) && `By ${words(meta.author)}`, words(meta.license)].filter(Boolean).join(' · ')\n  if (!description && !credit) return <div className={`w-[${W}px] h-[${H}px]`} />\n\n  // The size asked for on a panel of 480 px or more; a smaller one gets less.\n  const short = Math.min(W, H)\n  const size = Math.max(11, Math.round((Number(c.fontSize) || 22) * Math.min(1, short / 480)))\n  const small = Math.max(10, Math.round(size * 0.8))\n  const pad = Math.max(4, Math.round((Number(c.padding) || 12) * Math.min(1, short / 480)))\n\n  // On a round panel the words go in the square inside the circle.\n  const round = context.round === true\n  const side = round ? Math.floor((short / 2 - 12) * Math.SQRT2) : 0\n  const insetX = round ? Math.round((W - side) / 2) : pad\n  const insetY = round ? Math.round((H - side) / 2) : pad\n  const textW = round ? side : W - pad * 2\n\n  // A band of at most about a quarter of the panel: one to three lines of\n  // description and one of credit.\n  const lineH = size * 1.3\n  const lines = Math.max(1, Math.min(3, Math.floor((H * 0.28) / lineH) - (credit ? 1 : 0)))\n  const perLine = Math.max(8, Math.floor(textW / (size * 0.5)))\n  const shown = cut(description, lines * perLine)\n\n  const v = c.vAlign === 'top' ? 'justify-start' : c.vAlign === 'middle' ? 'justify-center' : 'justify-end'\n  const align = c.position === 'center' ? 'text-center' : c.position === 'right' ? 'text-right' : 'text-left'\n  const band = app.frame.paper ? `bg-[${c.bandColor || '#000000'}]` : `bg-[${c.bandColor || '#000000'}]/60`\n  const top = c.vAlign === 'top' ? insetY : pad\n  const bottom = c.vAlign === 'top' || c.vAlign === 'middle' ? pad : insetY\n  return (\n    <div className={`flex flex-col ${v} w-[${W}px] h-[${H}px]`}>\n      <div className={`flex flex-col ${band} text-[${c.fontColor || '#ffffff'}] ${align} pt-[${top}px] pb-[${bottom}px] px-[${insetX}px]`}>\n        {shown ? <div className={`text-[${size}px] leading-snug line-clamp-${lines}`}>{shown}</div> : null}\n        {credit ? <div className={`text-[${small}px] leading-snug truncate opacity-90`}>{credit}</div> : null}\n      </div>\n    </div>\n  )\n}\n"
         }
       }
     }

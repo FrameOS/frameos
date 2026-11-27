@@ -351,6 +351,47 @@
           "y": 147.8580042772884
         },
         "dragging": false
+      },
+      {
+        "id": "has-url",
+        "type": "code",
+        "position": { "x": 300, "y": 330 },
+        "data": {
+          "codeJS": "// No URL yet: ask for one instead of painting a download error.\nString(url || '').trim() !== ''",
+          "codeArgs": [{ "name": "url", "type": "string" }],
+          "codeOutputs": [{ "name": "hasUrl", "type": "boolean" }]
+        },
+        "width": 420,
+        "height": 140
+      },
+      {
+        "id": "url-given",
+        "type": "app",
+        "position": { "x": 300, "y": 180 },
+        "data": { "keyword": "logic/ifElse", "config": {} },
+        "width": 300,
+        "height": 130
+      },
+      {
+        "id": "ask-for-url",
+        "type": "app",
+        "position": { "x": 437, "y": 420 },
+        "data": {
+          "keyword": "render/text",
+          "config": {
+            "text": "No image URL yet. Add one in this scene's settings.",
+            "fontColor": "#000000",
+            "borderColor": "#ffffff",
+            "borderWidth": "2",
+            "fontSize": "28",
+            "overflow": "fit-bounds",
+            "padding": "24",
+            "position": "center",
+            "vAlign": "middle"
+          }
+        },
+        "width": 418,
+        "height": 414
       }
     ],
     "edges": [
@@ -404,7 +445,7 @@
       },
       {
         "id": "19c4f3a2-f8de-40f4-9adc-095dfcd0c021",
-        "target": "fb3b145f-38e6-440b-b583-9228bc24baf1",
+        "target": "url-given",
         "targetHandle": "prev",
         "source": "6088948d-da9a-4793-9872-36595be83619",
         "sourceHandle": "next",
@@ -443,20 +484,52 @@
         "type": "appNodeEdge"
       },
       {
-        "id": "0ec23c69-f9aa-43ed-9535-b49414d92e40",
-        "source": "b9152d0d-d586-4c38-bd71-f0a09b31f779",
-        "sourceHandle": "next",
-        "target": "0b58d93b-fb74-4d7e-b203-877e21fbc3bf",
-        "targetHandle": "prev",
-        "type": "appNodeEdge"
-      },
-      {
         "id": "41532c70-c4a5-43b3-ae36-016ec89506ff",
         "source": "9ff201f2-c88f-4d84-84ec-caf90a83fd41",
         "sourceHandle": "fieldOutput",
         "target": "c2b9a4d4-7a90-4819-b4ca-2e844642b06a",
         "targetHandle": "fieldInput/text",
         "type": "codeNodeEdge"
+      },
+      {
+        "id": "url-to-has-url",
+        "source": "9ff201f2-c88f-4d84-84ec-caf90a83fd41",
+        "sourceHandle": "fieldOutput",
+        "target": "has-url",
+        "targetHandle": "codeField/url",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "has-url-to-if",
+        "source": "has-url",
+        "sourceHandle": "fieldOutput",
+        "target": "url-given",
+        "targetHandle": "fieldInput/condition",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "url-given-then-image",
+        "source": "url-given",
+        "sourceHandle": "field/thenNode",
+        "target": "fb3b145f-38e6-440b-b583-9228bc24baf1",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "url-given-else-ask",
+        "source": "url-given",
+        "sourceHandle": "field/elseNode",
+        "target": "ask-for-url",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "url-given-next-sleep",
+        "source": "url-given",
+        "sourceHandle": "next",
+        "target": "0b58d93b-fb74-4d7e-b203-877e21fbc3bf",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
       }
     ],
     "apps": {}
