@@ -1031,12 +1031,16 @@ proc frameos_wasm_render_impl(): cint {.exportc, cdecl.} =
   except Exception as e:
     setLastError("render failed: " & e.msg)
     try:
-      if not deviceCanvas.isNil:
-        # Into the persistent canvas, as the device does: a fresh full-frame
-        # image is the allocation a frame with its canvas held cannot afford.
-        deviceCanvas.renderErrorInto(deviceCanvas.width, deviceCanvas.height,
-          "Render failed: " & e.msg)
-        lastImage = deviceCanvas
+      # Into the persistent canvas, as the device does: a fresh full-frame
+      # image is the allocation a frame with its canvas held cannot afford.
+      # Made here when the failure came before it (a scene that cannot be
+      # built fails in `ensureScene`): the device holds its canvas from boot,
+      # and a 1872x1404 RGBX error frame (10.5 MB) left the next scene no
+      # room under the reTerminal E1003's ceiling (the UX bench, 2026-11-27).
+      let canvas = previewCanvas()
+      if not canvas.isNil:
+        canvas.renderErrorInto(canvas.width, canvas.height, "Render failed: " & e.msg)
+        lastImage = canvas
       else:
         lastImage = renderError(frameConfig.width, frameConfig.height, "Render failed: " & e.msg)
       1
