@@ -7,6 +7,7 @@ outside what this board should do), `note` (worth knowing).
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import threading
@@ -489,8 +490,97 @@ def suite_input(ctx, frame):
         out[direction] = {'wall_ms': round((t_done - t) * 1000) if t_done else None}
         if not t_done:
             issues.append(issue('fail', 'scene_direction', direction, 'no render'))
+    # An edge swipe through the board's own touch task (`touch drag`, in panel
+    # pixels from the middle of an edge, which is on a round glass's rim too):
+    # up from the bottom to the scene list, down from the top to the scene's
+    # settings, each timed to the built-in scene's finished picture. The way
+    # a touch frame is used most; `builtin` times the same scenes opened by a
+    # command, without the touch task, the gesture or the event map.
+    if not frame.get('linux'):
+        out.update(edge_swipes(con, frame, issues))
     issues += incidents_since(con, t0, 'input')
     return {'input': out, 'issues': issues}
+
+
+def panel_size(display):
+    """A panel's (width, height) from boards.json, None when not listed."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'boards.json')) as fh:
+            panel = (json.load(fh).get('panels') or {}).get(display) or {}
+    except (OSError, ValueError):
+        return None
+    return (panel['width'], panel['height']) if panel.get('width') and panel.get('height') else None
+
+
+def edge_swipes(con, frame, issues):
+    out = {}
+    size = panel_size(frame.get('display'))
+    rotate = _console_rotate(con)
+    if not size or rotate not in (0, 90, 180, 270):
+        return {'swipes': {'skipped': f"panel {size}, rotate {rotate}"}}
+    w, h = size
+    reach = int(min(w, h) * 0.35)
+    # The picture's bottom and top edges on the panel as it is hung (a touch
+    # goes through the same turn, panelToScenePoint): (start, end) in panel
+    # pixels, from the middle of the edge inwards.
+    left, right = ((2, h // 2), (2 + reach, h // 2)), ((w - 3, h // 2), (w - 3 - reach, h // 2))
+    top, bottom = ((w // 2, 2), (w // 2, 2 + reach)), ((w // 2, h - 3), (w // 2, h - 3 - reach))
+    from_bottom, from_top = {0: (bottom, top), 90: (left, right), 180: (top, bottom), 270: (right, left)}[rotate]
+    out['swipe_rotate'] = rotate
+    for name, ((x0, y0), (x1, y1)), sid, title, close in (
+            ('swipe_switcher', from_bottom, 'system/sceneSwitcher', 'Scene switcher', 'sceneSwitcher'),
+            ('swipe_settings', from_top, 'system/sceneSettings', 'Scene settings', 'sceneSettings')):
+        drag = (x0, y0, x1, y1)
+        # Quiet first: a frame that starts within a second of the last one's
+        # end is a burst's, counted in a `render:burst` line and not logged
+        # (fos_animation.h), so a swipe right after the scene's own render
+        # had its picture drawn at once and no line to time it by (the
+        # rotary, the 2.8", the watch and the Sticky, 2026-11-27).
+        settle_renders(con)
+        con.drain()
+        t = time.time()
+        con.send('touch drag %d %d %d %d 250' % drag)
+        state = {'n': None, 'open': False}
+
+        def shown(x, sid=sid, title=title):
+            if x.startswith('{"event":"event:open"') and sid in x:
+                state['open'] = True
+            if x.startswith('render #') and ' started: scene ' in x:
+                named = x.split(' started: scene ', 1)[1].strip()
+                if state['n'] is None and (sid in named or f'"{title}"' in named):
+                    state['n'] = x.split()[1]
+                return False
+            if state['n'] is not None and (RENDER_DONE.match(x) or RENDER_FAILED.match(x)):
+                return x.split()[1] == state['n']
+            # Still a burst's frame (another render came in its second):
+            # opened and drawn, with no time of its own.
+            return state['open'] and state['n'] is None and '"event":"render:burst"' in x
+        t_done, line, _ = con.wait_for(shown, render_timeout(frame))
+        if t_done and line and '"event":"render:burst"' in line:
+            out[name] = {'wall_ms': None, 'burst': True}
+            issues.append(issue('note', 'edge_swipe_untimed', name,
+                                'opened, its picture drawn in a burst with no line of its own'))
+        else:
+            out[name] = {'wall_ms': round((t_done - t) * 1000) if t_done else None}
+            if not t_done:
+                issues.append(issue('fail', 'edge_swipe', name,
+                                    'opened, never drawn' if state['open'] else 'the swipe opened nothing'))
+        if state['open']:
+            # The same command again goes back to the scene it covered.
+            con.drain()
+            con.send(f'event {close}')
+            wait_render(con, render_timeout(frame))
+    settle_renders(con)
+    return out
+
+
+def settle_renders(con, quiet=2.0, cap=30.0):
+    """Until no render has started for `quiet` seconds (at most `cap`)."""
+    end = time.time() + cap
+    while time.time() < end:
+        t, _, _ = con.wait_for(lambda x: x.startswith('render #') or '"event":"render:' in x, quiet)
+        if not t:
+            return
 
 
 def suite_storm(ctx, frame):
