@@ -96,6 +96,10 @@ type
     lift*: int
       ## A round panel's lens (`lens`): how far down its cell a tile drawn
       ## smaller is put, so it stays centred where a full one would be.
+    beside*: bool
+      ## A room wider than tall: each scene's name beside its icon, on up to
+      ## two lines (a file manager's Tiles view), a row half as tall as an
+      ## icon over its name: the height such a room runs out of.
 
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
@@ -332,6 +336,21 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   # under it, the name's two lines, and `inner` under them: a row's names
   # never touch the next row's headings.
   result.tileH = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
+  if not round and width * 4 > height * 5:
+    # Wider than 5:4 (a panel held sideways, the 5.79" strip, a landscape
+    # window): the height a row of icons over their names took is what such
+    # a room runs out of long before its width. The Sticky held sideways
+    # showed 9 of 43 scenes, 19 upright (the UX bench, 2026-11-27): every
+    # category still has its heading over a row of its own, each row is
+    # half as tall.
+    result.beside = true
+    result.icon = clamp(permille(cu, 75), 18, 40)
+    result.tileH = max(result.icon + 2 * result.inner, 2 * (result.text * 5 div 4)) + 2 * result.inner
+    # As many as a name of a dozen letters leaves room for, widened to fill
+    # the row: no gutter at the right of every row.
+    let least = min(clamp(permille(cu, 350), 104, 180), gw)
+    let across = clamp((gw + result.gap) div (least + result.gap), 1, MaxCols)
+    result.tileW = (gw + result.gap) div across - result.gap
   result.cols = clamp((gw + result.gap) div (result.tileW + result.gap), 1, MaxCols)
   result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
   if round:
@@ -920,10 +939,14 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid
   ## (Explorer's blue label, Finder's pill); on e-paper the cell is inverted.
   var c: string
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top, grid.tileW, grid.tileH)
-  c.px("pt", grid.inner + grid.lift)
   c.px("gap", grid.inner)
   c.px("rounded", grid.inner * 2)
-  c.add " flex flex-col items-center"
+  if grid.beside:
+    c.px("px", grid.inner)
+    c.add " flex flex-row items-center"
+  else:
+    c.px("pt", grid.inner + grid.lift)
+    c.add " flex flex-col items-center"
   if look.paper:
     if look.lit: c.add " bg-black text-white"
   else:
@@ -932,9 +955,29 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
-  var n = "max-w-full text-center line-clamp-2 leading-tight"
-  n.px("text", grid.text)
-  n.px("px", grid.inner)
+  # The room the name has: the cell, or beside the icon what the icon leaves.
+  let room = if grid.beside: grid.tileW - (grid.icon + 2 * grid.inner) - 3 * grid.inner else: grid.tileW
+  # A word wider than that is set smaller, down to 9 px, never broken inside
+  # ("Countdow/n" on the 5.79" strip; the UX bench, 2026-11-27). Its letters
+  # say which words might be (as wide as Ubuntu's widest run them); only
+  # those are set in type to see whether they wrap.
+  var size = grid.text
+  var pad = if grid.beside: max(grid.inner div 2, 1) else: grid.inner
+  let perMille = if look.paper: 640 else: 600
+  for word in title.split({' ', '-'}):
+    var letters = 0
+    for ch in word:
+      if (ord(ch) and 0xC0) != 0x80: inc letters # a character's first byte
+    while letters * size * perMille > (room - 2 * pad) * 1000 and (size > 9 or pad > 0):
+      let classes = "leading-tight text-[" & $size & "px]" & (if look.paper: " font-bold" else: "")
+      let h = measureText([word, "x"], classes, float32(room - 2 * pad))
+      if h[0] <= h[1] * 1.5:
+        break # one line: it fits
+      if size > 9: dec size
+      else: pad = 0
+  var n = if grid.beside: "min-w-0 text-left line-clamp-2 leading-tight" else: "max-w-full text-center line-clamp-2 leading-tight"
+  n.px("text", size)
+  n.px("px", pad)
   n.px("rounded", grid.inner)
   if look.paper: n.add " font-bold"
   elif look.lit: n.add " bg-sky-600 text-white"
