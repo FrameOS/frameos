@@ -43,6 +43,26 @@ suite "text layout helpers":
     check layout.fontScaleRatio > 0
     check layout.fontScaleRatio < 1.0
 
+  test "fit-bounds keeps words whole: a word wider than the box makes the text smaller, not broken":
+    # Split screen's rich text panel on a 400 px wide e-paper, the UX bench
+    # 2026-11-27: "bananas" came out "banan" / "as" in a narrow, tall box.
+    var opts = makeOptions(overflow = "fit-bounds")
+    opts.text = "bananas and apples"
+    opts.fontSize = 48
+    var asked = opts
+    asked.overflow = "visible"
+    check typesetIntoBounds(asked, 90, 600).textTypeset.breaksWord() # at 48 px it breaks
+    let layout = typesetIntoBounds(opts, 90, 600)
+    check not layout.textTypeset.breaksWord()
+    check layout.fontScaleRatio < 1.0
+    # Plenty of room: as asked, nothing shrunk.
+    check typesetIntoBounds(opts, 900, 600).fontScaleRatio == 1.0
+    # A word that would not fit even at 40 % of the size (a long URL) breaks
+    # rather than shrink the text out of sight.
+    opts.text = "https://example.com/a-very-long-path/that-goes-on-and-on"
+    let url = typesetIntoBounds(opts, 90, 600)
+    check url.fontScaleRatio >= 0.39
+
   test "a render scale makes every length larger: the font, the padding, the border and rich text's sizes":
     var opts = makeOptions(overflow = "visible", borderWidth = 2)
     let plain = typesetIntoBounds(opts, 2000, 400)
