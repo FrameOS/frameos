@@ -585,6 +585,14 @@
             "value": "true",
             "required": true,
             "label": "Always start with today's date"
+          },
+          {
+            "name": "setupHint",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Shown instead, while there are no events",
+            "hint": "What to say where nothing came in because nothing is set up yet (the iCal URL): drawn alone, larger."
           }
         ],
         "output": [
