@@ -760,6 +760,9 @@ proc start*(host: SingleSceneHost) =
       host.runOn(scene, event, payload),
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
     sceneOrder: host.sceneOrder,
+    # A scene that failed to start has no instance (`sceneFor` is nil) and
+    # is still the one the arrows walk on from.
+    showing: proc (): Option[SceneId] = host.sceneId,
     keyboardAt: proc (x, y: int): bool =
       host.sceneId.isSome and sceneKeyboardAt(host.sceneId.get(), x, y),
     log: proc (entry: JsonNode) =

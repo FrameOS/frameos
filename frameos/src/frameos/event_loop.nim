@@ -90,6 +90,11 @@ type
       ## The frame's scene list in the control plane's order, for a
       ## `setCurrentScene` that says `direction` (`next` / `prev`) instead of
       ## a `sceneId`. nil, or an empty list: no such switch is possible here.
+    showing*: proc (): Option[SceneId]
+      ## The scene the frame shows, by its id, when `sceneFor` has no
+      ## instance of it: one that failed to start (an app this runtime does
+      ## not have, an init that throws) is still where a `direction` walks
+      ## from. nil: nothing more than `sceneFor` knows.
     keyboardAt*: proc (x, y: int): bool
       ## Whether the showing scene's keyboard on the screen is under (x, y),
       ## in scene pixels: a press there is a key, never an edge swipe
@@ -458,8 +463,9 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
         return loop.refused(envelope, "noSceneOrder")
       let opener = switcherOpener(current)
       var index = if opener.len > 0: order.find(SceneId(opener))
-        elif current.isNil: -1
-        else: order.find(current.id)
+        elif not current.isNil: order.find(current.id)
+        elif not loop.host.showing.isNil and loop.host.showing().isSome: order.find(loop.host.showing().get())
+        else: -1
       if direction == "next":
         index = if index < 0: 0 else: (index + 1) mod order.len
       else:

@@ -1028,7 +1028,10 @@ block a_scene_that_fails_to_start_keeps_the_frame_map:
     picked.add(sceneId)
     brokenHost.makeCurrent(SceneId(sceneId))
     true
-  brokenHost.sceneOrder = proc (): seq[SceneId] = @[brokenId, fineId]
+  # The broken scene in the middle of the frame's order: the arrows walk on
+  # from it either way (below).
+  let walkOrder = @[fineId, brokenId, "fixtures/dispatcher/third".SceneId]
+  brokenHost.sceneOrder = proc (): seq[SceneId] = walkOrder
   brokenHost.start()
   localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
     {.cast(gcsafe).}:
@@ -1056,5 +1059,14 @@ block a_scene_that_fails_to_start_keeps_the_frame_map:
   brokenHost.makeCurrent(brokenId)
   discard brokenHost.send(eoDriver, "edgeSwipe", %*{"edge": "top", "direction": "down", "x": 16383, "y": 0})
   doAssert picked[^1].startsWith(SceneSettingsId), $picked
+  # And the arrows walk on from it, either way: the next scene is the one
+  # after it in the frame's order, not the first (with no instance to ask,
+  # the walk began nowhere: `next` went to the list's first scene, which
+  # here is the broken one itself, and `prev` to its last).
+  for (direction, want) in [("next", walkOrder[2]), ("prev", walkOrder[0])]:
+    brokenHost.makeCurrent(brokenId)
+    picked.setLen(0)
+    discard brokenHost.send(eoHttpWrite, "setCurrentScene", %*{"direction": direction})
+    doAssert picked == @[want.string], direction & ": " & $picked
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
   echo "a scene that fails to start keeps the frame's keys ok"
