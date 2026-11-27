@@ -636,7 +636,10 @@ block a_round_panel_keeps_everything_on_the_glass:
         let scene = newSwitcher(roundConfig, opener = "scene-1")
         let grid = switcherGrid(480, 480, pictures, round = true)
         doAssert grid.round and grid.cols * grid.rows >= min(count, 4), $grid
-        doAssert (grid.listX, grid.listY, grid.listW, grid.listH) == (grid.x0, grid.y0, grid.side, grid.side), $grid
+        doAssert (grid.listY, grid.listW, grid.listH) == (grid.y0, grid.side, grid.side), $grid
+        # The columns in the middle of the square inside the circle.
+        let used = grid.cols * (grid.tileW + grid.gap) - grid.gap
+        doAssert abs((grid.x0 - grid.listX) - (grid.side - (grid.x0 - grid.listX) - used)) <= 1, $grid
         # The first tile, then the last (the list scrolled to its end where
         # it does not fit), so the ring is drawn at both ends.
         for last in [0, count - 1]:
