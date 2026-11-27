@@ -1253,11 +1253,18 @@ function withoutCrossOriginHeaders(headers) {
   }
   return kept;
 }
+// Who is asking, unless the scene said: node sends no User-Agent of its own,
+// and an API that wants one (GitHub's, Wikipedia's, met.no's) refused every
+// request of a frame rendered here while the board itself was answered
+// (FrameOS-ESP32/1). The backend's renderer sends the same
+// (embedded_wasm_render.mjs).
+const userAgent = "FrameOS/1 (rendered by its control plane)";
 function requestOnce(target, req, signal) {
   const headers = {};
   for (const [name, value] of Object.entries(req.headers || {})) {
     if (!skippedHeaders.has(name.toLowerCase())) headers[name] = value;
   }
+  if (!Object.keys(headers).some((name) => name.toLowerCase() === "user-agent")) headers["User-Agent"] = userAgent;
   return new Promise((resolve, reject) => {
     const client = target.protocol === "https:" ? https : http;
     const outgoing = client.request(target, { method: req.method, headers, lookup: guardedLookup, signal }, resolve);

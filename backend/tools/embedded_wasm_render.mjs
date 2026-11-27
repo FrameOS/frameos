@@ -203,12 +203,18 @@ function sameOrigin(a, b) {
 }
 
 const SKIPPED_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding']);
+// Who is asking, unless the scene said: node sends no User-Agent of its own,
+// and an API that wants one (GitHub's, Wikipedia's, met.no's) refused every
+// request of a frame rendered here while the board itself was answered
+// (FrameOS-ESP32/1). The cloud's renderer sends the same (scene-render.ts).
+const USER_AGENT = 'FrameOS/1 (rendered by its control plane)';
 
 function requestOnce(url, method, headers, body, lookup, signal) {
   const outgoing = {};
   for (const [name, value] of Object.entries(headers)) {
     if (!SKIPPED_HEADERS.has(name.toLowerCase())) outgoing[name] = value;
   }
+  if (!Object.keys(outgoing).some((name) => name.toLowerCase() === 'user-agent')) outgoing['User-Agent'] = USER_AGENT;
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? https : http;
     const request = client.request(url, { method, headers: outgoing, lookup, signal }, resolve);
