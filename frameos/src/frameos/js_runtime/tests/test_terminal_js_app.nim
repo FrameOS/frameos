@@ -184,9 +184,30 @@ suite "the Terminal scene":
     logger.frameConfig = config
     init("terminal-app".SceneId, config, logger, %*{})
 
+  proc promptRows(image: Image): (int, int) =
+    ## The rows of the lowest green prompt: the line to type on, under the
+    ## lines before it (each command typed has its prompt in green too).
+    var (top, bottom) = (image.height, -1)
+    for y in countdown(image.height - 1, 0):
+      var green = false
+      for x in 0 ..< min(240, image.width):
+        let c = image[x, y]
+        if c.g > 150 and c.r < 120 and c.b < 170:
+          green = true
+          break
+      if green:
+        top = y
+        if bottom < 0: bottom = y
+      elif bottom >= 0 and bottom - y > 4:
+        break
+    (top, bottom)
+
   proc typeLine(scene: FrameScene, config: FrameConfig, line: string) =
     # A tap on the line gives it the keyboard; a real keyboard types into it.
-    scene.send("tap", %*{"x": config.width div 2, "y": config.height - 18, "pointerId": 0, "pointerType": "touch"})
+    # The line follows the lines before it, from the top as a terminal's does.
+    let (top, bottom) = promptRows(draw(scene, config, "before"))
+    check bottom >= 0
+    scene.send("tap", %*{"x": config.width div 2, "y": (top + bottom) div 2, "pointerId": 0, "pointerType": "touch"})
     discard draw(scene, config, "focused")
     scene.send("textInput", %*{"text": line})
     scene.send("keyDown", %*{"key": "Enter"})
@@ -212,14 +233,8 @@ suite "the Terminal scene":
     proc letterHeight(width, height: int): int =
       let config = testConfig(width, height)
       let image = draw(load(config), config, "letters-" & $width)
-      # The prompt's green letters on the line at the bottom.
-      var (top, bottom) = (height, -1)
-      for y in height - 80 ..< height:
-        for x in 0 ..< 240:
-          let c = image[x, y]
-          if c.g > 150 and c.r < 120 and c.b < 170:
-            top = min(top, y)
-            bottom = max(bottom, y)
+      # The prompt's green letters on the line to type on.
+      let (top, bottom) = promptRows(image)
       bottom - top + 1
     let small = letterHeight(800, 480)
     check small > 6 and small <= 16
