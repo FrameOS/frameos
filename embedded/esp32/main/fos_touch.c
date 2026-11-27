@@ -853,20 +853,60 @@ static void report_settled(uint8_t id, int x_max)
     }
 }
 
-/* A touch the console made (`touch tap`): read in place of the controller's
- * reports, one finger, in the controller's own coordinates, until its lift,
- * so a bench can time what a finger on the glass sets going without one. */
+/* A touch the console made (`touch tap`, `touch drag`): read in place of the
+ * controller's reports, one finger, in the controller's own coordinates,
+ * until its lift, so a bench can time what a finger on the glass sets going
+ * without one. A drag moves it from one point to another along a wave, read
+ * at the task's own pace (TOUCH_POLL_HELD_MS), as a finger's reports come. */
 static volatile int64_t s_inject_until_us = 0; /* 0: none; the lift once past it */
+static volatile int64_t s_inject_from_us = 0;
 static volatile int16_t s_inject_x = 0, s_inject_y = 0;
+static volatile bool s_inject_drag = false;
+static volatile int16_t s_drag_x[2], s_drag_y[2], s_drag_amp, s_drag_waves;
+
+/* The panel's pixel back into the controller's range, the other way round
+ * from the task (its swap, then its mirror). */
+static void panel_to_raw(int px, int py, int16_t *x, int16_t *y)
+{
+    int pw = fos_display_width(), ph = fos_display_height();
+    if (px < 0) px = 0;
+    if (py < 0) py = 0;
+    if (px >= pw) px = pw - 1;
+    if (py >= ph) py = ph - 1;
+    int x_max = s_swap ? s_y_max : s_x_max;
+    int y_max = s_swap ? s_x_max : s_y_max;
+    int rx = (int)((int64_t)px * x_max / pw), ry = (int)((int64_t)py * y_max / ph);
+    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_X) rx = x_max - 1 - rx;
+    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_Y) ry = y_max - 1 - ry;
+    *x = (int16_t)(s_swap ? ry : rx);
+    *y = (int16_t)(s_swap ? rx : ry);
+}
 
 static bool inject_points(fos_touch_point_t *points, int *count)
 {
     int64_t until = s_inject_until_us;
     if (until == 0) return false;
-    if (esp_timer_get_time() >= until) {
+    int64_t now = esp_timer_get_time();
+    if (now >= until) {
         s_inject_until_us = 0;
         *count = 0;
         return true;
+    }
+    if (s_inject_drag) {
+        /* Integers (a float's sine is a kilobyte of software doubles here):
+         * along the line, and a zigzag across it, `waves` periods of `amp`
+         * pixels, sideways to a mostly level drag and up and down otherwise. */
+        int64_t done = now - s_inject_from_us, span = until - s_inject_from_us;
+        int dx = s_drag_x[1] - s_drag_x[0], dy = s_drag_y[1] - s_drag_y[0];
+        int f = (int)(((int64_t)s_drag_waves * done * 4096 / span) % 4096);
+        int zig = f < 1024 ? f : f < 3072 ? 2048 - f : f - 4096; /* -1024..1024 */
+        int off = s_drag_amp * zig / 1024;
+        bool level = (dx < 0 ? -dx : dx) >= (dy < 0 ? -dy : dy);
+        int16_t x, y;
+        panel_to_raw(s_drag_x[0] + (int)(dx * done / span) + (level ? 0 : off),
+                     s_drag_y[0] + (int)(dy * done / span) + (level ? off : 0), &x, &y);
+        s_inject_x = x;
+        s_inject_y = y;
     }
     memset(&points[0], 0, sizeof(points[0]));
     points[0].id = 0;
@@ -876,25 +916,43 @@ static bool inject_points(fos_touch_point_t *points, int *count)
     return true;
 }
 
-esp_err_t fos_touch_inject(int px, int py, int hold_ms)
+static esp_err_t inject_start(int px, int py, int hold_ms)
 {
     if (!s_present || !s_irq) return ESP_ERR_INVALID_STATE;
     int pw = fos_display_width(), ph = fos_display_height();
     if (px < 0 || py < 0 || px >= pw || py >= ph || hold_ms <= 0) return ESP_ERR_INVALID_ARG;
-    /* The panel's pixel back into the controller's range, the other way
-     * round from the task (its swap, then its mirror). */
-    int x_max = s_swap ? s_y_max : s_x_max;
-    int y_max = s_swap ? s_x_max : s_y_max;
-    int rx = (int)((int64_t)px * x_max / pw), ry = (int)((int64_t)py * y_max / ph);
-    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_X) rx = x_max - 1 - rx;
-    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_Y) ry = y_max - 1 - ry;
-    s_inject_x = (int16_t)(s_swap ? ry : rx);
-    s_inject_y = (int16_t)(s_swap ? rx : ry);
+    int16_t x, y;
+    panel_to_raw(px, py, &x, &y);
+    s_inject_x = x;
+    s_inject_y = y;
     s_seen_us = 0;
     s_lit_us = 0;
-    s_inject_until_us = esp_timer_get_time() + (int64_t)hold_ms * 1000;
+    s_inject_from_us = esp_timer_get_time();
+    s_inject_until_us = s_inject_from_us + (int64_t)hold_ms * 1000;
     xSemaphoreGive(s_irq);
     return ESP_OK;
+}
+
+esp_err_t fos_touch_inject(int px, int py, int hold_ms)
+{
+    s_inject_drag = false;
+    return inject_start(px, py, hold_ms);
+}
+
+esp_err_t fos_touch_inject_drag(int x0, int y0, int x1, int y1, int ms, int amp, int waves)
+{
+    int pw = fos_display_width(), ph = fos_display_height();
+    if (x1 < 0 || y1 < 0 || x1 >= pw || y1 >= ph) return ESP_ERR_INVALID_ARG;
+    s_inject_drag = false;
+    s_drag_x[0] = (int16_t)x0;
+    s_drag_y[0] = (int16_t)y0;
+    s_drag_x[1] = (int16_t)x1;
+    s_drag_y[1] = (int16_t)y1;
+    s_drag_amp = (int16_t)amp;
+    s_drag_waves = (int16_t)waves;
+    esp_err_t err = inject_start(x0, y0, ms);
+    if (err == ESP_OK) s_inject_drag = true;
+    return err;
 }
 
 void fos_touch_press_times(int64_t *seen_us, int64_t *lit_us)

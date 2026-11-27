@@ -824,6 +824,10 @@ static int64_t s_asked_us = 0;
 static int64_t s_render_began_us = 0;
 /* When the last rendered picture went to the panel (fos_pictures_fast). */
 static int64_t s_last_picture_us = 0;
+/* How long a render a finger asked for takes from its pass's start to the
+ * panel's update call, smoothed (fos_glass_lead_note): glass_slot_wait
+ * starts one that far ahead of the glass. */
+static int64_t s_glass_lead_us = 0;
 
 static bool input_queued(void)
 {
@@ -956,6 +960,39 @@ static void process_input_events(void)
     if (local && frameos_nim_tick()) {
         fos_client_wake_for_events();
     }
+}
+
+/* A stroke on e-paper (docs/realtime-rendering.md "A stroke on e-paper"):
+ * the scene asked for a render after a finger's moves while the glass still
+ * runs the last picture's waveform, which nothing can cut short and the next
+ * upload would wait out anyway. The render starts only as late as lets its
+ * picture be ready as the glass frees (fos_glass_slot_wait_us), and the
+ * finger's moves meanwhile go to the scene first, so the picture carries
+ * them: on the reTerminal E1003 a DU is ~350 ms, and a render begun at its
+ * start drew a stroke as it was 350 ms before it went up. A render somebody
+ * else asks for (a command, the console) ends the wait. */
+static void glass_slot_wait(void)
+{
+    if (fos_display_is_lcd()) return;
+    int64_t now = esp_timer_get_time();
+    int64_t free_at = fos_display_glass_free_at();
+    int64_t wait_us = fos_glass_slot_wait_us(now, free_at, s_glass_lead_us);
+    if (fos_config()->debug_logging && free_at > 0) {
+        char line[160];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:slot\",\"source\":\"esp32\",\"freeInMs\":%lld,\"leadMs\":%lld,\"waitMs\":%lld}",
+                 (long long)((free_at - now) / 1000), (long long)(s_glass_lead_us / 1000), (long long)(wait_us / 1000));
+        frameos_nim_log_hook(line);
+    }
+    if (wait_us <= 0) return;
+    int64_t until = now + wait_us;
+    while (until - esp_timer_get_time() >= FOS_GLASS_SLOT_MIN_US) {
+        EventBits_t bits = xEventGroupWaitBits(s_events, RENDER_NOW_BIT | COMMANDS_BIT | RESTART_NOTICE_BIT, pdFALSE,
+                                               pdFALSE, 1);
+        if (bits & (RENDER_NOW_BIT | COMMANDS_BIT | RESTART_NOTICE_BIT)) break;
+        process_input_events();
+    }
+    process_input_events();
 }
 
 void fos_client_request_commands_sync(void)
@@ -3665,6 +3702,9 @@ static esp_err_t render_once(bool quiet)
                                      &partial);
             tl_updated_us = esp_timer_get_time();
             if (err == ESP_OK) press_answered(tl_update_us, showing_id);
+            if (err == ESP_OK && fast && partial && s_tl_pass_us > 0 && s_tl_pass_us <= tl_update_us) {
+                s_glass_lead_us = fos_glass_lead_note(s_glass_lead_us, tl_update_us - s_tl_pass_us);
+            }
             if (lines_after) {
                 log_render_event("render:framebuffer", scene_id, scene_name, "rendered", "framebuffer",
                                  mode, "pending", "", render_attempt, framebuffer_ms, width, height,
@@ -5421,6 +5461,7 @@ static void client_task(void *arg)
                 } else {
                     s_render_owed = false;
                     s_scene_render = !want_render;
+                    if (scene_asked && !want_render && nim) glass_slot_wait();
                     force_render = true;
                     break;
                 }

@@ -411,6 +411,23 @@ static void test_a_deploy_downloads_off_the_render_task(void)
     CHECK(!p.fetch_here && !p.report_here, "never a third pull, link or not");
 }
 
+static void test_a_stroke_renders_for_the_glass(void)
+{
+    int64_t now = 1000 * MS;
+    CHECK(fos_glass_slot_wait_us(now, 0, 120 * MS) == 0, "the glass is free: render now");
+    /* A DU ends 350 ms from now and such a render takes 120 ms to its
+     * upload: it starts 30 ms of margin before that. */
+    CHECK(fos_glass_slot_wait_us(now, now + 350 * MS, 120 * MS) == 200 * MS, "held until 150 ms before the glass frees: %lld",
+          (long long)fos_glass_slot_wait_us(now, now + 350 * MS, 120 * MS));
+    CHECK(fos_glass_slot_wait_us(now, now + 350 * MS, 0) == 70 * MS, "no lead known yet: a quarter second's");
+    CHECK(fos_glass_slot_wait_us(now, now + 140 * MS, 120 * MS) == 0, "too close to bother: render now");
+    CHECK(fos_glass_slot_wait_us(now, now + 100 * MS, 400 * MS) == 0, "a render slower than the glass: now");
+    CHECK(fos_glass_slot_wait_us(now, now + 5000 * MS, 100 * MS) == FOS_GLASS_SLOT_MAX_US, "a wrong estimate costs no more");
+    CHECK(fos_glass_lead_note(0, 120 * MS) == 120 * MS, "the first sample is the lead");
+    CHECK(fos_glass_lead_note(120 * MS, 200 * MS) == 140 * MS, "smoothed: %lld", (long long)fos_glass_lead_note(120 * MS, 200 * MS));
+    CHECK(fos_glass_lead_note(0, 5 * MS) == 10 * MS && fos_glass_lead_note(0, 9000 * MS) == 1000 * MS, "held to 10 ms..1 s");
+}
+
 static void test_a_timed_render_waits_for_the_glass(void)
 {
     /* The E1002's color refresh is 28.7 s on the display's own task. */
@@ -488,6 +505,7 @@ int main(void)
     test_the_backend_link();
     test_a_deploy_downloads_off_the_render_task();
     test_a_timed_render_waits_for_the_glass();
+    test_a_stroke_renders_for_the_glass();
     test_a_layouts_second_is_a_second();
     test_an_animation_is_pictured_once();
     printf("%d checks, %d failures\n", g_checks, g_failures);

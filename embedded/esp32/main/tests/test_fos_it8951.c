@@ -347,10 +347,39 @@ static void test_tile_spans(void)
     CHECK(count == 1 && rects[0].x == 160 && rects[0].y == 80 && rects[0].w == 64 && rects[0].h == 32, "one block: %u %ux%u@%u,%u",
           (unsigned)count, rects[0].w, rects[0].h, rects[0].x, rects[0].y);
 
-    /* Too many for the limit says so rather than dropping any. */
+    /* More runs than the limit (a stroke across the panel, a run of tiles a
+     * row): the cheapest pairs are joined, every dirty tile is still sent,
+     * and far less than the coarse boxes would send. */
     memset(g_dirty, 0, sizeof(g_dirty));
-    for (int i = 0; i < 20; i++) mark(i * 2, i * 3);
-    CHECK(fos_it8951_tile_spans(g_dirty, rects, FOS_IT8951_MAX_RECTS_INTERACTIVE) == SIZE_MAX, "over the limit");
+    for (int row = 0; row < 120; row++) {
+        int col = 2 + (row * 40) / 120;
+        mark(col, row);
+        mark(col + 1, row);
+    }
+    count = fos_it8951_tile_spans(g_dirty, rects, FOS_IT8951_MAX_RECTS_INTERACTIVE);
+    CHECK(count <= FOS_IT8951_MAX_RECTS_INTERACTIVE, "at most the limit: %u", (unsigned)count);
+    int missed = 0;
+    for (int row = 0; row < FOS_IT8951_TILE_ROWS; row++) {
+        for (int col = 0; col < FOS_IT8951_TILE_COLS; col++) {
+            if (!g_dirty[(size_t)row * FOS_IT8951_TILE_COLS + (size_t)col]) continue;
+            bool in = false;
+            for (size_t i = 0; i < count && !in; i++) {
+                in = col * 32 >= rects[i].x && col * 32 < rects[i].x + rects[i].w && row * 8 >= rects[i].y &&
+                     row * 8 < rects[i].y + rects[i].h;
+            }
+            if (!in) missed++;
+        }
+    }
+    CHECK(missed == 0, "every dirty tile is sent: %d missed", missed);
+    sent = 0;
+    for (size_t i = 0; i < count; i++) sent += (long)rects[i].w * rects[i].h;
+    fos_it8951_rect_t coarse[FOS_IT8951_MAX_RECTS_INTERACTIVE];
+    size_t coarse_count = fos_it8951_tile_rects(g_dirty, coarse, FOS_IT8951_MAX_RECTS_INTERACTIVE);
+    long coarse_sent = 0;
+    for (size_t i = 0; i < coarse_count; i++) coarse_sent += (long)coarse[i].w * coarse[i].h;
+    long stroke_px = 120L * 2 * 32 * 8;
+    CHECK(sent < stroke_px * 3 / 2, "close to the stroke's own tiles: %ld of %ld", sent, stroke_px);
+    CHECK(sent * 3 < coarse_sent, "a third of the coarse boxes at most: %ld vs %ld", sent, coarse_sent);
 }
 
 static void test_row_halftone(void)

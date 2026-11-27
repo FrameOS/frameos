@@ -71,8 +71,12 @@ void fos_it8951_row_wire(const uint8_t *packed, size_t bytes, bool mirror_x, uin
 /* The controller runs one waveform at a time, some 0.5 s each, whatever the
  * area: more rectangles are more seconds. */
 #define FOS_IT8951_MAX_RECTS 3
-/* While someone taps it is one DU over all of them: what is sent is what counts. */
-#define FOS_IT8951_MAX_RECTS_INTERACTIVE 16
+/* While someone taps it is one DU over all of them: what is sent is what
+ * counts, and a load of its own costs little next to a tile of picture sent
+ * for nothing (a stroke drawn on e-paper changes a run of tiles per row: 16
+ * rectangles merged it into boxes four times its size, 125 ms of upload on
+ * the reTerminal E1003 between two waveforms, 2026-11-26). */
+#define FOS_IT8951_MAX_RECTS_INTERACTIVE 64
 
 /* A rectangle of the wire's coordinates. */
 typedef struct {
@@ -101,8 +105,9 @@ bool fos_it8951_tile_range(const fos_it8951_rect_t *packed_rect, bool mirror_x, 
 size_t fos_it8951_tile_rects(const uint8_t *dirty, fos_it8951_rect_t *rects, size_t max);
 
 /* The dirty tiles exactly, as rectangles that never overlap: a run of the same
- * columns over consecutive rows is one, anything else its own. SIZE_MAX when it
- * takes more than `max`. Pure. */
+ * columns over consecutive rows is one, anything else its own. Past `max` the
+ * two whose box adds the fewest clean pixels are one (and what it covers goes
+ * with it): every dirty tile is in one, a few clean ones may ride along. Pure. */
 size_t fos_it8951_tile_spans(const uint8_t *dirty, fos_it8951_rect_t *rects, size_t max);
 
 /* A wire row of greys as pure black and white, a halftone fixed to the panel,
@@ -166,3 +171,6 @@ bool fos_it8951_10in3_owed(void);
 bool fos_it8951_10in3_glass_rect(const uint8_t *buf, int x, int y, int w, int h);
 /* The waveform running, waited out (what the next upload would do). */
 void fos_it8951_10in3_wait(void);
+/* When the waveform running ends, about (esp_timer us, from how long one
+ * took here before); 0 when none runs. */
+int64_t fos_it8951_10in3_free_at(void);

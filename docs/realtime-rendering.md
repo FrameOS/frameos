@@ -862,7 +862,78 @@ What the person sees sooner now (2026-11-24, `fos_press.h`, `lcd_press.h`):
 The console's `touch tap <x> <y> [ms]` (`fos_touch_inject`) puts a finger
 on the glass through the touch task, in the controller's own coordinates, so
 the bench times all of this without one, and prints when the touch task saw
-it and lit it.
+it and lit it. `touch drag <x0> <y0> <x1> <y1> [ms] [amp] [waves]`
+(`fos_touch_inject_drag`) moves one from one panel pixel to another over `ms`
+along a zigzag of `amp` pixels and `waves` periods, read at the touch task's
+own pace as the glass's reports are: a stroke for the drawing scenes, timed
+("A stroke on e-paper", below).
+
+### A stroke on e-paper
+
+The drawing samples (Touch test, Sketchbook, Handwriting notes, the Kitchen
+sink's Paint) ask for a render at every move, on every panel, and keep every
+position the finger passed: a move that waited for a busy frame carries the
+others in `points` (docs/events.md "Pointer"), and they join the stroke. The
+frame paces them by its glass. Until 2026-11-26 e-paper drew the Touch test
+only when the finger lifted, and the other two a piece every 650 ms, a pace
+of their own slower than the glass they waited for. A grey or black-and-white
+panel draws the Touch test in black, which a DU draws exactly; a grey goes up
+as a halftone until the settle.
+
+On the reTerminal E1003 the IT8951 runs **one waveform at a time**: probed
+2026-11-26, a second display area, and even a load into another part of the
+image buffer, waits on HRDY for the whole of the first's waveform, whether the
+areas are apart, overlapping or the same (four 64x64 areas: 340 ms apart,
+1.36 s in all). So a stroke goes up as one DU after another, each with all
+that is new, and what is left to win is what each carries and what comes
+between them:
+
+- **The upload.** A stroke changes a run of tiles in each row it crosses.
+  Sixteen rectangles a picture (`FOS_IT8951_MAX_RECTS_INTERACTIVE` until then)
+  were too few for the Touch test's trail, pointer, hairlines and words, and
+  the driver fell back to boxes merged around all of them: 125 ms of upload
+  between two waveforms, which the controller cannot overlap with either.
+  Now it sends the changed runs as they are, up to 64, and past that joins the
+  two whose box adds the least (`fos_it8951_tile_spans`): 25-35 ms.
+- **The waveform's own length.** HRDY stays low until the waveform has run
+  and nobody talks to the controller meanwhile, so the driver times its end
+  with a 2 ms timer while one runs (`end_poll`) and learns how long a DU takes
+  on this glass, which follows the temperature the controller is given:
+  330-365 ms told 21 C, 473 ms told 16 C (the driver's default without a
+  reading, as after one reboot on the bench). `fos_display_glass_free_at`
+  says when the glass takes the next picture.
+- **When the render starts** (`glass_slot_wait` in `fos_client.c`, the rule
+  `fos_glass_slot_wait_us` in `fos_animation.c`, host-tested). A render the
+  scene asked for after input, begun while the glass still runs the last
+  picture, would draw the stroke as it was then and wait out the waveform at
+  its upload. It starts instead as late as lets its picture be ready as the
+  glass frees: the waveform's end less how long such a render takes to the
+  update call (`s_glass_lead_us`, smoothed from the renders that went up fast)
+  and 30 ms, while the moves meanwhile go to the scene. A render somebody else
+  asks for (a command, the console) ends the wait. With `set debug 1` each
+  decision is a `render:slot` line (`freeInMs`, `leadMs`, `waitMs`).
+
+Measured on the E1003 (2026-11-26, `touch drag`, 3 s strokes, a DU of ~340
+ms): the Touch test drew nothing until the lift before; now a DU every ~380
+ms, each render held ~100 ms (it renders in ~200 ms at 1872x1404) and its
+upload 30 ms instead of 125. Handwriting notes and the Sketchbook render in
+30-100 ms: a DU every ~350 ms, each holding 150-185 ms more of the stroke
+than one begun at the glass's start (with a 473 ms DU, a render held 335 ms).
+The reTerminal Sticky's SSD1677 runs a partial update after another (400-500
+ms each) with the scenes' own renders, not yet timed to the glass: its driver
+keeps no end time. The Touch test's trail is a canvas, so a render costs the
+same at the thousandth point as at the first: 1.8 ms a move on the host
+where the trail of paths it replaced averaged 6.3 ms and grew to 12.7 by 600
+points; ~14 frames a second through a long stroke on a SenseCAP Indicator.
+
+A frameos.canvas on a black-and-white e-paper is 8-bit grey like its panel,
+and drawn at its own size it is copied a row at a time (pixie `blendRect`,
+as 4-bit grey already was): through the accessors it was 1.3 s a frame on
+the Sticky (178 ms now), which the Touch test's trail paid at every press and
+the Sketchbook's page at every repaint of it. An SVG that draws a canvas
+starts with an opaque rectangle, or the frame takes it for one that does
+not cover the panel and draws it whole every time (`coversOpaque`, "A
+whole-frame SVG repaints what changed").
 
 ### A switch that takes a while: the loading mark
 
@@ -1083,7 +1154,9 @@ a small change cost what it should:
   that draw what they are sent: INIT, GC16 for sixteen greys and DU for pure
   black and white. GL16, GLR16, GLD16, DU4 and A2 finish in 645 ms and leave
   the area one flat tone. Waveforms run one at a time and take the same time
-  whatever the area, DU 470 ms and GC16 580 ms, so the count is what matters.
+  whatever the area, DU 470 ms and GC16 580 ms as first measured (a DU runs
+  330-365 ms at 21 C, timed off HRDY since: "A stroke on e-paper"), so the
+  count is what matters.
   While someone taps there is one: **a single DU over everything that changed**,
   however far apart. DU moves only the pixels that change (16 grey bars stay as
   they are under one), so the box costs nothing where nothing changed and the
