@@ -13,7 +13,12 @@ What it flags, per scene and panel:
   a round glass's invisible corners;
 - a scene whose whole view scrolls (content below the fold) on a panel where
   that is not a list;
-- taps on pressable regions that changed nothing, and slow steps.
+- taps on pressable regions that changed nothing, and slow steps;
+- the keys' walk (Next is Tab, Action is Enter: docs/jsx-ui.md "Keys"): an
+  element to press the ring never reaches, a ring on an element the panel
+  does not show, a Next that leaves the scene or does nothing, Action on
+  three ringed elements that changes nothing; on a board with keys and no
+  touch, elements that take a tap where no key ever stops.
 """
 from __future__ import annotations
 
@@ -157,6 +162,32 @@ def analyze_panel(panel_dir: Path):
                     add(rec, "scrolls", "note", f"a drag up scrolled {dist:.0f}px (content past the panel)", s.get("shot"))
             if s.get("renderMs", 0) + s.get("inputMs", 0) > SLOW_STEP_MS:
                 add(rec, "slow-step", "slow", f"{s['kind']} {s['label']}: input {s.get('inputMs')} ms + render {s.get('renderMs')} ms", s.get("shot"))
+        tap_only = rec.get("tapOnly")
+        if tap_only and not panel.get("touch") and tap_only["count"] >= max(3, tap_only["stops"]):
+            # A keys-only board: what only a tap reaches is out of reach here.
+            add(rec, "keys-tap-only", "slow", f"{tap_only['count']} elements take a tap but no key stops at them "
+                f"({tap_only['stops']} the keys do): {', '.join(str(b) for b in tap_only['boxes'])}")
+        walk = rec.get("focusWalk")
+        if walk:
+            # The keys' walk (docs/jsx-ui.md "Keys"): Next rings each element
+            # to press in turn, where it can be seen, without leaving the scene.
+            n = walk["takers"]
+            if walk.get("left"):
+                add(rec, "keys-left-scene", "fail", f"Next on a scene with {n} elements to press went to {walk['left']}")
+            elif not walk["seen"] and not walk.get("tookKeys"):
+                add(rec, "keys-reach-nothing", "fail", f"Next rings none of the {n} elements to press, and the scene does not take the key")
+            else:
+                un = walk.get("unreached") or []
+                if un:
+                    boxes = ", ".join(str(u["box"]) for u in un[:4])
+                    add(rec, "keys-unreached", "slow", f"Next never rings {len(un)} of {n} elements to press ({len(walk['stops'])} stops, then round again): {boxes}")
+                elif walk["seen"] and not walk.get("wrapped"):
+                    add(rec, "keys-no-wrap", "note", f"after {walk['presses']} presses of Next the ring had not come round ({len(walk['stops'])} stops of {n} elements)")
+                for o in (walk.get("offscreen") or [])[:1]:
+                    add(rec, "keys-ring-offscreen", "slow", f"Next rang an element {o['shown']:.0%} on the panel at {o['box']}")
+                acts = walk.get("actions") or []
+                if acts and all(a["changed"] == 0 and a["after"] == rec["scene"] for a in acts):
+                    add(rec, "keys-action-dead", "slow", f"Action on {len(acts)} ringed elements ({', '.join(str(a['ring']) for a in acts)}) changed nothing")
         if taps >= 2 and dead_taps == taps:
             add(rec, "dead-taps", "slow", f"none of {taps} taps on pressable regions changed the picture")
         if (r.get("coldMs") or 0) - 0 > 1500:

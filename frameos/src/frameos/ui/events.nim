@@ -1681,9 +1681,11 @@ proc uiElementsReport*(): JsonNode =
   ## Every element of every UI's last render, where the layout put it whole
   ## (`box`, not cut by the canvas or a scroller) and what of it shows
   ## (`visible`: what no scrolling box cut off), in the scene's pixels, and
-  ## whether it sits in a box that scrolls. For a harness to ask whether
-  ## every element is on the screen (tools/ux-bench, wasm_main
-  ## frameos_wasm_ui_elements); nothing on a frame calls it.
+  ## whether it sits in a box that scrolls; its UI (`node`) and `key`, which
+  ## the keys' ring names (`lastingUiInput`'s `ring` is the key + 1), and
+  ## whether the keys stop at it (`stop`). For a harness to ask whether every
+  ## element is on the screen and in the keys' reach (tools/ux-bench,
+  ## wasm_main frameos_wasm_ui_elements); nothing on a frame calls it.
   result = newJArray()
   for target in targets:
     let scale = if target.scale > 0: target.scale else: 1'f32
@@ -1698,12 +1700,13 @@ proc uiElementsReport*(): JsonNode =
         ox = target.offsetX
         oy = target.offsetY
       result.add %*{
-        "scene": target.sceneId,
+        "scene": target.sceneId, "node": target.nodeId, "key": r.key,
         "box": [ox + r.x * scale, oy + r.y * scale, ox + (r.x + r.w) * scale, oy + (r.y + r.h) * scale],
         "visible": [ox + r.visible[0] * scale, oy + r.visible[1] * scale,
                     ox + r.visible[2] * scale, oy + r.visible[3] * scale],
         "scroller": r.scroller, "scrolls": r.scrollX > 0 or r.scrollY > 0,
         "takes": takes, "field": r.field.int,
+        "stop": r.stop(false), # one the keys walk to
       }
 
 proc handlerPayload(target: UiTarget, r: UiRegion, payload: JsonNode, scale: float32): JsonNode =

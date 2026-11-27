@@ -23,6 +23,13 @@ installed (`ux.mjs`):
   `atMs`); what came up (`report.py` holds it to the board's event map: a held
   arrow walks the scenes, Home opens the list, ...);
 - **edge swipes** on touch panels, from the rim on a round one;
+- **the keys' walk** on every board with keys (docs/jsx-ui.md "Keys"): Next
+  pressed until the ring comes round to where it started, each element it
+  rings named (`frameos_wasm_ui_elements`' `key`, the kept state's `ring`):
+  an element to press it never reaches, a ring on an element the panel does
+  not show, a Next that leaves the scene or does nothing; then Action on
+  three of the elements it rang, spread over the walk (does any of them do
+  anything?). On a keys-only e-paper this is the only way into a scene;
 - **taps** on every region the press map says takes one (spread out, six at
   most): did the picture change, how long did it take;
 - **a scroll** (a drag up the middle): whether the scene's own view scrolls,
@@ -57,7 +64,9 @@ python3 tools/ux-bench/sheet.py out.png 300 4 a.png b.png ...                   
   thing the report cannot judge. A sheet a panel, about fifty scenes each.
 
 `UXDEBUG=1` echoes the runtime's output and its log lines to stderr as the
-harness runs, for a scene that does something unexpected.
+harness runs, for a scene that does something unexpected. `UXWALKDEBUG=1`
+keeps every element the keys stop at, with its box, on each step of the walk
+(`--steps focus --scenes '^To-do$'`), for a walk that goes somewhere odd.
 
 `device_ux.py <port> <board>` is the part a board has to do itself: each
 edge swipe through its own touch task (`touch drag`) and each key through its
@@ -69,3 +78,6 @@ swallowed every key and swipe on an ESP32; the pixel games drew in a quarter
 of the reTerminal E1003 at its new render scale; pixie drew an SVG whose
 viewBox starts away from 0 off to one side when scaled; server rendering sent
 no User-Agent; the Sticky's landscape home screen left the scene list one row.
+The keys' walk, the third time: a list paged to its end and round never came
+back to its top (only what shows of a box answers), a list that ends at its
+box's edge was never paged at all, and a page turn rang a row twice.
