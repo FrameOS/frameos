@@ -462,12 +462,19 @@ def suite_builtin(ctx, frame):
 
 
 def suite_input(ctx, frame):
-    """A drag across the panel and next/previous scene, on a touch board."""
+    """A drag across the panel, next/previous scene and the edge swipes on a
+    touch board; on every ESP32 its keys, timed (`key_presses`)."""
     con = ctx.console(frame)
     issues, out = [], {}
-    if not frame['touch']:
-        return {'skipped': 'no touch', 'issues': []}
+    keyed = not frame.get('linux') and frame['kind'] != 'pico' and bool(board_keys(frame))
+    if not frame['touch'] and not keyed:
+        return {'skipped': 'no touch and no keys', 'issues': []}
     t0 = time.time()
+    if keyed:
+        out.update(key_presses(con, frame, issues))
+    if not frame['touch']:
+        issues += incidents_since(con, t0, 'input')
+        return {'input': out, 'issues': issues}
     con.drain()
     t = time.time()
     con.send('event pointerDown {"x":4000,"y":16000,"pointerId":1,"pointerType":"touch","button":0,"buttons":1}')
@@ -570,6 +577,120 @@ def edge_swipes(con, frame, issues):
             con.drain()
             con.send(f'event {close}')
             wait_render(con, render_timeout(frame))
+    settle_renders(con)
+    return out
+
+
+def board_keys(frame):
+    """The board's keys and its event map as its preset has them, from the
+    UX bench's panel list (tools/ux-bench/panels.json, made from the
+    backend's presets): {} for a board it does not list."""
+    path = os.path.join(os.path.dirname(__file__), '..', '..', 'ux-bench', 'panels.json')
+    try:
+        with open(path) as f:
+            panels = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    for p in panels.values():
+        if p.get('preset') and p.get('preset') == frame.get('module') and p.get('keys'):
+            return {'keys': p['keys'], 'eventMap': p.get('eventMap') or []}
+    return {}
+
+
+def _key_role(role, rotate):
+    """A key's role as the scene hears it: a direction key's is next or prev
+    through the frame's rotation (docs/buttons.md; tools/ux-bench/report.py)."""
+    if role not in ('left', 'right', 'up', 'down'):
+        return role
+    x, y = {'left': (-1, 0), 'right': (1, 0), 'up': (0, -1), 'down': (0, 1)}[role]
+    r = (rotate or 0) % 360
+    if r == 90:
+        x, y = y, -x
+    elif r == 180:
+        x, y = -x, -y
+    elif r == 270:
+        x, y = -y, x
+    return 'next' if (x > 0 or y > 0) else 'prev'
+
+
+def _key_rule(event_map, key, role, action):
+    for rule in event_map:
+        if rule.get('event') != 'button':
+            continue
+        m = rule.get('match') or {}
+        if m.get('action', action) != action:
+            continue
+        if ('label' in m and m['label'] != key['label']) or ('role' in m and m['role'] != role):
+            continue
+        return rule
+    return None
+
+
+def key_presses(con, frame, issues):
+    """The keys, as the button task hands them over (`event gpio` edges):
+    the key whose press is the scene list (a Home key), timed to the list's
+    finished picture, and the next-scene key held, timed from its press to
+    the next scene's finished picture (the hold acts at its threshold, while
+    the key is down). What a person at a keys-only frame waits for most;
+    `edge_swipes` is the same for a finger."""
+    out = {}
+    known = board_keys(frame)
+    rotate = _console_rotate(con) or 0
+    keys = known.get('keys') or []
+    emap = known.get('eventMap') or []
+
+    def edges(key, hold_ms):
+        # Compact JSON: the console splits a command on spaces.
+        down = json.dumps({'label': key['label'], 'pin': key.get('pin', -1), 'action': 'down', 'level': 0}, separators=(',', ':'))
+        up = json.dumps({'label': key['label'], 'pin': key.get('pin', -1), 'action': 'up', 'level': 1}, separators=(',', ':'))
+        con.send(f'event gpio {down}')
+        threading.Timer(hold_ms / 1000, lambda: con.send(f'event gpio {up}')).start()
+
+    def timed(name, key, hold_ms, sid=None, title=None):
+        settle_renders(con)
+        con.drain()
+        t = time.time()
+        edges(key, hold_ms)
+        state = {'n': None, 'open': False, 'last': None}
+
+        def shown(x):
+            # The scene the key opens (`sid`, by the name its render starts
+            # with), or the scene that opens after it: a switch logs the new
+            # scene's render as started before its `open` (fos_scenes.c).
+            if x.startswith('{"event":"event:open"') and (sid is None or sid in x):
+                state['open'] = True
+                if sid is None and state['n'] is None:
+                    state['n'] = state['last']
+            if x.startswith('render #') and ' started: scene ' in x:
+                named = x.split(' started: scene ', 1)[1].strip()
+                state['last'] = x.split()[1]
+                if state['n'] is None and (state['open'] if sid is None else (sid in named or f'"{title}"' in named)):
+                    state['n'] = state['last']
+                return False
+            if state['n'] is not None and (RENDER_DONE.match(x) or RENDER_FAILED.match(x)):
+                return x.split()[1] == state['n']
+            return state['open'] and state['n'] is None and '"event":"render:burst"' in x
+        t_done, line, _ = con.wait_for(shown, render_timeout(frame) + hold_ms / 1000)
+        if t_done and line and '"event":"render:burst"' in line:
+            out[name] = {'wall_ms': None, 'burst': True, 'key': key['label']}
+        else:
+            out[name] = {'wall_ms': round((t_done - t) * 1000) if t_done else None, 'key': key['label']}
+            if not t_done:
+                issues.append(issue('fail', 'key_press', f"{name} ({key['label']})",
+                                    'opened, never drawn' if state['open'] else 'the key opened nothing'))
+        return state['open']
+
+    home = next((k for k in keys if (_key_rule(emap, k, _key_role(k.get('role', ''), rotate), 'press') or {})
+                 .get('emit') == 'sceneSwitcher'), None)
+    if home:
+        if timed('key_switcher', home, 80, 'system/sceneSwitcher', 'Scene switcher'):
+            con.drain()
+            con.send('event sceneSwitcher')
+            wait_render(con, render_timeout(frame))
+    walker = next((k for k in keys if k.get('hold') is not False and _key_role(k.get('role', ''), rotate) == 'next'
+                   and ((_key_rule(emap, k, 'next', 'longPress') or {}).get('as') or {}).get('direction') == 'next'), None)
+    if walker:
+        timed('key_next_held', walker, 1500)
     settle_renders(con)
     return out
 
