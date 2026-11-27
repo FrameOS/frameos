@@ -131,6 +131,8 @@ JSX layer's, for any app (`docs/jsx-ui.md` "Fields and the keyboard",
   the layout settings' page, on that layout): the button switches to the
   editor with its public field `open` set to the scene's id (`setCurrentScene {sceneId: "code-editor", state: {open}}`), and
   the app opens it and clears the field (`frameos.setState('open', '')`).
+  On a desktop the editor opens in a window of its own and the settings
+  stay open in theirs (they do not go back: `goTo(..., stay = true)`).
 
 ## `frameos.code(op, arg)`
 

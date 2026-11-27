@@ -65,7 +65,9 @@ several scenes stay open side by side, each with its own `from`, fields and
 edits. Save in one sets its scene's fields where that scene runs, in its window
 (`setSceneState` aimed at it), and the settings window stays open with the
 focus, its Save quiet until the next edit; Cancel goes back to its scene and
-closes only it. The
+closes only it. The code button opens the code editor in a window of its own
+and the settings window stays open beside it, as it is when another window is
+clicked. The
 frame page is one window, the plain `system/sceneSettings`: `sceneSettings
 {page: "frame"}` opens it over the scene in front, or over the scene whose
 settings are in front, and the gear in a scene's settings brings it forward
