@@ -7,7 +7,7 @@
 //   timed and screenshotted, and what came up (scene switches, built-in scenes,
 //   errors in the log) is recorded.
 //
-//   node tools/ux-bench/ux.mjs --wasm <dir> --panel <key> --out <dir> [--scenes regex] [--steps render,keys,swipes,taps,scroll]
+//   node tools/ux-bench/ux.mjs --wasm <dir> --panel <key> --out <dir> [--scenes regex] [--steps render,keys,focus,swipes,taps,scroll]
 //
 // One process per panel: a wasm abort takes the module with it, and the
 // harness starts a new one and goes on with the next scene.
@@ -35,7 +35,7 @@ for (let i = 2; i < process.argv.length; i++) {
 const WASM = args.wasm
 const OUT = args.out
 const PANEL_KEY = args.panel
-const STEPS = new Set((args.steps || 'render,keys,swipes,taps,scroll').split(','))
+const STEPS = new Set((args.steps || 'render,keys,focus,swipes,taps,scroll').split(','))
 const SCENE_RE = args.scenes ? new RegExp(args.scenes, 'i') : null
 const MAX_TAPS = Number(args.taps || 6)
 const LAYOUT = args.layout || '' // a layout sample's folder: every scene wears it
@@ -461,6 +461,32 @@ function keptScrolls(sceneId) {
   }
 }
 
+// Where the keys' ring is after the last render: [{scene, node, key}], the
+// ring (or the field with the keyboard) of each UI that has one, its element
+// named as frameos_wasm_ui_elements names it.
+function keptRings() {
+  try {
+    const kept = JSON.parse(call('frameos_wasm_kept_state', 'string', [], []))
+    return (kept.targets || []).filter((t) => t.ring > 0 || t.focus > 0)
+      .map((t) => ({ scene: t.sceneId, node: t.nodeId, key: (t.ring || t.focus) - 1 }))
+  } catch {
+    return []
+  }
+}
+// A key's role as the scene hears it (docs/buttons.md): a key that points
+// somewhere is next towards the right or the bottom of the picture as the
+// frame hangs (report.py resolve_role, panelToScenePoint applied to a direction).
+function resolveRole(role) {
+  if (!['left', 'right', 'up', 'down'].includes(role)) return role
+  let [x, y] = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[role]
+  const r = (((panel.rotate || 0) % 360) + 360) % 360
+  if (r === 90) [x, y] = [y, -x]
+  else if (r === 180) [x, y] = [-x, -y]
+  else if (r === 270) [x, y] = [-y, x]
+  return x > 0 || y > 0 ? 'next' : 'prev'
+}
+const elementId = (e) => `${e.scene}#${e.node}:${e.key}`
+
 // Every UI element of the last render, whole (frameos_wasm_ui_elements):
 // one that reaches past the canvas and sits in no box that scrolls is out of
 // reach (the press map is cut at the canvas, so it cannot say); on a round
@@ -725,7 +751,7 @@ for (const scene of tested) {
       takeEvents()
     }
 
-    const step = (kind, label, fn) => {
+    const step = (kind, label, fn, shoot = true) => {
       const before = currentScene()
       const t0 = performance.now()
       const delivered = fn()
@@ -742,7 +768,7 @@ for (const scene of tested) {
         logErrors: errorsIn(l), error: r.error,
       }
       if (r.aborted) s.aborted = true
-      if (s.changed > 0 || after !== before) s.shot = shot(`${kind}-${safe(label)}`, r)
+      if (shoot && (s.changed > 0 || after !== before)) s.shot = shot(`${kind}-${safe(label)}`, r)
       prev = r.pixels
       rec.steps.push(s)
       if (r.aborted) throw new Error(`abort after ${kind} ${label}: ${r.error}`)
@@ -771,6 +797,96 @@ for (const scene of tested) {
         })
         restore()
       }
+    }
+    // The keys' walk (docs/jsx-ui.md "Keys"): Next is Tab, so it should ring
+    // every element there is to press, one after the other and each where it
+    // can be seen, without leaving the scene; then Action presses the ringed
+    // one as a tap would. On a board without touch this is the only way in.
+    const nextKey = (panel.keys || []).find((k) => resolveRole(k.role) === 'next')
+    const primaryKey = (panel.keys || []).find((k) => k.role === 'primary')
+    if (STEPS.has('focus') && nextKey) {
+      restore()
+      const els = (uiElements() || []).filter((e) => e.box[2] - e.box[0] >= 1 && e.box[3] - e.box[1] >= 1)
+      const takers = els.filter((e) => e.stop ?? e.takes)
+      // What takes a press but no key ever stops at (a board game's cells
+      // with an onPointerDown, a canvas to draw on): a tap's alone.
+      const tapOnly = els.filter((e) => e.takes && e.stop === false)
+      if (tapOnly.length) rec.tapOnly = { count: tapOnly.length, stops: takers.length, boxes: tapOnly.slice(0, 4).map((e) => e.box.map(Math.round)) }
+      if (takers.length) {
+        const walk = { takers: takers.length, stops: [], seen: [], offscreen: [], left: null, wrapped: false, tookKeys: false, presses: 0 }
+        const seen = new Set()
+        let first = null
+        let last = null
+        let quiet = 0
+        // Until the ring comes round to where it started (a long list pages
+        // on the way), or a press for each element and a page of slack.
+        const maxPresses = Math.min(takers.length * 2 + 12, 160)
+        const press = (label, k) => step('focus', label, () => key(k.label, k.pin ?? -1, 90), false)
+        const ringNow = () => {
+          const rings = keptRings()
+          const ring = rings.find((r) => r.scene === scene.id || r.scene.startsWith(scene.id + '#')) || rings[0]
+          return ring ? elementId(ring) : null
+        }
+        for (let i = 0; i < maxPresses; i++) {
+          const s = step('focus', `next-${i + 1}`, () => key(nextKey.label, nextKey.pin ?? -1, 90), i < 2)
+          walk.presses++
+          if (s.after !== scene.id) {
+            walk.left = s.after
+            break
+          }
+          const id = ringNow()
+          if (!id) {
+            // A scene that keeps the keys (a game's own controls) changes its
+            // picture; one that does nothing does not.
+            if (s.changed > 0) walk.tookKeys = true
+            if (++quiet >= 3) break
+            continue
+          }
+          s.ring = id
+          if (process.env.UXWALKDEBUG) s.els = (uiElements() || []).filter((e) => e.stop).map((e) => [e.key, ...e.box.map(Math.round), e.scroller])
+          const el = (uiElements() || []).find((e) => elementId(e) === id)
+          if (el) {
+            const v = [Math.max(el.visible[0], 0), Math.max(el.visible[1], 0), Math.min(el.visible[2], W), Math.min(el.visible[3], H)]
+            const shown = Math.max(0, v[2] - v[0]) * Math.max(0, v[3] - v[1])
+            const whole = Math.min((el.box[2] - el.box[0]) * (el.box[3] - el.box[1]), W * H)
+            if (whole > 0 && shown / whole < 0.3) walk.offscreen.push({ id, box: el.box.map(Math.round), shown: Math.round((shown / whole) * 100) / 100 })
+          }
+          if (first && id === first && last !== first) {
+            walk.wrapped = true
+            break
+          }
+          if (!first) first = id
+          if (id !== last) walk.stops.push(id)
+          seen.add(id)
+          last = id
+        }
+        walk.seen = [...seen]
+        walk.unreached = walk.wrapped && !walk.left
+          ? takers.filter((e) => !seen.has(elementId(e))).map((e) => ({ id: elementId(e), box: e.box.map(Math.round), scroller: e.scroller }))
+          : []
+        // Action on three stops spread over the walk (the first is often a
+        // Clear or a Back that does nothing yet): does any of them do anything?
+        if (primaryKey && walk.stops.length && !walk.left) {
+          walk.actions = []
+          const n = walk.stops.length
+          const picks = [...new Set([0, Math.floor(n / 2), n - 1].map((i) => Math.min(i, n - 1)))]
+          for (const want of picks) {
+            // Next until the ring is on that stop (a page turn can keep it where it is).
+            let guard = walk.presses + 4
+            while (ringNow() !== walk.stops[want] && guard-- > 0) {
+              if (press(`to-${want}`, nextKey).after !== scene.id) break
+            }
+            if (currentScene() !== scene.id) break
+            const ring = ringNow()
+            const s = step('focus', `primary-${want}`, () => key(primaryKey.label, primaryKey.pin ?? -1, 90))
+            walk.actions.push({ stop: want, ring, changed: s.changed, after: s.after })
+            if (s.after !== scene.id) break
+          }
+          walk.primary = walk.actions.find((a) => a.changed > 0 || a.after !== scene.id) || walk.actions[walk.actions.length - 1]
+        }
+        rec.focusWalk = walk
+      }
+      restore()
     }
     if (STEPS.has('swipes') && panel.touch) {
       const m = Math.round(Math.min(W, H) * 0.35)
