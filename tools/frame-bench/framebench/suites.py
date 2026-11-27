@@ -357,6 +357,14 @@ def suite_scenes(ctx, frame, scene_filter=None):
             warm_n = ctx.warm if not ctx.quick else 1
             if sampled(ctx, frame):
                 warm_n = min(warm_n, 2 if sc.get('name') in TROUBLE_SCENES else 1)
+            if frame.get('linux') and any('"render:pause"' in x for x in con.history_since(t_start)):
+                # The runtime's render log paused after the switch (a scene
+                # rendering fast: Files reopened on a video, Cloud-W): a
+                # `render` now draws and says nothing for ten seconds, which
+                # read as a render_timeout fail (2026-11-27, twice).
+                issues.append(issue('note', 'warm_unlogged', where, "the runtime's render log paused (the scene renders "
+                                    'fast): its warm renders are not timed'))
+                warm_n = 0
             for _ in range(warm_n):
                 con.drain()
                 t_cmd = time.time()
