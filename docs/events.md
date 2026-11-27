@@ -422,7 +422,11 @@ and `toggleScreen` switches it to what it is not; the dispatcher keeps which
 press on a dark screen turns it back on and goes nowhere else: its down, its
 up and whatever gesture it makes never reach the scene, since nobody could
 see what they were pressing. A swipe in from an edge too, whose down was held
-back until it was a swipe: it wakes the screen and opens nothing. The same holds for a press on the voice chat's
+back until it was a swipe: it wakes the screen and opens nothing. And a key
+pressed at the frame (origin `driver`): its down wakes the screen, and its up,
+its press, its hold and any pair it makes go nowhere, so the Screen key does
+not turn the screen straight off again and a key held opens no scene list in
+the dark. A press sent from outside (the API, Home Assistant) acts as before. The same holds for a press on the voice chat's
 answer drawn across the bottom of an ESP32's panel: the touch driver keeps
 that finger from the dispatcher and the answer comes off
 ([voice-chat.md](voice-chat.md) "Taking the notice off").
