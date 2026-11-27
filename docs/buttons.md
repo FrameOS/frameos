@@ -79,8 +79,8 @@ configured with: they are read as `primary`.
 
 | Board | Action (held) | Prev / Next | Back | Home | Screen |
 |---|---|---|---|---|---|
-| reTerminal E1001 / E1002 | REFRESH (voice) | LEFT / RIGHT | both arrows together | both arrows held | — |
-| reTerminal E1003 | REFRESH (voice) | LEFT / RIGHT | both arrows, or a swipe | held, or a swipe | — |
+| reTerminal E1001 / E1002 | REFRESH (voice) | RIGHT / LEFT (see below) | both arrows together | both arrows held | — |
+| reTerminal E1003 | REFRESH (voice) | RIGHT / LEFT (see below) | both arrows, or a swipe | held, or a swipe | — |
 | reTerminal E1004 | REFRESH (Home) | LEFT / RIGHT | both arrows together | REFRESH held, both arrows held | — |
 | reTerminal Sticky | AI (voice) | UP / DOWN | two keys, or a swipe | two keys held, or a swipe | — |
 | CrowPanel 5.79" / 4.2" e-paper | OK (Home) | PREV / NEXT | EXIT | HOME; EXIT held | — |
@@ -97,6 +97,15 @@ configured with: they are read as `primary`.
 | Guition 4848S040, every HyperPixel | — | — | swipe | swipe | — |
 | Inky Frame (Pico) | A (Home) | B / C | D | E; D held | — |
 | Inky Impression (Pi) | A (Home) | B / C (they point up and down) | D | D held | — |
+
+The E1001-E1003's arrows are printed for someone behind the frame: seen from
+the front, the key labelled RIGHT is the left one of the pair and LEFT the one
+beside the green REFRESH key. So unrotated RIGHT is Prev and LEFT Next (their
+`EMBEDDED_BOARD_KEYS` directions are `left` and `right`), and turned upside
+down the other way round. The Sticky's UP and DOWN are up and down in the
+portrait it is held in, 270 degrees from its panel, so on the panel unrotated
+they are `left` and `right`. A direction is always where the key sits on the
+panel unrotated, seen from the front.
 
 The XIAO ePaper boards' key order and the PhotoPainter's (which key is easier
 to reach) have not been checked on the hardware yet.

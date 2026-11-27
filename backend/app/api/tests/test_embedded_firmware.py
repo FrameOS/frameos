@@ -1033,8 +1033,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
     assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
     assert frame.gpio_buttons == [
         {"pin": 4, "label": "AI", "role": "primary"},
-        {"pin": 5, "label": "UP", "role": "up"},
-        {"pin": 6, "label": "DOWN", "role": "down"},
+        {"pin": 5, "label": "UP", "role": "left"},
+        {"pin": 6, "label": "DOWN", "role": "right"},
     ]
     assert [rule["emit"] for rule in frame.event_map] == [
         "voiceChat",
@@ -1140,8 +1140,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
         assert settings["led_type"] == "gpio_inverted"
         assert frame.gpio_buttons == [
             {"pin": 3, "label": "REFRESH", "role": "primary"},
-            {"pin": 4, "label": "LEFT", "role": "left"},
-            {"pin": 5, "label": "RIGHT", "role": "right"},
+            {"pin": 4, "label": "LEFT", "role": "right"},
+            {"pin": 5, "label": "RIGHT", "role": "left"},
         ]
         # Same switched 2:1 divider as the E1004 per Seeed's schematic
         # (hardware-unverified on these two); no shipped power policy.
@@ -1225,8 +1225,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert cleared.event_map == []
     assert cleared.gpio_buttons == [
         {"pin": 3, "label": "REFRESH", "role": "primary"},
-        {"pin": 4, "label": "LEFT", "role": "left"},
-        {"pin": 5, "label": "RIGHT", "role": "right"},
+        {"pin": 4, "label": "LEFT", "role": "right"},
+        {"pin": 5, "label": "RIGHT", "role": "left"},
     ]
     plan = embedded_provisioning_plan(frame)
     settings = _provisioned(plan)
@@ -1285,8 +1285,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
     # the Indicator's does (docs/scene-switcher.md).
     assert frame.gpio_buttons == [
         {"pin": 3, "label": "REFRESH", "role": "primary"},
-        {"pin": 4, "label": "LEFT", "role": "left"},
-        {"pin": 5, "label": "RIGHT", "role": "right"},
+        {"pin": 4, "label": "LEFT", "role": "right"},
+        {"pin": 5, "label": "RIGHT", "role": "left"},
     ]
     # The E1001's keys and rules, then the glass's four.
     assert frame.event_map[0] == {

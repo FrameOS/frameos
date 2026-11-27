@@ -1304,7 +1304,19 @@ _CROWPANEL_EPAPER_KEYS = [
     {"label": "OK", "role": "primary"},
     {"label": "PREV", "role": "prev"},
 ]
-_RETERMINAL_KEYS = [
+# The E1001-E1003's keys are on the top edge, their arrows printed for someone
+# behind the frame: seen from the front, the one labelled RIGHT is the left one
+# of the pair and LEFT the one beside the green REFRESH key (Seeed's drawings;
+# the reTerminal layout sample draws them so). So unrotated, RIGHT points left
+# and is the previous key, LEFT the next.
+_RETERMINAL_TOP_KEYS = [
+    {"label": "REFRESH", "role": "primary"},
+    {"label": "LEFT", "role": "right"},
+    {"label": "RIGHT", "role": "left"},
+]
+# The E1004's touch keys are printed on the front, under its upright
+# (1200x1600) picture: REFRESH, LEFT and RIGHT from the left.
+_RETERMINAL_E1004_KEYS = [
     {"label": "REFRESH", "role": "primary"},
     {"label": "LEFT", "role": "left"},
     {"label": "RIGHT", "role": "right"},
@@ -1353,15 +1365,18 @@ EMBEDDED_BOARD_KEYS: dict[str, list[dict[str, Any]]] = {
         {"label": "NEXT", "role": "next", "hold": False},
         {"label": "PREV", "role": "prev", "hold": False},
     ],
+    # UP and DOWN are up and down in the portrait the Sticky is held in (its
+    # preset turns the 800x480 panel 270 degrees): on the panel unrotated, UP
+    # sits to the left of DOWN.
     "seeed_reterminal_sticky": [
         {"label": "AI", "role": "primary"},
-        {"label": "UP", "role": "up"},
-        {"label": "DOWN", "role": "down"},
+        {"label": "UP", "role": "left"},
+        {"label": "DOWN", "role": "right"},
     ],
-    "seeed_reterminal_e1001": _RETERMINAL_KEYS,
-    "seeed_reterminal_e1002": _RETERMINAL_KEYS,
-    "seeed_reterminal_e1003": _RETERMINAL_KEYS,
-    "seeed_reterminal_e1004": _RETERMINAL_KEYS,
+    "seeed_reterminal_e1001": _RETERMINAL_TOP_KEYS,
+    "seeed_reterminal_e1002": _RETERMINAL_TOP_KEYS,
+    "seeed_reterminal_e1003": _RETERMINAL_TOP_KEYS,
+    "seeed_reterminal_e1004": _RETERMINAL_E1004_KEYS,
     "seeed_xiao_ee02": _XIAO_EE_KEYS,
     "seeed_xiao_ee03": _XIAO_EE_KEYS,
     "seeed_xiao_ee04": _XIAO_EE_KEYS,
