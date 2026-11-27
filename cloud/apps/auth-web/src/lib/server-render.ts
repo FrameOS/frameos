@@ -550,7 +550,13 @@ export function frameDither(
   panel: { height: number; width: number },
 ): { dither: NormalizedDither | null; ppi: number } {
   const hardware = isRecord(frame.hardware) ? frame.hardware : {};
-  const panelName = typeof hardware.panel === "string" ? hardware.panel : null;
+  // The board reports its panel as both `panel` and `device` (fos_cloud.c).
+  const panelName =
+    typeof hardware.panel === "string" && hardware.panel
+      ? hardware.panel
+      : typeof hardware.device === "string" && hardware.device
+        ? hardware.device
+        : null;
   return { dither: normalizeDither(frame.dither), ppi: panelPpi(panelName, panel.width, panel.height) };
 }
 
