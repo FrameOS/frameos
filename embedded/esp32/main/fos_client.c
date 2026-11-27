@@ -4961,7 +4961,7 @@ static void client_task(void *arg)
                 double next_sleep = frameos_nim_next_sleep();
                 if (next_sleep >= 0.0) {
                     if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
-                    s_anim.next_due_us = cycle_start + (int64_t)(next_sleep * 1000000.0);
+                    fos_animation_asked(&s_anim, cycle_start, (int64_t)(next_sleep * 1000000.0));
                 }
             }
             /* Core 1 is the render task's and the refill interrupt's; a frame

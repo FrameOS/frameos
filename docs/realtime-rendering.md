@@ -299,7 +299,9 @@ not deep-sleep, animates:
   push hashes, copies and uploads the whole picture, and held the frames
   around it to 115 ms instead of 75) — with
   a `render:animation` summary of the frames before it (`frames`, `fps`,
-  `avgMs`, `maxMs`, `periodMs`). The frames in between are quiet: no render
+  `avgMs`, `maxMs`, `periodMs`: the wait the scene asked for between them, its
+  next sleep where it gave one, else its interval, so a page that asks for a
+  second at a 0.05 s interval is not 1 fps against 20). The frames in between are quiet: no render
   lines, no scene log lines (`frameos_nim_set_quiet`, the logger off, like
   the Linux runner's fast-render log pause). The first frame of an animation
   always logs in full: it is the `render:done` a deploy waits for
