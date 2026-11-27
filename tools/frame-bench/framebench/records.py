@@ -337,7 +337,7 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
         _m(rows, f'resp.{key}.open_ms', ((bi.get(name) or {}).get('open') or {}).get('wall_ms'), 'ms')
 
     inp = (suites.get('input') or {}).get('input') or {}
-    for d in ('next', 'previous'):
+    for d in ('next', 'previous', 'swipe_switcher', 'swipe_settings'):
         _m(rows, f'resp.input.{d}_ms', (inp.get(d) or {}).get('wall_ms'), 'ms')
 
     desk = (suites.get('desktop') or {}).get('desktop') or []
