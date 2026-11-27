@@ -288,10 +288,11 @@
             "options": [
               "auto",
               "vivid",
-              "mono"
+              "mono",
+              "inks"
             ],
             "value": "auto",
-            "hint": "auto picks vivid, or mono when low contrast is enabled"
+            "hint": "auto picks mono (black on white) when low contrast is on or the panel shows no color, the panel's own inks on color e-paper, else vivid"
           },
           {
             "name": "lowContrast",
@@ -309,7 +310,7 @@
             "name": "ink",
             "label": "Ink color (mono)",
             "type": "color",
-            "value": "#222222"
+            "value": "#000000"
           },
           {
             "name": "paper",
@@ -437,10 +438,21 @@
             ]
           },
           {
+            "name": "stackedMode",
+            "label": "Forecast around a round panel (stacked mode)",
+            "type": "select",
+            "options": [
+              "hourly",
+              "daily"
+            ],
+            "value": "hourly"
+          },
+          {
             "name": "lowContrast",
             "label": "Low contrast",
             "type": "boolean",
-            "value": "false"
+            "value": "false",
+            "hint": "Black on white. Panels without color get it by themselves."
           },
           {
             "name": "showLocation",
