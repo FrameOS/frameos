@@ -927,6 +927,14 @@ for (const scene of tested) {
       for (const k of panel.keys || []) {
         for (const [action, ms] of (k.hold === false ? [['press', 90]] : [['press', 90], ['hold', 1400]])) {
           step('key', `${k.label}-${action}`, () => key(k.label, k.pin ?? -1, ms))
+          // The Screen key's press turned the screen off: on again, or the
+          // next tap only wakes it (and reads as an element that does nothing).
+          const em = panel.eventMap || []
+          const screenRule = em.find((r) => r.event === 'button' && r.emit === 'toggleScreen' && r.match &&
+            (!r.match.label || r.match.label === k.label) && (r.match.action || 'press') === (action === 'press' ? 'press' : 'longPress'))
+          if (screenRule) {
+            try { call('frameos_wasm_event', 'boolean', ['string', 'string'], ['turnOn', '{}']) } catch {}
+          }
           restore()
         }
       }
