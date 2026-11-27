@@ -3,6 +3,7 @@
     "id": "d9450112-8b47-4b7d-8030-268489340c02",
     "name": "CyberPunk EU",
     "settings": {
+      "fullScreen": true,
       "round": true,
       "category": "Art & galleries",
       "backgroundColor": "#000000",

@@ -3,6 +3,7 @@
     "id": "c1d7e9ed-9cd4-4375-b767-ae3b678d935e",
     "name": "Masterpieces",
     "settings": {
+      "fullScreen": true,
       "round": true,
       "category": "Art & galleries",
       "backgroundColor": "#000000",
