@@ -3274,7 +3274,7 @@
       ],
       "trace": [
        "mapped scene button",
-       "run eventMap button {\"pin\":17,\"label\":\"A\",\"role\":\"next\",\"action\":\"press\"}"
+       "run eventMap button {\"pin\":17,\"label\":\"A\",\"role\":\"prev\",\"action\":\"press\"}"
       ],
       "state": {
        "heardA": true
@@ -3683,7 +3683,7 @@
    },
    {
     "name": "a press three times is the event map's only where a rule binds one, and any other key is as fast as before",
-    "why": "A key whose `triplePress` a rule binds (the frame's map, or the showing scene's) holds its second down back: the third down inside doublePressMs of the second up is the `triplePress`, which the map replaces or rewrites like any press. A key no rule binds three times is a `doublePress` on its second down, as before. Edges with no `atMs` are timed when they are delivered, so these taps, sent together, are quick ones.",
+    "why": "A key whose `triplePress` a rule binds (the frame's map, or the showing scene's) holds its second down back: the third down inside doublePressMs of the second up is the `triplePress`, which the map replaces or rewrites like any press. A key no rule binds twice or three times is a `press` at each up (UP: its first tap is a press, its second down nothing yet). Edges with no `atMs` are timed when they are delivered, so these taps, sent together, are quick ones.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/triple",
@@ -3886,7 +3886,7 @@
       ],
       "trace": [
        "mapped scene button",
-       "run triple button {\"pin\":6,\"label\":\"A\",\"role\":\"next\",\"action\":\"press\"}",
+       "run triple button {\"pin\":6,\"label\":\"A\",\"role\":\"prev\",\"action\":\"press\"}",
        "render"
       ],
       "state": {
@@ -3927,8 +3927,145 @@
        }
       ],
       "trace": [
-       "run triple button {\"pin\":5,\"label\":\"UP\",\"role\":\"up\",\"action\":\"doublePress\"}"
+       "run triple button {\"pin\":5,\"label\":\"UP\",\"role\":\"prev\",\"action\":\"press\",\"durationMs\":0}"
       ]
+     }
+    ]
+   },
+   {
+    "name": "a scene with nothing to press hears its next and prev keys as forward and back",
+    "why": "A photo scene written for the edge swipes (`forward`, `back`) and with no ear for buttons and no UI: the dispatcher hands it a press of a `next` key as `forward` and of a `prev` key as `back` (origin `system`), so it works with keys as it is (docs/buttons.md). A scene that listens for `button`, or has a UI the keys walk, hears the press itself.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/photos",
+      "name": "photos",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "f",
+        "type": "event",
+        "data": {
+         "keyword": "forward",
+         "config": {}
+        }
+       },
+       {
+        "id": "fa",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "wentForward",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "b",
+        "type": "event",
+        "data": {
+         "keyword": "back",
+         "config": {}
+        }
+       },
+       {
+        "id": "ba",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "wentBack",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "f",
+        "sourceHandle": "next",
+        "target": "fa",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "b",
+        "sourceHandle": "next",
+        "target": "ba",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/photos",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "level": 1,
+         "action": "up"
+        }
+       }
+      ],
+      "trace": [
+       "run photos forward",
+       "render"
+      ],
+      "state": {
+       "wentForward": true,
+       "wentBack": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "level": 1,
+         "action": "up"
+        }
+       }
+      ],
+      "trace": [
+       "run photos back",
+       "render"
+      ],
+      "state": {
+       "wentBack": true
+      }
      }
     ]
    },
@@ -4119,8 +4256,8 @@
     ]
    },
    {
-    "name": "the scene switcher opens from the scene showing, and the same again goes back; back, forward and a scene direction move its highlight a screenful",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` is its `forward` (for `next`) or `back` (for `prev`) instead: the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) move its highlight a screenful of tiles back or on (here one tile: the frame is 4x3), its list scrolling with it, wrapping around at the ends, and the frame stays on it. The switcher is in no scene list.",
+    "name": "the scene switcher opens from the scene showing, and the same again goes back; forward and a scene direction move its highlight a screenful, back leaves",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` is its `forward` (for `next`) or `back` (for `prev`) instead: the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `forward` (a swipe in from the right edge) moves its highlight a screenful of tiles on (here one tile: the frame is 4x3), its list scrolling with it, wrapping around at the ends, and the frame stays on it; a scene direction (said as `forward` or `back` with its `direction`) moves it a screenful either way. The frame's `back` (its Back key, a swipe in from the left edge) goes back to the scene it was opened from, as on a phone. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -4539,13 +4676,12 @@
       "trace": [
        "mapped frame edgeSwipe -> back",
        "run sceneSwitcher back",
+       "select fixtures/dispatcher/switcherB",
+       "run sceneSwitcher close",
+       "run switcherB open",
        "render"
       ],
-      "current": "system/sceneSwitcher",
-      "state": {
-       "from": "fixtures/dispatcher/switcherB",
-       "highlight": "fixtures/dispatcher/switcherB"
-      }
+      "current": "fixtures/dispatcher/switcherB"
      }
     ]
    },
@@ -4822,6 +4958,93 @@
       "state": {
        "from": "fixtures/dispatcher/switcherA",
        "home": null
+      }
+     }
+    ]
+   },
+   {
+    "name": "the scene list's gear opens the settings of the scene it was opened from",
+    "why": "The list reads the settings of the scene it opens over (`fields`, `values`), as the settings panel does, because a host that holds one scene lets that scene go while the list shows. Its gear sends `sceneSettings {page: \"scene\"}`: the settings open in the list's place with those fields and values and `from` the scene, and going back from them is going back to the list (docs/buttons.md \"Scene settings\"). `{page: \"frame\"}` is the frame page, as before.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/weather",
+      "name": "weather",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": [],
+      "fields": [
+       {
+        "name": "city",
+        "label": "City",
+        "type": "string",
+        "value": "Tallinn",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     }
+    ],
+    "scene": "fixtures/dispatcher/weather",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run weather close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/weather",
+       "fields": [
+        {
+         "name": "city",
+         "label": "City",
+         "type": "string",
+         "placeholder": "",
+         "secret": false
+        },
+        {
+         "name": "refreshInterval",
+         "label": "Refresh interval (seconds)",
+         "type": "float",
+         "placeholder": "",
+         "secret": false
+        }
+       ]
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings",
+        "payload": {
+         "page": "scene"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run sceneSwitcher close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/weather",
+       "opened": null
       }
      }
     ]
