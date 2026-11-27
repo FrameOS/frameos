@@ -54,6 +54,9 @@ import { apiFetch } from '../../utils/apiFetch'
 import { framesModel } from '../../models/framesModel'
 import { useState } from 'react'
 import { AdoptFields, AdoptMethod, adoptCanSubmit, adoptCodeInput, adoptPaste, adoptRequestBody } from './adoptFrame'
+import { flasherUrl } from '../../utils/flasherBridge'
+import { webSerialNeedsFlasher } from '../../utils/webSerial'
+import { workspaceMode } from '../workspace/workspaceSurfaces'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -1334,6 +1337,12 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
   const embeddedHardwarePreset = normalizeEmbeddedHardwarePreset(
     newFrame.embedded?.hardwarePreset ?? newFrame.device_config?.hardwarePreset
   )
+  // On a page with no Web Serial (plain http, a frame that was not given the
+  // permission) the frame's USB card hands the USB part to flash.frameos.net
+  // with this frame's settings (EmbeddedUsbConnect -> FlasherBridgeCard), so
+  // the board comes up as this frame: say so before the frame is added.
+  const embeddedUsbFlasherHost =
+    webSerialNeedsFlasher() && workspaceMode() === 'backend' ? new URL(flasherUrl()).host : null
 
   const setEmbeddedHardwarePreset = (hardwarePreset: FrameEmbeddedHardwarePreset): void => {
     if (hardwarePreset === 'custom') {
@@ -1465,7 +1474,12 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             <ModeButton
               onClick={() => setNewFrameValues(setInstallMethodValues('embedded', savedSettings))}
               title="Flash embedded device"
-              description="ESP32-S3/C3 boards and e-ink devices like the TRMNL, XTEINK X4, Inky Frame (Pico W), reTerminal, and CrowPanel."
+              description={
+                'ESP32-S3/C3 boards and e-ink devices like the TRMNL, XTEINK X4, Inky Frame (Pico W), reTerminal, and CrowPanel.' +
+                (embeddedUsbFlasherHost
+                  ? ` This page can't reach USB, so the USB part goes through ${embeddedUsbFlasherHost}, with this frame's settings.`
+                  : '')
+              }
             >
               <CpuChipIcon className="h-4 w-4" />
             </ModeButton>
@@ -1862,6 +1876,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             same USB cable. The firmware renders scenes on-device, drives SPI e-ink panels, and updates itself over the
             air.
           </p>
+          {embeddedUsbFlasherHost ? (
+            <p className="frameos-form-hint text-sm leading-relaxed text-slate-500">
+              This page can't reach USB, so once the frame is added, its USB card opens {embeddedUsbFlasherHost} in a
+              window of its own and hands it this frame's settings, or saves them as a setup file for{' '}
+              {embeddedUsbFlasherHost} on another computer. The board comes up as this frame.
+            </p>
+          ) : null}
           <FormField label="Name" error={newFrameErrors.name}>
             <input
               className={textInputClassName()}
