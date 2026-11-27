@@ -31,8 +31,17 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     if sourceImage == image:
       # The producer already decoded straight into this canvas. The fit then
       # covers the whole of it (a fitted decode is cover or stretch; contain
-      # with a profile takes the other path, see data/localImage).
-      applyAutoFitToDrawn(image, 0, 0, image.width, image.height)
+      # with a profile takes the other path, see data/localImage), but for
+      # the scenes it holds (a layout's `<yield />`, a `<Scene>`), whose own
+      # consumers fitted them already.
+      var around: seq[array[4, int]]
+      if not self.scene.isNil:
+        for slot in self.scene.slots:
+          let v = slot.visible
+          if v[2] > v[0] and v[3] > v[1]:
+            around.add [int(v[0]), int(v[1]), int(v[2] + 0.999), int(v[3] + 0.999)]
+      if around.len > 0: applyAutoFitAround(image, around)
+      else: applyAutoFitToDrawn(image, 0, 0, image.width, image.height)
       return
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend

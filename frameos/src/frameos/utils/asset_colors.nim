@@ -535,6 +535,9 @@ proc autoFitActive*(): bool =
 
 # ------------------------------------------------------- the automatic fit
 
+proc endPointsOf(histogram: array[256, int], total: int,
+    palette: seq[(int, int, int)]): Option[tuple[whites, blacks: float]]
+
 proc autoEndPoints*(image: Image, x0, y0, width, height: int,
     palette: seq[(int, int, int)]): Option[tuple[whites, blacks: float]] =
   ## The Whites and Blacks that map the luminance percentiles 0.5 and 99.5
@@ -553,7 +556,11 @@ proc autoEndPoints*(image: Image, x0, y0, width, height: int,
     return none(tuple[whites, blacks: float])
   var histogram: array[256, int]
   fitHistogram(image, xStart, yStart, xEnd, yEnd, histogram)
-  let total = (xEnd - xStart) * (yEnd - yStart)
+  endPointsOf(histogram, (xEnd - xStart) * (yEnd - yStart), palette)
+
+proc endPointsOf(histogram: array[256, int], total: int,
+    palette: seq[(int, int, int)]): Option[tuple[whites, blacks: float]] =
+  ## autoEndPoints' answer from a histogram of `total` pixels.
   let
     loCount = (total.float * 0.005).int
     hiCount = (total.float * 0.995).int
@@ -850,6 +857,65 @@ proc applyAutoFitToDrawn*(canvas: Image, x0, y0, width, height: int, source: Ima
       profile.whites = endPoints.get().whites
       profile.blacks = endPoints.get().blacks
       applyAssetColors(canvas, profile, x0, y0, width, height)
+
+proc rectsAround*(width, height: int, around: openArray[array[4, int]]): seq[array[4, int]] =
+  ## The canvas but for the rectangles `around` (x0, y0, x1, y1), as
+  ## rectangles: bands between the rectangles' top and bottom edges, each cut
+  ## where a rectangle covers it.
+  var ys = @[0, height]
+  for r in around:
+    for y in [clamp(r[1], 0, height), clamp(r[3], 0, height)]:
+      if y notin ys: ys.add y
+  for i in 1 ..< ys.len: # a few edges: an insertion sort, no import for it
+    var j = i
+    while j > 0 and ys[j - 1] > ys[j]:
+      swap(ys[j - 1], ys[j])
+      dec j
+  for i in 0 ..< ys.len - 1:
+    let (ya, yb) = (ys[i], ys[i + 1])
+    if yb <= ya:
+      continue
+    var cuts: seq[(int, int)]
+    for r in around:
+      if r[1] <= ya and r[3] >= yb and r[2] > r[0]:
+        cuts.add (clamp(r[0], 0, width), clamp(r[2], 0, width))
+    for k in 1 ..< cuts.len:
+      var j = k
+      while j > 0 and cuts[j - 1][0] > cuts[j][0]:
+        swap(cuts[j - 1], cuts[j])
+        dec j
+    var x = 0
+    for (a, b) in cuts:
+      if a > x: result.add [x, ya, a, yb]
+      x = max(x, b)
+    if x < width: result.add [x, ya, width, yb]
+
+proc applyAutoFitAround*(canvas: Image, around: openArray[array[4, int]]) =
+  ## The consumer's half for a picture drawn straight into the whole canvas
+  ## that holds scenes of its own (a layout's `<yield />`, a `<Scene>`):
+  ## their rectangles (`around`) were fitted by their own scenes' consumers,
+  ## and a second fit over them stretched the panel's range twice (a
+  ## Spectra's white, #bdbebd once, came out #949294: every scene in the
+  ## reTerminal layout dithered to colour confetti; the UX bench,
+  ## 2026-11-27). The rest is fitted as one, by one histogram.
+  if canvas.isNil or not autoFitActive() or isImageGraded(canvas):
+    return
+  let rects = rectsAround(canvas.width, canvas.height, around)
+  if rects.len == 0:
+    return
+  probe(phFit):
+    var histogram: array[256, int]
+    var total = 0
+    for r in rects:
+      fitHistogram(canvas, r[0], r[1], r[2], r[3], histogram)
+      total += (r[2] - r[0]) * (r[3] - r[1])
+    let endPoints = endPointsOf(histogram, total, assetColorsPanelPalette)
+    if endPoints.isSome:
+      var profile = AssetColorProfile()
+      profile.whites = endPoints.get().whites
+      profile.blacks = endPoints.get().blacks
+      for r in rects:
+        applyAssetColors(canvas, profile, r[0], r[1], r[2] - r[0], r[3] - r[1])
 
 proc applyGlobalColorCorrection*(canvas: Image) =
   ## The frame-wide correction, once per render on the finished canvas.

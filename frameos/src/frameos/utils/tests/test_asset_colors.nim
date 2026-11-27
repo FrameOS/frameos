@@ -368,6 +368,33 @@ suite "the frame's automatic fit":
     check canvas.unsafe[6, 2] == rgbx(255, 255, 255, 255)
     check canvas.unsafe[3, 3] != rgbx(240, 240, 255, 255)
 
+  test "the canvas around a layout's scenes is fitted once, the scenes not again":
+    # The canvas but for two rectangles, as bands cut where they stand.
+    let rects = rectsAround(10, 6, [[2, 1, 5, 4], [6, 2, 8, 6]])
+    var covered = 0
+    for r in rects:
+      covered += (r[2] - r[0]) * (r[3] - r[1])
+      for (hx0, hy0, hx1, hy1) in [(2, 1, 5, 4), (6, 2, 8, 6)]:
+        check r[2] <= hx0 or r[0] >= hx1 or r[3] <= hy0 or r[1] >= hy1
+    check covered == 60 - 9 - 8
+    check rectsAround(4, 4, []) == @[[0, 0, 4, 4]]
+    check rectsAround(4, 4, [[0, 0, 4, 4]]).len == 0
+    # A layout's picture with a scene in its hole: the chrome is fitted, the
+    # hole is left as its scene left it (a second fit dimmed a Spectra's white
+    # from #bdbebd to #949294 under the reTerminal layout; the UX bench,
+    # 2026-11-27).
+    setAssetColorsPanelPalette(spectra6ColorPalette)
+    setFrameColorSettings(parseFrameColorSettings(parseJson("""{"autoFit": "on"}""")))
+    let canvas = gradient(16, 16)
+    for y in 4 ..< 12:
+      for x in 4 ..< 12:
+        canvas.unsafe[x, y] = rgbx(189, 190, 189, 255)
+    let hole = pixelsOf(canvas.subImage(4, 4, 8, 8))
+    let chrome = canvas.unsafe[0, 0]
+    applyAutoFitAround(canvas, [[4, 4, 12, 12]])
+    check pixelsOf(canvas.subImage(4, 4, 8, 8)) == hole
+    check canvas.unsafe[0, 0] != chrome
+
   test "a photo graded by its sidecar is not fitted on top":
     let graded = gradient(16, 16)
     markImageGraded(graded)
