@@ -334,6 +334,10 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   result.tileH = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
   result.cols = clamp((gw + result.gap) div (result.tileW + result.gap), 1, MaxCols)
   result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
+  if round:
+    # The columns in the middle of the square inside the circle, not along
+    # its left side: two tiles on the 1.46" rotary left a third of it empty.
+    result.x0 += max(result.side - (result.cols * (result.tileW + result.gap) - result.gap), 0) div 2
 
 proc lens*(grid: SwitcherGrid, top, scroll: int): SwitcherGrid =
   ## A round panel's list is a lens: a tile is full size at the circle's
@@ -1055,7 +1059,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     self.header(result, grid, paper, width, size, small, button)
   if self.entries.len == 0:
     c = ""
-    if grid.round: c.at(grid.x0, grid.y0, grid.side, grid.side)
+    if grid.round: c.at(grid.listX, grid.listY, grid.side, grid.side)
     else: c.at(0, grid.y0, width, max(height - grid.y0, 1))
     c.add " flex items-center justify-center text-center"
     c.px("text", size)
