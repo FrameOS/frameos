@@ -204,10 +204,17 @@ larger.
   label, in the theme's `picked` role (Explorer's navy label in Windows 98,
   Finder's blue pill in macOS). A dot at the icon's corner marks the scene it
   was opened from. On e-paper the whole cell is inverted.
-- **Categories** are sections, as a file manager's: each starts a row of its
-  own under a small name with a thin rule across the row (the owner's call,
-  2026-11-22; before, the next category went on in the row the last one
-  ended in). Only a category's first row has the strip its heading sits in.
+- **Categories** are sections, as a file manager's: each under a small name
+  with a thin rule across its own cells (the owner's call, 2026-11-22;
+  before, the next category went on in the row the last one ended in). A
+  category that fits beside the ones on its row whole, one empty cell
+  between, goes there under its heading, whose rule runs to the next
+  section or the row's end; any other starts a row (`spots`,
+  `headingSpan`; 2026-11-27: a row per category left most of every row
+  empty on a landscape panel, where categories of two to four scenes are
+  the rule, and the reTerminal E1002 showed two and a half rows of them).
+  Only a row whose first cell starts a category has the strip its headings
+  sit in.
   They show wherever a scene has a category, from a list of one (`headed`;
   until 2026-11-25 only from a dozen scenes and two a category), and never
   where none has: no lone "Other" over a list with no categories.
@@ -225,7 +232,9 @@ the keys move it too. Opened, the list starts at its top and, at its first
 render, brings the scene it was opened from to its middle when it is further
 down: measured in the room that render has (a layout's hole, a window), never
 the panel's, which is all the open knows (`revealing`; the reTerminal
-Sticky's home screen left it below the hole, 2026-11-25).
+Sticky's home screen left it below the hole, 2026-11-25), and then up to
+where a row starts, so the list's first row shows whole (never a row of
+names whose icons are above the edge), short of the list's end.
 
 The header ends with the gear and Close. **A frame that takes no taps has no
 Close**: e-paper whose event map binds its keys and nothing else

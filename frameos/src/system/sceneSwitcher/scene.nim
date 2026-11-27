@@ -512,23 +512,58 @@ proc rowH(self: SceneSwitcherScene, grid: SwitcherGrid): int =
   ## strip its heading sits in where there are any.
   grid.tileH + grid.gap + (if self.headed: grid.headingH else: 0)
 
+proc groupLen(self: SceneSwitcherScene, index: int): int =
+  ## How many scenes the category that starts at `index` holds.
+  result = 1
+  while index + result < self.entries.len and not self.heads(index + result):
+    inc result
+
 proc spots*(self: SceneSwitcherScene, grid: SwitcherGrid): seq[Spot] =
   ## Every cell's place in the list, row after row. Where the categories have
-  ## headings each starts a row of its own, its heading in a strip above it
-  ## (a file manager's sections); without them the scenes flow on in one.
+  ## headings each is a section under its heading's strip (a file manager's
+  ## sections): a category that fits beside the ones on its row whole, one
+  ## empty cell between, goes there under a heading of its own; any other
+  ## starts a row. Without headings the scenes flow on in one.
   var col = 0
   var top = grid.y0 - grid.listY + (if self.headed: grid.headingH else: 0)
+  var headedRow = self.headed # the row has a heading strip over it: a section may start beside
   for i in 0 ..< self.entries.len:
     if i > 0:
       if self.heads(i):
-        col = 0
-        top += grid.tileH + grid.gap + grid.headingH
+        if headedRow and col + 2 + self.groupLen(i) <= grid.cols:
+          col += 2
+        else:
+          col = 0
+          top += grid.tileH + grid.gap + grid.headingH
+          headedRow = true
       elif col + 1 >= grid.cols:
         col = 0
         top += grid.tileH + grid.gap
+        headedRow = false
       else:
         inc col
     result.add (col, top)
+
+proc headingSpan(self: SceneSwitcherScene, grid: SwitcherGrid, spots: seq[Spot], index: int): int =
+  ## How many cells the heading of the category starting at `index` runs
+  ## across: to the cell before the next section on its row, or to the
+  ## row's end.
+  let (col, top) = spots[index]
+  var next = index + 1
+  while next < spots.len and not self.heads(next):
+    inc next
+  if next < spots.len and spots[next].top == top:
+    spots[next].col - 1 - col
+  else:
+    grid.cols - col
+
+proc rowHeaded(self: SceneSwitcherScene, spots: seq[Spot], index: int): bool =
+  ## Whether the row the cell at `index` is on has a heading strip over it:
+  ## its first cell starts a category.
+  var first = index
+  while first > 0 and spots[first - 1].top == spots[index].top:
+    dec first
+  self.heads(first)
 
 # ------------------------------------------------------------------ the model
 
@@ -580,15 +615,29 @@ proc reveal(self: SceneSwitcherScene, index: int, centred = false) =
   ## `centred`: one out of sight comes to the middle of the list instead, as
   ## the scene showing does when the list opens.
   let grid = self.grid()
-  let spot = self.spots(grid)[index]
+  let spots = self.spots(grid)
+  let spot = spots[index]
   let margin = grid.y0 - grid.listY
   var top = spot.top - margin
-  if self.heads(index - spot.col):
+  if self.rowHeaded(spots, index):
     top -= grid.headingH
   let bottom = spot.top + grid.tileH + margin
   let y = listScroll()
   if centred and (top.float32 < y or bottom.float32 > y + grid.listH.float32):
-    scrollList(float32(top - max(grid.listH - (bottom - top), 0) div 2))
+    # To the middle, then up to where a row starts, its heading's strip with
+    # it: the list's first row shows whole, never a row of names whose
+    # icons are above the edge.
+    # Short of the end, which the list scrolls no further than: there the
+    # last row ends the list and the first one may be cut.
+    let want = min(top - max(grid.listH - (bottom - top), 0) div 2,
+      spots[^1].top + grid.tileH + grid.pad - grid.listH)
+    var at = want
+    for i in 0 ..< spots.len:
+      if i == 0 or spots[i].top != spots[i - 1].top:
+        # A row's top is where the one above it ends (its names' last line).
+        let rowTop = if i == 0: 0 else: spots[i].top - grid.gap - (if self.heads(i): grid.headingH else: 0)
+        if rowTop <= want and bottom - rowTop <= grid.listH: at = rowTop
+    scrollList(max(at, 0).float32)
   elif top.float32 < y:
     scrollList(top.float32)
   elif bottom.float32 > y + grid.listH.float32:
@@ -1072,8 +1121,9 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     if index == 0 or self.entries[index].category != self.entries[index - 1].category:
       inc group
     if self.heads(index):
-      # Across its row: a category starts a row of its own.
-      list.children.add heading(grid, spots[index], grid.cols, self.entries[index].category, paper)
+      # Over its own cells, to the next section on the row or the row's end.
+      list.children.add heading(grid, spots[index], self.headingSpan(grid, spots, index),
+        self.entries[index].category, paper)
     look.hue = group
     look.lit = index == lit
     look.showing = self.entries[index].id == opener

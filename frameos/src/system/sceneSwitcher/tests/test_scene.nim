@@ -530,8 +530,12 @@ block categories_head_their_scenes_and_other_comes_last:
     @["Clocks", "Garden", "Photos", "photos", "\xC3\xA9a", "\xC3\x89clairs", "Other"]
   let grid = switcherGrid(800, 480, thumbnails = false)
   var spots = scene.spots(grid)
-  # Garden starts a row of its own under its heading.
-  doAssert spots[2].col == 0 and spots[2].top > spots[0].top, $spots
+  # Garden, one scene, goes beside Clocks' two under a heading of its own,
+  # one empty cell between (a category that fits beside the ones on its row
+  # whole goes there; 2026-11-27, before every category started a row).
+  doAssert spots[2].col == 3 and spots[2].top == spots[0].top, $spots
+  # Seven categories in two rows on an 800 px panel, not seven.
+  doAssert spots[^1].top == spots[5].top and spots[5].col == 0, $spots
   doAssert scene.highlighted() == 2, "scene-6 is third, in Garden"
   scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   doAssert scene.highlightedId == "scene-7"
