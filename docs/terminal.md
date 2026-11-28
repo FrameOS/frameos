@@ -27,13 +27,15 @@ Super+Return, and Commander's F8 and command line.
 
 ## The commands
 
-An ESP32 serial console's names, arguments and answer lines, answered from
-what the frame page knows (`docs/scene-settings.md` "The frame page"):
+An ESP32 serial console's names, arguments and answer lines, and the frame
+page's version and About card, answered from what the frame page knows (`docs/scene-settings.md` "The frame page"):
 
 | Command | What |
 |---|---|
 | `help` | The commands. |
 | `status` | Wi-Fi, managed by, panel, rotate, render scale, the frame page, time zone, debug, battery, scenes, version, the last refusal. |
+| `version` | The FrameOS version, and the build where the host gives one. |
+| `about`, `info` | The frame page's About card (`docs/scene-settings.md` "About"): version, chip, board, system, display, memory, storage, uptime, MAC address, host name, frame ID, server, build; a fact the host leaves out is a line left out. |
 | `set <key> <value>` | `rotate`, `render_scale`, `wifi_ssid`, `wifi_pass`, through the page's Save. Every other key is the control plane's to set, and says so. |
 | `wifi <ssid> [pass]` | Joins that network (an ESP32 restarts for it). |
 | `wifi-scan` | Scans, and lists the networks when the scan is back. |
