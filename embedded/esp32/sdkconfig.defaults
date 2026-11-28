@@ -248,8 +248,9 @@ CONFIG_LOG_VERSION_2=y
 # server and its services stay out of the image. No BLE 5 features (no
 # extended advertising: keyboards and mice advertise the legacy way). Two
 # links (a keyboard and a mouse). The host's memory is PSRAM's, and the stack
-# starts only with `set bluetooth 1`: off, its static RAM is given back at
-# boot (esp_bt_controller_mem_release). The host logs errors only.
+# starts only with `set bluetooth 1` (and stops with 0, no restart): the
+# controller's 1.1 KB of static RAM stays reserved for that, and the heap it
+# takes while on is given back when off. The host logs errors only.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
