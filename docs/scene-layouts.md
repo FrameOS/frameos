@@ -266,8 +266,10 @@ of its own, all of them running, one with the focus. The samples `Windows 98`
 says none, filling the desktop where that does not fit, on bare desktop where
 there is room (below), and where they were when their scene opens again; moved
 and sized with the mouse, snapped to a half or the
-whole desktop at its edges, a taskbar of what is open, a Start menu and desktop
-icons, Alt+Tab and Alt+F4, full screen with F11, a gear button at the left of a
+whole desktop at its edges, a taskbar of what is open, a Start menu (from a
+keyboard too: the Windows key alone, Ctrl+Escape, Cmd+Space or Alt+F1, then the
+arrows and Enter) and desktop icons, Alt+Tab and Alt+F4, full screen with F11, a
+gear button at the left of a
 scene's title bar for its settings, Start's Control Panel) and `Tiling`
 (tiles that keep their places in an arrangement the top bar steps through: the
 first large on the left and the others in a column, the first on top and the
