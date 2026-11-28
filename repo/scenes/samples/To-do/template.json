@@ -1,6 +1,6 @@
 {
   "name": "To-do",
-  "description": "A to-do list for a touch screen: tick items off, edit them and add your own.",
+  "description": "A to-do list for a touch screen: tick items off, edit them and add your own. Give one a time (\"milk at 5\") and the frame wakes for it and chimes on its buzzer.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

@@ -74,6 +74,12 @@ configured with: they are read as `primary`.
   key knows when to let go.
 - **The voice key is the Action key held** (the Screen key on a board without
   one). The firmware finds it by its label in the map.
+- **Motion is no key of the standard.** A frame with an accelerometer (the
+  Sticky, the round AMOLED) can bind a flick, a tilt, a shake or laying it
+  face down like a key (docs/events.md "Event map", docs/accelerometer.md), but
+  no preset does: a motion in the frame's map is taken from every scene, a
+  tilting game included. One scene's ("Map buttons": a flick as `forward`
+  turns a reader's page) is the place for one.
 
 ## Every board
 

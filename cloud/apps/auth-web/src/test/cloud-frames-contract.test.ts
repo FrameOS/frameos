@@ -113,8 +113,10 @@ describe("settings parity between the device planes", () => {
     // both-planes (2026.11.15: a Pi's CPU governor, cpu_governor.nim). 22
     // with `brightness`, `dim_after_seconds`, `dim_brightness` (2026.11.16):
     // the glass's brightness lives in the ESP32 display drivers and the
-    // Linux runtime has no backlight control yet.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(22);
+    // Linux runtime has no backlight control yet. 23 with `auto_rotate`
+    // (2026.11.17): the accelerometer is read by the ESP32 firmware, and no
+    // Pi preset has one.
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(23);
   });
 });
 

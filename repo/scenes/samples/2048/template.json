@@ -1,6 +1,6 @@
 {
   "name": "2048",
-  "description": "The sliding tile puzzle: merge equal tiles and try to reach 2048.",
+  "description": "The sliding tile puzzle: merge equal tiles and try to reach 2048. Swipe, tap the arrows, or tilt the frame where it has an accelerometer.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

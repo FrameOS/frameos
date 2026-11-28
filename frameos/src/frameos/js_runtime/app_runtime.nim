@@ -55,6 +55,7 @@ import frameos/panel_shape
 import frameos/scene_store_hooks
 import frameos/scene_code_hooks
 import frameos/frame_settings_hooks
+import frameos/tones
 when not defined(frameosEmbedded):
   import frameos/file_transfer_hooks
 from frameos/ui/theme import themeSource
@@ -147,6 +148,13 @@ type
     lastJsx: SvgNode
     lastJsxConfig: JsonNode
     lastJsxAt: MonoTime
+    ownSleep: float
+      ## The `frameos.setNextSleep` the last whole get() asked for (-1: none),
+      ## and when: a render that only runs the components a handler's signals
+      ## dirtied, or lays the last tree out again for the pointer, runs no
+      ## get(), so it carries what is left of that wish (`keepOwnSleep`), or a
+      ## reminder a tap came before would wait out the scene's interval.
+    ownSleepAt: MonoTime
     transientImageIds: seq[int]
     keptImageIds: seq[int]
     canvases: seq[tuple[key: string, id: int]]
@@ -194,6 +202,11 @@ var currentEnv: JsAppEvalEnv
   ## Every interpreter is entered from one thread, and a scene's apps share
   ## its context, so the call says which app is talking, never the context.
 var nextJsAppKey = 0
+var accelerometerReader*: proc (x, y, z: var float): bool {.nimcall, gcsafe.}
+  ## Which way gravity pulls, in g along the picture's axes as it shows now
+  ## (x to its right, y to its bottom, z out of the glass), where the frame
+  ## has an accelerometer (docs/accelerometer.md): the ESP32's `fos_imu_gravity`
+  ## (embedded_runtime.nim), a test's stub. nil, or false, where there is none.
 var boardRotation* = -1
   ## The board's rotation where the runtime draws for one that turns the
   ## picture itself (the wasm runtime's `set_frame`), else -1: what
@@ -644,6 +657,28 @@ proc storeFacts(asker: string): string =
 
 when defined(testing):
   proc sceneStoreFactsForTests*(asker: string): string = storeFacts(asker)
+
+proc readAccelerometer*(x, y, z: var float): bool =
+  let reader = accelerometerReader
+  not reader.isNil and reader(x, y, z)
+
+proc jsAccelerometer(ctx: ptr JSContext): JSValue {.nimcall.} =
+  ## `frameos.accelerometer()` (docs/accelerometer.md): "x y z" in g, or "" (null
+  ## in JS) where the frame has no accelerometer. A string, not an object: one
+  ## allocation a frame, read 30 times a second by an animation.
+  var x, y, z: float
+  if not readAccelerometer(x, y, z):
+    return nimStringToJS(ctx, "")
+  var answer = ""
+  for i, v in [x, y, z]:
+    if i > 0: answer.add ' '
+    answer.addInt int(v * 1000.0)
+  nimStringToJS(ctx, answer)
+
+proc jsTone(ctx: ptr JSContext, notes: JSValue): JSValue {.nimcall.} =
+  ## `frameos.tone(...)` (docs/tones.md): the notes as the prelude writes them
+  ## ("hz:ms,...", "" the chime), true when something plays them.
+  nimBoolToJS(ctx, playTones(toNimString(ctx, notes)))
 
 proc jsStore(ctx: ptr JSContext): JSValue {.nimcall.} =
   ## `frameos.store()`: the scene store's facts as the host knows them now
@@ -2525,6 +2560,22 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
           undef = true
       else:
         undef = true
+    of "accelerometer":
+      # The frame has one (docs/accelerometer.md): frameos.accelerometer()
+      # reads it. Undefined where it has none.
+      var x, y, z: float
+      if readAccelerometer(x, y, z):
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "tone":
+      # Something plays frameos.tone() (docs/tones.md): a buzzer, a speaker or
+      # the status LED, the browser preview, a board rendered on its plane.
+      # Undefined where nothing does (a Raspberry Pi).
+      if canPlayTones():
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
     of "wifiRssi":
       when defined(freertos):
         let rssi = fos_client_wifi_rssi()
@@ -2673,7 +2724,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
       "paper", "color", "round", "sceneName", "systemScene", "typing", "fullScreen", "wentBack", "batteryPercent", "wifiRssi",
-      "theme", "eventMap"]
+      "accelerometer", "tone", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")
@@ -2717,7 +2768,8 @@ proc newJsAppRuntime*(category: string, outputType: string, source: string,
     assetGrant: assetGrant,
     nextImageId: 0,
     images: initTable[int, Image](),
-    transientImageIds: @[]
+    transientImageIds: @[],
+    ownSleep: -1
   )
 
 type
@@ -3633,6 +3685,15 @@ const appJsPrelude* = compactJs("""
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
     dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __appReplacer)),
     store: () => JSON.parse(jsStore() || "null"),
+    accelerometer: () => {
+      const r = jsAccelerometer();
+      if (!r) return null;
+      const v = r.split(" ");
+      return { x: v[0] / 1000, y: v[1] / 1000, z: v[2] / 1000 };
+    },
+    tone: (notes, ms) => jsTone(notes == null ? "" : Array.isArray(notes)
+      ? notes.map((n) => (Array.isArray(n) ? n[0] + ":" + n[1] : "")).join(",")
+      : notes + ":" + (ms ?? 200)),
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __appReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
@@ -4000,7 +4061,8 @@ proc registerAppNatives(js: var QuickJS) =
       ("jsNextLine", jsNextLine),
       ("jsTimeZoneInfo", jsTimeZoneInfo), ("jsGetSetting", jsGetSetting), ("jsGetAppMeta", jsGetAppMeta),
       ("jsGetAppConfig", jsGetAppConfig), ("jsGetAppState", jsGetAppState), ("jsGetAppFrame", jsGetAppFrame),
-      ("jsGetAppContext", jsGetAppContext), ("jsGetAppKeys", jsGetAppKeys), ("jsAsyncCancel", jsAsyncCancel)]
+      ("jsGetAppContext", jsGetAppContext), ("jsGetAppKeys", jsGetAppKeys), ("jsAsyncCancel", jsAsyncCancel),
+      ("jsTone", jsTone)]
     natives2 = [("jsAppLog", NimFunction2(jsAppLog)), ("jsDispatch", jsDispatch),
       ("jsStoreAction", jsStoreAction), ("jsFrame", jsFrame), ("jsCode", jsCode), ("jsSetState", jsSetState),
       ("jsRemember", jsRemember), ("jsHttpRequest", jsHttpRequest), ("jsText", jsText),
@@ -4013,6 +4075,7 @@ proc registerAppNatives(js: var QuickJS) =
   for (name, fn) in natives2:
     js.registerFunction(name, fn)
   js.registerFunction("jsStore", jsStore)
+  js.registerFunction("jsAccelerometer", jsAccelerometer)
   js.registerFunction("jsAsyncMode", jsAsyncMode)
   js.registerFunction("jsAssets", jsAssets)
   js.registerFunction("jsAsyncStart", jsAsyncStart)
@@ -5148,6 +5211,25 @@ proc partialRender(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, 
   runtime.lastJsx = root
   result = runtime.imageFromJsx(owner, context, root)
 
+proc ownSleepLeft(runtime: JsAppRuntime): float =
+  ## What is left of the sleep the last whole get() asked for, in seconds; -1
+  ## when it asked for none.
+  if runtime.ownSleep < 0:
+    return -1
+  max(runtime.ownSleep - inMilliseconds(getMonoTime() - runtime.ownSleepAt).float / 1000, 0)
+
+proc keepOwnSleep(runtime: JsAppRuntime, context: ExecutionContext): bool =
+  ## A render that runs no get(): the sleep get() asked for goes on counting
+  ## down (true), as if get() had asked again. False once it ran out: the
+  ## render get() wanted then is due, so a whole get() it is.
+  let left = runtime.ownSleepLeft()
+  if left < 0:
+    return true
+  if left <= 0:
+    return false
+  context.nextSleep = left
+  true
+
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   probe(phInit):
     runtime.init(owner, configJson)
@@ -5164,7 +5246,8 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       target.partial = false
       target.full = false
       if partial and not target.inputOnly and not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
-          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
+          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000 and
+          runtime.keepOwnSleep(context):
         let image = runtime.partialRender(owner, configJson, context)
         if not image.isNil:
           runtime.lastJsxAt = getMonoTime()
@@ -5175,7 +5258,8 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # pointer, while nothing else can have changed what get() returns (the
       # same config, a render sooner than the scene's own interval).
       if not handled and not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
-          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
+          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000 and
+          runtime.keepOwnSleep(context):
         return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
   try:
     runtime.midCall:
@@ -5188,6 +5272,15 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # memory (a map's tree held a third of a megabyte while the next map
       # was fetched and parsed).
       runtime.lastJsx = nil
+      # What get() itself asks of the sleep, for the renders that run no get()
+      # (keepOwnSleep); the render's own as before, the last word winning.
+      let before = context.nextSleep
+      context.nextSleep = -1
+      defer:
+        runtime.ownSleep = context.nextSleep
+        runtime.ownSleepAt = getMonoTime()
+        if context.nextSleep < 0:
+          context.nextSleep = before
       let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
       var spent = false
       defer:

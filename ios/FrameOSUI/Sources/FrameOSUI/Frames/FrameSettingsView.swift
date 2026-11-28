@@ -436,7 +436,8 @@ struct ButtonMapView: View {
             AddBindingSheet(
                 scenes: scenes,
                 voice: app.frame(frameId).map { Microphone.present($0, plane: app.current?.kind ?? .cloud) } ?? false,
-                triple: app.frame(frameId).map { ButtonBindings.supportsTriplePress($0, cloud: app.current?.kind != .backend) } ?? false
+                triple: app.frame(frameId).map { ButtonBindings.supportsTriplePress($0, cloud: app.current?.kind != .backend) } ?? false,
+                motion: app.frame(frameId).map { Accelerometer.present($0) } ?? false
             ) { binding in
                 bindings.append(binding)
                 changed = true
@@ -451,8 +452,13 @@ struct AddBindingSheet: View {
     let voice: Bool
     /// The frame's FrameOS makes a triple press (ButtonBindings.supportsTriplePress).
     let triple: Bool
+    /// The frame has an accelerometer (Accelerometer.present): its motions are rows too.
+    let motion: Bool
     let add: (ButtonBinding) -> Void
-    @State private var isSwipe = false
+    /// What the row binds: 0 a button, 1 a swipe, 2 a motion of the frame.
+    @State private var input = 0
+    @State private var motionIndex = 0
+    private var isSwipe: Bool { input == 1 }
     @State private var label = ""
     @State private var press = "longPress"
     @State private var edge = "left"
@@ -475,12 +481,19 @@ struct AddBindingSheet: View {
         NavigationStack {
             Form {
                 Section("When") {
-                    Picker("Input", selection: $isSwipe) {
-                        Text("A button").tag(false)
-                        Text("A swipe").tag(true)
+                    Picker("Input", selection: $input) {
+                        Text("A button").tag(0)
+                        Text("A swipe").tag(1)
+                        if motion { Text("A motion").tag(2) }
                     }
                     .pickerStyle(.segmented)
-                    if isSwipe {
+                    if input == 2 {
+                        Picker("Motion", selection: $motionIndex) {
+                            ForEach(Array(ButtonBindings.motionGestures().enumerated()), id: \.offset) { index, gesture in
+                                Text(ButtonBindings.gestureTitle(gesture)).tag(index)
+                            }
+                        }
+                    } else if isSwipe {
                         Picker("Swipe", selection: $edge) {
                             ForEach(ButtonBindings.screenEdges, id: \.self) { Text(ButtonBindings.gestureTitle(.edge($0))).tag($0) }
                         }
@@ -529,13 +542,14 @@ struct AddBindingSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        let gesture: ButtonBinding.Gesture = isSwipe
-                            ? .edge(edge) : .button(label: label.trimmingCharacters(in: .whitespaces), action: press)
+                        let gesture: ButtonBinding.Gesture = input == 2
+                            ? ButtonBindings.motionGestures()[motionIndex]
+                            : isSwipe ? .edge(edge) : .button(label: label.trimmingCharacters(in: .whitespaces), action: press)
                         let state = kind == "showScene" ? SceneForm.applyState(sceneFields, values: settings) : [:]
                         add(ButtonBinding(gesture: gesture, kind: kind, sceneId: kind == "showScene" ? sceneId : nil, state: state))
                         dismiss()
                     }
-                    .disabled((!isSwipe && label.trimmingCharacters(in: .whitespaces).isEmpty) || (kind == "showScene" && sceneId.isEmpty))
+                    .disabled((input == 0 && label.trimmingCharacters(in: .whitespaces).isEmpty) || (kind == "showScene" && sceneId.isEmpty))
                 }
             }
         }

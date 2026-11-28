@@ -1448,6 +1448,9 @@ export const frameServerRenders = pgTable("frame_server_renders", {
   prerenderMs: integer("prerender_ms"),
   prerenderNextRenderSeconds: integer("prerender_next_render_seconds"),
   prerenderPressMap: text("prerender_press_map"),
+  // The tone the scene asked for in the picture drawn ahead (migration 0086,
+  // docs/tones.md), sent with it at the wake; null: none.
+  prerenderTones: text("prerender_tones"),
   ...timestamps,
 });
 

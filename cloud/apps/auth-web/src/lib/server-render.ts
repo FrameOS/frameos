@@ -25,7 +25,7 @@ import {
   readServiceSettingGroups,
   storeFrameLogs,
 } from "./frames";
-import { pressMapOf } from "./fosb";
+import { pressMapOf, tonesOf } from "./fosb";
 import { logError, logWarn } from "./log";
 import {
   fosbHeaderBytes,
@@ -601,6 +601,8 @@ type Drawn = {
   nextRenderSeconds: number | null;
   /** Where a press on it does something (pressMapOf); null: nowhere, or not said. */
   pressMap: string | null;
+  /** The tone the render asked for (tonesOf, docs/tones.md); null: none. */
+  tones: string | null;
   renderMs: number;
   scene: string;
   states: Record<string, Record<string, unknown>>;
@@ -746,6 +748,7 @@ async function draw(
       etag: serverRenderEtag(body),
       nextRenderSeconds: serverNextRenderSeconds(result),
       pressMap: pressMapOf(result.pressMap),
+      tones: tonesOf(result.tones),
       renderMs: result.renderMs,
       scene: ended,
       states: after,
@@ -817,7 +820,7 @@ function sceneLogPayloads(logs: readonly string[] | undefined, heard = false): u
 }
 
 export type ServerRenderPull =
-  | { etag: string; nextRenderSeconds: number | null; pressMap: string | null; scene: string; status: 304 }
+  | { etag: string; nextRenderSeconds: number | null; pressMap: string | null; scene: string; status: 304; tones: string | null }
   | {
       /**
        * The picture the device says it shows (its If-None-Match), when it is
@@ -834,6 +837,12 @@ export type ServerRenderPull =
       pressMap: string | null;
       scene: string;
       status: 200;
+      /**
+       * The tone the render asked for (docs/tones.md), sent once: with the
+       * render that asked, or the picture drawn ahead of the wake; never
+       * with the last picture again. Null: none.
+       */
+      tones: string | null;
     }
   | { error: string; message: string; retryAfterSeconds?: number; status: 409 | 429 | 502 | 503 };
 
@@ -882,10 +891,11 @@ export async function pullServerRender(
     scene: string,
     nextRenderSeconds: number | null,
     pressMap: string | null,
+    tones: string | null = null,
   ): ServerRenderPull =>
     ifNoneMatchHas(input.ifNoneMatch, etag)
-      ? { etag, nextRenderSeconds, pressMap, scene, status: 304 }
-      : { base, body, etag, from, nextRenderSeconds, pressMap, scene, status: 200 };
+      ? { etag, nextRenderSeconds, pressMap, scene, status: 304, tones }
+      : { base, body, etag, from, nextRenderSeconds, pressMap, scene, status: 200, tones };
 
   // The last picture again: nothing it depends on moved, and the plan's
   // floor has not passed since it was drawn. Never for a pull with input:
@@ -932,6 +942,7 @@ export async function pullServerRender(
         prerenderRevision: null,
         prerenderScene: null,
         prerenderState: null,
+        prerenderTones: null,
         renderError: null,
         renderMs: row.prerenderMs,
         renderedAt: now,
@@ -956,6 +967,7 @@ export async function pullServerRender(
         row.prerenderScene as string,
         row.prerenderNextRenderSeconds,
         pressMapOf(row.prerenderPressMap),
+        tonesOf(row.prerenderTones),
       );
     }
   }
@@ -1058,7 +1070,7 @@ export async function pullServerRender(
     },
     ...sceneLogPayloads(outcome.logs, !!deviceInput || heldEvents(row).length > 0),
   ]);
-  return answer(drawn.body, drawn.etag, "render", drawn.scene, drawn.nextRenderSeconds, drawn.pressMap);
+  return answer(drawn.body, drawn.etag, "render", drawn.scene, drawn.nextRenderSeconds, drawn.pressMap, drawn.tones);
 }
 
 // A kept pre-render's columns, emptied.
@@ -1073,6 +1085,7 @@ const noPrerender = {
   prerenderRevision: null,
   prerenderScene: null,
   prerenderState: null,
+  prerenderTones: null,
 } as const;
 
 /**
@@ -1184,6 +1197,7 @@ export async function prerenderFrame(
       prerenderRevision: row.revision,
       prerenderScene: outcome.drawn.scene,
       prerenderState: outcome.drawn.states,
+      prerenderTones: outcome.drawn.tones,
       updatedAt: new Date(),
     })
     .where(and(eq(frameServerRenders.frameId, frameId), eq(frameServerRenders.revision, row.revision)))

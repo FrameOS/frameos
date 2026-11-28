@@ -183,6 +183,10 @@ export interface FrameType {
     clickSounds?: ClickSounds | null
     /** ESP32 only: the board makes sounds (a buzzer, a speaker, an LED that follows them), 2026.11.15+. */
     sounds?: boolean | null
+    /** ESP32 only: the board has an accelerometer (docs/accelerometer.md). */
+    imu?: boolean | null
+    /** ESP32 only: auto-rotate, the picture turned upright as the frame is turned (`auto_rotate`, 2026.11.17+). */
+    autoRotate?: boolean | null
     /**
      * The processor speed setting (`cpu_mode`) and the clock it gave, in MHz:
      * an ESP32's chip clock (2026.11.7+), a Linux frame's CPU at the report
@@ -392,6 +396,9 @@ export interface FrameType {
     /** The sounds of a tap and a press: silent, or the buzzer's own (default). */
     clickSounds?: ClickSounds
     click_sounds?: ClickSounds
+    /** Auto-rotate: the picture turned upright as the frame is turned, by its accelerometer. Default off. */
+    autoRotate?: boolean
+    auto_rotate?: boolean
     /** ESP32: the chip's clock (main.c, at boot); unset = auto. */
     cpuMode?: CpuMode
     cpu_mode?: CpuMode
@@ -503,6 +510,8 @@ export interface FrameType {
   touch_beep?: boolean
   /** ESP32: the sounds of a tap and a press (`click_sounds`); unset = normal. */
   click_sounds?: ClickSounds
+  /** ESP32: auto-rotate by the accelerometer (`auto_rotate`); unset = off. */
+  auto_rotate?: boolean
   /** ESP32: the chip's clock, 160 MHz (battery) or 240 (performance); unset = auto. */
   cpu_mode?: CpuMode
   /** ESP32: where its scenes run (docs/server-rendering.md); unset = on the frame. */

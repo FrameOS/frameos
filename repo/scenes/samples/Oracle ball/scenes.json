@@ -1,0 +1,114 @@
+[
+  {
+    "id": "oracle-ball",
+    "name": "Oracle ball",
+    "settings": {
+      "category": "Fun & animations",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#20242c",
+      "windowSize": "480x480",
+      "needs": [
+        "touch",
+        "buttons",
+        "accelerometer"
+      ],
+      "icon": "M12 2a10 10 0 1 1 0 20a10 10 0 1 1 0-20Z M12 7.5 8.5 14h7Z"
+    },
+    "fields": [
+      {
+        "name": "answer",
+        "label": "Answer",
+        "type": "integer",
+        "value": "",
+        "access": "private",
+        "persist": "disk"
+      },
+      {
+        "name": "asked",
+        "label": "Questions asked",
+        "type": "integer",
+        "value": "0",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "app",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "oracleBall",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "app-image",
+        "type": "codeNodeEdge",
+        "source": "app",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "oracleBall": {
+        "origin": "oracleBall",
+        "name": "Oracle ball",
+        "category": "data",
+        "description": "A fortune-telling ball: ask a question and shake the frame (its accelerometer), turn it face down and back, tap it or press a key, and an answer floats up in its window.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Oracle ball\",\n  \"category\": \"data\",\n  \"description\": \"A fortune-telling ball: ask a question and shake the frame (its accelerometer), turn it face down and back, tap it or press a key, and an answer floats up in its window.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"events\": [\"shake\", \"orientation\", \"tap\", \"button\", \"keyDown\"],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n",
+          "app.tsx": "// Oracle ball: ask it a question, shake the frame, and an answer floats up in\n// its window. Turning the frame face down and back up asks again too, and so\n// do a tap and the Action key, which is how a frame without an accelerometer\n// asks. The answer is kept in the scene's state, so it stays on e-paper\n// until the next question. On a fast screen (not an ESP32's) the answer rises\n// out of the dark over a second.\n\nconst ANSWERS = [\n  'Yes',\n  'Without a doubt',\n  'Count on it',\n  'The signs say yes',\n  'Most likely',\n  'It looks good',\n  'Yes, in time',\n  'Go for it',\n  'Probably',\n  'Ask again later',\n  'Too soon to tell',\n  'Hard to say now',\n  'Sleep on it',\n  'Concentrate and ask again',\n  'Maybe',\n  'Not this time',\n  'Unlikely',\n  'The signs say no',\n  'Better not',\n  'No',\n]\n\n// When the answer showing was asked for: it rises for a second after.\nlet askedAt = 0\nlet wasFaceDown = false\n\nconst hasAccelerometer = (app: any) => app.frame.accelerometer === true\n\nfunction ask(app: any) {\n  const last = Number(app.state.answer)\n  let next = Math.floor(Math.random() * ANSWERS.length)\n  if (next === last) next = (next + 1 + Math.floor(Math.random() * (ANSWERS.length - 1))) % ANSWERS.length\n  frameos.setState('answer', next)\n  frameos.setState('asked', Number(app.state.asked || 0) + 1)\n  askedAt = Date.now()\n}\n\n/** Words broken into lines of about `width` letters. */\nfunction lines(text: string, width: number): string[] {\n  const out: string[] = []\n  let line = ''\n  for (const word of text.split(' ')) {\n    if (line && (line + ' ' + word).length > width) {\n      out.push(line)\n      line = word\n    } else line = line ? line + ' ' + word : word\n  }\n  if (line) out.push(line)\n  return out\n}\n\nexport function get(app: any, context: any) {\n  const W = context.imageWidth || app.frame.width\n  const H = context.imageHeight || app.frame.height\n  const round = context.round === true\n  const fast = app.frame.fast ?? !app.frame.paper\n  const S = Math.min(W, H)\n  const cx = W / 2\n  const hint = round ? 0 : Math.max(16, Math.round(S * 0.05))\n  const cy = round ? H / 2 : (H - hint * 1.6) / 2\n  const R = round ? S / 2 - 2 : Math.min(W, H - hint * 3) * 0.46\n  const win = R * 0.5\n\n  const index = app.state.answer\n  const answered = index !== undefined && index !== null && index !== '' && ANSWERS[Number(index)] !== undefined\n  const text = answered ? ANSWERS[Number(index)] : hasAccelerometer(app) ? 'Ask, then shake' : 'Ask, then tap'\n  const words = lines(text.toUpperCase(), 10)\n  // Rising: a second from dark to bright on a fast screen. Not on an ESP32,\n  // whose frame waits a whole second between pictures unless the scene\n  // animates all the time (its refreshInterval under a second).\n  const age = Date.now() - askedAt\n  const rise = fast && !app.frame.embedded && answered && age < 1000 ? age / 1000 : 1\n  if (fast && rise < 1) frameos.setNextSleep(0.05)\n\n  const paper = !fast\n  // A triangle in the window, point down, the words on it: it grows out of\n  // the dark as it rises, and stays inside the window.\n  const tri = win * 0.92 * (0.55 + 0.45 * rise)\n  const ty = cy\n  const p1 = `${cx - tri * 0.866},${ty - tri * 0.5}`\n  const p2 = `${cx + tri * 0.866},${ty - tri * 0.5}`\n  const p3 = `${cx},${ty + tri}`\n  const fontSize = Math.round(win * (words.length > 2 ? 0.17 : 0.2) * (0.55 + 0.45 * rise))\n  const lineH = fontSize * 1.1\n  const top = ty - tri * 0.22 - ((words.length - 1) * lineH) / 2\n  const triColor = paper ? '#ffffff' : rise < 1 ? mix('#06102e', '#1f3fbf', rise) : '#1f3fbf'\n  const wordColor = paper ? '#000000' : rise < 1 ? mix('#06102e', '#e9eeff', rise) : '#e9eeff'\n\n  return (\n    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>\n      <defs>\n        <radialGradient id=\"shine\" gradientUnits=\"userSpaceOnUse\" cx={cx - R * 0.3} cy={cy - R * 0.4} r={R * 1.5}>\n          <stop offset=\"0\" stopColor=\"#4a4f5c\" />\n          <stop offset=\"0.45\" stopColor=\"#111318\" />\n          <stop offset=\"1\" stopColor=\"#000000\" />\n        </radialGradient>\n      </defs>\n      <rect x={0} y={0} width={W} height={H} fill={paper ? '#ffffff' : round ? '#000000' : '#20242c'} />\n      <circle cx={cx} cy={cy} r={R} fill={paper ? '#000000' : 'url(#shine)'} />\n      <circle cx={cx} cy={cy} r={win} fill={paper ? '#000000' : '#04081a'} stroke={paper ? '#ffffff' : '#2b2f3a'} strokeWidth={Math.max(2, R * 0.025)} />\n      {answered ? (\n        <polygon points={`${p1} ${p2} ${p3}`} fill={triColor} />\n      ) : null}\n      {words.map((word, i) => (\n        <text x={cx} y={(answered ? top : cy - ((words.length - 1) * lineH) / 2) + i * lineH + fontSize * 0.35}\n          fontSize={answered ? fontSize : Math.round(win * 0.15)} fontWeight=\"bold\" textAnchor=\"middle\"\n          fill={answered ? wordColor : paper ? '#ffffff' : '#9aa3c7'}>\n          {word}\n        </text>\n      ))}\n      {round ? null : (\n        <text x={cx} y={H - hint * 0.9} fontSize={hint} textAnchor=\"middle\" fill={paper ? '#000000' : '#9aa3c7'}>\n          {hasAccelerometer(app) ? 'Shake the frame, or tap, for an answer' : 'Tap for an answer'}\n        </text>\n      )}\n    </svg>\n  )\n}\n\nfunction mix(a: string, b: string, t: number): string {\n  const pa = parseInt(a.slice(1), 16)\n  const pb = parseInt(b.slice(1), 16)\n  let out = '#'\n  for (const shift of [16, 8, 0]) {\n    const va = (pa >> shift) & 255\n    const vb = (pb >> shift) & 255\n    out += Math.round(va + (vb - va) * t).toString(16).padStart(2, '0')\n  }\n  return out\n}\n\nexport function onEvent(app: any, context: any) {\n  const e = context.event\n  const p = context.payload || {}\n  if (e === 'orientation') {\n    // Face down and back up asks again, as the toy is used.\n    if (p.position === 'faceDown') {\n      wasFaceDown = true\n      return false\n    }\n    if (!wasFaceDown) return false\n    wasFaceDown = false\n    ask(app)\n    return true\n  }\n  if (e === 'shake' || e === 'tap' || (e === 'button' && p.action === 'press') ||\n      (e === 'keyDown' && (p.code === 'Space' || p.code === 'Enter'))) {\n    ask(app)\n    return true\n  }\n  return false\n}\n"
+        }
+      }
+    }
+  }
+]

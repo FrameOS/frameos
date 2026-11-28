@@ -600,6 +600,7 @@ type
   ExportedInterpretedScene* {.acyclic.} = ref object of ExportedScene
     name*: string
     compiled*: CompiledScene ## its program, made by the first instance (scene_compiler.nim)
+    graph*: SceneGraph ## its edges, read by the first instance (scene_compiler.sceneGraph)
     backgroundColor*: Color
     refreshInterval*: float
     nodes*: seq[DiagramNode]
@@ -736,11 +737,25 @@ type
     ## program puts around it (interpreter.snippetStaysInside), once.
     confined*: bool
 
-  AppInput* = object
-    ## An edge into a node's field: from another node's value, or inline code.
-    target*, source*: NodeId
+  SceneInput* = object
+    ## An edge into a node's field or code argument: from another node's
+    ## value, or inline code.
     field*: string
+    source*: int       ## the producer's node id, for a wired input
+    snippet*: string   ## the code, for an inline one
     inline*: bool
+
+  SceneGraph* {.acyclic.} = ref object
+    ## A scene's edges, read once (scene_compiler.sceneGraph) and shared by
+    ## the program's compiler, the image planner and every instance of the
+    ## scene. Acyclic like the export that holds it.
+    nodes*: seq[DiagramNode]
+    index*: Table[int, int]               ## node id -> position in `nodes`
+    next*: Table[int, int]                ## a `next` edge: node id -> node id
+    appInputs*: Table[int, seq[SceneInput]]  ## into app, dispatch and scene node fields
+    codeInputs*: Table[int, seq[SceneInput]] ## into code node arguments
+    fieldTargets*: seq[int]               ## nodes a `field/<name>` edge names
+    ignored*: seq[DiagramEdge]            ## edges nothing reads, logged at init
 
   SceneJsKind* = enum
     ## Where a scene's program runs (js_runtime/runtime.nim, ensureSceneJs).
@@ -768,7 +783,7 @@ type
     apps*: JsonNode
     eventApps*: seq[NodeId]                                                    # JS app nodes with `events` in their config.json
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup
-    appInputs*: seq[AppInput] # the edges into app, dispatch and scene node fields (the planner reads them)
+    graph*: SceneGraph # its edges as the program and the planner read them (scene_compiler.sceneGraph)
     sceneNodes*: Table[NodeId, FrameScene]                                     # cache of instantiated child scenes
     layoutSceneId*: SceneId
     layoutState*: JsonNode
@@ -796,13 +811,13 @@ type
     ## 0 is nothing). Emptied when the outermost run ends.
     values*: seq[Value]
     cacheConfigs*: Table[NodeId, NodeCacheConfig] # nodes with their cache on
-    cacheInputKeys*: Table[NodeId, JsonNode]      # their inputs this run, for the key
-    cachePending*: Table[NodeId, tuple[key, expr: JsonNode]] # a code node's miss, until its result is stored
+    cacheInputKeys*: Table[NodeId, seq[(uint64, uint64)]] # their inputs this run, field by field (cache_key.nim)
+    cachePending*: Table[NodeId, tuple[key, expr: uint64]] # a code node's miss, until its result is stored
     profiles*: seq[NodeProfile]                   # the nodes being profiled (frameConfig.debug)
     cacheValues*: Table[NodeId, Value]
     cacheTimes*: Table[NodeId, float]
-    cacheKeys*: Table[NodeId, JsonNode]
-    cacheExprs*: Table[NodeId, JsonNode]
+    cacheKeys*: Table[NodeId, uint64]   # the inputs' key the held value was made for (cache_key.nim)
+    cacheExprs*: Table[NodeId, uint64]  # the cache expression's
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
     imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
 

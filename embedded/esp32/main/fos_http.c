@@ -47,6 +47,7 @@
 #include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_framebuffer.h"
 #include "fos_lan_access.h"
 #include "fos_mem.h"
@@ -740,7 +741,7 @@ char *fos_http_status_json(void)
         "\"charger\":{\"present\":%s,\"usbPower\":%s,\"charging\":%s,\"chargeDone\":%s},"
         "\"led\":{\"pin\":%d,\"type\":\"%s\"},"
         "\"i2c\":{\"buses\":\"%s\",\"rtc\":%s,\"rtcTimeLoaded\":%s,\"climateSensor\":%s,"
-        "\"gauge\":%s,\"touch\":%s,\"codecMic\":%s,\"codecSpeaker\":%s,\"imu\":%s},"
+        "\"gauge\":%s,\"touch\":%s,\"codecMic\":%s,\"codecSpeaker\":%s,\"imu\":%s,\"autoRotate\":%s},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
@@ -784,7 +785,7 @@ char *fos_http_status_json(void)
         fos_rtc_time_loaded() ? "true" : "false", fos_i2c_present(FOS_I2C_SHT4X) ? "true" : "false",
         fos_gauge_present() ? "true" : "false", fos_touch_present() ? "true" : "false",
         fos_codec_has_mic() ? "true" : "false", fos_codec_has_speaker() ? "true" : "false",
-        fos_imu_present() ? "true" : "false",
+        fos_imu_present() ? "true" : "false", config->auto_rotate ? "true" : "false",
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
@@ -1041,7 +1042,7 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
     /* The packed snapshot is in PANEL orientation (the packers rotate while
      * packing); previews are served in SCENE orientation like the Pi's, so
      * the UI never shows a sideways image on rotated frames. */
-    int rotate = fos_config()->rotate;
+    int rotate = fos_rotation();
     int out_width = (rotate == 90 || rotate == 270) ? height : width;
     int out_height = (rotate == 90 || rotate == 270) ? width : height;
 

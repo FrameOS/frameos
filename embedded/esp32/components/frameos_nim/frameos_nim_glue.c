@@ -88,6 +88,7 @@ extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
 extern void fos_nim_set_scaling_mode_impl(const char *mode);
 extern void fos_nim_set_render_scale_impl(double scale);
+extern bool fos_nim_set_rotation_impl(int rotate);
 extern void fos_nim_set_colors_impl(const char *json);
 extern void fos_nim_set_palette_impl(const char *json);
 extern void fos_nim_set_event_map_impl(const char *json);
@@ -1298,6 +1299,15 @@ void frameos_nim_set_render_scale(double scale)
     if (!nim_lock_take()) return;
     fos_nim_set_render_scale_impl(scale);
     nim_lock_give();
+}
+
+bool frameos_nim_set_rotation(int rotate)
+{
+    if (!s_nim_ready) return false;
+    if (!nim_lock_take()) return false;
+    bool ok = fos_nim_set_rotation_impl(rotate);
+    nim_lock_give();
+    return ok;
 }
 
 void frameos_nim_set_colors(const char *json)

@@ -3,7 +3,7 @@
     "id": "video-player",
     "name": "Video player",
     "settings": {
-      "category": "Photos",
+      "category": "Video",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",

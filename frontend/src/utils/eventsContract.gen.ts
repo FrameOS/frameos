@@ -16,7 +16,7 @@ export const SCENE_YIELD_ID = 'system/yield'
 
 export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap' | 'panel'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
-export type EventDevice = 'keyboard' | 'pointer' | 'button'
+export type EventDevice = 'keyboard' | 'pointer' | 'button' | 'motion'
 export type EventRenderAfter = 'never' | 'always' | 'if-state-changed'
 export type EventCoalesce = 'none' | 'latest'
 export type EventLogPolicy = 'full' | 'name-only' | 'none'
@@ -43,6 +43,10 @@ export type ContractEventName =
   | 'pinch'
   | 'edgeSwipe'
   | 'wheel'
+  | 'tilt'
+  | 'flick'
+  | 'shake'
+  | 'orientation'
   | 'turnOn'
   | 'turnOff'
   | 'toggleScreen'
@@ -604,6 +608,102 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "wasm": true
     },
     "since": "2026.9.21"
+  },
+  "tilt": {
+    "class": "input",
+    "device": "motion",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": false,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.17"
+  },
+  "flick": {
+    "class": "input",
+    "device": "motion",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": false,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.17"
+  },
+  "shake": {
+    "class": "input",
+    "device": "motion",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": false,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.17"
+  },
+  "orientation": {
+    "class": "input",
+    "device": "motion",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": false,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.17"
   },
   "turnOn": {
     "class": "scene-command",
@@ -1185,6 +1285,14 @@ interface FrameOSEventPayloads {
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
+  /** The frame tipped toward one side of its picture and stayed tipped (docs/accelerometer.md): \`direction\` is the side that went down, \`x\` and \`y\` how far it leans then, in g along the picture's axes (x to its right, y to its bottom). Measured from how the frame rested before, so it works lying on a table and held in a hand alike: past \`motion.tiltG\` and still there after \`motion.tiltHoldMs\`. It comes again only once the frame has rested for \`motion.restMs\`. A frame with an accelerometer: the reTerminal Sticky, the Waveshare 1.75" AMOLED. */
+  tilt: { direction: string; x: number; y: number };
+  /** The frame tipped toward one side of its picture past \`motion.tiltG\` and straight back within \`motion.tiltHoldMs\`: a flick of the wrist, as one turns a page (docs/accelerometer.md). \`direction\` is the side that dipped, \`x\` and \`y\` the deepest of it in g. A flick is never also a tilt. The frame's event map binds it like a key: a flick right as \`next\`, left as \`prev\`. */
+  flick: { direction: string; x: number; y: number };
+  /** The frame was shaken: \`motion.shakeCount\` jolts of more than \`motion.shakeG\` away from gravity within \`motion.shakeMs\` (docs/accelerometer.md). \`strength\` is the hardest of them, in g. Once a shake is heard the next one needs the frame to rest for \`motion.restMs\` first. */
+  shake: { strength: number };
+  /** The frame came to rest in another position (docs/accelerometer.md): standing on one of its sides or lying flat, for \`motion.restMs\`. \`position\` is one of \`motion.positions\`, next to the way the frame was set up (its rotation in the settings): \`upright\`, \`turnedLeft\` (turned a quarter to the left, its left side down), \`turnedRight\`, \`upsideDown\`, \`faceUp\` or \`faceDown\`. \`rotate\`, while it stands, is the rotation that shows the picture upright; auto-rotate (the frame's setting) turns the picture by the same reading. */
+  orientation: { position: string; rotate?: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
   /** Turn the screen off */

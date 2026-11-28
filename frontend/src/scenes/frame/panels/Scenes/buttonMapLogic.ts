@@ -4,7 +4,23 @@ import type { DeepPartial } from 'kea-forms'
 import type { EventMapRule, FrameId, FrameScene, FrameType, GPIOButton } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
-import { frameSupportsTriplePress } from '../../../../utils/frameEventMap'
+import { frameHasAccelerometer } from '../../../../utils/accelerometer'
+import {
+  type ButtonBinding,
+  type FrameActionOffer,
+  bindingConflicts,
+  bindingRule,
+  frameGestureValue,
+  frameSupportsBackForward,
+  frameSupportsMotionGestures,
+  frameSupportsSceneSettings,
+  frameSupportsSceneSwitcher,
+  frameSupportsTriplePress,
+  motionGestures,
+  sceneMotionBindings,
+  type MotionGesture,
+} from '../../../../utils/frameEventMap'
+import { deviceSwitchesDisplay, frameDisplayDevice } from '../../../workspace/workspaceSurfaces'
 import {
   type ButtonGesture,
   type ButtonListener,
@@ -23,7 +39,10 @@ import {
 // form next to the scene like a rename is, and saved with the frame: the
 // backend keeps it on the installed entry, the cloud on the assignment row
 // (cloudFrameScenesSave.ts posts it as `event_maps`), and a scene update
-// keeps it on both.
+// keeps it on both. On a frame with an accelerometer it also binds the
+// frame's motion to an action while this scene shows (a flick as Forward
+// turns a reader's page; docs/accelerometer.md): rows like the frame's
+// "Button actions" (frameEventMap.ts sceneMotionBindings).
 
 export interface ButtonMapLogicProps {
   frameId: FrameId
@@ -42,6 +61,9 @@ export interface buttonMapLogicValues {
   gestures: ButtonGesture[]
   isOpen: boolean
   listeners: ButtonListener[]
+  motionBindings: ButtonBinding[]
+  motionGestures: MotionGesture[]
+  motionOffer: FrameActionOffer
   rules: EventMapRule[]
   scene: FrameScene | null
 }
@@ -51,21 +73,32 @@ export interface buttonMapLogicActions {
   setFrameFormValues: (values: DeepPartial<FrameType>) => {
     values: DeepPartial<FrameType>
   } // frameLogic
+  addMotionBinding: () => {
+    value: true
+  }
+  appendMotionBinding: (binding: ButtonBinding) => {
+    binding: ButtonBinding
+  }
   closeButtonMap: () => {
     value: true
   }
   openButtonMap: () => {
     value: true
   }
+  removeMotionBinding: (index: number) => {
+    index: number
+  }
   saveButtonMap: () => {
     value: true
   }
   seedChoices: (
     choices: Record<string, string>,
-    custom: EventMapRule[]
+    custom: EventMapRule[],
+    motionBindings: ButtonBinding[]
   ) => {
     choices: Record<string, string>
     custom: EventMapRule[]
+    motionBindings: ButtonBinding[]
   }
   setChoice: (
     listenerKey: string,
@@ -73,6 +106,13 @@ export interface buttonMapLogicActions {
   ) => {
     listenerKey: string
     value: string
+  }
+  setMotionBinding: (
+    index: number,
+    binding: ButtonBinding
+  ) => {
+    binding: ButtonBinding
+    index: number
   }
 }
 
@@ -84,8 +124,20 @@ export interface buttonMapLogicMeta {
     buttons: (frame: FrameType, frameForm: Partial<FrameType>) => GPIOButton[]
     listeners: (scene: FrameScene | null) => ButtonListener[]
     gestures: (buttons: GPIOButton[], frame: FrameType) => ButtonGesture[]
-    conflicts: (listeners: ButtonListener[], choices: Record<string, string>) => string[]
-    rules: (listeners: ButtonListener[], choices: Record<string, string>, custom: EventMapRule[]) => EventMapRule[]
+    motionGestures: (frame: FrameType) => MotionGesture[]
+    motionOffer: (frame: FrameType, frameForm: Partial<FrameType>) => FrameActionOffer
+    conflicts: (
+      listeners: ButtonListener[],
+      choices: Record<string, string>,
+      motionBindings: ButtonBinding[],
+      motionOffer: FrameActionOffer
+    ) => string[]
+    rules: (
+      listeners: ButtonListener[],
+      choices: Record<string, string>,
+      custom: EventMapRule[],
+      motionBindings: ButtonBinding[]
+    ) => EventMapRule[]
     changed: (rules: EventMapRule[], scene: FrameScene | null) => boolean
   }
 }
@@ -105,8 +157,16 @@ export const buttonMapLogic = kea<buttonMapLogicType>([
     openButtonMap: true,
     closeButtonMap: true,
     setChoice: (listenerKey: string, value: string) => ({ listenerKey, value }),
-    seedChoices: (choices: Record<string, string>, custom: EventMapRule[]) => ({ choices, custom }),
+    seedChoices: (choices: Record<string, string>, custom: EventMapRule[], motionBindings: ButtonBinding[]) => ({
+      choices,
+      custom,
+      motionBindings,
+    }),
     saveButtonMap: true,
+    addMotionBinding: true,
+    appendMotionBinding: (binding: ButtonBinding) => ({ binding }),
+    setMotionBinding: (index: number, binding: ButtonBinding) => ({ index, binding }),
+    removeMotionBinding: (index: number) => ({ index }),
   }),
   reducers({
     isOpen: [
@@ -141,6 +201,16 @@ export const buttonMapLogic = kea<buttonMapLogicType>([
         seedChoices: (_, { custom }) => custom,
       },
     ],
+    // The scene's motion rows: a motion of the frame and its action while the scene shows.
+    motionBindings: [
+      [] as ButtonBinding[],
+      {
+        seedChoices: (_, { motionBindings }) => motionBindings,
+        appendMotionBinding: (state, { binding }) => [...state, binding],
+        setMotionBinding: (state, { index, binding }) => state.map((b, i) => (i === index ? binding : b)),
+        removeMotionBinding: (state, { index }) => state.filter((_b, i) => i !== index),
+      },
+    ],
   }),
   selectors(({ props }) => ({
     scene: [
@@ -162,18 +232,43 @@ export const buttonMapLogic = kea<buttonMapLogicType>([
       (buttons: buttonMapLogicValues['buttons'], frame: buttonMapLogicValues['frame']): ButtonGesture[] =>
         buttonGestures(buttons, { triplePress: frameSupportsTriplePress(frame?.frameos_version, isCloudMode()) }),
     ],
-    conflicts: [
-      (s) => [s.listeners, s.choices],
-      (listeners: buttonMapLogicValues['listeners'], choices: buttonMapLogicValues['choices']): string[] =>
-        buttonMapConflicts(listeners, choices),
+    // The frame's motions, offered on a frame with an accelerometer whose
+    // FrameOS hears it (empty elsewhere: saved rows still show).
+    motionGestures: [
+      (s) => [s.frame],
+      (frame: buttonMapLogicValues['frame']): MotionGesture[] =>
+        frameHasAccelerometer(frame) && frameSupportsMotionGestures(frame?.frameos_version, isCloudMode())
+          ? motionGestures()
+          : [],
     ],
-    rules: [
-      (s) => [s.listeners, s.choices, s.custom],
+    // What a motion row may do: what the frame's own rows may, voice chat aside.
+    motionOffer: [
+      (s) => [s.frame, s.frameForm],
+      (frame: buttonMapLogicValues['frame'], frameForm: buttonMapLogicValues['frameForm']): FrameActionOffer => ({
+        voiceChat: false,
+        displayPower: deviceSwitchesDisplay(frameForm?.device ?? frameDisplayDevice(frame)),
+        sceneSwitcher: frameSupportsSceneSwitcher(frame?.frameos_version, isCloudMode()),
+        sceneSettings: frameSupportsSceneSettings(frame?.frameos_version, isCloudMode()),
+        backForward: frameSupportsBackForward(frame?.frameos_version, isCloudMode()),
+      }),
+    ],
+    conflicts: [
+      (s) => [s.listeners, s.choices, s.motionBindings, s.motionOffer],
       (
         listeners: buttonMapLogicValues['listeners'],
         choices: buttonMapLogicValues['choices'],
-        custom: buttonMapLogicValues['custom']
-      ): EventMapRule[] => buttonMapRules(listeners, choices, custom),
+        motionBindings: buttonMapLogicValues['motionBindings'],
+        motionOffer: buttonMapLogicValues['motionOffer']
+      ): string[] => [...buttonMapConflicts(listeners, choices), ...bindingConflicts(motionBindings, motionOffer)],
+    ],
+    rules: [
+      (s) => [s.listeners, s.choices, s.custom, s.motionBindings],
+      (
+        listeners: buttonMapLogicValues['listeners'],
+        choices: buttonMapLogicValues['choices'],
+        custom: buttonMapLogicValues['custom'],
+        motionBindings: buttonMapLogicValues['motionBindings']
+      ): EventMapRule[] => buttonMapRules(listeners, choices, [...motionBindings.map(bindingRule), ...custom]),
     ],
     changed: [
       (s) => [s.rules, s.scene],
@@ -184,7 +279,26 @@ export const buttonMapLogic = kea<buttonMapLogicType>([
   listeners(({ actions, values, props }) => ({
     openButtonMap: () => {
       const { choices, custom } = buttonMapChoices(values.scene?.eventMap, values.listeners)
-      actions.seedChoices(choices, custom)
+      const motion = sceneMotionBindings(custom)
+      actions.seedChoices(choices, motion.others, motion.bindings)
+    },
+    addMotionBinding: () => {
+      // A page turned: a flick to the right as Forward, then to the left as
+      // Back, then the first motion no row binds yet.
+      const bound = new Set(values.motionBindings.map((binding) => frameGestureValue(binding.gesture)))
+      const free = (gesture: MotionGesture): boolean => !bound.has(frameGestureValue(gesture))
+      const right: MotionGesture = { event: 'flick', direction: 'right' }
+      const left: MotionGesture = { event: 'flick', direction: 'left' }
+      const gesture = [right, left, ...values.motionGestures].find(free) ?? values.motionGestures[0]
+      if (gesture && values.motionGestures.length > 0) {
+        const back = gesture.event === 'flick' && gesture.direction === 'left'
+        actions.appendMotionBinding({
+          gesture,
+          action: values.motionOffer.backForward
+            ? { kind: back ? 'back' : 'forward' }
+            : { kind: back ? 'prevScene' : 'nextScene' },
+        })
+      }
     },
     saveButtonMap: () => {
       const scenes = values.frameForm?.scenes ?? values.frame?.scenes ?? []

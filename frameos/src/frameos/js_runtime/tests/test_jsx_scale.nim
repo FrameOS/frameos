@@ -3,6 +3,7 @@ import pixie
 
 import frameos/js_runtime/app_runtime
 import frameos/panel_shape
+import frameos/tones
 import frameos/types
 import frameos/values
 import frameos/ui/events
@@ -263,6 +264,72 @@ export function get(app, context) {
       hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
     discard ui.runtime.get(ui.owner, %*{}, context)
     check ui.scene.state["quiet"].getBool()
+
+  test "frameos.accelerometer() reads the frame's, and is null without one":
+    const source = """
+      export function get(app) {
+        const g = frameos.accelerometer()
+        frameos.setState('has', app.frame.accelerometer === true)
+        frameos.setState('g', g)
+        return { ok: true }
+      }
+    """
+    let ui = newUi(source, "tests/accelerometer", sourceName = "app.js", outputType = "json")
+    proc run() =
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+    accelerometerReader = nil
+    run()
+    check not ui.scene.state["has"].getBool()
+    check ui.scene.state["g"].kind == JNull
+    accelerometerReader = proc (x, y, z: var float): bool {.nimcall, gcsafe.} =
+      x = -0.25
+      y = 0.5
+      z = -0.812
+      true
+    run()
+    check ui.scene.state["has"].getBool()
+    check ui.scene.state["g"]["x"].getFloat() == -0.25
+    check ui.scene.state["g"]["y"].getFloat() == 0.5
+    check ui.scene.state["g"]["z"].getFloat() == -0.812
+    accelerometerReader = nil
+
+  test "frameos.tone() hands the host its notes, and answers false where nothing plays them":
+    const source = """
+      export function get(app) {
+        frameos.setState('has', app.frame.tone === true)
+        frameos.setState('answers', [
+          frameos.tone(),
+          frameos.tone(880),
+          frameos.tone(440.4, 99.6),
+          frameos.tone([[2093, 120], [0, 60], [3136, 240], 'loud']),
+          frameos.tone([[0, 100]]),
+        ])
+        return { ok: true }
+      }
+    """
+    let ui = newUi(source, "tests/tone", sourceName = "app.js", outputType = "json")
+    proc run() =
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+    toneSink = nil
+    run()
+    check not ui.scene.state["has"].getBool()
+    check ui.scene.state["answers"] == %*[false, false, false, false, false]
+    var heard {.global.}: seq[string]
+    heard = @[]
+    toneSink = proc (notes: string): bool {.nimcall, gcsafe.} =
+      {.cast(gcsafe).}:
+        if notes.len > 0:
+          heard.add notes
+      true
+    run()
+    check ui.scene.state["has"].getBool()
+    check ui.scene.state["answers"] == %*[true, true, true, true, false]
+    check heard == @[ChimeNotes, "880:200", "440:100", "2093:120,0:60,3136:240"]
+    toneSink = nil
 
   test "the scene's own scale wins over the frame's, and its role field over its setting":
     let ui = newUi(box, "tests/jsx-scale-scene")

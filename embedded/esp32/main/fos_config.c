@@ -328,6 +328,8 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) cfg->voice_chat = u8 != 0;
     if (nvs_get_u8(nvs, "touch_beep", &u8) == ESP_OK) cfg->touch_beep = u8 != 0;
     if (nvs_get_u8(nvs, "bt", &u8) == ESP_OK) cfg->bluetooth = u8 != 0;
+    if (nvs_get_u8(nvs, "auto_rotate", &u8) == ESP_OK) cfg->auto_rotate = u8 != 0;
+    nvs_get_string(nvs, "imu_axes", cfg->imu_axes, sizeof(cfg->imu_axes));
     if (nvs_get_u8(nvs, "click_sounds", &u8) == ESP_OK && u8 <= FOS_CLICK_SOUNDS_LAST) cfg->click_sounds = u8;
     if (nvs_get_u8(nvs, "cpu_mode", &u8) == ESP_OK && u8 <= FOS_CPU_PERFORMANCE) cfg->cpu_mode = u8;
     if (nvs_get_u8(nvs, "brightness", &u8) == ESP_OK && u8 >= 5 && u8 <= 100) cfg->brightness = u8;
@@ -486,6 +488,8 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", cfg->voice_chat ? 1 : 0), "voice");
     FOS_NVS_SET(nvs_set_u8(nvs, "touch_beep", cfg->touch_beep ? 1 : 0), "touch_beep");
     FOS_NVS_SET(nvs_set_u8(nvs, "bt", cfg->bluetooth ? 1 : 0), "bt");
+    FOS_NVS_SET(nvs_set_u8(nvs, "auto_rotate", cfg->auto_rotate ? 1 : 0), "auto_rotate");
+    FOS_NVS_SET(nvs_set_str(nvs, "imu_axes", cfg->imu_axes), "imu_axes");
     FOS_NVS_SET(nvs_set_u8(nvs, "click_sounds", cfg->click_sounds), "click_sounds");
     FOS_NVS_SET(nvs_set_u8(nvs, "cpu_mode", cfg->cpu_mode), "cpu_mode");
     FOS_NVS_SET(nvs_set_u8(nvs, "brightness", cfg->brightness), "brightness");

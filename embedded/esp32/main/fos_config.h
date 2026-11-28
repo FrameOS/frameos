@@ -287,6 +287,13 @@ typedef struct {
                                     * talks to the AI chat (docs/voice-chat.md);
                                     * off keeps the microphone shut whatever
                                     * the map says. Default on. */
+    bool auto_rotate;              /* the picture turns to stand upright as the
+                                    * frame is turned, by its accelerometer
+                                    * (fos_rotation.c, docs/accelerometer.md).
+                                    * Live; default off. */
+    char imu_axes[16];             /* the accelerometer's axes on the panel,
+                                    * "x=-y,y=x,z=z" (fos_motion_parse_axes);
+                                    * "" = the board's (fos_imu.c). */
     bool touch_beep;               /* e-paper: a click when something takes a
                                     * press on the glass, and when it lifts.
                                     * Default on. */

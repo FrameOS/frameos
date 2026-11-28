@@ -263,6 +263,54 @@ suite "jsx events":
     check counts() == "2 5 3"
     check image[85, 33] == red
 
+  test "signal(): a render that runs no get() goes on counting down the sleep get() asked for":
+    # A reminder at 17:00 that get() woke the frame for (setNextSleep) must
+    # not wait out the scene's interval because a tap came in between and
+    # ran only a component (docs/tones.md).
+    let ui = newUi("""
+      const lit = signal(false)
+      let gets = 0
+      const Dot = memo(() => <div className={`w-10 h-10 ${lit.value ? 'bg-green-500' : 'bg-red-500'}`}
+        onClick={() => { lit.value = !lit.value }} />)
+      export function get(app) {
+        gets++
+        frameos.setState('gets', gets)
+        if (app.state.sleep !== undefined) frameos.setNextSleep(app.state.sleep)
+        return <div className="flex p-5 bg-white"><Dot /></div>
+      }
+    """, "tests/jsx-signal-sleep")
+    ui.scene.refreshInterval = 3600
+    proc renderSleep(): float =
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{}, loopIndex: 0, loopKey: ".",
+        nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+      context.nextSleep
+    # get() asks nothing: a render after a tap asks nothing either.
+    check renderSleep() == -1
+    check dispatchUiEvent("tests/jsx-signal-sleep", "tap", at(25, 25))
+    check renderSleep() == -1
+    check ui.scene.state{"gets"}.getInt() == 1
+    # get() asks for 100 s: the tap's render asks for what is left of them.
+    ui.scene.state["sleep"] = %100
+    ui.scene.refreshInterval = 0.001
+    check renderSleep() == 100
+    ui.scene.refreshInterval = 3600
+    check ui.scene.state{"gets"}.getInt() == 2
+    check dispatchUiEvent("tests/jsx-signal-sleep", "tap", at(25, 25))
+    let left = renderSleep()
+    check ui.scene.state{"gets"}.getInt() == 2 # the component alone
+    check left > 99 and left <= 100
+    # Once the wish has run out, the render after a tap is the one get()
+    # wanted: a whole get().
+    ui.scene.state["sleep"] = %0.05
+    ui.scene.refreshInterval = 0.001
+    check renderSleep() == 0.05
+    ui.scene.refreshInterval = 3600
+    sleep(80)
+    check dispatchUiEvent("tests/jsx-signal-sleep", "tap", at(25, 25))
+    discard renderSleep()
+    check ui.scene.state{"gets"}.getInt() == 4
+
   test "signal(): a handler that changes anything else is a whole get()":
     let ui = newUi("""
       const lit = signal(false)

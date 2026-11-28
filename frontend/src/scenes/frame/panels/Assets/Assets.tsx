@@ -12,6 +12,7 @@ import {
   type DiskStats,
   isThumbnailAssetName,
 } from './assetsLogic'
+import { deviceThumbnailMaxBytes, thumbnailSizeAllowed } from '../../../../utils/deviceThumbnails'
 import {
   DocumentIcon,
   ExclamationTriangleIcon,
@@ -19,6 +20,7 @@ import {
   EyeSlashIcon,
   FolderIcon,
   FolderOpenIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline'
 import {
   AdjustmentsHorizontalIcon,
@@ -31,6 +33,7 @@ import {
   SwatchIcon,
   TrashIcon,
   FolderPlusIcon,
+  SquaresPlusIcon,
 } from '@heroicons/react/24/solid'
 import { useState, type DragEvent } from 'react'
 import { Spinner } from '../../../../components/Spinner'
@@ -114,6 +117,8 @@ function TreeNode({
   createFolder,
   createImageScene,
   createImageFolderScene,
+  installImageScene,
+  installImageFolderScene,
   uploadDroppedFiles,
   frameAssetFolderExpansion,
   setFrameAssetFolderExpanded,
@@ -137,6 +142,9 @@ function TreeNode({
   createFolder: (path: string) => void
   createImageScene: (path: string) => void
   createImageFolderScene: (path: string) => void
+  /** The same scenes, installed on the frame instead of shown once. */
+  installImageScene: (path: string) => void
+  installImageFolderScene: (path: string) => void
   uploadDroppedFiles: (path: string, files: File[]) => void
   frameAssetFolderExpansion: Record<string, boolean>
   setFrameAssetFolderExpanded: (frameId: FrameId, path: string, expanded: boolean) => void
@@ -158,6 +166,7 @@ function TreeNode({
   // five at once makes the whole panel slower than asking for one.
   const { frame } = useValues(frameLogic)
   const thumbnailConcurrency = isEsp32Frame(frame) ? 1 : undefined
+  const thumbnailMaxBytes = deviceThumbnailMaxBytes(isEsp32Frame(frame))
   const expansionPath = assetFolderExpansionPath(storage, node.path)
   const expansionKey = frameAssetFolderExpansionKey(frameId, expansionPath)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
@@ -295,6 +304,14 @@ function TreeNode({
                       onClick: () => createImageFolderScene(node.path),
                     }
                   : null,
+                hasPlayableImages && !readOnly
+                  ? {
+                      label: 'Install slideshow as scene',
+                      icon: <SquaresPlusIcon className="w-5 h-5" />,
+                      title: 'Add a scene that plays this folder to the frame’s scenes',
+                      onClick: () => installImageFolderScene(node.path),
+                    }
+                  : null,
                 !node.path
                   ? {
                       label: showSystemFolders
@@ -365,6 +382,8 @@ function TreeNode({
                 createFolder={createFolder}
                 createImageScene={createImageScene}
                 createImageFolderScene={createImageFolderScene}
+                installImageScene={installImageScene}
+                installImageFolderScene={installImageFolderScene}
                 uploadDroppedFiles={uploadDroppedFiles}
                 frameAssetFolderExpansion={frameAssetFolderExpansion}
                 setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}
@@ -385,6 +404,7 @@ function TreeNode({
   } else {
     // This is a file
     const hasThumbnail = hasAssetThumbnail(node.name)
+    const showsThumbnail = hasThumbnail && thumbnailSizeAllowed(node.size, thumbnailMaxBytes)
     const opensInline = opensAsBrowserImage(node.name)
     const isPlayableImage = nodeHasPlayableImages(node)
     const isUploading = node.mtime === -1
@@ -399,7 +419,15 @@ function TreeNode({
         onDragLeave={onDragLeave}
         onDrop={onDropFiles}
       >
-        {hasThumbnail &&
+        {hasThumbnail && !showsThumbnail && node.mtime !== undefined && node.mtime >= 0 ? (
+          <span
+            className="asset-file-thumb w-8 h-8 flex items-center justify-center"
+            title="No thumbnail: the frame would have to send the whole file. Open it to see it."
+          >
+            <PhotoIcon className="asset-row-icon h-5 w-5 shrink-0 frame-tool-muted" />
+          </span>
+        ) : null}
+        {showsThumbnail &&
           node.size !== undefined &&
           node.mtime !== undefined &&
           node.size >= 0 &&
@@ -408,6 +436,7 @@ function TreeNode({
             <div className="asset-file-thumb w-8 h-8">
               <DeferredImage
                 url={frameAssetUrl(frameId, node.path, { thumb: true, storage })}
+                maxConcurrent={thumbnailConcurrency}
                 className="frameos-card-media w-8 h-8 object-cover border rounded"
                 spinnerClassName="w-4 h-4"
               />
@@ -471,6 +500,14 @@ function TreeNode({
                       label: 'Render image',
                       icon: <PlayIcon className="w-4 h-4" />,
                       onClick: () => createImageScene(node.path),
+                    }
+                  : null,
+                isPlayableImage && !readOnly
+                  ? {
+                      label: 'Install as scene',
+                      icon: <SquaresPlusIcon className="w-4 h-4" />,
+                      title: 'Add a scene that shows this image to the frame’s scenes',
+                      onClick: () => installImageScene(node.path),
                     }
                   : null,
                 hasThumbnail && !readOnly
@@ -798,6 +835,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     deleteAsset,
     renameAsset,
     createFolder,
+    installImageScene: installImageSceneOnFrame,
   } = useActions(assetsLogic(assetsLogicProps))
   const { toggleShowSystemFolders, toggleShowHiddenFiles, setStorage } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
@@ -846,13 +884,17 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const sceneRootPath =
     storage === DEFAULT_ASSET_STORAGE ? frameForm.assets_path || frame.assets_path || '/srv/assets' : storageRootPath
 
-  const createImageScene = async (path: string): Promise<void> => {
-    const assetsPath = sceneRootPath
-    const normalizedPath = path.replace(/^\.\//, '')
-    const parts = normalizedPath.split('/').filter(Boolean)
-    const filename = parts.pop() || normalizedPath
+  // Where an asset is for a scene on the frame: its folder as the frame sees
+  // it, and the file's name within it (none for a folder).
+  const imageSceneTarget = (path: string, isFile: boolean): { imageFolder: string; filename: string } => {
+    const parts = path.replace(/^\.\//, '').split('/').filter(Boolean)
+    const filename = isFile ? parts.pop() || path : ''
     const folderPath = parts.join('/')
-    const imageFolder = folderPath ? `${assetsPath}/${folderPath}` : assetsPath
+    return { imageFolder: folderPath ? `${sceneRootPath}/${folderPath}` : sceneRootPath, filename }
+  }
+
+  const createImageScene = async (path: string): Promise<void> => {
+    const { imageFolder, filename } = imageSceneTarget(path, true)
     const sceneId = uuidv4()
     const scene = buildLocalImageScene(filename, imageFolder, sceneId)
     try {
@@ -864,20 +906,25 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   }
 
   const createImageFolderScene = async (path: string): Promise<void> => {
-    const assetsPath = sceneRootPath
-    const normalizedPath = path.replace(/^\.\//, '')
-    const parts = normalizedPath.split('/').filter(Boolean)
-    const folderPath = parts.join('/')
-    const imageFolder = folderPath ? `${assetsPath}/${folderPath}` : assetsPath
+    const { imageFolder } = imageSceneTarget(path, false)
     const sceneId = uuidv4()
     const scene = buildLocalImageFolderScene(imageFolder, sceneId, secondsBetweenImages)
     try {
       await sendEvent('uploadScenes', { scenes: [scene], sceneId })
     } catch (error) {
       console.error(error)
-      reportImageSceneFailure(folderPath || assetsPath, error)
+      reportImageSceneFailure(imageFolder, error)
     }
   }
+
+  const installImageScene = (path: string): void => installImageSceneOnFrame(imageSceneTarget(path, true))
+  const installImageFolderScene = (path: string): void =>
+    installImageSceneOnFrame({
+      imageFolder: imageSceneTarget(path, false).imageFolder,
+      seconds: secondsBetweenImages,
+      // The whole storage: its folder's name (`assets`) says nothing.
+      ...(path.replace(/^\.\//, '') ? {} : { name: 'Slideshow' }),
+    })
 
   return (
     <div
@@ -914,6 +961,8 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             createFolder={createFolder}
             createImageScene={createImageScene}
             createImageFolderScene={createImageFolderScene}
+            installImageScene={installImageScene}
+            installImageFolderScene={installImageFolderScene}
             uploadDroppedFiles={uploadDroppedFiles}
             frameAssetFolderExpansion={frameAssetFolderExpansion}
             setFrameAssetFolderExpanded={setFrameAssetFolderExpanded}

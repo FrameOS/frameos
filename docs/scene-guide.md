@@ -36,7 +36,8 @@ A scenes file is a JSON array of scenes. Each scene is
 - `settings.category` (optional): the scene's category by its name, which a
   desktop layout groups its list of scenes by. Pick one of the store's:
   `"Photos"` (the owner's photos or a photo service), `"Art & galleries"` (a
-  collection of artwork the scene carries), `"Clocks & time"` (clocks, timers,
+  collection of artwork the scene carries), `"Video"` (films and video clips
+  it plays), `"Clocks & time"` (clocks, timers,
   the year at a glance), `"Calendars & agendas"`, `"Weather"` (real
   forecasts), `"Home & dashboards"` (a smart home, data, charts, maps, stats
   from a service), `"Games"`, `"Fun & animations"` (comics, toys,
@@ -1002,6 +1003,49 @@ terse code:
   on a Pi), and a render or an event after 90 seconds in all (120 on a Pi, 60
   in the preview), HTTP included.
 
+## Moving the frame
+
+A few frames have an accelerometer (the reTerminal Sticky, the Waveshare
+1.75" AMOLED). `frameos.accelerometer()` answers which way down is, in g along
+the picture's axes as it shows (x right, y down, z out of the glass): upright
+`{x: 0, y: 1, z: 0}`, face up on a table `{x: 0, y: 0, z: -1}`, plus whatever
+shaking adds. It is `null` everywhere else, and `app.frame.accelerometer` says
+whether there is one without reading it.
+
+- For a gesture, listen for an event rather than reading: `tilt` (tipped to a
+  side and held: `direction` is the side that went down), `flick` (tipped and
+  straight back, a page turn), `shake` and `orientation` (`position`:
+  `upright`, `turnedLeft`, `turnedRight`, `upsideDown`, `faceUp`,
+  `faceDown`). A JS app lists them in its config.json `events`.
+- Read `frameos.accelerometer()` every frame of an animation (sand, a marble,
+  a spirit level), only where `app.frame.fast` is true; on e-paper move in
+  steps on `tilt` events instead, one picture a gesture.
+- Always offer another way to play where it is `null`: a swipe, the keys, the
+  buttons, a tap. Say so in a line on the screen if the scene is about
+  tilting.
+- A scene that does either is tagged "Accelerometer" in the store.
+
+## Sounds and reminders
+
+Many ESP32 frames have a buzzer (the reTerminal E-series and Sticky) or a
+speaker that plays its notes (the Waveshare PhotoPainter). `frameos.tone()`
+sounds it: the frame's chime with no arguments, `frameos.tone(880, 300)` one
+note, `frameos.tone([[2093, 120], [0, 60], [3136, 240]])` up to 16 notes (0 Hz
+a rest). It answers `false` where nothing plays it (a Raspberry Pi), and
+`app.frame.tone` says so without sounding anything. It is new: check
+`typeof frameos.tone === 'function'` first, and draw the reminder anyway.
+
+- A reminder is a time the scene wakes for and a sound at that render: work
+  out the next due time, `frameos.setNextSleep(seconds until it)` (no more
+  than the scene's own interval), and in the render that finds it due, sound
+  once and remember that it rang (`frameos.setState`). A scene renders again
+  on every tap, so a tone in every render is noise.
+- Sound for something the person asked to be told about (a time they set, a
+  timer they started), never to draw attention to a scene by itself.
+- A frame that sleeps between pictures wakes on the time it was given and
+  plays the tone to its end before it sleeps again; one rendered on its
+  control plane gets the tone with its picture.
+
 ## Events
 
 An `event` node starts a flow when its event happens; a `dispatch` node sends
@@ -1042,6 +1086,10 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `pinch` | yes |  | `scale` float, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | Two fingers (or pens) down together that moved, when the first of them lifts: `scale` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), `startX` / `startY` the point between them then and `x` / `y` the point between them now. |
 | `edgeSwipe` | yes |  | `edge` string, `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. |
 | `wheel` | yes |  | `deltaX` float, `deltaY` float, `x` integer, `y` integer | all | When a mouse wheel is scrolled. |
+| `tilt` | yes |  | `direction` string, `x` float, `y` float | ESP32, preview | The frame tipped toward one side of its picture and stayed tipped (docs/accelerometer.md): `direction` is the side that went down, `x` and `y` how far it leans then, in g along the picture's axes (x to its right, y to its bottom). |
+| `flick` | yes |  | `direction` string, `x` float, `y` float | ESP32, preview | The frame tipped toward one side of its picture past `motion.tiltG` and straight back within `motion.tiltHoldMs`: a flick of the wrist, as one turns a page (docs/accelerometer.md). |
+| `shake` | yes |  | `strength` float | ESP32, preview | The frame was shaken: `motion.shakeCount` jolts of more than `motion.shakeG` away from gravity within `motion.shakeMs` (docs/accelerometer.md). |
+| `orientation` | yes |  | `position` string, `rotate`? integer | ESP32, preview | The frame came to rest in another position (docs/accelerometer.md): standing on one of its sides or lying flat, for `motion.restMs`. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |
 | `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |
@@ -1414,6 +1462,14 @@ interface FrameOSApp {
     /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
      * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
     wifiRssi?: number;
+    /** True on a frame with an accelerometer (the reTerminal Sticky, the Waveshare 1.75" AMOLED): frameos.accelerometer()
+     * reads it, and tilt, flick, shake and orientation are heard. Undefined elsewhere (FrameOS 2026.11.17+). */
+    accelerometer?: boolean;
+    /** True where something plays frameos.tone(): an ESP32 frame's buzzer, the speaker that stands in for one or the
+     * status LED that lights with the notes (the reTerminal E-series and Sticky, the Waveshare PhotoPainter), the
+     * browser preview, and a frame its control plane renders for (which plays it if it has a buzzer). Undefined where
+     * nothing plays it, as on a Raspberry Pi (FrameOS 2026.11.17+). */
+    tone?: boolean;
     /** The id of the scene showing; a layout's app gets the id of the scene it wraps, the one its <yield />
      * shows (FrameOS 2026.11.8+; undefined before). */
     sceneId?: string;
@@ -1500,6 +1556,14 @@ interface FrameOSEventPayloads {
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
+  /** The frame tipped toward one side of its picture and stayed tipped (docs/accelerometer.md): `direction` is the side that went down, `x` and `y` how far it leans then, in g along the picture's axes (x to its right, y to its bottom). Measured from how the frame rested before, so it works lying on a table and held in a hand alike: past `motion.tiltG` and still there after `motion.tiltHoldMs`. It comes again only once the frame has rested for `motion.restMs`. A frame with an accelerometer: the reTerminal Sticky, the Waveshare 1.75" AMOLED. */
+  tilt: { direction: string; x: number; y: number };
+  /** The frame tipped toward one side of its picture past `motion.tiltG` and straight back within `motion.tiltHoldMs`: a flick of the wrist, as one turns a page (docs/accelerometer.md). `direction` is the side that dipped, `x` and `y` the deepest of it in g. A flick is never also a tilt. The frame's event map binds it like a key: a flick right as `next`, left as `prev`. */
+  flick: { direction: string; x: number; y: number };
+  /** The frame was shaken: `motion.shakeCount` jolts of more than `motion.shakeG` away from gravity within `motion.shakeMs` (docs/accelerometer.md). `strength` is the hardest of them, in g. Once a shake is heard the next one needs the frame to rest for `motion.restMs` first. */
+  shake: { strength: number };
+  /** The frame came to rest in another position (docs/accelerometer.md): standing on one of its sides or lying flat, for `motion.restMs`. `position` is one of `motion.positions`, next to the way the frame was set up (its rotation in the settings): `upright`, `turnedLeft` (turned a quarter to the left, its left side down), `turnedRight`, `upsideDown`, `faceUp` or `faceDown`. `rotate`, while it stands, is the rotation that shows the picture upright; auto-rotate (the frame's setting) turns the picture by the same reading. */
+  orientation: { position: string; rotate?: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
   /** Turn the screen off */
@@ -1585,6 +1649,24 @@ declare const frameos: {
    * preview, a frame rendered on its control plane, one whose owner turned the settings on its screen off) and
    * before FrameOS 2026.11.8. Read it every render: what an action did shows up here. */
   store(): FrameOSStore | null;
+  /** Which way gravity pulls, in g along the picture's axes as the frame shows it now: x towards its right, y towards
+   * its bottom, z out of the glass towards whoever looks at it. Held upright y is about 1, lying face up z is about -1,
+   * and shaking adds to it. Read it every frame of an animation (it is 50 readings a second, the latest one). null
+   * where the frame has no accelerometer (only the reTerminal Sticky and the Waveshare 1.75" AMOLED have one; the
+   * browser preview, a Raspberry Pi, a frame rendered on its control plane): fall back on touch or keys there. For a
+   * gesture rather than a reading, listen for tilt, flick, shake and orientation (docs/accelerometer.md;
+   * FrameOS 2026.11.17+). */
+  accelerometer(): { x: number; y: number; z: number } | null;
+  /** Sounds the frame's buzzer, or the speaker that stands in for one, for a reminder or an alarm: with no arguments
+   * the frame's chime (two rising arpeggios, 1.6 s), tone(880, 300) one note of 880 Hz for 300 ms (200 ms when the
+   * length is left out), tone([[2093, 120], [0, 60], [3136, 240]]) up to 16 notes in a row, 0 Hz a rest. Pitches
+   * are held to 100 to 10000 Hz (a piezo is loudest around 2000 to 4000), a note to 10 to 5000 ms, and a call to 10 s
+   * in all. A call while notes sound replaces them. It returns at once and answers true when something plays it (see
+   * app.frame.tone), false where nothing plays it (a Raspberry Pi), and runtimes before FrameOS 2026.11.17, where it does
+   * not exist, so check typeof frameos.tone === "function" first. Call it when something is due, from get() of the
+   * render that wakes for it (frameos.setNextSleep), and remember that it rang (frameos.setState): a scene renders
+   * again on a tap, and a sound at every render is noise (docs/tones.md). */
+  tone(notes?: number | Array<[number, number]>, ms?: number): boolean;
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
    * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
    * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False

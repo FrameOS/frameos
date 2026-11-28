@@ -50,6 +50,22 @@ describe("scene needs", () => {
     expect(sceneFitsFrame(["video"], { video: false })).toBe(false);
   });
 
+  it("reads an accelerometer from the call that reads it or the motion events, never from asking whether there is one", () => {
+    const reads = { apps: { a: { sources: { "app.tsx": "const g = frameos.accelerometer()" } } } };
+    expect(sceneNeeds([reads])).toEqual(["accelerometer"]);
+    const tilt = { nodes: [{ type: "event", data: { keyword: "tilt" } }] };
+    expect(sceneNeeds([tilt])).toEqual(["accelerometer"]);
+    const config = JSON.stringify({ events: ["shake"] });
+    expect(sceneNeeds([{ apps: { a: { sources: { "config.json": config, "app.ts": "" } } } }])).toEqual(["accelerometer"]);
+    const onEvent = { apps: { a: { sources: { "app.ts": "if (event === 'flick') next()" } } } };
+    expect(sceneNeeds([onEvent])).toEqual(["accelerometer"]);
+    // Whether the frame has one is no need, nor is a photo's EXIF orientation.
+    expect(sceneNeeds([{ apps: { a: { sources: { "app.tsx": "if (app.frame.accelerometer) hint()" } } } }])).toEqual([]);
+    expect(sceneNeeds([{ apps: { a: { sources: { "app.ts": "const o = exif['orientation'] ?? 1" } } } }])).toEqual([]);
+    // It rules nothing out: such a scene plays by touch or keys elsewhere.
+    expect(sceneFitsFrame(["accelerometer"], { fast: false, linux: false, video: false })).toBe(true);
+  });
+
   it("files the samples as their descriptions say", () => {
     expect(needsOf("Star shooter")).toContain("fast");
     // Snake turns into a slow puzzle on e-paper, and says so (settings.needs).
@@ -65,6 +81,9 @@ describe("scene needs", () => {
     expect(needsOf("Immich")).toContain("round");
     expect(needsOf("Webcam RSTP")).not.toContain("round");
     expect(needsOf("Windows 98 layout")).not.toContain("round");
+    // Book highlights takes taps, keys and buttons and needs none of them: a
+    // picture that changes by itself (settings.needs: []), set in a round one's circle.
+    expect(needsOf("Book highlights")).toEqual(["round"]);
     for (const name of readdirSync(samples)) {
       if (existsSync(join(samples, name, "scenes.json"))) {
         expect(Array.isArray(needsOf(name))).toBe(true);
@@ -114,15 +133,16 @@ describe("the store front's split and screen filter", () => {
     { name: "Weather", category: "weather" },
     { name: "Top bar", category: "layouts" },
     { name: "Windows 98", category: "desktops", needs: ["touch"] },
+    { name: "Sand", category: "games", needs: ["accelerometer"] },
   ];
   const shelf = (groups: ReturnType<typeof storeShelvesOf>) =>
     groups.map((group) => [group.shelf.slug, group.templates.map((template) => template.name)]);
 
   it("shows scenes or layouts, never both", () => {
-    expect(storeKindCountsOf(templates)).toEqual({ layout: 2, scene: 3 });
+    expect(storeKindCountsOf(templates)).toEqual({ layout: 2, scene: 4 });
     expect(shelf(storeShelvesOf(templates, { category: null, kind: "scene", search: "", sort: "name" }))).toEqual([
       ["weather", ["Weather"]],
-      ["games", ["Snake", "Sudoku"]],
+      ["games", ["Sand", "Snake", "Sudoku"]],
     ]);
     expect(shelf(storeShelvesOf(templates, { category: null, kind: "layout", search: "", sort: "name" }))).toEqual([
       ["desktops", ["Windows 98"]],
@@ -132,13 +152,14 @@ describe("the store front's split and screen filter", () => {
   });
 
   it("filters by screen and input from what each scene needs", () => {
-    const names = (fit: "epaper" | "fast" | "touch" | "keys") =>
+    const names = (fit: "epaper" | "fast" | "touch" | "keys" | "accelerometer") =>
       storeShelvesOf(templates, { category: null, fit, kind: "scene", search: "", sort: "name" }).flatMap((group) =>
         group.templates.map((template) => template.name),
       );
-    expect(names("epaper")).toEqual(["Weather", "Sudoku"]);
+    expect(names("epaper")).toEqual(["Weather", "Sand", "Sudoku"]);
     expect(names("fast")).toEqual(["Snake"]);
     expect(names("touch")).toEqual(["Sudoku"]);
     expect(names("keys")).toEqual(["Snake", "Sudoku"]);
+    expect(names("accelerometer")).toEqual(["Sand"]);
   });
 });

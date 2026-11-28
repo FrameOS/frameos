@@ -34,6 +34,7 @@ const sceneGuideTools =
 const storeCategories = [
   "photos",
   "art",
+  "video",
   "clocks",
   "calendar",
   "weather",

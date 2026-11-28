@@ -38,10 +38,11 @@ export interface StoreFilters {
  * Which scenes a store page lists by what they need (the template's `needs`,
  * utils/sceneNeeds.ts): every scene, the ones e-paper can show (no fast
  * screen needed), the ones made for a fast screen, the ones used with touch
- * or a mouse, the ones used with a keyboard, or the ones made for round
- * screens too.
+ * or a mouse, the ones used with a keyboard, the ones moved by tilting or
+ * shaking a frame with an accelerometer, or the ones made for round screens
+ * too.
  */
-export type StoreFit = 'any' | 'epaper' | 'fast' | 'touch' | 'keys' | 'round'
+export type StoreFit = 'any' | 'epaper' | 'fast' | 'touch' | 'keys' | 'accelerometer' | 'round'
 
 export const STORE_FIT_OPTIONS: { value: StoreFit; label: string }[] = [
   { value: 'any', label: 'Any screen' },
@@ -49,11 +50,17 @@ export const STORE_FIT_OPTIONS: { value: StoreFit; label: string }[] = [
   { value: 'fast', label: 'Made for fast screens' },
   { value: 'touch', label: 'Touch & mouse' },
   { value: 'keys', label: 'Keyboard' },
+  { value: 'accelerometer', label: 'Accelerometer' },
   { value: 'round', label: 'Round screens' },
 ]
 
 export function storeFitOf(value: unknown): StoreFit {
-  return value === 'epaper' || value === 'fast' || value === 'touch' || value === 'keys' || value === 'round'
+  return value === 'epaper' ||
+    value === 'fast' ||
+    value === 'touch' ||
+    value === 'keys' ||
+    value === 'accelerometer' ||
+    value === 'round'
     ? value
     : 'any'
 }
@@ -79,6 +86,9 @@ export function templateFitsStoreFit(template: TemplateType, fit: StoreFit): boo
   }
   if (fit === 'keys') {
     return needs.includes('keys')
+  }
+  if (fit === 'accelerometer') {
+    return needs.includes('accelerometer')
   }
   if (fit === 'round') {
     return needs.includes('round')

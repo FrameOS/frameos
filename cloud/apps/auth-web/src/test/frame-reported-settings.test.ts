@@ -46,6 +46,13 @@ describe("settingsWithReported", () => {
     expect(settingsWithReported({}, { brightness: 4 })).toBeUndefined();
   });
 
+  it("takes auto-rotate set on the frame page; off is the default", () => {
+    expect(settingsWithReported({ rotate: 90 }, { autoRotate: true })).toEqual({ rotate: 90, auto_rotate: true });
+    expect(settingsWithReported({ auto_rotate: true }, { autoRotate: false })).toEqual({ auto_rotate: false });
+    expect(settingsWithReported({}, { autoRotate: false })).toBeUndefined();
+    expect(settingsWithReported({}, { autoRotate: "on" })).toBeUndefined();
+  });
+
   it("ignores a report without them, as older firmware's, and nonsense", () => {
     expect(settingsWithReported({ rotate: 90 }, { platform: "esp32" })).toBeUndefined();
     expect(settingsWithReported({ rotate: 90 }, { rotate: 45 })).toBeUndefined();

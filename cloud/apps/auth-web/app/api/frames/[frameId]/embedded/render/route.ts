@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
-import { fosbReadsV2, fosbV2, fosbVersionHeader, pressMapHeader } from "../../../../../../src/lib/fosb";
+import { fosbReadsV2, fosbV2, fosbVersionHeader, pressMapHeader, toneHeader } from "../../../../../../src/lib/fosb";
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
 import {
   checkIdentityRateLimit,
@@ -190,6 +190,8 @@ async function pull(
       "X-FrameOS-Scene": encodeURIComponent(pulled.scene),
       ...(nextRenderSeconds !== null ? { "X-FrameOS-Next-Render": String(nextRenderSeconds) } : {}),
       ...(pulled.pressMap ? { [pressMapHeader]: pulled.pressMap } : {}),
+      // A scene's tone (docs/tones.md): the board plays it as the answer comes.
+      ...(pulled.tones ? { [toneHeader]: pulled.tones } : {}),
     };
     if (pulled.status === 304) {
       return new NextResponse(null, { headers: { ...headers, ...about }, status: 304 });

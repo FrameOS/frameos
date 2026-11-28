@@ -35,6 +35,7 @@
 #include "fos_buttons.h"
 #include "fos_gauge.h"
 #include "fos_buzzer.h"
+#include "fos_tone.h"
 #include "fos_touch.h"
 #include "fos_bt.h"
 #include "fos_charger.h"
@@ -42,6 +43,7 @@
 #include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_events.h"
 #include "fos_framebuffer.h"
 #include "fos_frame_settings.h"
@@ -1697,7 +1699,7 @@ static void switch_cue(void)
     xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
     fos_panel_surface_t surface = {
         .buf = glass_picture(), .width = fos_display_width(), .height = fos_display_height(),
-        .format = fos_display_format(), .rotate = fos_config()->rotate,
+        .format = fos_display_format(), .rotate = fos_rotation(),
     };
     fos_panel_code_box_t box;
     if (surface.buf && fos_panel_mark_box(&surface, &box)) {
@@ -1759,6 +1761,11 @@ static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
     } else if (strcasecmp(evt->header_key, FOS_PRESS_HEADER) == 0) {
         int count = fos_press_map_parse(evt->header_value, pull->press, FOS_PRESS_MAP_MAX);
         pull->press_count = count > 0 ? count : 0;
+    } else if (strcasecmp(evt->header_key, FOS_TONE_HEADER) == 0) {
+        /* The scene's frameos.tone() in the render the plane ran for this
+         * board (docs/tones.md): played as it comes, while the picture
+         * downloads. Sent once, with the render that asked. */
+        fos_buzzer_scene_tone(evt->header_value);
     } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene") == 0) {
         /* Percent-encoded on the wire (a built-in scene's id has a '/'). */
         const char *in = evt->header_value;
@@ -1797,7 +1804,7 @@ static int remote_pull_target(char *url, size_t url_len, char *auth, size_t auth
     } else if (!fos_cloud_api_access(base, sizeof(base), frame, sizeof(frame), auth, auth_len)) {
         return FOS_RENDER_PULL_NONE;
     }
-    return fos_render_pull_url(url, url_len, from, frame, width, height, format, config->rotate)
+    return fos_render_pull_url(url, url_len, from, frame, width, height, format, fos_rotation())
                ? source : FOS_RENDER_PULL_NONE;
 }
 
@@ -2729,7 +2736,7 @@ static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf,
     } else {
         ov->surface = (fos_panel_surface_t){
             .buf = buf, .width = width, .height = height, .format = format,
-            .rotate = fos_config()->rotate,
+            .rotate = fos_rotation(),
         };
         if (fos_panel_code_box(&ov->surface, "Local network access code", FOS_LAN_ACCESS_CODE_LEN,
                                &ov->box)) {
@@ -2828,7 +2835,7 @@ static bool render_held(void)
 
 void fos_client_loading_begin(uint32_t since_tick)
 {
-    fos_display_loading_begin(since_tick, fos_config()->rotate);
+    fos_display_loading_begin(since_tick, fos_rotation());
     if (fos_loading_taps_wanted(fos_display_is_lcd(), fos_config()->touch_beep, render_held(), s_last_input_us,
                                 esp_timer_get_time())) {
         fos_buzzer_loading_begin();
@@ -2863,7 +2870,7 @@ static void notice_overlay_begin(notice_overlay_t *ov, uint8_t *buf, int width, 
     if (s_last_frame == buf) return; /* see lan_overlay_begin */
     ov->surface = (fos_panel_surface_t){
         .buf = buf, .width = width, .height = height, .format = format,
-        .rotate = fos_config()->rotate,
+        .rotate = fos_rotation(),
     };
     /* Glyphs 3 px per font pixel on a big panel (an 800 px line takes ~44
      * characters), smaller where the text would not fit in six lines. */
@@ -3024,7 +3031,7 @@ static void wake_mark_task(void *arg)
         memset(prev, white, len);
         fos_panel_surface_t on_glass = {
             .buf = prev, .width = fos_display_width(), .height = fos_display_height(),
-            .format = fos_display_format(), .rotate = fos_config()->rotate,
+            .format = fos_display_format(), .rotate = fos_rotation(),
         };
         fos_panel_surface_t next = on_glass;
         next.buf = buf;
@@ -3153,7 +3160,7 @@ static esp_err_t band_over_last_image(const char *text, int lines, uint8_t **gla
     size_t len = s_last_frame ? s_last_frame_len : 0;
     fos_panel_surface_t surface = {
         .buf = len ? fos_big_malloc(len) : NULL, .width = s_last_frame_width, .height = s_last_frame_height,
-        .format = s_last_frame_format, .rotate = fos_config()->rotate,
+        .format = s_last_frame_format, .rotate = fos_rotation(),
     };
     if (surface.buf) memcpy(surface.buf, s_last_frame, len);
     if (glass && !*glass && len && !fos_display_is_lcd() && !fos_display_glass_supported()) {
@@ -3273,7 +3280,7 @@ static void draw_sleep_mark(void)
     size_t len = s_last_frame ? s_last_frame_len : 0;
     fos_panel_surface_t surface = {
         .buf = NULL, .width = s_last_frame_width, .height = s_last_frame_height,
-        .format = s_last_frame_format, .rotate = fos_config()->rotate,
+        .format = s_last_frame_format, .rotate = fos_rotation(),
     };
     uint8_t *copy = len ? fos_big_malloc(len) : NULL;
     uint8_t *glass = len ? fos_big_malloc(len) : NULL;
@@ -4544,6 +4551,10 @@ static void client_task(void *arg)
         /* Interpreted scenes: pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
+        /* The rotation the picture is drawn at: the frame's, or with
+         * auto-rotate the way it stands (fos_rotation.c). Every pass, before
+         * its render, and only a compare when nothing turned. */
+        fos_rotation_apply();
         if (renders_locally(config)) {
             if (housekeeping && !pulls_after_render && !held_for_input) pass_scenes_sync();
             fos_scenes_apply_pending();
@@ -5251,6 +5262,9 @@ static void client_task(void *arg)
             /* A scene payload the store task is still writing goes to flash
              * first: the next boot loads what is on flash. */
             fos_scenes_store_wait(30000);
+            /* A scene's tone (a reminder, docs/tones.md) plays to its end:
+             * the sleep below silences the buzzer and the codec mid-note. */
+            fos_buzzer_wait_quiet(FOS_TONE_TOTAL_MS_MAX);
             /* What the sleep does not need goes dark too. Last, after the
              * logs are on the wire and the panel is parked — nothing renders
              * or sounds after this. */

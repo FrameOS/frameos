@@ -64,6 +64,9 @@ export function isValidUploadId(value: unknown): value is string {
 const commandTtlMs = 2 * 60 * 1000;
 // Mutations are user-blocking (a dialog waits on them), so wait about as
 // long as the asset long-poll does before calling the frame unreachable.
+// For an upload chunk the 504 is not the end: the panel asks about the same
+// chunk again (uploadFileInChunks' pendingBudgetMs) and putAssetChunk waits
+// for the command already queued, so a slow card is slow, not a failed file.
 const ackTimeoutMs = 30_000;
 const ackPollStepMs = 500;
 

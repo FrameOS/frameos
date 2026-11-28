@@ -1,0 +1,106 @@
+[
+  {
+    "id": "spirit-level",
+    "name": "Spirit level",
+    "settings": {
+      "category": "Notes & tools",
+      "execution": "interpreted",
+      "refreshInterval": 0.05,
+      "renderScale": 1,
+      "backgroundColor": "#10161d",
+      "windowSize": "480x480",
+      "needs": [
+        "touch",
+        "accelerometer"
+      ],
+      "icon": "M2 9h7v6H2Z M15 9h7v6h-7Z M12 9.5a2.5 2.5 0 1 1 0 5a2.5 2.5 0 1 1 0-5Z"
+    },
+    "fields": [
+      {
+        "name": "zero",
+        "label": "Zero",
+        "type": "json",
+        "value": "",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "app",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "spiritLevel",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "app-image",
+        "type": "codeNodeEdge",
+        "source": "app",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "spiritLevel": {
+        "origin": "spiritLevel",
+        "name": "Spirit level",
+        "category": "data",
+        "description": "The frame's accelerometer as a spirit level: a bullseye lying flat, a tube along the level side standing up, with the angle in degrees. A tap zeroes it, a long press takes the zero away. Without an accelerometer it shows a demo.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Spirit level\",\n  \"category\": \"data\",\n  \"description\": \"The frame's accelerometer as a spirit level: a bullseye lying flat, a tube along the level side standing up, with the angle in degrees. A tap zeroes it, a long press takes the zero away. Without an accelerometer it shows a demo.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"events\": [\"tap\", \"longPress\", \"button\", \"keyDown\", \"orientation\", \"tilt\"],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n",
+          "app.tsx": "// Spirit level: the frame's accelerometer as a level. Lying flat it is a\n// bullseye, its bubble drifting to the high side; standing up it is a tube\n// along the side of the picture that is level, and says how many degrees off\n// it is. A tap (or the Action key) zeroes it where it rests; a long press\n// takes the zero away.\n//\n// A fast screen draws it twenty times a second, the reading smoothed. E-paper\n// redraws when the reading moves by a degree (each render is a refresh, and\n// one that changed nothing changes nothing on the glass). A frame without an\n// accelerometer shows a demo, the bubble wandering, and says so.\n\ntype Vec = { x: number; y: number; z: number }\n\n// Smoothed between renders on a fast screen.\nlet smooth: Vec | null = null\n\nconst accelerometer = (): Vec | null => (typeof frameos.accelerometer === 'function' ? frameos.accelerometer() : null)\n\nconst DEG = 180 / Math.PI\n\n/** The zero the person set: an offset for each kind of level. */\nfunction zeroOf(app: any): { flatX: number; flatY: number; tube: number } {\n  const z = app.state.zero\n  if (z && typeof z === 'object') {\n    return { flatX: Number(z.flatX) || 0, flatY: Number(z.flatY) || 0, tube: Number(z.tube) || 0 }\n  }\n  return { flatX: 0, flatY: 0, tube: 0 }\n}\n\n/** What the level reads from a gravity vector: flat or standing, and how far off. */\nfunction readLevel(g: Vec) {\n  const inPlane = Math.sqrt(g.x * g.x + g.y * g.y)\n  const flat = Math.abs(g.z) > inPlane * 1.2\n  // Standing: the side of the picture nearest level is the tube's. The\n  // quarter turn the picture stands at, and the angle off it.\n  const roll = Math.atan2(g.x, g.y) * DEG\n  const quarter = Math.round(roll / 90)\n  const vertical = (quarter & 1) !== 0\n  const along = vertical ? g.y : g.x\n  const tubeAngle = Math.asin(Math.max(-1, Math.min(1, along / Math.max(inPlane, 0.001)))) * DEG\n  // Flat: how far each way the surface leans, in degrees.\n  const flatX = Math.atan2(g.x, Math.abs(g.z)) * DEG\n  const flatY = Math.atan2(g.y, Math.abs(g.z)) * DEG\n  return { flat, vertical, tubeAngle, flatX, flatY }\n}\n\n/** A wandering bubble for a frame with no accelerometer. */\nfunction demo(now: number): Vec {\n  const t = now / 1000\n  return { x: Math.sin(t * 0.7) * 0.12 + Math.sin(t * 1.9) * 0.04, y: Math.cos(t * 0.5) * 0.1, z: -1 }\n}\n\nconst fmt = (deg: number, fine: boolean) => {\n  const a = Math.abs(deg)\n  return (fine ? (Math.round(a * 10) / 10).toFixed(1) : String(Math.round(a))) + '°'\n}\n\nexport function get(app: any, context: any) {\n  const W = context.imageWidth || app.frame.width\n  const H = context.imageHeight || app.frame.height\n  const round = context.round === true\n  const fast = app.frame.fast ?? !app.frame.paper\n  const now = Date.now()\n  const real = accelerometer()\n  const raw = real || demo(now)\n  if (fast && smooth && real) {\n    const k = 0.35\n    smooth = { x: smooth.x + (raw.x - smooth.x) * k, y: smooth.y + (raw.y - smooth.y) * k, z: smooth.z + (raw.z - smooth.z) * k }\n  } else {\n    smooth = { x: raw.x, y: raw.y, z: raw.z }\n  }\n  const zero = zeroOf(app)\n  const r = readLevel(smooth)\n  // E-paper shows whole degrees, so a reading that wobbles redraws nothing.\n  const q = (deg: number) => (fast ? deg : Math.round(deg))\n  const flatX = q(r.flatX - zero.flatX)\n  const flatY = q(r.flatY - zero.flatY)\n  const tube = q(r.tubeAngle - zero.tube)\n\n  const S = Math.min(W, H)\n  const cx = W / 2\n  const cy = H / 2\n  const paper = !fast\n  const ink = paper ? '#000000' : '#e8eef2'\n  const back = paper ? '#ffffff' : '#10161d'\n  const glass = paper ? '#ffffff' : '#1d2a33'\n  const fluid = paper ? '#ffffff' : '#b9e04a'\n  const bubble = paper ? '#000000' : '#f6ffd8'\n  const accent = paper ? '#000000' : '#7fd1b9'\n  const level = r.flat ? Math.hypot(flatX, flatY) < 0.5 : Math.abs(tube) < 0.5\n  const font = Math.round(S * 0.13)\n  const small = Math.max(14, Math.round(S * (fast ? 0.045 : 0.055)))\n\n  let body\n  let reading\n  if (r.flat) {\n    // A bullseye: the bubble goes to the high side, all the way out at 10°.\n    const R = S * (round ? 0.34 : 0.32)\n    const b = S * 0.085\n    const reach = R - b - S * 0.01\n    let bx = -flatX / 10\n    let by = -flatY / 10\n    const m = Math.hypot(bx, by)\n    if (m > 1) {\n      bx /= m\n      by /= m\n    }\n    const ox = cx + bx * reach\n    const oy = cy - S * 0.04 + by * reach\n    const y0 = cy - S * 0.04\n    body = (\n      <g>\n        <circle cx={cx} cy={y0} r={R} fill={fluid} stroke={ink} strokeWidth={S * 0.012} />\n        <circle cx={cx} cy={y0} r={b * 1.25} fill=\"none\" stroke={ink} strokeWidth={S * 0.008} />\n        <circle cx={cx} cy={y0} r={R * 0.62} fill=\"none\" stroke={ink} strokeWidth={S * 0.004} strokeDasharray={`${S * 0.012} ${S * 0.012}`} />\n        <line x1={cx - R} y1={y0} x2={cx + R} y2={y0} stroke={ink} strokeWidth={S * 0.003} />\n        <line x1={cx} y1={y0 - R} x2={cx} y2={y0 + R} stroke={ink} strokeWidth={S * 0.003} />\n        <circle cx={ox} cy={oy} r={b} fill={bubble} stroke={paper ? 'none' : '#ffffff'} strokeWidth={S * 0.004} />\n        {paper ? null : <circle cx={ox - b * 0.35} cy={oy - b * 0.35} r={b * 0.25} fill=\"#ffffff\" opacity={0.8} />}\n      </g>\n    )\n    reading = level ? 'Level' : `${fmt(Math.hypot(flatX, flatY), fast)}`\n  } else {\n    // A tube along the level side of the picture: the bubble runs to the\n    // high end, all the way at 5°.\n    const vertical = r.vertical\n    const span = round ? S * 0.62 : (vertical ? H : W) * 0.78\n    const thick = S * 0.17\n    const len = vertical ? thick : span\n    const tall = vertical ? span : thick\n    const x0 = cx - len / 2\n    const y0 = cy - (vertical ? 0 : S * 0.05) - tall / 2\n    const bl = thick * 1.5\n    const reach = (span - bl) / 2 - S * 0.02\n    const t = Math.max(-1, Math.min(1, -tube / 5)) * reach\n    const bxc = vertical ? cx : cx + t\n    const byc = vertical ? cy + t : y0 + tall / 2\n    const mark = bl / 2 + S * 0.01\n    body = (\n      <g>\n        <rect x={x0} y={y0} width={len} height={tall} rx={thick / 2} fill={fluid} stroke={ink} strokeWidth={S * 0.012} />\n        {vertical ? (\n          <g>\n            <line x1={x0 - S * 0.03} y1={cy - mark} x2={x0 + len + S * 0.03} y2={cy - mark} stroke={ink} strokeWidth={S * 0.008} />\n            <line x1={x0 - S * 0.03} y1={cy + mark} x2={x0 + len + S * 0.03} y2={cy + mark} stroke={ink} strokeWidth={S * 0.008} />\n          </g>\n        ) : (\n          <g>\n            <line x1={cx - mark} y1={y0 - S * 0.03} x2={cx - mark} y2={y0 + tall + S * 0.03} stroke={ink} strokeWidth={S * 0.008} />\n            <line x1={cx + mark} y1={y0 - S * 0.03} x2={cx + mark} y2={y0 + tall + S * 0.03} stroke={ink} strokeWidth={S * 0.008} />\n          </g>\n        )}\n        <ellipse cx={bxc} cy={byc} rx={vertical ? thick * 0.32 : bl / 2} ry={vertical ? bl / 2 : thick * 0.32} fill={bubble} />\n      </g>\n    )\n    reading = level ? 'Level' : fmt(tube, fast)\n  }\n\n  const caption = !real\n    ? 'No accelerometer: a demo'\n    : r.flat\n      ? level ? 'Flat and level' : 'Lying down'\n      : level ? 'Straight' : r.vertical ? (tube > 0 ? 'Top side high' : 'Bottom side high') : tube > 0 ? 'Left side high' : 'Right side high'\n  const readingY = r.flat ? cy + S * 0.42 : cy + S * 0.28\n  // The fast screen keeps going; e-paper looks again in a second, the demo\n  // on e-paper stays still.\n  if (!fast && !real) frameos.setNextSleep(3600)\n  return (\n    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>\n      <rect x={0} y={0} width={W} height={H} fill={back} />\n      {body}\n      <text x={cx} y={readingY} fontSize={font} fontWeight=\"bold\" textAnchor=\"middle\" fill={level ? accent : ink}>\n        {reading}\n      </text>\n      <text x={cx} y={round ? cy - S * 0.4 : Math.max(small * 1.6, cy - S * 0.44)} fontSize={small} textAnchor=\"middle\" fill={ink}>\n        {caption}\n      </text>\n    </svg>\n  )\n}\n\nexport function onEvent(app: any, context: any) {\n  const e = context.event\n  const p = context.payload || {}\n  const zeroHere = e === 'tap' || (e === 'button' && p.action === 'press' && p.role === 'primary') ||\n    (e === 'keyDown' && (p.code === 'Space' || p.code === 'Enter'))\n  if (zeroHere) {\n    const g = accelerometer()\n    if (!g) return false\n    const r = readLevel(smooth || g)\n    frameos.setState('zero', { flatX: r.flat ? r.flatX : zeroOf(app).flatX, flatY: r.flat ? r.flatY : zeroOf(app).flatY, tube: r.flat ? zeroOf(app).tube : r.tubeAngle })\n    return true\n  }\n  if (e === 'longPress' || (e === 'button' && p.action === 'longPress' && p.role === 'primary') || (e === 'keyDown' && p.code === 'Escape')) {\n    frameos.setState('zero', null)\n    return true\n  }\n  // A new position: draw it now, not at the next look.\n  return e === 'orientation' || e === 'tilt'\n}\n"
+        }
+      }
+    }
+  }
+]

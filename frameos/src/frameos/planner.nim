@@ -60,8 +60,9 @@ proc isWiredInput(scene: InterpretedFrameScene, nodeId: NodeId, field: string, i
   ## True when a field's value comes from another node or from inline code
   ## (only inline code with `inlineOnly`), in which case the planner cannot
   ## know it up front.
-  for input in scene.appInputs:
-    if input.target == nodeId and input.field == field and (input.inline or not inlineOnly):
+  if scene.graph.isNil: return false
+  for input in scene.graph.appInputs.getOrDefault(nodeId.int):
+    if input.field == field and (input.inline or not inlineOnly):
       return true
 
 proc staticFieldValue(scene: InterpretedFrameScene, node: DiagramNode,
@@ -148,9 +149,10 @@ proc connectedInput(scene: InterpretedFrameScene, nodeId: NodeId,
     field: string): NodeId =
   ## The node a field is wired from (the last edge into it), or NoNodeId.
   result = NoNodeId
-  for input in scene.appInputs:
-    if input.target == nodeId and input.field == field and not input.inline:
-      result = input.source
+  if scene.graph.isNil: return
+  for input in scene.graph.appInputs.getOrDefault(nodeId.int):
+    if input.field == field and not input.inline:
+      result = input.source.NodeId
 
 type
   FusionRefusal* = enum

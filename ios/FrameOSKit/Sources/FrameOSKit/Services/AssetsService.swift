@@ -101,10 +101,17 @@ extension FrameOSService {
 
     /// The chunked upload both planes speak (assets and photos): raw bytes,
     /// `upload_id`, `offset`, `complete`. A failed chunk is retried twice.
+    /// A 504 is the plane saying the frame has not acked the chunk YET (the
+    /// cloud keeps its command queued, and asking again waits for that same
+    /// command): it is asked about again for up to `pendingBudget` seconds
+    /// without spending a retry, as the SPA's uploadFileInChunks does. An
+    /// ESP32 writing a photo to its card took longer than two retries'
+    /// worth of 30 s waits (2026-11-28).
     /// Returns the plane's answer to the last chunk (the stored entry).
     @discardableResult
     func uploadChunks(path: String, base: [String: String?], data: Data, chunkSize: Int, idLength: Int,
-                      chunkIndex: Bool, progress: (@Sendable (Double) -> Void)?) async throws -> JSONValue
+                      chunkIndex: Bool, pendingBudget: TimeInterval = 600,
+                      progress: (@Sendable (Double) -> Void)?) async throws -> JSONValue
     {
         var last: JSONValue = .null
         let uploadId = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(idLength))
@@ -119,6 +126,7 @@ extension FrameOSService {
             query["complete"] = end >= data.count ? "1" : "0"
             if chunkIndex { query["chunk_index"] = String(index) }
             var tries = 0
+            let chunkStarted = Date()
             while true {
                 do {
                     last = try await client.call("POST", path, query: query,
@@ -126,6 +134,10 @@ extension FrameOSService {
                     break
                 } catch let error as APIError where error.status != 409 && error.status < 500 && error.status != 0 {
                     throw error
+                } catch let error as APIError
+                    where error.status == 504 && Date().timeIntervalSince(chunkStarted) < pendingBudget
+                {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
                 } catch {
                     tries += 1
                     if tries > 2 { throw error }

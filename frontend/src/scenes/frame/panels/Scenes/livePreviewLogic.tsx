@@ -16,6 +16,7 @@ import { router } from 'kea-router'
 import { FrameScene, GPIOButton, RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { openCanvasImageInNewTab } from '../../../../utils/objectUrl'
 import { attachKeyboardInput, attachPointerInput, writeHostClipboard } from '../../../../utils/previewPointer'
+import { playTones } from 'frameos-wasm'
 import { isHostEvent, isKeyboardEvent, isPointerEvent } from '../../../../utils/eventsContract'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assetUrl } from '../../../../utils/assetUrl'
@@ -948,6 +949,11 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           case 'clipboard':
             // A Copy or a Cut in the frame's UI: the computer's clipboard too.
             writeHostClipboard(String(msg.text ?? ''))
+            break
+          case 'tone':
+            // The scene's frameos.tone() (docs/tones.md): the computer's
+            // speakers stand in for the frame's buzzer.
+            playTones(String(msg.notes ?? ''))
             break
           case 'assetsResult':
             assetRequester.resolve(msg)

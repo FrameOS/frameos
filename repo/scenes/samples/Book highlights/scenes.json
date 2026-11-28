@@ -1,0 +1,225 @@
+[
+  {
+    "id": "book-highlights",
+    "name": "Book highlights",
+    "settings": {
+      "category": "Notes & tools",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#f7f3ea",
+      "windowSize": "800x480",
+      "icon": "M14,17H17L19,13V7H13V13H16M6,17H9L11,13V7H5V13H8L6,17Z",
+      "needs": []
+    },
+    "fields": [
+      {
+        "name": "folder",
+        "label": "Books folder",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "placeholder": "Books",
+        "hint": "The ePub reader's books folder, when you set one there: its highlights are in Notes inside it (Books/Notes when it is empty)."
+      },
+      {
+        "name": "order",
+        "label": "Order",
+        "type": "select",
+        "value": "shuffle",
+        "access": "public",
+        "persist": "disk",
+        "options": [
+          {
+            "value": "shuffle",
+            "label": "Shuffled, every one before any again"
+          },
+          {
+            "value": "newest",
+            "label": "Newest first"
+          },
+          {
+            "value": "book",
+            "label": "Book by book, in reading order"
+          }
+        ]
+      },
+      {
+        "name": "interval",
+        "label": "Seconds per highlight",
+        "type": "float",
+        "value": "3600",
+        "access": "public",
+        "persist": "disk",
+        "role": "refreshInterval",
+        "hint": "How long each highlight shows before the next: 3600 is an hour, 86400 a day."
+      },
+      {
+        "name": "look",
+        "label": "Look",
+        "type": "select",
+        "value": "light",
+        "access": "public",
+        "persist": "disk",
+        "options": [
+          {
+            "value": "light",
+            "label": "Light"
+          },
+          {
+            "value": "sepia",
+            "label": "Sepia"
+          },
+          {
+            "value": "dark",
+            "label": "Dark"
+          }
+        ],
+        "hint": "On e-paper, Light is black on white and Dark white on black."
+      },
+      {
+        "name": "typeface",
+        "label": "Typeface",
+        "type": "select",
+        "value": "Cormorant Garamond",
+        "access": "public",
+        "persist": "disk",
+        "options": [
+          {
+            "value": "Cormorant Garamond",
+            "label": "Cormorant Garamond"
+          },
+          {
+            "value": "Liberation Serif",
+            "label": "Liberation Serif"
+          },
+          {
+            "value": "PT Sans",
+            "label": "PT Sans"
+          },
+          {
+            "value": "Ubuntu",
+            "label": "Ubuntu (every frame has it)"
+          }
+        ],
+        "hint": "A frame draws a typeface it has in its fonts folder (on an ESP32, its TF card: Sync fonts), and its own Ubuntu without one."
+      },
+      {
+        "name": "notes",
+        "label": "Your notes",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "hint": "The note you wrote on a highlight, under it."
+      },
+      {
+        "name": "clippings",
+        "label": "Kindle clippings",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "placeholder": "Books/My Clippings.txt",
+        "hint": "A Kindle's My Clippings.txt (or another reader's), copied onto the frame, to show its highlights too: its path in the assets (on an ESP32, the TF card)."
+      },
+      {
+        "name": "fullScreen",
+        "label": "Full screen",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "role": "fullScreen",
+        "hint": "The whole glass for the quote: no bar of the frame's layout around it."
+      },
+      {
+        "name": "spot",
+        "label": "Where it is",
+        "type": "json",
+        "value": "{}",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "render-event",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "app",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "highlights",
+          "config": {}
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-to-draw",
+        "type": "appNodeEdge",
+        "source": "render-event",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "app-to-draw",
+        "type": "codeNodeEdge",
+        "source": "app",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "highlights": {
+        "name": "Book highlights",
+        "category": "data",
+        "description": "Your highlights from the ePub reader as full-screen quotes, one at a time: the passage as big as the screen takes, the book, its author and chapter, and your note. A new one every hour (or as often as you set), the one you made last first. Tap, swipe, the arrows or the buttons for the next; a long press opens the book at it. Can show a Kindle's My Clippings.txt too.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Book highlights\",\n  \"category\": \"data\",\n  \"description\": \"Your highlights from the ePub reader as full-screen quotes, one at a time: the passage as big as the screen takes, the book, its author and chapter, and your note. A new one every hour (or as often as you set), the one you made last first. Tap, swipe, the arrows or the buttons for the next; a long press opens the book at it. Can show a Kindle's My Clippings.txt too.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"events\": [\n    \"tap\",\n    \"longPress\",\n    \"swipe\",\n    \"forward\",\n    \"back\",\n    \"keyDown\",\n    \"button\"\n  ],\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n",
+          "app.tsx": "// Book highlights: the passages you highlighted in the ePub reader, one at a\n// time and as big as the screen takes, with the book and your note under it;\n// a new one every so often (the scene's interval), and the one you made last\n// first. A tap, a swipe, the arrows or the frame's buttons go on to the next\n// (or back); a long press (or the Action key, Enter) opens the book at it in\n// the reader.\n//\n// The reader writes them to Highlights.json in its Notes folder whenever one\n// changes; a Kindle's \"My Clippings.txt\" can be shown too (the clippings\n// field). Nothing is written here but the scene's own place (spot).\n\nimport { HIGHLIGHTS_NAME, fromHighlights, fromClippings, merged, pick } from './quotes'\n\nconst LOOKS = {\n  light: { bg: 'bg-[#f7f3ea]', ink: 'text-[#221c15]', muted: 'text-[#7a6e5f]', accent: 'text-[#b4532a]', rule: 'bg-[#b4532a]' },\n  sepia: { bg: 'bg-[#efe1c4]', ink: 'text-[#3a2918]', muted: 'text-[#7b6247]', accent: 'text-[#9b3d1b]', rule: 'bg-[#9b3d1b]' },\n  dark: { bg: 'bg-[#15171c]', ink: 'text-[#ede7db]', muted: 'text-[#9a9ea6]', accent: 'text-[#d9a35b]', rule: 'bg-[#d9a35b]' },\n}\n\n// Paper has inks and no greys worth the name: solid black and white, and the\n// accent in red where the panel has it.\nfunction lookOf(app) {\n  const name = LOOKS[app.state.look] ? app.state.look : 'light'\n  if (!app.frame.paper) return LOOKS[name]\n  const red = app.frame.color !== false\n  if (name === 'dark') return { bg: 'bg-black', ink: 'text-white', muted: 'text-white', accent: red ? 'text-[#ffd400]' : 'text-white', rule: red ? 'bg-[#ffd400]' : 'bg-white' }\n  return { bg: 'bg-white', ink: 'text-black', muted: 'text-black', accent: red ? 'text-[#c00000]' : 'text-black', rule: red ? 'bg-[#c00000]' : 'bg-black' }\n}\n\nfunction readSpot(app) {\n  let spot = app.state.spot\n  if (typeof spot === 'string') {\n    try {\n      spot = JSON.parse(spot)\n    } catch (e) {\n      spot = null\n    }\n  }\n  return spot && typeof spot === 'object' && !Array.isArray(spot) ? spot : {}\n}\n\nconst saveSpot = (spot) => frameos.setState('spot', spot)\n\nconst folderOf = (app) => (typeof app.state.folder === 'string' ? app.state.folder.trim().replace(/^\\/+|\\/+$/g, '') : '') || 'Books'\n\n// The quotes there are, and why there are none.\nfunction quotesOf(app) {\n  const notes = `${folderOf(app)}/Notes`\n  const path = `${notes}/${HIGHLIGHTS_NAME}`\n  let quotes = []\n  if (frameos.assetExists(path)) quotes = fromHighlights(frameos.readAsset(path, { text: true }) || '')\n  const clippings = typeof app.state.clippings === 'string' ? app.state.clippings.trim().replace(/^\\/+/, '') : ''\n  let missing = ''\n  if (clippings) {\n    if (!frameos.assetExists(clippings)) missing = clippings\n    else {\n      // The end of a long one: the newest clippings, as a Kindle adds them there.\n      const size = frameos.assetSize(clippings)\n      const most = app.frame.embedded ? 512 * 1024 : 4 * 1024 * 1024\n      const offset = Math.max(0, size - most)\n      const text = frameos.readAsset(clippings, { text: true, offset, length: size - offset }) || ''\n      quotes = merged(quotes, fromClippings(text, offset > 0))\n    }\n  }\n  const storages = app.frame.storages\n  const noCard = Array.isArray(storages) && !storages.some((s) => s && s.id === 'assets')\n  return { quotes, notes, missing, noCard }\n}\n\nconst STEPS = { next: 1, prev: -1 }\n\nexport function onEvent(app, context) {\n  const p = context.payload || {}\n  const event = context.event\n  let cmd = null\n  if (event === 'tap') cmd = 'next'\n  else if (event === 'longPress') cmd = 'open'\n  else if (event === 'forward') cmd = 'next'\n  else if (event === 'back') cmd = 'prev'\n  else if (event === 'swipe') cmd = p.direction === 'left' || p.direction === 'up' ? 'next' : p.direction === 'right' || p.direction === 'down' ? 'prev' : null\n  else if (event === 'keyDown') {\n    if (p.ctrl || p.alt || p.meta) return false\n    const key = p.key\n    if (key === 'ArrowRight' || key === 'ArrowDown' || key === 'PageDown' || key === ' ') cmd = 'next'\n    else if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp') cmd = 'prev'\n    else if (key === 'Enter') cmd = 'open'\n  } else if (event === 'button') {\n    if (p.action !== 'press') return false\n    const role = String(p.role || '').toLowerCase()\n    const label = String(p.label || '').toUpperCase()\n    if (role === 'next' || role === 'right' || role === 'down' || (!role && (label === 'DOWN' || label === 'RIGHT' || label === 'NEXT'))) cmd = 'next'\n    else if (role === 'prev' || role === 'left' || role === 'up' || (!role && (label === 'UP' || label === 'LEFT' || label === 'PREV' || label === 'PREVIOUS'))) cmd = 'prev'\n    else if (role === 'primary') cmd = 'open'\n  }\n  if (!cmd) return false\n  const spot = readSpot(app)\n  if (cmd === 'open') return openBook(app, spot)\n  // Steps add up: taps that come while e-paper refreshes all count.\n  spot.step = Math.max(-20, Math.min(20, (spot.step || 0) + STEPS[cmd]))\n  saveSpot(spot)\n  return true\n}\n\n// The book of the highlight showing, at it, in the scene that opens .epub\n// files (the ePub reader): its file and mark fields. A Kindle clipping has no\n// book on the frame.\nfunction openBook(app, spot) {\n  if (!spot.book) return false\n  const reader = (app.frame.scenes || []).find((s) => s && String(s.opens || '').toLowerCase().split(/[\\s,]+/).includes('epub'))\n  if (!reader) {\n    spot.notice = 'Install the ePub reader to open the book from here.'\n    saveSpot(spot)\n    return true\n  }\n  frameos.dispatch('setCurrentScene', { sceneId: reader.id, state: { file: spot.book, mark: spot.id } })\n  return false\n}\n\n// The biggest text size at which the paragraphs fit height in width, found\n// by halves; at the least size, how many lines fit when they do not.\nfunction fitted(paras, font, width, height, least, most) {\n  const lineOf = (size) => Math.round(size * 1.28)\n  const gapOf = (size) => Math.round(size * 0.45)\n  const classOf = (size) => `${font} text-[${size}px] leading-[${lineOf(size)}px]`\n  const fits = (size) => {\n    let total = gapOf(size) * (paras.length - 1)\n    for (const h of frameos.measureText(paras, { className: classOf(size), width })) total += h\n    return total <= height\n  }\n  const result = (size, lines) => ({ size, line: lineOf(size), gap: gapOf(size), lines })\n  if (!fits(least)) return result(least, Math.max(1, Math.floor(height / lineOf(least))))\n  let lo = least\n  let hi = most\n  while (hi - lo > 1) {\n    const mid = (lo + hi) >> 1\n    if (fits(mid)) lo = mid\n    else hi = mid\n  }\n  return result(fits(hi) ? hi : lo, 0)\n}\n\nconst PEN = 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z'\n\nexport function get(app, context) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const look = lookOf(app)\n  const round = context.round === true\n  const short = Math.min(W, H)\n  const now = Date.now()\n\n  // Where it goes: the square inside a round panel, else the panel less a margin.\n  const margin = Math.round(short * 0.075)\n  const side = round ? Math.floor((short / 2 - 12) * Math.SQRT2) : 0\n  const box = round\n    ? { x: (W - side) >> 1, y: (H - side) >> 1, w: side, h: side }\n    : { x: Math.round(margin * 1.15), y: margin, w: W - Math.round(margin * 2.3), h: H - margin * 2 }\n\n  // Which one: the next when its time is up or someone asked.\n  const kept = readSpot(app)\n  const { quotes, notes, missing, noCard } = quotesOf(app)\n  const interval = Number(app.state.interval) > 0 ? Number(app.state.interval) : 3600\n  const by = kept.step || 0\n  const due = !kept.t || now - kept.t >= interval * 1000 - 1500\n  const order = app.state.order === 'newest' || app.state.order === 'book' ? app.state.order : 'shuffle'\n  let chosen = pick(quotes, kept, Math.sign(by), due, order, now)\n  for (let k = 1; k < Math.min(Math.abs(by), quotes.length); k++) chosen = pick(quotes, chosen.spot, Math.sign(by), false, order, now)\n  const quote = chosen.quote\n  const notice = kept.notice\n  const spot = { ...chosen.spot, book: quote ? quote.book : '' }\n  delete spot.step\n  delete spot.notice\n  if (chosen.spot !== kept || by !== 0 || notice || spot.book !== kept.book) saveSpot(spot)\n  // The next quote when its time is up, however this render came.\n  if (quote && spot.t) {\n    const left = interval - (now - spot.t) / 1000\n    if (left > 1 && left < interval - 1) frameos.setNextSleep(left)\n  }\n\n  const hint = Math.max(13, Math.round(short / 34))\n  if (!quote) {\n    const why = noCard\n      ? 'The ePub reader keeps its highlights on the TF card, and this frame has none in.'\n      : 'Highlight a passage in the ePub reader and it shows here, one at a time.'\n    return (\n      <div className={`w-[${W}px] h-[${H}px] ${look.bg} flex items-center justify-center`}>\n        <div className={`w-[${box.w}px] flex flex-col items-center text-center gap-[${hint}px]`}>\n          <div className={`font-[Cormorant_Garamond] text-[${hint * 6}px] leading-[${hint * 4}px] ${look.accent}`}>“</div>\n          <div className={`text-[${Math.round(hint * 1.8)}px] font-bold ${look.ink}`}>No highlights yet</div>\n          <div className={`text-[${hint}px] leading-[${Math.round(hint * 1.4)}px] ${look.muted}`}>{why}</div>\n          {missing ? <div className={`text-[${hint}px] ${look.muted}`}>{`No Kindle clippings at ${missing}.`}</div> : null}\n          <div className={`text-[${Math.round(hint * 0.85)}px] ${look.muted}`}>{`Looking in ${notes}`}</div>\n        </div>\n      </div>\n    )\n  }\n\n  // Under the quote: a short rule, the book, its author and chapter, the note.\n  const small = Math.max(12, Math.round(Math.min(short / 27, box.w / 22)))\n  const showNote = app.state.notes !== false && app.state.notes !== 'false' && quote.note\n  const byline = [quote.author, quote.chapter].filter(Boolean).join(' · ')\n  const noteWidth = box.w - Math.round(small * 1.6)\n  const noteHeight = showNote ? Math.min(frameos.measureText([quote.note], { className: `italic text-[${small}px] leading-[${Math.round(small * 1.35)}px]`, width: noteWidth })[0], Math.round(small * 1.35) * 2) : 0\n  const gap = Math.round(small * 1.4)\n  const foot = gap + 3 + Math.round(small * 0.8) + Math.round(small * 1.45) + (byline ? Math.round(small * 1.3) : 0) + (showNote ? Math.round(small * 0.6) + noteHeight : 0) + (notice ? Math.round(small * 1.4) : 0)\n\n  // The quote as big as the room left takes it.\n  const typeface = typeof app.state.typeface === 'string' ? app.state.typeface : 'Cormorant Garamond'\n  const font = typeface && typeface !== 'Ubuntu' ? `font-[${typeface.replace(/\\s+/g, '_')}]` : ''\n  // Its paragraphs, each a block (a UI's text folds its line breaks into\n  // spaces). A short one is set centred, in quotation marks unless it opens\n  // with its own (a line of dialogue); a long one reads better from the left.\n  const centred = round || quote.text.length <= 160\n  let paras = quote.text.split(/\\n+/).map((t) => t.replace(/\\s+/g, ' ').trim()).filter(Boolean)\n  if (centred && !/^[\"“‘'«„‹(\\[]/.test(paras[0])) {\n    paras[0] = '“' + paras[0]\n    paras[paras.length - 1] += '”'\n  }\n  const fit = fitted(paras, font, box.w, box.h - foot, Math.max(14, Math.round(short / 26)), Math.round(Math.min(box.h * 0.2, box.w / 7)))\n  // Too long even at the least size: one paragraph, cut where the room ends.\n  if (fit.lines) paras = [paras.join(' ')]\n  const align = centred ? 'items-center text-center' : 'items-start text-left'\n  // The opening mark, in the margin above the quote's first line.\n  const markSize = Math.round(Math.min(fit.size * 2.2, margin * 2.4))\n\n  return (\n    <div className={`relative w-[${W}px] h-[${H}px] ${look.bg}`}>\n      {!round && !centred ? (\n        <div className={`absolute left-[${Math.round(margin * 0.2)}px] top-[${Math.round(margin * 0.15)}px] font-[Cormorant_Garamond] text-[${markSize}px] leading-[${markSize}px] ${look.accent}`}>“</div>\n      ) : null}\n      <div className={`absolute left-[${box.x}px] top-[${box.y}px] w-[${box.w}px] h-[${box.h}px] flex flex-col justify-center ${align}`}>\n        <div className={`w-full flex flex-col gap-[${fit.gap}px] ${align}`}>\n          {paras.map((para) => (\n            <div className={`${font} text-[${fit.size}px] leading-[${fit.line}px] ${look.ink} ${fit.lines ? `line-clamp-${fit.lines}` : ''}`}>{para}</div>\n          ))}\n        </div>\n        <div className={`mt-[${gap}px] w-[${Math.round(small * 2.6)}px] h-[3px] ${look.rule}`} />\n        <div className={`mt-[${Math.round(small * 0.8)}px] w-full text-[${Math.round(small * 1.15)}px] leading-[${Math.round(small * 1.45)}px] font-bold ${look.ink} truncate`}>{quote.title || 'Untitled'}</div>\n        {byline ? <div className={`w-full text-[${small}px] leading-[${Math.round(small * 1.3)}px] ${look.muted} truncate`}>{byline}</div> : null}\n        {showNote ? (\n          <div className={`mt-[${Math.round(small * 0.6)}px] flex flex-row gap-[${Math.round(small * 0.5)}px] ${centred ? 'justify-center' : ''} w-full`}>\n            <svg viewBox=\"0 0 24 24\" className={`w-[${small}px] h-[${small}px] mt-[${Math.round(small * 0.2)}px] ${look.accent}`}>\n              <path d={PEN} fill=\"currentColor\" />\n            </svg>\n            <div className={`italic text-[${small}px] leading-[${Math.round(small * 1.35)}px] ${look.muted} line-clamp-2 max-w-[${noteWidth}px]`}>{quote.note}</div>\n          </div>\n        ) : null}\n        {notice ? <div className={`mt-[${Math.round(small * 0.6)}px] text-[${small}px] ${look.muted}`}>{notice}</div> : null}\n      </div>\n    </div>\n  )\n}\n",
+          "quotes.ts": "// What the Book highlights scene shows, and in which order.\n//\n// The ePub reader keeps every highlight in Highlights.json in its Notes\n// folder (Books/Notes unless its books folder is another), and a Kindle (or\n// any reader that exports one) keeps them in a \"My Clippings.txt\". Both are\n// read into quotes: { id, book, title, author, chapter, text, note, at, pos },\n// book being the reader's key for the book ('' for a clipping), at when it was\n// made (ms, 0 when unknown) and pos where it is in its book.\n\nexport const HIGHLIGHTS_NAME = 'Highlights.json'\n\nconst str = (v) => (typeof v === 'string' ? v : '')\n\n// FNV-1a, for ids and the shuffle: the same text gives the same number on every frame.\nexport function hash(text) {\n  let h = 0x811c9dc5\n  for (let i = 0; i < text.length; i++) {\n    h ^= text.charCodeAt(i)\n    h = Math.imul(h, 0x01000193)\n  }\n  return h >>> 0\n}\n\n// ---- The ePub reader's Highlights.json ------------------------------------------------\n\nexport function fromHighlights(text) {\n  let data = null\n  try {\n    data = JSON.parse(text)\n  } catch (e) {\n    return []\n  }\n  if (!data || data.format !== 'frameos-highlights' || !Array.isArray(data.highlights)) return []\n  const out = []\n  for (const h of data.highlights) {\n    if (!h || typeof h.text !== 'string' || !h.text.trim()) continue\n    out.push({\n      id: String(h.id || hash(str(h.title) + '|' + h.text)),\n      book: str(h.book),\n      title: str(h.title),\n      author: str(h.author),\n      chapter: str(h.chapter),\n      text: h.text.trim(),\n      note: str(h.note).trim(),\n      at: Number(h.at) || 0,\n      pos: Number(h.f) || 0,\n    })\n  }\n  return out\n}\n\n// ---- A Kindle's \"My Clippings.txt\" ---------------------------------------------------\n\nconst MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']\nconst ADDED = /(\\d{1,2})?\\s*(january|february|march|april|may|june|july|august|september|october|november|december)\\s*(\\d{1,2})?,?\\s+(\\d{4})\\D+(\\d{1,2}):(\\d{2})(?::(\\d{2}))?\\s*([ap]m)?/i\n\n// \"Added on Monday, March 2, 2020 9:15:32 PM\" (or the day first, as a UK\n// Kindle writes it), in the frame's time; 0 for a Kindle in another language.\nexport function kindleTime(line) {\n  const m = ADDED.exec(line)\n  if (!m) return 0\n  const day = Number(m[1] || m[3])\n  if (!day) return 0\n  let hour = Number(m[5]) % 24\n  const half = (m[8] || '').toLowerCase()\n  if (half === 'pm' && hour < 12) hour += 12\n  if (half === 'am' && hour === 12) hour = 0\n  return new Date(Number(m[4]), MONTHS.indexOf(m[2].toLowerCase()), day, hour, Number(m[6]), Number(m[7] || 0)).getTime()\n}\n\n// Its highlights, in the file's order. A highlight made longer is written\n// again, so the newer of two that overlap in one book is kept; a note goes\n// with the highlight of its book that it is at the end of; bookmarks (no text)\n// are left out. A file read from its middle starts at its first whole one.\nexport function fromClippings(text, fromMiddle = false) {\n  let body = text.replace(/\\r/g, '').replace(/^﻿/, '')\n  if (fromMiddle) {\n    const first = body.indexOf('==========\\n')\n    body = first < 0 ? '' : body.slice(first + 11)\n  }\n  const out = []\n  const notes = []\n  for (const part of body.split(/\\n?==========\\n?/)) {\n    const lines = part.split('\\n')\n    let i = 0\n    while (i < lines.length && !lines[i].trim()) i++\n    if (i + 1 >= lines.length) continue\n    const head = lines[i].replace(/^﻿/, '').trim()\n    const meta = lines[i + 1]\n    const said = lines.slice(i + 2).join('\\n').trim()\n    if (!head || !said) continue\n    const named = /^(.*\\S)\\s*\\(([^()]*)\\)$/.exec(head)\n    const title = named ? named[1] : head\n    const author = named ? named[2].trim() : ''\n    const loc = /location\\s+(\\d+)(?:\\s*-\\s*(\\d+))?/i.exec(meta)\n    const from = loc ? Number(loc[1]) : -1\n    const to = loc ? Number(loc[2] || loc[1]) : -1\n    if (/\\bnote\\b/i.test(meta)) {\n      notes.push({ title, at: to, text: said, index: out.length })\n      continue\n    }\n    if (/\\bbookmark\\b/i.test(meta)) continue\n    const quote = { id: 'k' + hash(title + '|' + said).toString(36), book: '', title, author, chapter: '', text: said, note: '', at: kindleTime(meta), pos: from, to }\n    let replaced = false\n    for (let j = out.length - 1; j >= 0 && j >= out.length - 10; j--) {\n      const o = out[j]\n      if (o.title === title && from >= 0 && o.pos >= 0 && from <= o.to && to >= o.pos && (said.includes(o.text) || o.text.includes(said))) {\n        out[j] = quote\n        replaced = true\n        break\n      }\n    }\n    if (!replaced) out.push(quote)\n  }\n  for (const n of notes) {\n    let best = null\n    for (let j = Math.max(0, n.index - 10); j < Math.min(out.length, n.index + 10); j++) {\n      const o = out[j]\n      if (o.title === n.title && n.at >= o.pos && n.at <= o.to + 1 && (!best || Math.abs(j - n.index) < Math.abs(best.j - n.index))) best = { j, o }\n    }\n    if (best) best.o.note = best.o.note ? best.o.note + '\\n' + n.text : n.text\n  }\n  for (const o of out) delete o.to\n  return out\n}\n\n// Both, the reader's first: a passage both have shows once.\nexport function merged(...lists) {\n  const seen = new Set()\n  const out = []\n  const key = (q) => (q.title.toLowerCase() + '|' + q.text.replace(/\\s+/g, ' ').slice(0, 80)).toLowerCase()\n  for (const list of lists) {\n    for (const q of list) {\n      const k = key(q)\n      if (seen.has(k)) continue\n      seen.add(k)\n      out.push(q)\n    }\n  }\n  return out\n}\n\n// ---- The order ------------------------------------------------------------------------\n\nfunction mix(x) {\n  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b)\n  x = Math.imul(x ^ (x >>> 16), 0x45d9f3b)\n  return (x ^ (x >>> 16)) >>> 0\n}\n\n// order: 'shuffle' (a new order every time round), 'newest' first, or 'book'\n// (book by book, each in the order it reads).\nexport function deckOf(quotes, order, seed) {\n  if (order === 'newest') return quotes.slice().sort((a, b) => b.at - a.at)\n  if (order === 'book') return quotes.slice().sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.pos - b.pos))\n  return quotes\n    .map((q) => ({ k: mix(hash(q.id) ^ seed), q }))\n    .sort((a, b) => a.k - b.k)\n    .map((x) => x.q)\n}\n\n// Which quote shows. spot is what the scene keeps: the quote showing (id),\n// the shuffle's seed and the quote its round started at (start), when it went\n// up (t) and the newest highlight it has shown (seen). by is a step the person asked for (1, -1, 0), due whether the\n// quote's time is up. A highlight made since (newer than seen) comes next,\n// before the rest; the first time, the newest. Returns { quote, spot }, spot\n// changed only when the quote did.\nexport function pick(quotes, spot, by, due, order, now) {\n  if (quotes.length === 0) return { quote: null, spot }\n  const next = { ...spot }\n  if (typeof next.seed !== 'number') next.seed = (now % 2147483647) >>> 0\n  const showing = quotes.find((q) => q.id === spot.id) || null\n  const forward = by > 0 || (by === 0 && (due || !showing))\n  let newest = 0\n  for (const q of quotes) newest = Math.max(newest, q.at)\n  if (forward && typeof spot.seen !== 'number') {\n    const first = quotes.reduce((a, q) => (q.at > a.at ? q : a), quotes[0])\n    return { quote: first, spot: { ...next, id: first.id, t: now, seen: newest, start: first.id } }\n  }\n  if (forward) {\n    // The oldest of those made since the last one shown.\n    let fresh = null\n    for (const q of quotes) if (q.at > spot.seen && (!fresh || q.at < fresh.at)) fresh = q\n    if (fresh) return { quote: fresh, spot: { ...next, id: fresh.id, t: now, seen: fresh.at } }\n  }\n  if (!forward && by === 0) return { quote: showing, spot }\n  // Round the deck from the one showing. A round of a shuffle ends when it\n  // comes back to where it started (start): every one has shown, and the next\n  // round goes in a new order, not starting with the one that just showed.\n  let deck = deckOf(quotes, order, next.seed)\n  const n = deck.length\n  const at = showing ? deck.findIndex((q) => q.id === showing.id) : -1\n  let i = at < 0 ? (by < 0 ? n - 1 : 0) : (at + (by < 0 ? -1 : 1) + n) % n\n  const shuffled = order !== 'newest' && order !== 'book'\n  if (shuffled && by >= 0 && deck[i].id === next.start) {\n    next.seed = mix(next.seed + 1)\n    deck = deckOf(quotes, order, next.seed)\n    i = n > 1 && deck[0].id === spot.id ? 1 : 0\n    next.start = deck[i].id\n  }\n  if (!quotes.some((q) => q.id === next.start)) next.start = deck[i].id\n  const quote = deck[i]\n  return { quote, spot: { ...next, id: quote.id, t: now } }\n}\n",
+          "app.test.ts": "import { fromHighlights, fromClippings, kindleTime, merged, deckOf, pick } from './quotes'\n\nconst reader = (highlights) => JSON.stringify({ format: 'frameos-highlights', version: 1, highlights })\n\nconst q = (id, at, title = 'A Book', pos = 0) => ({ id, book: '', title, author: '', chapter: '', text: `Text ${id}`, note: '', at, pos })\n\ndescribe(\"the ePub reader's Highlights.json\", () => {\n  it('reads its highlights, and nothing from what is not one', () => {\n    const quotes = fromHighlights(\n      reader([\n        { id: 'h1', book: 'assets:Books/Emma.epub', title: 'Emma', author: 'Jane Austen', chapter: 'Volume I', text: ' One line.\\nAnother. ', note: 'Mine', at: 5, f: 0.25 },\n        { id: 'h2', title: 'Emma', text: '   ' },\n        null,\n      ]),\n    )\n    expect(quotes).toEqual([{ id: 'h1', book: 'assets:Books/Emma.epub', title: 'Emma', author: 'Jane Austen', chapter: 'Volume I', text: 'One line.\\nAnother.', note: 'Mine', at: 5, pos: 0.25 }])\n    expect(fromHighlights('{\"format\":\"frameos-books\",\"marks\":{}}')).toEqual([])\n    expect(fromHighlights('not json')).toEqual([])\n  })\n})\n\ndescribe(\"a Kindle's My Clippings.txt\", () => {\n  const clippings = [\n    '﻿The Old Man and the Sea (Ernest Hemingway)',\n    '- Your Highlight on page 103 | Location 1569-1570 | Added on Monday, March 2, 2020 9:15:32 PM',\n    '',\n    'A man can be destroyed',\n    '==========',\n    'The Old Man and the Sea (Ernest Hemingway)',\n    '- Your Highlight on page 103 | Location 1569-1571 | Added on Monday, March 2, 2020 9:16:01 PM',\n    '',\n    'A man can be destroyed but not defeated.',\n    '==========',\n    'The Old Man and the Sea (Ernest Hemingway)',\n    '- Your Note on page 103 | Location 1571 | Added on Monday, March 2, 2020 9:16:40 PM',\n    '',\n    'Read this again.',\n    '==========',\n    'Walden (Thoreau, Henry David)',\n    '- Your Bookmark on page 4 | Location 52 | Added on Tuesday, 3 March 2020 07:01:00',\n    '',\n    '',\n    '==========',\n    'Walden (Thoreau, Henry David)',\n    '- Your Highlight at location 88-90 | Added on Tuesday, 3 March 2020 07:02:00',\n    '',\n    'I went to the woods because I wished to live deliberately.',\n    '==========',\n    '',\n  ].join('\\r\\n')\n\n  it('reads highlights with their books and authors, a longer one in place of the one it grew from, a note with its highlight, no bookmarks', () => {\n    const quotes = fromClippings(clippings)\n    expect(quotes.length).toBe(2)\n    expect(quotes[0]).toMatchObject({ title: 'The Old Man and the Sea', author: 'Ernest Hemingway', text: 'A man can be destroyed but not defeated.', note: 'Read this again.', book: '', pos: 1569 })\n    expect(quotes[1]).toMatchObject({ title: 'Walden', author: 'Thoreau, Henry David', text: 'I went to the woods because I wished to live deliberately.', note: '' })\n    expect(quotes[0].id).toMatch(/^k/)\n    expect(quotes[0].id).not.toBe(quotes[1].id)\n  })\n\n  it('reads when each was added, either way round, and 0 in another language', () => {\n    expect(kindleTime('- Your Highlight | Added on Monday, March 2, 2020 9:15:32 PM')).toBe(new Date(2020, 2, 2, 21, 15, 32).getTime())\n    expect(kindleTime('- Your Highlight | Added on Tuesday, 3 March 2020 07:02:00')).toBe(new Date(2020, 2, 3, 7, 2, 0).getTime())\n    expect(kindleTime('- Your Highlight | Added on Monday, March 2, 2020 12:05:00 AM')).toBe(new Date(2020, 2, 2, 0, 5, 0).getTime())\n    expect(kindleTime('- Votre surlignement | Ajouté le lundi 2 mars 2020 21:15:32')).toBe(0)\n  })\n\n  it('read from its middle, starts at the first whole clipping', () => {\n    const tail = clippings.slice(clippings.indexOf('Location 1569-1571') - 10)\n    const quotes = fromClippings(tail, true)\n    expect(quotes.map((x) => x.title)).toEqual(['Walden'])\n  })\n\n  it('a passage both the reader and a clippings file have shows once, as the reader has it', () => {\n    const a = { ...q('h1', 1, 'Walden'), text: 'I went to the woods because I wished to live deliberately.', book: 'assets:Books/Walden.epub' }\n    const all = merged([a], fromClippings(clippings))\n    expect(all.length).toBe(2)\n    expect(all[0].book).toBe('assets:Books/Walden.epub')\n  })\n})\n\ndescribe('the order', () => {\n  const quotes = [q('a', 10, 'B', 2), q('b', 30, 'A', 9), q('c', 20, 'A', 1), q('d', 40, 'B', 1)]\n\n  it('newest first, book by book in reading order, or shuffled the same way for a seed', () => {\n    expect(deckOf(quotes, 'newest', 1).map((x) => x.id)).toEqual(['d', 'b', 'c', 'a'])\n    expect(deckOf(quotes, 'book', 1).map((x) => x.id)).toEqual(['c', 'b', 'd', 'a'])\n    const one = deckOf(quotes, 'shuffle', 7).map((x) => x.id)\n    expect(deckOf(quotes, 'shuffle', 7).map((x) => x.id)).toEqual(one)\n    expect(one.slice().sort()).toEqual(['a', 'b', 'c', 'd'])\n  })\n\n  it('starts with the newest, stays until its time is up, then shows every one before any again', () => {\n    let { quote, spot } = pick(quotes, {}, 0, true, 'shuffle', 1000)\n    expect(quote.id).toBe('d')\n    expect(spot).toMatchObject({ id: 'd', t: 1000, seen: 40, start: 'd' })\n    const stay = pick(quotes, spot, 0, false, 'shuffle', 2000)\n    expect(stay.quote.id).toBe('d')\n    expect(stay.spot).toBe(spot)\n    const shown = [quote.id]\n    for (let i = 0; i < 3; i++) {\n      ;({ quote, spot } = pick(quotes, spot, 0, true, 'shuffle', 3000 + i))\n      shown.push(quote.id)\n    }\n    expect(shown.slice().sort()).toEqual(['a', 'b', 'c', 'd'])\n    // Round again, in a new order, not the one that just showed first.\n    const again = pick(quotes, spot, 1, false, 'shuffle', 9000)\n    expect(again.quote.id).not.toBe(quote.id)\n    expect(again.spot.seed).not.toBe(spot.seed)\n  })\n\n  it('back goes the other way through the same order', () => {\n    const first = pick(quotes, { id: 'b', seed: 3, seen: 40, t: 1 }, 1, false, 'newest', 5)\n    expect(first.quote.id).toBe('c')\n    expect(pick(quotes, first.spot, -1, false, 'newest', 6).quote.id).toBe('b')\n    expect(pick(quotes, { id: 'd', seed: 3, seen: 40, t: 1 }, -1, false, 'newest', 6).quote.id).toBe('a')\n  })\n\n  it('a highlight made since comes next, before the rest', () => {\n    const more = quotes.concat([q('e', 50), q('f', 60)])\n    const spot = { id: 'a', seed: 3, seen: 40, t: 1 }\n    const next = pick(more, spot, 0, true, 'shuffle', 100)\n    expect(next.quote.id).toBe('e')\n    expect(pick(more, next.spot, 1, false, 'shuffle', 101).quote.id).toBe('f')\n  })\n\n  it('one that was taken away gives way to another at once', () => {\n    const left = pick(quotes, { id: 'gone', seed: 3, seen: 40, t: 1 }, 0, false, 'newest', 5)\n    expect(left.quote).not.toBe(null)\n    expect(pick([], {}, 0, true, 'shuffle', 5).quote).toBe(null)\n  })\n})\n"
+        }
+      }
+    }
+  }
+]

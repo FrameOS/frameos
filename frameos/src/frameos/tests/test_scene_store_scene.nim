@@ -50,7 +50,7 @@ var
   thumbsOn = true ## that store lists its scenes' covers
 initLock(requestsLock)
 
-const Shelves = [("photos", "Photos"), ("art", "Art & galleries"), ("clocks", "Clocks & time"),
+const Shelves = [("photos", "Photos"), ("art", "Art & galleries"), ("video", "Video"), ("clocks", "Clocks & time"),
   ("calendar", "Calendars & agendas"), ("weather", "Weather"), ("dashboards", "Home & dashboards"),
   ("games", "Games"), ("fun", "Fun & animations"), ("utilities", "Notes & tools"), ("ai", "AI & generative"),
   ("demos", "Demos & examples"), ("system", "System"), ("desktops", "Multi app layouts"), ("layouts", "Single app layouts"),

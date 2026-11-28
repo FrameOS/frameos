@@ -292,6 +292,10 @@ const CloudContractSettings* = @[
     Rule(kind: rkString, strEnum: @["silent", "normal"]),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.11.15")]),
+  SettingSpec(key: "auto_rotate", rule:
+    Rule(kind: rkBool),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.17")]),
   SettingSpec(key: "brightness", rule:
     Rule(kind: rkInt, hasMin: true, min: 5.0, hasMax: true, max: 100.0),
   profiles: @[

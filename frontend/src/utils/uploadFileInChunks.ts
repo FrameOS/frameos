@@ -19,8 +19,21 @@ interface UploadFileInChunksOptions {
   /** The frame's storage to write into (the `storage` query parameter);
    * absent means the assets folder. */
   storage?: AssetStorageId
+  /** How long one chunk may keep answering 504 before the file fails, when
+   * `retries` is above 0. A 504 is the control plane saying the frame has
+   * not acked the chunk YET: the cloud keeps the command queued and the next
+   * request for the same offset waits for that command again rather than
+   * sending the bytes twice (putAssetChunk). A slow card or a busy frame
+   * takes longer than the request's 30 s, and failing the file then
+   * abandoned it half-written on the frame. */
+  pendingBudgetMs?: number
   onProgress?: (uploadedBytes: number) => void
+  /** Called with true while a chunk is waiting on the frame (a 504 came
+   * back and the chunk is being asked about again), false once it lands. */
+  onWaiting?: (waiting: boolean) => void
 }
+
+const DEFAULT_PENDING_BUDGET_MS = 10 * 60 * 1000
 
 class ChunkGapError extends Error {}
 
@@ -78,7 +91,9 @@ async function uploadOnce({
   chunkSize = DEFAULT_UPLOAD_CHUNK_SIZE,
   retries = 0,
   storage,
+  pendingBudgetMs = DEFAULT_PENDING_BUDGET_MS,
   onProgress,
+  onWaiting,
 }: UploadFileInChunksOptions): Promise<any> {
   const uploadId = secureToken(18)
   const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize))
@@ -106,6 +121,8 @@ async function uploadOnce({
     const body = file.slice(start, end)
 
     let response: ChunkResponse | null = null
+    const chunkStarted = Date.now()
+    let waiting = false
     for (let attempt = 0; ; attempt++) {
       try {
         response = await postChunk(url, body, (sentBytes) => {
@@ -121,6 +138,20 @@ async function uploadOnce({
       if (response.status === 409) {
         throw new ChunkGapError('Upload lost earlier bytes; restarting')
       }
+      // Not acked yet: ask again, without spending a retry, for as long as
+      // the budget allows (see pendingBudgetMs).
+      if (response.status === 504 && retries > 0 && Date.now() - chunkStarted < pendingBudgetMs) {
+        if (!waiting) {
+          waiting = true
+          onWaiting?.(true)
+        }
+        // The cloud's 504 comes after its own 30 s wait; a second's pause
+        // keeps a proxy that answers 504 at once from turning this into a
+        // tight loop.
+        await new Promise((r) => setTimeout(r, 1000))
+        attempt--
+        continue
+      }
       if (response.status < 200 || response.status >= 300) {
         if (attempt < retries) {
           await new Promise((r) => setTimeout(r, 500 * (attempt + 1)))
@@ -129,6 +160,9 @@ async function uploadOnce({
         throw new Error(`Upload failed with status ${response.status}`)
       }
       break
+    }
+    if (waiting) {
+      onWaiting?.(false)
     }
 
     finalPayload = response.payload

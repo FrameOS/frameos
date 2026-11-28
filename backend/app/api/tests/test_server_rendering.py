@@ -234,6 +234,30 @@ async def test_a_picture_drawn_before_the_wake_is_the_pulls_once(
 
 
 @pytest.mark.asyncio
+async def test_a_tone_drawn_before_the_wake_sounds_at_the_wake(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """A reminder due at the wake (docs/tones.md): the pre-render's tone goes
+    out with the picture it was drawn with, and not with the next one."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    as_of_ms = asleep_until(db, frame, 30)
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'tones': '2093:120,0:40,3136:240'}),
+    )
+    assert await prerender_thin_client(db, redis, frame, as_of_ms) is True
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer([]))
+    url = f'/api/frames/{frame.id}/embedded/render'
+    woke = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
+    assert woke.status_code == 200
+    assert woke.headers['x-frameos-tone'] == '2093:120,0:40,3136:240'
+    after = await no_auth_client.get(url, params={'scene': 'clock'}, headers=auth(frame))
+    assert 'x-frameos-tone' not in after.headers
+
+
+@pytest.mark.asyncio
 async def test_a_state_written_since_it_was_drawn_sends_the_pull_to_render(
     async_client, no_auth_client, db, redis, monkeypatch
 ):
@@ -1767,3 +1791,30 @@ async def test_the_pull_says_where_a_press_does_something(async_client, no_auth_
         )
         quiet = await no_auth_client.get(url, headers=auth(frame))
         assert 'x-frameos-press' not in quiet.headers, press_map
+
+
+@pytest.mark.asyncio
+async def test_the_pull_carries_the_scenes_tone(async_client, no_auth_client, db, redis, monkeypatch):
+    """The render's frameos.tone() goes to the board as X-FrameOS-Tone, on a
+    304 too: the scene asked for it in this render (docs/tones.md)."""
+    frame = await server_rendered_frame(async_client, db)
+    await redis.set(f'frame:{frame.id}:active_scene', 'clock')
+    monkeypatch.setattr(
+        'app.api.embedded_device.render_scene_rgba_and_state',
+        recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'tones': '880:200,0:50,1320:300'}),
+    )
+    url = f'/api/frames/{frame.id}/embedded/render'
+    first = await no_auth_client.get(url, headers=auth(frame))
+    assert first.headers['x-frameos-tone'] == '880:200,0:50,1320:300'
+    same = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert same.status_code == 304
+    assert same.headers['x-frameos-tone'] == '880:200,0:50,1320:300'
+
+    # No tone, or the bundle says nothing, or it is not notes.
+    for tones in ('', None, '880:200\r\nX-Injected: 1', '880', 'a:b', '1:' + '9' * 300):
+        monkeypatch.setattr(
+            'app.api.embedded_device.render_scene_rgba_and_state',
+            recording_renderer([], state={'sceneId': 'clock', 'state': {}, 'tones': tones}),
+        )
+        quiet = await no_auth_client.get(url, headers=auth(frame))
+        assert 'x-frameos-tone' not in quiet.headers, tones

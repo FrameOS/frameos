@@ -1,0 +1,10 @@
+{
+  "name": "Oracle ball",
+  "description": "Ask a question and shake the frame: an answer floats up in the ball's window. Turning it face down and back asks again too. On a frame without an accelerometer, tap it or press a key.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.17"
+}

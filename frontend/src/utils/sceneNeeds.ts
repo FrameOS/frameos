@@ -18,6 +18,13 @@
  * - `video`: it plays video or reads frames of one (`frameos.video`,
  *   `videoFrame`, `videoInfo`: docs/video.md), which takes a Raspberry Pi
  *   with ffmpeg. An ESP32 cannot; a cloud-managed Pi can.
+ * - `accelerometer`: it is moved by tilting, flicking or shaking the frame
+ *   (`frameos.accelerometer()`, or the `tilt`, `flick`, `shake` and
+ *   `orientation` events: docs/accelerometer.md), which a frame with an
+ *   accelerometer has (the reTerminal Sticky, the Waveshare 1.75" AMOLED). It
+ *   rules nothing out (a scene that reads it plays by touch or keys
+ *   elsewhere), and such a frame's own store puts it first. `app.frame
+ *   .accelerometer` alone only asks whether there is one: no need.
  * - `round`: no need but a fit: it works on a round screen too (only the
  *   circle inside the panel shows: docs/scene-guide.md "Round panels"). Read
  *   from code that asks `context.round` or `app.frame.round`, or said by
@@ -38,14 +45,24 @@
  * under its stricter tsconfig.
  */
 
-export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'linux' | 'video' | 'round'
-export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'buttons', 'linux', 'video', 'round']
+export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'accelerometer' | 'linux' | 'video' | 'round'
+export const SCENE_NEEDS: readonly SceneNeed[] = [
+  'fast',
+  'touch',
+  'keys',
+  'buttons',
+  'accelerometer',
+  'linux',
+  'video',
+  'round',
+]
 
 const needLabels: Record<SceneNeed, string> = {
   fast: 'Fast screen',
   touch: 'Touch & mouse',
   keys: 'Keyboard',
   buttons: 'Buttons',
+  accelerometer: 'Accelerometer',
   linux: 'Pi only',
   video: 'Video',
   round: 'Round screen',
@@ -56,6 +73,8 @@ const needDescriptions: Record<SceneNeed, string> = {
   touch: 'Used with taps and swipes on a touch screen, or with a mouse.',
   keys: 'Used with a keyboard.',
   buttons: "Used with the frame's own buttons.",
+  accelerometer:
+    'Tilt or shake the frame: made for a frame with an accelerometer (the reTerminal Sticky, the Waveshare 1.75" AMOLED). Elsewhere it plays by touch or keys where the scene offers that.',
   linux:
     'Runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32 or a cloud-managed frame.',
   video: 'Plays video: a Raspberry Pi frame with FFmpeg (every FrameOS image has it), not an ESP32.',
@@ -109,6 +128,14 @@ const ROUND_READ = /\b(?:context|frame)\s*\??\.\s*round\b/
 const KEY_EVENTS = new Set(['keyDown', 'keyUp', 'textInput'])
 /** The frame's own buttons (GPIO). */
 const BUTTON_EVENTS = new Set(['button'])
+
+/** Moving the frame (docs/accelerometer.md): the contract's motion events. */
+const MOTION_EVENTS = new Set(['tilt', 'flick', 'shake', 'orientation'])
+/** Code that reads the accelerometer; `app.frame.accelerometer` only asks whether there is one. */
+const ACCELEROMETER_CALL = /\bframeos\s*\.\s*accelerometer\s*\(/
+// Compared with or switched on, as onEvent does: 'orientation' alone is also a
+// photo's EXIF key.
+const MOTION_NAME = /(?:===?\s*|\bcase\s+)['"`](?:tilt|flick|shake|orientation)['"`]/
 
 /** Code that plays video or reads its frames (docs/video.md). */
 const VIDEO_CALL = /\bframeos\s*\.\s*video(?:Frame|Info)?\s*\(/
@@ -206,7 +233,10 @@ export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] 
   const needs = new Set<SceneNeed>()
   for (const entry of scenesOf(scene)) {
     const round = settingsOf(entry).round
-    if (round === true || (round !== false && !isLayout(entry) && codeOf(entry).some((text) => ROUND_READ.test(text)))) {
+    if (
+      round === true ||
+      (round !== false && !isLayout(entry) && codeOf(entry).some((text) => ROUND_READ.test(text)))
+    ) {
       needs.add('round')
     }
     if (codeOf(entry).some((text) => VIDEO_CALL.test(text))) {
@@ -250,6 +280,12 @@ export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] 
     }
     if ([...events].some((name) => BUTTON_EVENTS.has(name)) || code.some((text) => BUTTON_NAME.test(text))) {
       needs.add('buttons')
+    }
+    if (
+      [...events].some((name) => MOTION_EVENTS.has(name)) ||
+      code.some((text) => ACCELEROMETER_CALL.test(text) || MOTION_NAME.test(text))
+    ) {
+      needs.add('accelerometer')
     }
   }
   if (riskFlags.includes('shell')) {

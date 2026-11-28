@@ -37,6 +37,8 @@
 #include "fos_codec.h"
 #include "fos_gauge.h"
 #include "fos_imu.h"
+#include "fos_motion.h"
+#include "fos_rotation.h"
 #include "fos_touch.h"
 #include "lcd_qspi_amoled.h"
 #include "fos_bt.h"
@@ -611,6 +613,7 @@ static int cmd_set(int argc, char **argv)
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
                "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|click_sounds|bluetooth|mic_pins|voice_chat|"
+               "auto_rotate|imu_axes|"
                "cpu_mode|brightness|dim_after|dim_brightness|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
@@ -1292,6 +1295,21 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
     else if (strcmp(key, "touch_beep") == 0) config->touch_beep = atoi(value) != 0;
+    else if (strcmp(key, "auto_rotate") == 0) config->auto_rotate = atoi(value) != 0;
+    else if (strcmp(key, "imu_axes") == 0) {
+        /* The accelerometer's axes on the panel (docs/accelerometer.md):
+         * live, the next reading uses them; "default" for the board's. */
+        fos_motion_axes_t axes;
+        if (strcmp(value, "default") == 0) {
+            config->imu_axes[0] = '\0';
+        } else if (strlen(value) < sizeof(config->imu_axes) && fos_motion_parse_axes(value, &axes)) {
+            strlcpy(config->imu_axes, value, sizeof(config->imu_axes));
+        } else {
+            printf("imu_axes: x=<axis>,y=<axis>,z=<axis>, each [-]x, [-]y or [-]z once (x=-y,y=x,z=z), or default\n");
+            return 1;
+        }
+        fos_imu_axes_changed();
+    }
     else if (strcmp(key, "click_sounds") == 0) {
         /* Live: the next click reads it (fos_buzzer.c). */
         if (!fos_config_parse_click_sounds(value, &config->click_sounds)) {
@@ -1322,7 +1340,8 @@ static int cmd_set(int argc, char **argv)
         printf("error: %s is set until the next restart but was NOT saved: %s\n", key, esp_err_to_name(err));
         return 1;
     }
-    printf("ok: %s set (some settings need `restart`)\n", key);
+    bool live = strcmp(key, "auto_rotate") == 0 || strcmp(key, "imu_axes") == 0;
+    printf(live ? "ok: %s set (live)\n" : "ok: %s set (some settings need `restart`)\n", key);
     /* A frame that was never on the cloud runs no cloud task: provisioning
      * one (the flasher's `set cloud_url` + `set claim_token`) starts it. */
     if (strcmp(key, "claim_token") == 0 || strcmp(key, "cloud_url") == 0) fos_cloud_start();
@@ -2340,7 +2359,21 @@ static int cmd_imu(int argc, char **argv)
         printf("imu: read failed: %s\n", esp_err_to_name(err));
         return 1;
     }
-    printf("imu: qmi8658 x=%d y=%d z=%d mg\n", x, y, z);
+    /* The chip's own reading, and gravity along the picture as it shows now:
+     * held upright it says y=+1000, lying face up z=-1000. A board whose
+     * map is wrong says otherwise: `set imu_axes` (docs/accelerometer.md). */
+    const fos_config_t *config = fos_config();
+    printf("imu: %s x=%d y=%d z=%d mg (the chip's axes)\n", fos_imu_chip(), x, y, z);
+    int g[3];
+    if (fos_imu_gravity(&g[0], &g[1], &g[2])) {
+        printf("gravity: x=%d y=%d z=%d mg along the picture at rotate %u\n", g[0], g[1], g[2],
+               (unsigned)fos_rotation());
+    }
+    printf("axes: %s%s\n", config->imu_axes[0] ? config->imu_axes : fos_imu_board_axes(config->hardware_preset),
+           config->imu_axes[0] ? " (imu_axes)" : " (the board's)");
+    printf("position: %s, upright at %d, auto_rotate %s\n",
+           fos_imu_position() >= 0 ? fos_motion_position_name((fos_position_t)fos_imu_position()) : "not yet",
+           fos_imu_upright_rotate(), config->auto_rotate ? "on" : "off");
     return 0;
 }
 

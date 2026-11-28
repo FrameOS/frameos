@@ -44,6 +44,7 @@ import frameos/version
 import frameos/scene_store_preview
 import frameos/scene_code_preview
 import frameos/file_transfer_preview
+import frameos/tones
 from frameos/utils/http_client import boundedRequestWithHeaders
 
 # ------------------------------------------------------------------ JS hooks
@@ -162,6 +163,18 @@ proc dropDeviceCanvas() =
 panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     if frameConfig.isNil: 0 else: max(0, frameConfig.width) * max(0, frameConfig.height) * 4
+
+# A scene's tones (docs/tones.md): kept for whoever runs this runtime, the
+# browser preview's worker (which plays them with Web Audio) or a plane
+# rendering for a board (which hands them on as X-FrameOS-Tone). The last
+# call wins, as a call while notes sound replaces them on the board.
+var pendingTones = ""
+var tonesBuffer = ""
+toneSink = proc(notes: string): bool {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    if notes.len > 0:
+      pendingTones = notes
+  true
 
 proc previewCanvas(): Image =
   ## The canvas the next render draws into, or nil for a fresh RGBX one per
@@ -913,6 +926,16 @@ proc frameos_wasm_press_map(): cstring {.exportc, cdecl.} =
   except Exception:
     pressMapBuffer = ""
   pressMapBuffer.cstring
+
+proc frameos_wasm_tones(): cstring {.exportc, cdecl.} =
+  ## The notes a scene asked `frameos.tone()` for since the last call,
+  ## "hz:ms,..." with 0 Hz a rest (tones.normalizeTones), and "" when none:
+  ## read once after every render or event, they are forgotten here. A plane
+  ## sends them as `X-FrameOS-Tone` and the board plays them; the browser
+  ## preview plays them itself (docs/tones.md).
+  tonesBuffer = pendingTones
+  pendingTones = ""
+  tonesBuffer.cstring
 
 # ------------------------------------------------------------- the cursor
 

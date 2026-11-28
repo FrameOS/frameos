@@ -72,6 +72,8 @@ main/                     boot orchestration + platform modules
   fos_assets_sd.c         SD card mount/probe/format for the assets root
   fos_assets_flash.c      the state partition's files: /srv/internal, and the assets root with no SD card in use
   fos_sd_probe.c          SD presence probe used by the assets layer
+  fos_sd_diskio.c         FatFS's disk driver for the card: a buffer in PSRAM moves 16 sectors a
+                          command through internal RAM, where IDF's moves it one sector a command
   fos_framebuffer.c       canvas allocation (RGB565, luma or 4-bit grey by panel) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
@@ -269,7 +271,13 @@ for the two Spectra boards most of the bench work runs on:
   the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
   `fos_assets_sd.c` joins the display's bus instead of opening SPI3
   (`fos_display_spi_bus_share`), the panel holds the bus for each refresh
-  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. The
+  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. Every
+  card is mounted with `wait_for_miso = -1` (`fos_assets_sd.c`): on the
+  bench E1004 MISO never read high between commands, so IDF's default
+  waited 40 ms before every one, which made a sector read 80 ms and a cloud
+  upload 66 s a 256 KiB chunk (3 s without it, 2026-11-28). The bench
+  E1002's card answers high; without the wait it moved a 4.8 MB file 10 %
+  and upload chunks 28 % faster. The
   socket is powered through GPIO16 (GPIO39 on the E1003) and has a
   card-detect contact on GPIO15 (`pwr=16,det=15` in the spec; an empty slot
   is reported without a bus probe). The green status LED (`led_pin 6` with
@@ -1524,6 +1532,18 @@ Silent leaves the voice chat's cues alone. Live, no restart; the plane's
 report says `sounds` (a buzzer, a codec speaker or an LED that follows the
 notes: `fos_buzzer_sounds`) and `clickSounds`.
 
+### A scene's tones
+
+A scene sounds the buzzer itself with `frameos.tone()` (docs/tones.md): the
+runtime hands the notes as text, "hz:ms,...", to `fos_buzzer_scene_tone`,
+which reads them with `fos_tone.c` (pure, host-tested in `test_fos_tone.c`)
+and plays them like any sequence (16 notes at most, `FOS_BUZZER_NOTES_MAX`),
+on the buzzer, the codec's speaker or the LED. Tap and click sounds do not
+mute them. A frame about to deep-sleep waits for them to end
+(`fos_buzzer_wait_quiet`, 10 s at most), and a board rendered on its plane
+plays the `X-FrameOS-Tone` of the render pull's answer. The console's `beep`
+is still one note.
+
 ### Brightness and dimming when idle
 
 Where the display can set it (`fos_display_brightness`: the round AMOLED's
@@ -1609,6 +1629,20 @@ Espressif for use on Espressif chips). Keep Bluetooth off by default,
 keep the Bluetooth logo and the words "certified" / "qualified" out of the
 firmware, the frame page, the docs and the cloud's plans, and do not sell it
 as a feature of a paid plan.
+
+### The accelerometer
+
+The reTerminal Sticky (LSM6DS3TR-C at 0x6a) and the AMOLED 1.75 (QMI8658 at
+0x6b) are read by `fos_imu.c`'s task while the frame is awake, 50 times a
+second while a scene reads `frameos.accelerometer()` and 25 otherwise, and
+`fos_motion.c` makes the `tilt`, `flick`, `shake` and `orientation` events of
+it (docs/accelerometer.md). `set auto_rotate 1` (`autoRotate` on a backend's
+settings pull, `auto_rotate` on the cloud's, "Auto-rotate" on the frame page)
+turns the picture to stand upright as the frame is turned, live, without the
+restart a new rotation takes (`fos_rotation.c`). The console's `imu` prints
+the chip's reading, gravity along the picture, the axis map, the position and
+auto-rotate's reading; `set imu_axes x=-y,y=x,z=z` (or `default`) changes
+which chip axis is which panel axis, live, should a board's map be wrong.
 
 ### Voice chat
 

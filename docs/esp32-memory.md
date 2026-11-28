@@ -864,7 +864,7 @@ the peak plus 50 % or plus 3 KB, whichever is more.
 | `websocket_task` (cloud boards) | 10 KB | 3.4 KB (connect; no cloud push measured) | 6.4 KB | unchanged |
 | `console` | 8 KB | 5.5 KB | 8.5 KB | unchanged |
 | `fos_link` | 8 KB | 4.3 KB | 7.3 KB | unchanged |
-| `fos_cloud` (cloud boards only since the section above) | 8 KB | 2.8 KB (enrollment not measured) | 5.8 KB | unchanged |
+| `fos_cloud` (cloud boards only since the section above) | 8 KB | 2.8 KB (enrollment not measured); 8.7 KB enrolling, measured 2026-11-28 (below) | 8.1 KB | **8.5 KB**, the answers off the stack |
 | `fos_store` | 6 KB | 3.4 KB | 6.4 KB | unchanged |
 | `fos_refresh` | 5 KB | 2.0 KB | 5 KB | unchanged |
 | `state_wr` | 4 KB | 1.9 KB | 4.9 KB | unchanged |
@@ -880,6 +880,20 @@ get smaller under the rule. What would make the servers' stacks smaller is
 the put itself: it parses the scene and writes its slot on the server's
 task (`fos_scenes_put`), and its frames, not the handler's, are the 2.7 KB
 above the status page's 4.6 KB.
+### The cloud task's enrollment (2026-11-28)
+
+The one path the table above did not measure overflowed: a reTerminal E1004
+holding 15 scenes, given a claim token, restarted every 8 s with "stack
+overflow in task fos_cloud" (backtrace in `spiffs_api_read`). Enrolling
+builds the hardware report, which walks `/state`
+(`fos_scenes_add_storage_json`), under `cloud_task`'s own 3.1 KB frame
+(inlined code holding a 2 KB provider answer) and `enroll_once`'s (another
+2 KB answer, the token and URLs). A 16 KB probe build's `cloudStackFreeBytes`
+said 8,940 bytes used. The four 2 KB answers now come from the heap
+(`response_alloc` in `fos_cloud.c`, wiped when freed) and the request and its
+answer are frames of their own after the body is built: 5,224 bytes used,
+enrolling, on the same board. The rule gives 8.1 KB; the stack is 8.5 KB.
+
 ## The scene showing keeps its interpreters (2026-11-23)
 
 The hardware bench's reTerminal E1004 (8 MB PSRAM, a 3.84 MB 565 canvas that

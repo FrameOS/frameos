@@ -146,6 +146,7 @@ describe("ruleCategory", () => {
     expect(ruleCategory({ name: "Word clock" })).toBe("clocks");
     expect(ruleCategory({ appKeywords: ["icalJson"], name: "Week" })).toBe("calendar");
     expect(ruleCategory({ appKeywords: ["immich"], name: "Family" })).toBe("photos");
+    expect(ruleCategory({ appKeywords: ["immich"], name: "Family", needs: ["video"] })).toBe("video");
     expect(ruleCategory({ description: "A week of made-up weather.", name: "Weather demo" })).toBe("demos");
     expect(ruleCategory({ appKeywords: ["jsxUi"], name: "Something" })).toBeUndefined();
   });
@@ -161,6 +162,11 @@ describe("ruleTags", () => {
     ]);
     expect(ruleTags({ appKeywords: ["immich"], name: "Family", needs: [] })).toEqual(["e-ink", "immich"]);
     expect(ruleTags({ name: "Shell", needs: ["linux"] })).toEqual(["raspberry-pi"]);
+    expect(ruleTags({ category: "games", name: "Tilt maze", needs: ["accelerometer"] })).toEqual([
+      "e-ink",
+      "accelerometer",
+      "games",
+    ]);
     expect(ruleTags({ name: "x", needs: ["touch"] }).length).toBeGreaterThan(0);
   });
 });

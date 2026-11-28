@@ -226,6 +226,21 @@ void frameos_nim_set_scaling_mode(const char *mode);
  * anything else is ignored. Live, one value per pass like scaling_mode
  * (console `set render_scale`, settings sync, cloud set_settings). */
 void frameos_nim_set_render_scale(double scale);
+/* The rotation the picture is drawn at, live (fos_rotation.c: auto-rotate):
+ * the scene's canvas turns, the packers and the press map with it, and every
+ * kept canvas is let go. False when the runtime is not up or the rotation is
+ * not 0, 90, 180 or 270. Render task, between renders. */
+bool frameos_nim_set_rotation(int rotate);
+/* Which way gravity pulls along the picture's axes in thousandths of g
+ * (fos_imu.c), for frameos.accelerometer(): false without an accelerometer.
+ * Provided by the firmware, called by the runtime. */
+bool fos_imu_gravity(int *x_mg, int *y_mg, int *z_mg);
+/* frameos.tone() (docs/tones.md): plays `notes`, "hz:ms,..." with 0 Hz a
+ * rest, as the runtime writes them (tones.nim normalizeTones), on the buzzer,
+ * the codec's speaker or the status LED, replacing whatever sounds; "" plays
+ * nothing. True when the board has one of them to play it on. Provided by the
+ * firmware (fos_buzzer.c), called by the runtime on the render task. */
+bool fos_buzzer_scene_tone(const char *notes);
 /* frame.json's `colors` block as compact JSON ("" = defaults); live, one
  * string per pass like scaling_mode (docs/asset-color-profiles.md). */
 void frameos_nim_set_colors(const char *json);

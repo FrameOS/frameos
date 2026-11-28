@@ -413,6 +413,14 @@ interface FrameOSApp {
     /** The Wi-Fi signal in dBm, about -50 strong and -85 weak, on an ESP32 frame that is connected. Undefined
      * elsewhere, so check before drawing it (FrameOS 2026.11.5+; undefined before). */
     wifiRssi?: number;
+    /** True on a frame with an accelerometer (the reTerminal Sticky, the Waveshare 1.75" AMOLED): frameos.accelerometer()
+     * reads it, and tilt, flick, shake and orientation are heard. Undefined elsewhere (FrameOS 2026.11.17+). */
+    accelerometer?: boolean;
+    /** True where something plays frameos.tone(): an ESP32 frame's buzzer, the speaker that stands in for one or the
+     * status LED that lights with the notes (the reTerminal E-series and Sticky, the Waveshare PhotoPainter), the
+     * browser preview, and a frame its control plane renders for (which plays it if it has a buzzer). Undefined where
+     * nothing plays it, as on a Raspberry Pi (FrameOS 2026.11.17+). */
+    tone?: boolean;
     /** The id of the scene showing; a layout's app gets the id of the scene it wraps, the one its <yield />
      * shows (FrameOS 2026.11.8+; undefined before). */
     sceneId?: string;
@@ -491,6 +499,24 @@ declare const frameos: {
    * preview, a frame rendered on its control plane, one whose owner turned the settings on its screen off) and
    * before FrameOS 2026.11.8. Read it every render: what an action did shows up here. */
   store(): FrameOSStore | null;
+  /** Which way gravity pulls, in g along the picture's axes as the frame shows it now: x towards its right, y towards
+   * its bottom, z out of the glass towards whoever looks at it. Held upright y is about 1, lying face up z is about -1,
+   * and shaking adds to it. Read it every frame of an animation (it is 50 readings a second, the latest one). null
+   * where the frame has no accelerometer (only the reTerminal Sticky and the Waveshare 1.75" AMOLED have one; the
+   * browser preview, a Raspberry Pi, a frame rendered on its control plane): fall back on touch or keys there. For a
+   * gesture rather than a reading, listen for tilt, flick, shake and orientation (docs/accelerometer.md;
+   * FrameOS 2026.11.17+). */
+  accelerometer(): { x: number; y: number; z: number } | null;
+  /** Sounds the frame's buzzer, or the speaker that stands in for one, for a reminder or an alarm: with no arguments
+   * the frame's chime (two rising arpeggios, 1.6 s), tone(880, 300) one note of 880 Hz for 300 ms (200 ms when the
+   * length is left out), tone([[2093, 120], [0, 60], [3136, 240]]) up to 16 notes in a row, 0 Hz a rest. Pitches
+   * are held to 100 to 10000 Hz (a piezo is loudest around 2000 to 4000), a note to 10 to 5000 ms, and a call to 10 s
+   * in all. A call while notes sound replaces them. It returns at once and answers true when something plays it (see
+   * app.frame.tone), false where nothing plays it (a Raspberry Pi), and runtimes before FrameOS 2026.11.17, where it does
+   * not exist, so check typeof frameos.tone === "function" first. Call it when something is due, from get() of the
+   * render that wakes for it (frameos.setNextSleep), and remember that it rang (frameos.setState): a scene renders
+   * again on a tap, and a sound at every render is noise (docs/tones.md). */
+  tone(notes?: number | Array<[number, number]>, ms?: number): boolean;
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
    * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
    * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False
@@ -957,6 +983,8 @@ declare const mock: {
   recall(impl?: (typeof frameos)["recall"]): FrameOSMockFn<(typeof frameos)["recall"]>;
   setNextSleep(impl?: (typeof frameos)["setNextSleep"]): FrameOSMockFn<(typeof frameos)["setNextSleep"]>;
   dispatch(impl?: (typeof frameos)["dispatch"]): FrameOSMockFn<(typeof frameos)["dispatch"]>;
+  accelerometer(impl?: (typeof frameos)["accelerometer"]): FrameOSMockFn<(typeof frameos)["accelerometer"]>;
+  tone(impl?: (typeof frameos)["tone"]): FrameOSMockFn<(typeof frameos)["tone"]>;
   frame(impl?: (typeof frameos)["frame"]): FrameOSMockFn<(typeof frameos)["frame"]>;
   code(impl?: (typeof frameos)["code"]): FrameOSMockFn<(typeof frameos)["code"]>;
   listAssets(impl?: (typeof frameos)["listAssets"]): FrameOSMockFn<(typeof frameos)["listAssets"]>;

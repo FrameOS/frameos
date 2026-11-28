@@ -17,7 +17,9 @@ import { AssetType, MetricsType, FrameId } from '../../../../types'
 import { loaders } from 'kea-loaders'
 import { socketLogic } from '../../../socketLogic'
 
-import { frameLogic } from '../../frameLogic'
+import { frameLogic, openSceneControlDrawer } from '../../frameLogic'
+import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
+import { v4 as uuidv4 } from 'uuid'
 import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
@@ -33,7 +35,7 @@ import {
 } from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
-import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { resizeUploadLogic } from '../../../../components/resizeUploadLogic'
 import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 import { consumeFontSyncStream, isFontSyncStream } from '../../../../utils/fontSyncStream'
@@ -453,8 +455,12 @@ export interface assetsLogicActions {
     newPath: string
     oldPath: string
   }
-  assetUploaded: (asset: AssetType) => {
+  assetUploaded: (
+    asset: AssetType,
+    uploadedAs?: string
+  ) => {
     asset: AssetType
+    uploadedAs: string | undefined
   }
   createFolder: (path: string) => {
     path: string
@@ -481,6 +487,9 @@ export interface assetsLogicActions {
   }
   fullListingLoaded: () => {
     value: true
+  }
+  installImageScene: (scene: ImageSceneRequest) => {
+    scene: ImageSceneRequest
   }
   loadAssets: () => any
   loadAssetsFailure: (
@@ -642,6 +651,28 @@ export interface assetsLogicMeta {
 
 export type assetsLogicType = MakeLogicType<assetsLogicValues, assetsLogicActions, AssetsLogicProps> & assetsLogicMeta
 
+/** One image (`filename` set) or a folder's slideshow, on the frame. */
+export interface ImageSceneRequest {
+  /** The folder as the frame sees it (`/srv/assets/portrait`). */
+  imageFolder: string
+  filename?: string
+  /** A slideshow's seconds between images. */
+  seconds?: number
+  /** The scene's name, when the folder's or the file's is not it. */
+  name?: string
+}
+
+/** The installed scene's name: the image's or the folder's, as people call them. */
+export function imageSceneName({ imageFolder, filename, name }: ImageSceneRequest): string {
+  if (name) {
+    return name
+  }
+  if (filename) {
+    return filename.replace(/\.[^.]+$/, '') || filename
+  }
+  return imageFolder.replace(/\/+$/, '').split('/').pop() || 'Images'
+}
+
 export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
@@ -661,8 +692,14 @@ export const assetsLogic = kea<assetsLogicType>([
     /** "Resize and upload files": the dialog, this frame's size preselected, then the usual upload. */
     resizeAndUploadAssets: (path: string) => ({ path }),
     uploadDroppedFiles: (path: string, files: File[]) => ({ path, files }),
-    assetUploaded: (asset: AssetType) => ({ asset }),
+    // `uploadedAs`: the path the upload's row was shown under while it ran
+    // (the file's name as picked). The frame may store it under another
+    // (spaces and other characters become `_`), and that row goes then.
+    assetUploaded: (asset: AssetType, uploadedAs?: string) => ({ asset, uploadedAs }),
     filesToUpload: (files: string[]) => ({ files }),
+    // The play buttons' scene, installed on the frame (saved, on its scene
+    // list) instead of shown once: like Photos' "Install scene".
+    installImageScene: (scene: ImageSceneRequest) => ({ scene }),
     uploadProgress: (path: string, size: number) => ({ path, size }),
     uploadFailure: (path: string) => ({ path }),
     setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
@@ -935,10 +972,16 @@ export const assetsLogic = kea<assetsLogicType>([
     assets: {
       // Another storage is another tree: nothing of this one's stays on screen.
       setStorage: () => [],
-      assetUploaded: (state, { asset }) =>
-        state.find((a) => a.path === asset.path)
-          ? state.map((a) => (a.path === asset.path ? asset : a))
-          : [...state, asset],
+      assetUploaded: (state, { asset, uploadedAs }) => {
+        // The upload's own row, when the frame stored the file under another
+        // name: every such file stayed listed twice, once with a spinner,
+        // until the folder was loaded again (2026-11-28).
+        const rows =
+          uploadedAs && uploadedAs !== asset.path ? state.filter((a) => a.path !== uploadedAs || a.mtime !== -1) : state
+        return rows.find((a) => a.path === asset.path)
+          ? rows.map((a) => (a.path === asset.path ? asset : a))
+          : [...rows, asset]
+      },
       filesToUpload: (state, { files }) => {
         const foundFiles: Set<string> = new Set()
         const updatedFiles = state.map((asset) => {
@@ -1178,6 +1221,45 @@ export const assetsLogic = kea<assetsLogicType>([
         actions.ensureFolderLoaded(folder)
       }
     },
+    installImageScene: async ({ scene: request }) => {
+      const name = imageSceneName(request)
+      const sceneId = uuidv4()
+      const scene = {
+        ...(request.filename
+          ? buildLocalImageScene(request.filename, request.imageFolder, sceneId)
+          : buildLocalImageFolderScene(request.imageFolder, sceneId, request.seconds)),
+        name,
+      }
+      const frameStore = frameLogic({ frameId: props.frameId })
+      try {
+        const scenesBefore = (frameStore.values.frameForm?.scenes ?? frameStore.values.frame?.scenes ?? []) as {
+          id: string
+        }[]
+        const idsBefore = new Set(scenesBefore.map((existing) => existing.id))
+        await frameStore.asyncActions.applyTemplate({ name, scenes: [scene] })
+        // Installed means saved (as Photos' install): on the frame's list now,
+        // not on a later Save.
+        await frameStore.asyncActions.submitFrameFormRequest(frameStore.values.frameForm as FrameType)
+        const saveError = frameStore.values.frameFormSaveError
+        if (saveError) {
+          throw saveError
+        }
+        const installed = ((frameStore.values.frameForm?.scenes ?? []) as { id: string }[]).find(
+          (candidate) => !idsBefore.has(candidate.id)
+        )
+        if (installed) {
+          openSceneControlDrawer(props.frameId, installed.id)
+        }
+      } catch (error) {
+        console.error(error)
+        reportTaskOutcome('error', {
+          frameId: props.frameId,
+          kind: 'save',
+          title: `Install the scene ${name}`,
+          detail: error instanceof Error && error.message ? error.message : 'Could not install the scene',
+        })
+      }
+    },
     uploadDroppedFiles: async ({ path, files }) => {
       if (files.length === 0) {
         return
@@ -1287,6 +1369,13 @@ export const assetsLogic = kea<assetsLogicType>([
                   retries: isInFrameAdminMode() ? 0 : 2,
                   storage,
                   onProgress: (size) => updateProgress(size),
+                  // A chunk the frame has not acked within the request: say
+                  // so, so a slow card reads as slow and not as a hang.
+                  onWaiting: (waiting) =>
+                    updateProgress(
+                      task.lastReportedBytes - task.completedBytes,
+                      waiting ? `Waiting for the frame to save ${file.name}` : `Uploading ${file.name}`
+                    ),
                 })
               : await (async () => {
                   const formData = new FormData()
@@ -1307,10 +1396,13 @@ export const assetsLogic = kea<assetsLogicType>([
             task.completedBytes += fileTaskBytes
             updateProgress(fileTaskBytes, `Uploaded ${file.name}`)
             if (shown()) {
-              actions.assetUploaded({
-                ...asset,
-                path: normalizeAssetPath(asset.path, assetsPath),
-              })
+              actions.assetUploaded(
+                {
+                  ...asset,
+                  path: normalizeAssetPath(asset.path, assetsPath),
+                },
+                normalizedPath
+              )
             }
           } catch (error) {
             task.failures += 1

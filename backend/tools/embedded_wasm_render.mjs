@@ -805,6 +805,16 @@ try {
       pressMap = undefined
     }
   }
+  // The notes the scene's frameos.tone() asked for in this render
+  // (docs/tones.md), which the plane hands the board as X-FrameOS-Tone.
+  let tones
+  if (typeof Module._frameos_wasm_tones === 'function') {
+    try {
+      tones = call('frameos_wasm_tones', 'string', [], [])
+    } catch {
+      tones = undefined
+    }
+  }
   process.stderr.write('__FRAMEOS_SCENE_STATE__' + JSON.stringify({
     sceneId: info.currentSceneId || request.sceneId || '',
     state,
@@ -813,6 +823,7 @@ try {
     ...timing,
     ...(typeof keptState === 'string' ? { keptState } : {}),
     ...(typeof pressMap === 'string' ? { pressMap } : {}),
+    ...(typeof tones === 'string' && tones ? { tones } : {}),
   }) + '\n')
 } catch (error) {
   process.stderr.write(`embedded_wasm_render: state readback failed: ${error}\n`)

@@ -21,6 +21,7 @@ export type StoreKind = 'scene' | 'layout'
 export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'photos', title: 'Photos', kind: 'scene' },
   { slug: 'art', title: 'Art & galleries', kind: 'scene' },
+  { slug: 'video', title: 'Video', kind: 'scene' },
   { slug: 'clocks', title: 'Clocks & time', kind: 'scene' },
   { slug: 'calendar', title: 'Calendars & agendas', kind: 'scene' },
   { slug: 'weather', title: 'Weather', kind: 'scene' },
@@ -43,6 +44,8 @@ export const storeCategoryShelves: StoreCategoryShelf[] = [
 export const storeShelfDescriptions: Record<string, string> = {
   photos: 'Your own pictures on the frame: albums, slideshows, and photo services like Google Photos or Immich.',
   art: 'Curated image collections that rotate on a schedule, no configuration needed.',
+  video:
+    'Films and video clips on the frame: your own videos, Immich, old films from the Internet Archive and a film slowed down for e-paper. Plays on a Raspberry Pi.',
   clocks: 'Clocks of every kind, timers and the year at a glance.',
   calendar: 'Upcoming events and schedules, straight from your calendar.',
   weather: 'Current conditions and forecasts at a glance.',

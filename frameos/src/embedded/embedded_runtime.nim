@@ -19,6 +19,7 @@ from frameos/render_scale import MaxRenderScale
 import lib/tz
 import std/[monotimes, times]
 import frameos/channels
+from frameos/input_state import initInputState
 from frameos/events_gen import contractEventIndex, ContractEventPolicies, ecInput, SceneSwitcherId
 import frameos/single_scene_host
 import frameos/scene_rhythm
@@ -29,6 +30,7 @@ import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
 import frameos/scene_code_hooks
 import frameos/scene_icon
+import frameos/tones
 from frameos/utils/memory import panelMemoryBytes, waitingTextDrops
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
@@ -66,6 +68,10 @@ proc sceneStateSave(sceneId: cstring, json: cstring): bool {.importc: "frameos_n
 proc cFree(p: pointer) {.importc: "free", header: "<stdlib.h>", cdecl.}
 proc log*(msg: string) =
   espLog(msg.cstring)
+
+when defined(freertos):
+  proc imuGravity(x, y, z: ptr cint): bool {.importc: "fos_imu_gravity", cdecl.}
+  proc buzzerSceneTone(notes: cstring): bool {.importc: "fos_buzzer_scene_tone", cdecl.}
 
 # ------------------------------------------------------------------- state
 
@@ -416,6 +422,30 @@ proc fos_nim_set_render_scale_impl(scale: cdouble) {.exportc, cdecl.} =
   if not frameConfig.isNil and scale >= 0.0 and scale <= MaxRenderScale:
     frameConfig.renderScale = float(scale)
 
+proc setRuntimeRotation*(rotate: int): bool =
+  ## The rotation the picture is drawn at, live (the firmware's fos_rotation.c:
+  ## auto-rotate, docs/accelerometer.md). The scene's canvas is made at the
+  ## turned size on the next render (interpreter.nim reads frameConfig.rotate),
+  ## the press map and the touch follow it, and what the rhythm kept at the old
+  ## size is let go. A desktop puts its windows at the same share of the new
+  ## room by itself (`refit`). The input state is made again for the turned
+  ## panel, keeping what the frame's keyboard and maps had, as the wasm
+  ## runtime's set_frame does.
+  if frameConfig.isNil or rotate notin [0, 90, 180, 270]:
+    return false
+  if frameConfig.rotate == rotate:
+    return true
+  frameConfig.rotate = rotate
+  if not host.events.isNil:
+    let keyboardAt = host.events.inputState.keyboardAt
+    let bound = host.events.inputState.bound
+    host.events.inputState = initInputState(frameConfig)
+    host.events.inputState.keyboardAt = keyboardAt
+    host.events.inputState.bound = bound
+  rhythmForgetCanvases()
+  rhythmRequestFreshPass()
+  true
+
 proc setPanelInches*(inches: float) =
   ## The panel's diagonal (render_scale.panelInches of the display's name):
   ## what the automatic render scale goes by, the device here being "embedded".
@@ -698,6 +728,21 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   # The state a scene starts with: what it last had (persistSceneState), the
   # way the Linux runtime seeds a scene from ./state/scene-<id>.json.
   host.initialState = proc (sceneId: SceneId): JsonNode = loadPersistedSceneState(sceneId.string)
+  # frameos.accelerometer() (docs/accelerometer.md): the firmware's 50 Hz
+  # reading, along the picture's axes as it is drawn now.
+  when defined(freertos):
+    accelerometerReader = proc (x, y, z: var float): bool {.nimcall, gcsafe.} =
+      var mx, my, mz: cint
+      if not imuGravity(addr mx, addr my, addr mz):
+        return false
+      x = mx.float / 1000.0
+      y = my.float / 1000.0
+      z = mz.float / 1000.0
+      true
+    # frameos.tone() (docs/tones.md): the buzzer, the codec's speaker or the
+    # status LED, whichever the board has (fos_buzzer.c).
+    toneSink = proc (notes: string): bool {.nimcall, gcsafe.} =
+      buzzerSceneTone(notes.cstring)
   host.start()
   # A desktop layout runs the frame's scenes side by side, as on a Pi, as many
   # at once as the memory allows (app_runtime.windowLimit,

@@ -54,6 +54,17 @@ const frame = {
   ],
 };
 
+// A reTerminal Sticky: it reported its accelerometer; its reader listens for no key.
+const sticky = {
+  id: 32,
+  project_id: 1,
+  name: "Sticky",
+  mode: "embedded",
+  hardware: { imu: true },
+  gpio_buttons: [{ pin: 4, label: "AI" }],
+  scenes: [{ id: "book", name: "Book", nodes: [], edges: [] }],
+};
+
 beforeEach(() => {
   testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
   // headlessui's Dialog measures itself; jsdom has no ResizeObserver.
@@ -67,7 +78,9 @@ beforeEach(() => {
   );
   apiFetchMock.mockReset();
   apiFetchMock.mockImplementation(async (input) =>
-    /\/api\/frames$/.test(String(input)) ? Response.json({ frames: [frame] }) : Response.json({ frame }),
+    /\/api\/frames$/.test(String(input))
+      ? Response.json({ frames: [frame, sticky] })
+      : Response.json({ frame: /\/frames\/32\b/.test(String(input)) ? sticky : frame }),
   );
   initKea();
   framesModel.mount();
@@ -125,5 +138,30 @@ describe("ButtonMapModal", () => {
     await waitFor(() =>
       expect(frameLogic({ frameId }).values.frameForm.scenes?.[0]).not.toHaveProperty("eventMap"),
     );
+  });
+  it("binds a flick of a frame with an accelerometer to Forward while the scene shows", async () => {
+    const stickyId = 32 as unknown as FrameType["id"];
+    const logic = buttonMapLogic({ frameId: stickyId, sceneId: "book" });
+    logic.mount();
+    await waitFor(() => expect(frameLogic({ frameId: stickyId }).values.frame?.id).toBe(32));
+    logic.actions.openButtonMap();
+    render(<ButtonMapModal frameId={stickyId} sceneId="book" />);
+
+    expect(await screen.findByText("Moving the frame")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Add motion" }));
+    const [gesture, action] = (await screen.findAllByRole("combobox")) as HTMLSelectElement[];
+    expect(gesture!.options[gesture!.selectedIndex]!.textContent).toBe("Flick to the right");
+    expect(action!.options[action!.selectedIndex]!.textContent).toBe("Forward");
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Apply" })).toBeNull());
+    expect(frameLogic({ frameId: stickyId }).values.frameForm.scenes?.[0]?.eventMap).toEqual([
+      { event: "flick", match: { direction: "right" }, emit: "forward", as: {} },
+    ]);
+
+    // Reopened, the row reads back.
+    logic.actions.openButtonMap();
+    const [again] = (await screen.findAllByRole("combobox")) as HTMLSelectElement[];
+    expect(again!.value).toBe(JSON.stringify({ event: "flick", direction: "right" }));
   });
 });

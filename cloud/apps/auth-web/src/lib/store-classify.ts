@@ -222,7 +222,8 @@ export function ruleCategory(facts: SceneFacts): string | undefined {
     return "games";
   }
   if (keywordMatches(keywords, /googlephotos|immich|unsplash|localimage|photoalbum|wikimedia/)) {
-    return "photos";
+    // A photo service's videos are video, not photos.
+    return facts.needs?.includes("video") ? "video" : "photos";
   }
   if (keywordMatches(keywords, /ical|calendar|agenda/)) {
     return "calendar";
@@ -276,6 +277,9 @@ export function ruleTags(facts: SceneFacts & { category?: string | null | undefi
   }
   if (needs.includes("buttons")) {
     tags.push("buttons");
+  }
+  if (needs.includes("accelerometer")) {
+    tags.push("accelerometer");
   }
   if (needs.includes("video")) {
     tags.push("video");

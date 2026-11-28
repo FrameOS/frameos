@@ -280,6 +280,14 @@ describe("GET /api/store/device/scenes", () => {
       slug: "weather",
       title: "Weather",
     });
+    expect(page1.categories.find((category) => category.slug === "video")).toEqual({ slug: "video", title: "Video" });
+    // An ESP32 plays no video: its store has no Video shelf, which would always be empty.
+    const esp32 = (await (await getDeviceStore(get("/api/store/device/scenes?categories=1&without=linux,video"))).json()) as {
+      categories: { slug: string }[];
+    };
+    expect(esp32.categories.map((category) => category.slug)).toEqual(
+      page1.categories.map((category) => category.slug).filter((slug) => slug !== "video"),
+    );
 
     const second = (await (await getDeviceStore(get("/api/store/device/scenes?page=2"))).json()) as {
       categories?: unknown;
@@ -409,6 +417,25 @@ describe("GET /api/store/device/scenes", () => {
     expect(roundFast.scenes.slice(0, 3).map((scene) => scene.id)).toEqual([both.id, dial.id, spin.id]);
     // Round rules nothing out.
     expect((await read("without=round")).scenes).toHaveLength(6);
+  });
+
+  it("puts the scenes moved by tilting first on a frame with an accelerometer, ruling none out", async () => {
+    const { accountId } = await account("Publisher");
+    for (let i = 0; i < 3; i += 1) {
+      await storeScene(accountId, `Weather ${i}`);
+    }
+    const sand = await storeScene(accountId, "Sand", { category: "fun", needs: ["fast", "accelerometer"] });
+    const tilt = await storeScene(accountId, "Tilt maze", { category: "games", needs: ["accelerometer"] });
+    const read = async (query: string) =>
+      (await (await getDeviceStore(get(`/api/store/device/scenes?${query}`))).json()) as {
+        scenes: { id: string; needs?: string[] }[];
+      };
+
+    const first = await read("prefer=accelerometer");
+    expect(first.scenes.slice(0, 2).map((scene) => scene.id).sort()).toEqual([sand.id, tilt.id].sort());
+    expect(first.scenes.find((scene) => scene.id === tilt.id)?.needs).toEqual(["accelerometer"]);
+    // A frame without one is still offered them: they play by touch or keys there.
+    expect((await read("without=accelerometer")).scenes).toHaveLength(5);
   });
 
   it("answers one listed scene with its newest version and a short description", async () => {

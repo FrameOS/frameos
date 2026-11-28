@@ -238,6 +238,7 @@ int fos_touch_edge_step(fos_touch_edge_t edge, int dx, int dy)
 #include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_events.h"
 #include "fos_i2c.h"
 #include "fos_usb_pads.h"
@@ -457,7 +458,7 @@ static void scene_point(uint16_t wx, uint16_t wy, int *x, int *y, int *w, int *h
     int py = (int)((int64_t)ph * wy / FOS_TOUCH_WIRE_MAX);
     if (px >= pw) px = pw - 1;
     if (py >= ph) py = ph - 1;
-    fos_touch_scene_point(px, py, pw, ph, fos_config()->rotate, x, y, w, h);
+    fos_touch_scene_point(px, py, pw, ph, fos_rotation(), x, y, w, h);
 }
 
 static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)

@@ -1785,3 +1785,16 @@ from the usual places, below.
   is 80 bytes smaller. Not committed; run it again before the release.
 - The brightness pill's three handler attributes in a loop: +85 (an array of
   literals and its loop cost more than three `add`s of a constant).
+
+## The accelerometer (2026-11-28)
+
+`tilt`, `flick`, `shake`, `orientation`, `frameos.accelerometer()` and
+auto-rotate (docs/accelerometer.md), measured against main (656315f84) by
+two local builds: **+7,936 app bytes**. `fos_motion.c` (the gestures,
+integer milli-g, no float formatting) 2,188; `fos_imu.c` +874 (the
+LSM6DS3TR-C, the task, the axis map); `fos_rotation.c` 264; the console's
+`imu` / `auto_rotate` / `imu_axes` +292; the cloud's and the frame page's
+`auto_rotate` +303 / +260; the Nim side (the native, `setRuntimeRotation`,
+the frame page's switch, four contract events) +2.6 KB; strings +0.7 KB.
+The thresholds are integers from the contract (`fos_events_gen.h`), so
+nothing of the gesture rules is a float in the image.

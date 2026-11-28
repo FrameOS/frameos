@@ -154,10 +154,13 @@ copy `frontend/src/utils/storeCategories.ts`, the iOS app's
 **Scenes | Layouts**: what a scene is (`settings.isLayout`, `settings.desktop`,
 `settings.devices`),
 never a category it states. The scenes' shelves say what a scene is about:
-Photos, Art & galleries, Clocks & time, Calendars & agendas, Weather, Home &
+Photos, Art & galleries, Video, Clocks & time, Calendars & agendas, Weather, Home &
 dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
 examples, System (the frame's own apps, only for a scene that names it: the
-classifier never picks it). The layouts' are Multi app layouts, Single app layouts and Device
+classifier never picks it). Video is films and clips played (migration 0086
+moved the video scenes off Photos and Art & galleries; a live camera stays a
+tool), and a frame that plays no video (`without=video`, an ESP32) is not
+offered the shelf at all: a category's `needs` (`storeDeviceCategories`). The layouts' are Multi app layouts, Single app layouts and Device
 layouts (one made for a device: `settings.devices` names it, docs/scene-layouts.md),
 and a layout is always on its kind's (`validateSceneZip`), a scene never.
 
@@ -178,19 +181,26 @@ is published and kept on the version (`needs`, migration 0084; the row holds
 the latest's): `fast` (it redraws more than once a second: a
 `refreshInterval` under 1 s; never a layout), `touch` (taps or a mouse, one
 thing to the runtime: JSX handlers, pointer events), `keys` (a keyboard: key
-events, text input), `buttons` (the frame's own GPIO buttons), `linux`
+events, text input), `buttons` (the frame's own GPIO buttons),
+`accelerometer` (it is moved by tilting, flicking or shaking the frame:
+`frameos.accelerometer()`, or the `tilt`, `flick`, `shake` and `orientation`
+events; docs/accelerometer.md; `app.frame.accelerometer`, which only asks
+whether there is one, is no need), `linux`
 (Chromium, FFmpeg, a shell command), `video` (it plays video or reads its
 frames, `frameos.video` / `videoFrame` / `videoInfo`: a Pi, cloud-managed or
 not, never an ESP32; docs/video.md), and `round`, which is no need but a
 fit: the scene works on a round screen too (code that asks `context.round`
 or `app.frame.round`, or `settings.round`, which wins either way;
 docs/scene-guide.md "Round panels"). The store front shows them on each tile
-("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Pi only", "Video", "Round
+("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Accelerometer", "Pi only", "Video", "Round
 screen") and filters by them (Any screen, Fits e-paper, Made for fast
-screens, Touch & mouse, Keyboard, Round screens). A frame's own store leaves
+screens, Touch & mouse, Keyboard, Accelerometer, Round screens). A frame's own store leaves
 out what it cannot run (`without=fast` on a slow panel, `linux,video` on an ESP32)
 and puts what fits first: `prefer=fast` on a fast panel, `round` on a round
-one (`prefer=round,fast`, the first weighing most). Round rules nothing out. Touch and keys rule nothing out: the frame's buttons and
+one, `accelerometer` on a frame with one (`app.frame.accelerometer`; the
+Scene store asks `prefer=round,accelerometer,fast` as it applies, the first
+weighing most). Round and accelerometer rule nothing out: a scene that reads
+the accelerometer plays by touch or keys elsewhere. Touch and keys rule nothing out: the frame's buttons and
 its pages reach any scene. Versions from before the column are read by
 `pnpm --filter @frameos-cloud/auth-web scene:backfill-needs`.
 
