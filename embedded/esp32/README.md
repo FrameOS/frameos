@@ -271,11 +271,13 @@ for the two Spectra boards most of the bench work runs on:
   the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
   `fos_assets_sd.c` joins the display's bus instead of opening SPI3
   (`fos_display_spi_bus_share`), the panel holds the bus for each refresh
-  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. MISO
-  does not read high between commands there, so the card is mounted with
-  `wait_for_miso = -1`: IDF's default waited 40 ms before every command,
-  which made a sector read 80 ms and a cloud upload 66 s a 256 KiB chunk
-  (3 s without it, 2026-11-28; `fos_assets_sd.c`). The
+  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. Every
+  card is mounted with `wait_for_miso = -1` (`fos_assets_sd.c`): on the
+  bench E1004 MISO never read high between commands, so IDF's default
+  waited 40 ms before every one, which made a sector read 80 ms and a cloud
+  upload 66 s a 256 KiB chunk (3 s without it, 2026-11-28). The bench
+  E1002's card answers high; without the wait it moved a 4.8 MB file 10 %
+  and upload chunks 28 % faster. The
   socket is powered through GPIO16 (GPIO39 on the E1003) and has a
   card-detect contact on GPIO15 (`pwr=16,det=15` in the spec; an empty slot
   is reported without a bus probe). The green status LED (`led_pin 6` with

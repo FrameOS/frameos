@@ -48,6 +48,7 @@ import {
   assetFolderFromExpansionPath,
   assetStorageRootPath,
   assetsLogic,
+  imageSceneName,
 } from '../../../../../../frontend/src/scenes/frame/panels/Assets/assetsLogic'
 import type { FrameType } from '../../../../../../frontend/src/types'
 
@@ -289,6 +290,39 @@ describe("the Assets panel's storage", () => {
     expect(pinned.values.storage).toBe('assets')
     // The panel's own logic is a different one.
     expect(assetsLogic({ frameId: 1 }).isMounted()).toBe(false)
+  })
+})
+
+describe('an upload the frame stores under another name', () => {
+  // The frame (and the backend) store "2024-10-27 Liermolen.jpg" as
+  // "2024-10-27_Liermolen.jpg": the row the upload showed while it ran goes
+  // when the stored one comes back, where it used to stay as a duplicate with
+  // a spinner until the folder was loaded again (a user's 20 photos, 2026-11-28).
+  it('replaces its row with the stored one', async () => {
+    const logic = mountAssets(makeFrame({ mode: 'embedded' } as Partial<FrameType>))
+    await waitFor(() => expect(logic.values.showStorageSwitch).toBe(true))
+    chunkedUploadMock.mockImplementationOnce(async () => ({
+      path: 'portrait/2024-10-27_Liermolen.jpg',
+      size: 3,
+      mtime: 1,
+    }))
+    logic.actions.uploadDroppedFiles('portrait', [new File(['abc'], '2024-10-27 Liermolen.jpg')])
+    await waitFor(() => expect(chunkedUploadMock).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(logic.values.assets.map((asset) => asset.path).filter((path) => path.includes('Liermolen'))).toEqual([
+        '/srv/assets/portrait/2024-10-27_Liermolen.jpg',
+      ])
+    )
+  })
+})
+
+describe('an image installed as a scene', () => {
+  it('is named after the image or the folder', () => {
+    expect(imageSceneName({ imageFolder: '/srv/assets/portrait', filename: '2024-10-27_Liermolen.jpg' })).toBe(
+      '2024-10-27_Liermolen'
+    )
+    expect(imageSceneName({ imageFolder: '/srv/assets/portrait/' })).toBe('portrait')
+    expect(imageSceneName({ imageFolder: '/srv/assets', name: 'Slideshow' })).toBe('Slideshow')
   })
 })
 
