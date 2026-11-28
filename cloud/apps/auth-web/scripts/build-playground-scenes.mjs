@@ -26,6 +26,8 @@ export const excludedTemplates = new Set([
   "Browser",
   "Camera wall",
   "Chromium Screenshot",
+  // A Personal API key of one's own, made on Garmin Connect.
+  "Garmin",
   "Google Photos",
   "Haiku of the hour",
   "Home Assistant remote",

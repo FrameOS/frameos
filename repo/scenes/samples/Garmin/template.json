@@ -1,0 +1,10 @@
+{
+  "name": "Garmin",
+  "description": "Your day from Garmin Connect at a glance: Body Battery over the last day, steps against your goal, last night's sleep score and stages, HRV status, stress, the week's steps and intensity minutes, resting heart rate and your last activities, in kilometers or miles as your Garmin profile says. Reads Garmin Connect's Personal API with a key you make on Garmin Connect, straight from the frame, every half hour.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
