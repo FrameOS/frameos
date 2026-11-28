@@ -122,7 +122,8 @@ to reach) have not been checked on the hardware yet.
   `frontend/src/utils/deviceGpioButtons.ts`).
 - **The copies, generated:** `frameos/tools/generate_board_keys.py` writes the
   firmware's table (`embedded/esp32/main/fos_board_keys_gen.h`: each rule once,
-  each board its rules and its keys' roles), the SPA's
+  what the rules have in common as one-byte words (`k_rule_words`, put back by
+  `fos_board.c`), each board its rules and its keys' roles), the SPA's
   (`frontend/src/generated/boardKeys.gen.ts`) and the Linux devices' maps
   (`frameos/src/frameos/device_event_map_gen.nim`). The backend suite runs
   its `--check` (`test_board_keys.py`). Change a board in the backend, run the

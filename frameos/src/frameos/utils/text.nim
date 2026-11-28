@@ -512,16 +512,15 @@ proc typesetIntoBounds*(
           typeface, bounds, hAlign, vAlign, true, opts.assetsPath)
       chosenBorder = some(borderLayout)
 
-  var laid = opts
-  laid.padding = padding # what drawText insets by
   result = TextLayoutResult(
-    opts: laid,
+    opts: opts,
     width: width,
     height: height,
     textTypeset: chosen,
     borderTypeset: chosenBorder,
     fontScaleRatio: scaleRatio
   )
+  result.opts.padding = padding # what drawText insets by
 
 proc scaledBorder*(layout: TextLayoutResult): int =
   ## The border's width at the render scale (TextRenderOptions.scale), in

@@ -7,6 +7,7 @@
 ## exhausting the device.
 
 import pixie/decodebudget
+from pixie/common import PixelFormat
 from pixie/paths import clearCoverageCache, clearGlyphCache
 from pixie/fontformats/filefont import clearFontPages
 from pixie/fonts import clearColorGlyphCache
@@ -458,6 +459,15 @@ proc refreshDecodeBudgetInto*(forDecode = true) =
   if available > 0:
     setDecodeBudgetBytes(available)
   refreshDecodeContiguousBudget()
+
+proc imageBytes*(format: PixelFormat, width, height: int): int =
+  ## What an image of `format` and this size holds (pixie's `byteSize`
+  ## before it exists): what `roomForImage` is asked about.
+  case format
+  of pfRgbx: width * height * 4
+  of pfRgb565: width * height * 2
+  of pfGray8: width * height
+  of pfGray4: ((width + 1) div 2) * height
 
 proc roomForImage*(bytes: int): bool =
   ## Whether one image-sized buffer of `bytes` fits now, before it is asked

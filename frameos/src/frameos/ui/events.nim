@@ -1215,6 +1215,24 @@ proc pageBox(target: UiTarget, i: int, back: bool): int =
     j = if r.scroller > 0: target.regionOf(r.scroller - 1) else: -1
   -1
 
+proc ringBox(t: UiTarget, s, ring: int, scrollY, start: float32, back: bool): bool =
+  ## `turnPage`'s and `enterBox`'s end: the ring on `ring` (a key + 1), the
+  ## box at region `s` scrolled to `scrollY`, and the next layout told to ring
+  ## the first element its page shows from `start` on, in the box's own pixels
+  ## (the last before it with `back`: ui/layout.nim `turnPage`).
+  if t.input.focus > 0:
+    t.blurField()
+  let key = t.regions[s].key
+  t.input.ring = ring
+  t.input.scrollTo(key, t.input.scrolled(key)[0], scrollY)
+  t.input.turn = key + 1
+  t.input.turnBack = back
+  t.input.turnFrom = start
+  t.input.turnSteps = 0
+  t.inputOnly = true
+  t.scrolledBy(t.regions[s])
+  true
+
 proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, back: bool): bool =
   ## A frame's next (prev with `back`) on an element in a box that scrolls,
   ## while the box has more that way: the element Tab would go to next is
@@ -1246,21 +1264,12 @@ proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, b
   let
     box = t.regions[s]
     c = t.regions[k]
-    (sx, sy) = t.input.scrolled(box.key)
+    sy = t.input.scrolled(box.key)[1]
     page = max(float32(int(box.h * 0.875 + 0.5)), 1)
-  if t.input.focus > 0:
-    t.blurField()
-  t.input.ring = c.key + 1
-  t.input.scrollTo(box.key, sx, if back: max(sy - page, 0) else: min(sy + page, box.scrollY))
-  t.input.turn = box.key + 1
-  t.input.turnBack = back
   # Where the ring was, in the box's own pixels: on the box itself, its page's
   # top edge (its bottom edge going back).
-  t.input.turnFrom = if k == s: (if back: sy + box.h else: sy) else: c.y - box.y + sy
-  t.input.turnSteps = 0
-  t.inputOnly = true
-  t.scrolledBy(box)
-  true
+  t.ringBox(s, c.key + 1, if back: max(sy - page, 0) else: min(sy + page, box.scrollY),
+    if k == s: (if back: sy + box.h else: sy) else: c.y - box.y + sy, back)
 
 proc enterBox(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, back: bool): bool =
   ## A frame's next (prev with `back`) that comes into a box that scrolls,
@@ -1287,21 +1296,9 @@ proc enterBox(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, b
         o.inputOnly = true
       if o.input.focus > 0:
         o.blurField()
-  if t.input.focus > 0:
-    t.blurField()
-  let
-    box = t.regions[s]
-    (sx, _) = t.input.scrolled(box.key)
-  t.input.ring = box.key + 1
-  t.input.scrollTo(box.key, sx, if back: box.scrollY else: 0)
-  t.input.turn = box.key + 1
-  t.input.turnBack = back
   # From past its far end: its first element (going back, its last) is the one.
-  t.input.turnFrom = if back: box.h + box.scrollY + 1 else: -1
-  t.input.turnSteps = 0
-  t.inputOnly = true
-  t.scrolledBy(box)
-  true
+  let box = t.regions[s]
+  t.ringBox(s, box.key + 1, if back: box.scrollY else: 0, if back: box.h + box.scrollY + 1 else: -1, back)
 
 proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
   ## Tab once: the ring to the next element of the UIs in `list` (the one

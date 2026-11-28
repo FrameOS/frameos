@@ -5,7 +5,7 @@ from frameos/apps as frameos_apps import spoolDir, renderWidth, renderHeight
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage,
   renderSvgIntoTarget
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
-  availableRenderHeadroomBytes, runsAsEmbedded, roomForImage
+  availableRenderHeadroomBytes, runsAsEmbedded, roomForImage, imageBytes
 when defined(testing):
   from frameos/utils/memory import availableRenderBytesOverride
 when defined(memProbe): import frameos/utils/memory
@@ -1142,11 +1142,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     # reTerminal E1002's macOS and BeOS desktops, 2026-11-15). Asked first;
     # without the room the window shows nothing this pass, and the scene in
     # front, the chrome and the frame go on.
-    let bytes = case format
-      of pfRgbx: width * height * 4
-      of pfRgb565: width * height * 2
-      of pfGray8: width * height
-      of pfGray4: ((width + 1) div 2) * height
+    let bytes = imageBytes(format, width, height)
     if not roomForImage(bytes):
       if not r.embedRefused:
         r.embedRefused = true

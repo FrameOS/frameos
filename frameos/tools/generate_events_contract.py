@@ -525,13 +525,30 @@ def gen_nim(doc):
         out.append('    else: ""')
     out.append('  else: ""')
     out.append("")
+    role_by_label = doc["buttons"]["roleByLabel"]
+    for label, role in role_by_label.items():
+        if not label or not role or any(ch in " =" for ch in label + role):
+            fail(f"roleByLabel {label!r}: {role!r} has a space or an '=' in it")
+    pairs = " " + " ".join(f"{label}={role}" for label, role in role_by_label.items()) + " "
     out.append("proc buttonRoleForLabel*(upperLabel: string): string =")
     out.append("  ## The default role of a GPIO button that has none configured, by its label")
     out.append("  ## (upper-cased by the caller); empty when the label says nothing.")
-    out.append("  case upperLabel")
-    for label, role in doc["buttons"]["roleByLabel"].items():
-        out.append(f"  of {nim_str(label)}: {nim_str(role)}")
-    out.append('  else: ""')
+    out.append("  # ` LABEL=role` pairs in one text, read in place: a `case` of every label")
+    out.append("  # was 0.8 KB of an ESP32's flash.")
+    out.append(f"  const Pairs = {nim_str(pairs)}")
+    out.append("  var at = 0 # a space, before a label")
+    out.append("  while at + 1 < Pairs.len:")
+    out.append("    var i = 0")
+    out.append("    while i < upperLabel.len and Pairs[at + 1 + i] == upperLabel[i] and upperLabel[i] notin {' ', '='}:")
+    out.append("      inc i")
+    out.append("    var to = at + 1 + i")
+    out.append("    let found = i == upperLabel.len and Pairs[to] == '='")
+    out.append("    while Pairs[to] != ' ':")
+    out.append("      inc to")
+    out.append("    if found:")
+    out.append("      return Pairs[at + 2 + i ..< to]")
+    out.append("    at = to")
+    out.append('  ""')
     return "\n".join(out) + "\n"
 
 

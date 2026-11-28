@@ -548,33 +548,19 @@ proc aliasPayloadKey*(alias: string, index: int): string =
 proc buttonRoleForLabel*(upperLabel: string): string =
   ## The default role of a GPIO button that has none configured, by its label
   ## (upper-cased by the caller); empty when the label says nothing.
-  case upperLabel
-  of "A": "primary"
-  of "B": "prev"
-  of "C": "next"
-  of "D": "back"
-  of "E": "menu"
-  of "BOOT": "primary"
-  of "KEY1": "prev"
-  of "KEY2": "primary"
-  of "KEY3": "next"
-  of "BUTTON": "primary"
-  of "AI": "primary"
-  of "POWER": "primary"
-  of "OK": "primary"
-  of "ENTER": "primary"
-  of "SELECT": "primary"
-  of "HOME": "menu"
-  of "MENU": "menu"
-  of "EXIT": "back"
-  of "BACK": "back"
-  of "NEXT": "next"
-  of "RIGHT": "right"
-  of "PREV": "prev"
-  of "LEFT": "left"
-  of "UP": "up"
-  of "DOWN": "down"
-  of "REFRESH": "primary"
-  of "PWR": "screen"
-  of "SCREEN": "screen"
-  else: ""
+  # ` LABEL=role` pairs in one text, read in place: a `case` of every label
+  # was 0.8 KB of an ESP32's flash.
+  const Pairs = " A=primary B=prev C=next D=back E=menu BOOT=primary KEY1=prev KEY2=primary KEY3=next BUTTON=primary AI=primary POWER=primary OK=primary ENTER=primary SELECT=primary HOME=menu MENU=menu EXIT=back BACK=back NEXT=next RIGHT=right PREV=prev LEFT=left UP=up DOWN=down REFRESH=primary PWR=screen SCREEN=screen "
+  var at = 0 # a space, before a label
+  while at + 1 < Pairs.len:
+    var i = 0
+    while i < upperLabel.len and Pairs[at + 1 + i] == upperLabel[i] and upperLabel[i] notin {' ', '='}:
+      inc i
+    var to = at + 1 + i
+    let found = i == upperLabel.len and Pairs[to] == '='
+    while Pairs[to] != ' ':
+      inc to
+    if found:
+      return Pairs[at + 2 + i ..< to]
+    at = to
+  ""
