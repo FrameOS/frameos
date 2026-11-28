@@ -415,6 +415,51 @@ describe("the render pull", () => {
     expect(row?.states).toEqual({ clock: { count: 2 } });
   });
 
+  it("sends the scene's tone once: with the render that asked, and with a picture drawn for the wake", async () => {
+    const accountId = await signIn();
+    await subscribe(accountId, 1);
+    const { frame, token } = await createFrame(accountId);
+
+    // The render that asked: on its picture, and on a 304 of it.
+    reports = { tones: "2093:120,0:40,3136:240" };
+    const first = await pull(frame.id, token, panel);
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-frameos-tone")).toBe("2093:120,0:40,3136:240");
+    // The same picture served again (nothing changed, inside the floor) is
+    // no render: no tone.
+    const reused = await pull(frame.id, token, panel);
+    expect(reused.status).toBe(200);
+    expect(renders).toHaveLength(1);
+    expect(reused.headers.get("x-frameos-tone")).toBeNull();
+
+    // A reminder due at the wake: drawn ahead with its tone, sent at the wake.
+    shade = 255;
+    expect(await prerenderFrame(db, frame.id, { asOf: new Date(Date.now() + 30_000), render: standIn })).toBe("kept");
+    expect((await renderRow(frame.id))?.prerenderTones).toBe("2093:120,0:40,3136:240");
+    reports = {};
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    const woke = await pull(frame.id, token, panel);
+    expect(woke.status).toBe(200);
+    expect(renders).toHaveLength(2);
+    expect(woke.headers.get("x-frameos-tone")).toBe("2093:120,0:40,3136:240");
+    expect((await renderRow(frame.id))?.prerenderTones).toBeNull();
+    const after = await pull(frame.id, token, panel);
+    expect(after.headers.get("x-frameos-tone")).toBeNull();
+
+    // What is not notes never reaches the board.
+    await db
+      .update(frameServerRenders)
+      .set({ renderedAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(frameServerRenders.frameId, frame.id));
+    reports = { tones: "880:200\r\nX-Injected: 1" };
+    const refused = await pull(frame.id, token, panel);
+    expect(refused.headers.get("x-frameos-tone")).toBeNull();
+    reports = {};
+  });
+
   it("says when the scene wants its next picture, on every answer for the picture", async () => {
     const accountId = await signIn();
     await subscribe(accountId, 1);

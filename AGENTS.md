@@ -641,6 +641,27 @@
   frame that has one and leaves it out nowhere, so every such scene plays by
   touch, keys or buttons too.
 
+## A scene's tones: `docs/tones.md`
+
+- `frameos.tone()` (the chime), `tone(hz, ms)`, `tone([[hz, ms], ...])`
+  sounds the frame's buzzer, the codec's speaker or the status LED. The
+  runtime writes every call one way, "hz:ms,..." with 0 Hz a rest, held to a
+  piezo's bounds (`frameos/tones.nim` `normalizeTones`), and hands it to the
+  host's `toneSink`: the ESP32's `fos_buzzer_scene_tone` (which reads it
+  again with the same bounds, `fos_tone.c`, host-tested), the wasm runtime's
+  queue (`frameos_wasm_tones`: the browser preview plays it with Web Audio,
+  `frameos/wasm/src/tones.ts`; a plane hands it to a board it renders for as
+  `X-FrameOS-Tone`, once, the backend's kept pre-render and the cloud's
+  `prerender_tones` included). A Pi has none: it answers false. A new host
+  sets `toneSink`; a new limit changes `tones.nim`, `fos_tone.c` and both
+  tests together.
+- A scene's tone is not behind Tap and click sounds, and a deep sleep waits
+  for it (`fos_buzzer_wait_quiet`). A reminder rings once and remembers it
+  (the To-do sample, `docs/scene-guide.md` "Sounds and reminders").
+- A JSX render that runs no `get()` (a tap's signals, the pointer) carries on
+  the sleep the last whole `get()` asked for, and once that has run out the
+  next render is a whole `get()` (`keepOwnSleep` in `app_runtime.nim`).
+
 ## Home Assistant: `docs/home-assistant.md`
 
 - The self-hosted backend's Home Assistant link is `backend/app/ha/` (one task

@@ -32,6 +32,7 @@ export {
   type DevicePreset,
   type DevicePresetKey,
 } from './devices'
+export { parseTones, playTones } from './tones'
 export {
   PreviewCursor,
   composeCursor,

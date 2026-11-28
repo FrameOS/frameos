@@ -35,6 +35,7 @@
 #include "fos_buttons.h"
 #include "fos_gauge.h"
 #include "fos_buzzer.h"
+#include "fos_tone.h"
 #include "fos_touch.h"
 #include "fos_charger.h"
 #include "fos_codec.h"
@@ -1756,6 +1757,11 @@ static esp_err_t remote_pull_header(esp_http_client_event_t *evt)
     } else if (strcasecmp(evt->header_key, FOS_PRESS_HEADER) == 0) {
         int count = fos_press_map_parse(evt->header_value, pull->press, FOS_PRESS_MAP_MAX);
         pull->press_count = count > 0 ? count : 0;
+    } else if (strcasecmp(evt->header_key, FOS_TONE_HEADER) == 0) {
+        /* The scene's frameos.tone() in the render the plane ran for this
+         * board (docs/tones.md): played as it comes, while the picture
+         * downloads. Sent once, with the render that asked. */
+        fos_buzzer_scene_tone(evt->header_value);
     } else if (strcasecmp(evt->header_key, "X-FrameOS-Scene") == 0) {
         /* Percent-encoded on the wire (a built-in scene's id has a '/'). */
         const char *in = evt->header_value;
@@ -5252,6 +5258,9 @@ static void client_task(void *arg)
             /* A scene payload the store task is still writing goes to flash
              * first: the next boot loads what is on flash. */
             fos_scenes_store_wait(30000);
+            /* A scene's tone (a reminder, docs/tones.md) plays to its end:
+             * the sleep below silences the buzzer and the codec mid-note. */
+            fos_buzzer_wait_quiet(FOS_TONE_TOTAL_MS_MAX);
             /* What the sleep does not need goes dark too. Last, after the
              * logs are on the wire and the panel is parked — nothing renders
              * or sounds after this. */

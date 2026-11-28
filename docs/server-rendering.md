@@ -154,7 +154,10 @@ input as a JSON body (see "Keys, touch and the schedule").
   `X-FrameOS-Next-Render: <seconds>` when the scene said when it wants its
   next picture (on a 304 too; see "When the next picture is due"), and
   `X-FrameOS-Press: <entries>` where a press on the picture does something
-  (on a 304 too; see "The click"). The ETag is the version 1 body's, however
+  (on a 304 too; see "The click"), and `X-FrameOS-Tone: <hz:ms,...>` when the
+  scene's `frameos.tone()` asked for a sound in this render (on a 304 too,
+  once: never with a kept picture served again; the board plays it as the
+  answer comes, docs/tones.md). The ETag is the version 1 body's, however
   the picture travels.
 - **304**: the picture is the one the panel shows. No body; the device
   leaves the panel alone and logs `render:device skipped unchanged`.
@@ -547,6 +550,8 @@ and keeps it, so the pull at the wake is a download, not a render:
   it is within 120 s of the time it was drawn for. Its scene state is
   committed then, not before. Anything else, and the pull renders as it
   always did. A kept picture is used once.
+- Its tone is kept with it (a reminder due at the wake, docs/tones.md) and
+  sent with it as `X-FrameOS-Tone`.
 
 With the ETag a wake whose picture did not change costs no download and no
 refresh at all.

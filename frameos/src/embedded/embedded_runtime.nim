@@ -30,6 +30,7 @@ import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
 import frameos/scene_code_hooks
 import frameos/scene_icon
+import frameos/tones
 from frameos/utils/memory import panelMemoryBytes, waitingTextDrops
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
@@ -68,6 +69,7 @@ proc log*(msg: string) =
 
 when defined(freertos):
   proc imuGravity(x, y, z: ptr cint): bool {.importc: "fos_imu_gravity", cdecl.}
+  proc buzzerSceneTone(notes: cstring): bool {.importc: "fos_buzzer_scene_tone", cdecl.}
 
 # ------------------------------------------------------------------- state
 
@@ -693,6 +695,10 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
       y = my.float / 1000.0
       z = mz.float / 1000.0
       true
+    # frameos.tone() (docs/tones.md): the buzzer, the codec's speaker or the
+    # status LED, whichever the board has (fos_buzzer.c).
+    toneSink = proc (notes: string): bool {.nimcall, gcsafe.} =
+      buzzerSceneTone(notes.cstring)
   host.start()
   # A desktop layout runs the frame's scenes side by side, as on a Pi, as many
   # at once as the memory allows (app_runtime.windowLimit,

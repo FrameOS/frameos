@@ -235,6 +235,12 @@ bool frameos_nim_set_rotation(int rotate);
  * (fos_imu.c), for frameos.accelerometer(): false without an accelerometer.
  * Provided by the firmware, called by the runtime. */
 bool fos_imu_gravity(int *x_mg, int *y_mg, int *z_mg);
+/* frameos.tone() (docs/tones.md): plays `notes`, "hz:ms,..." with 0 Hz a
+ * rest, as the runtime writes them (tones.nim normalizeTones), on the buzzer,
+ * the codec's speaker or the status LED, replacing whatever sounds; "" plays
+ * nothing. True when the board has one of them to play it on. Provided by the
+ * firmware (fos_buzzer.c), called by the runtime on the render task. */
+bool fos_buzzer_scene_tone(const char *notes);
 /* frame.json's `colors` block as compact JSON ("" = defaults); live, one
  * string per pass like scaling_mode (docs/asset-color-profiles.md). */
 void frameos_nim_set_colors(const char *json);

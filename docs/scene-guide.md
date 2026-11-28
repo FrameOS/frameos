@@ -1025,6 +1025,27 @@ whether there is one without reading it.
   tilting.
 - A scene that does either is tagged "Accelerometer" in the store.
 
+## Sounds and reminders
+
+Many ESP32 frames have a buzzer (the reTerminal E-series and Sticky) or a
+speaker that plays its notes (the Waveshare PhotoPainter). `frameos.tone()`
+sounds it: the frame's chime with no arguments, `frameos.tone(880, 300)` one
+note, `frameos.tone([[2093, 120], [0, 60], [3136, 240]])` up to 16 notes (0 Hz
+a rest). It answers `false` where nothing plays it (a Raspberry Pi), and
+`app.frame.tone` says so without sounding anything. It is new: check
+`typeof frameos.tone === 'function'` first, and draw the reminder anyway.
+
+- A reminder is a time the scene wakes for and a sound at that render: work
+  out the next due time, `frameos.setNextSleep(seconds until it)` (no more
+  than the scene's own interval), and in the render that finds it due, sound
+  once and remember that it rang (`frameos.setState`). A scene renders again
+  on every tap, so a tone in every render is noise.
+- Sound for something the person asked to be told about (a time they set, a
+  timer they started), never to draw attention to a scene by itself.
+- A frame that sleeps between pictures wakes on the time it was given and
+  plays the tone to its end before it sleeps again; one rendered on its
+  control plane gets the tone with its picture.
+
 ## Events
 
 An `event` node starts a flow when its event happens; a `dispatch` node sends
@@ -1444,6 +1465,11 @@ interface FrameOSApp {
     /** True on a frame with an accelerometer (the reTerminal Sticky, the Waveshare 1.75" AMOLED): frameos.accelerometer()
      * reads it, and tilt, flick, shake and orientation are heard. Undefined elsewhere (FrameOS 2026.11.17+). */
     accelerometer?: boolean;
+    /** True where something plays frameos.tone(): an ESP32 frame's buzzer, the speaker that stands in for one or the
+     * status LED that lights with the notes (the reTerminal E-series and Sticky, the Waveshare PhotoPainter), the
+     * browser preview, and a frame its control plane renders for (which plays it if it has a buzzer). Undefined where
+     * nothing plays it, as on a Raspberry Pi (FrameOS 2026.11.17+). */
+    tone?: boolean;
     /** The id of the scene showing; a layout's app gets the id of the scene it wraps, the one its <yield />
      * shows (FrameOS 2026.11.8+; undefined before). */
     sceneId?: string;
@@ -1631,6 +1657,16 @@ declare const frameos: {
    * gesture rather than a reading, listen for tilt, flick, shake and orientation (docs/accelerometer.md;
    * FrameOS 2026.11.17+). */
   accelerometer(): { x: number; y: number; z: number } | null;
+  /** Sounds the frame's buzzer, or the speaker that stands in for one, for a reminder or an alarm: with no arguments
+   * the frame's chime (two rising arpeggios, 1.6 s), tone(880, 300) one note of 880 Hz for 300 ms (200 ms when the
+   * length is left out), tone([[2093, 120], [0, 60], [3136, 240]]) up to 16 notes in a row, 0 Hz a rest. Pitches
+   * are held to 100 to 10000 Hz (a piezo is loudest around 2000 to 4000), a note to 10 to 5000 ms, and a call to 10 s
+   * in all. A call while notes sound replaces them. It returns at once and answers true when something plays it (see
+   * app.frame.tone), false where nothing plays it (a Raspberry Pi), and runtimes before FrameOS 2026.11.17, where it does
+   * not exist, so check typeof frameos.tone === "function" first. Call it when something is due, from get() of the
+   * render that wakes for it (frameos.setNextSleep), and remember that it rang (frameos.setState): a scene renders
+   * again on a tap, and a sound at every render is noise (docs/tones.md). */
+  tone(notes?: number | Array<[number, number]>, ms?: number): boolean;
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
    * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
    * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False

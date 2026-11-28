@@ -109,7 +109,17 @@ typedef struct {
     uint32_t freq_hz;
     uint32_t duration_ms;
 } fos_buzzer_note_t;
-#define FOS_BUZZER_NOTES_MAX 8
+#define FOS_BUZZER_NOTES_MAX 16
 /* Notes back to back (at most FOS_BUZZER_NOTES_MAX), stepped by the stop
  * timer; returns at once. Like a tone, a sequence replaces whatever sounds. */
 void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count);
+
+/* A scene's frameos.tone() (docs/tones.md): `notes` as text, "hz:ms,..."
+ * (fos_tone.h), played like a sequence; "" or NULL plays nothing. Not behind
+ * Tap and click sounds: a scene's tone is the scene's, like the voice chat's
+ * cues. True when the frame has anything to play it on (fos_buzzer_sounds).
+ * Declared for the runtime in frameos_nim.h. */
+bool fos_buzzer_scene_tone(const char *notes);
+/* Until the notes sounding now are over, `max_ms` at most: a deep sleep
+ * waits for a reminder's tone instead of cutting it off. */
+void fos_buzzer_wait_quiet(uint32_t max_ms);

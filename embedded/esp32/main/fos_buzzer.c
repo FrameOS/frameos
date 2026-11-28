@@ -5,6 +5,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -15,6 +16,7 @@
 #include "fos_config.h"
 #include "fos_restart.h"
 #include "fos_led.h"
+#include "fos_tone.h"
 
 /* The last LEDC timer and channel (the C3 has six channels, the S3 eight), so
  * a user counting from 0 does not land on the buzzer; a backlit LCD's PWM
@@ -271,6 +273,24 @@ void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count)
         else stop_all_locked();
     }
     xSemaphoreGive(s_lock);
+}
+
+bool fos_buzzer_scene_tone(const char *notes)
+{
+    fos_buzzer_note_t parsed[FOS_BUZZER_NOTES_MAX];
+    size_t count = fos_tone_parse(notes, parsed, FOS_BUZZER_NOTES_MAX);
+    if (count > 0) fos_buzzer_play(parsed, count);
+    return fos_buzzer_sounds();
+}
+
+void fos_buzzer_wait_quiet(uint32_t max_ms)
+{
+    if (!s_lock) return;
+    for (uint32_t waited = 0; waited < max_ms; waited += 20) {
+        /* s_note_count goes to 0 when the last note's timer runs out. */
+        if (s_note_count == 0 && !esp_timer_is_active(s_stop_timer)) return;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
 }
 
 void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms)
