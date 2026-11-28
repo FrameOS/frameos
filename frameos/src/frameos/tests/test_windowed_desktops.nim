@@ -520,6 +520,74 @@ suite "the Windows 98 desktop":
     check current.id.string == "tests/green"
     check winOf("tests/blue").isNil
 
+  test "the Windows key, Ctrl+Escape, Cmd+Space and Alt+F1 open Start, and its arrows and Enter open a scene":
+    proc key(event, name: string, code = "", ctrl = false, alt = false, meta = false, repeat = false): seq[string] =
+      send(event, %*{"key": name, "code": (if code.len > 0: code else: name), "repeat": repeat, "shift": false,
+        "ctrl": ctrl, "alt": alt, "meta": meta})
+    proc started(): bool = desk().state{"menu"}.getBool()
+    discard pass()
+    check not started()
+    # The Windows key pressed and let go alone opens Start, and again closes it.
+    discard key("keyDown", "Meta", "MetaLeft", meta = true)
+    check not started()
+    discard key("keyDown", "Meta", "MetaLeft", meta = true, repeat = true)
+    discard key("keyUp", "Meta", "MetaLeft")
+    check started()
+    discard pass()
+    discard key("keyDown", "Meta", "MetaLeft", meta = true)
+    discard key("keyUp", "Meta", "MetaLeft")
+    check not started()
+    # Held for another key it is a modifier: Cmd+Space opens Start, its own up
+    # closes nothing, and the space held does not close it again.
+    discard key("keyDown", "Meta", "MetaLeft", meta = true)
+    discard key("keyDown", " ", "Space", meta = true)
+    check started()
+    discard key("keyDown", " ", "Space", meta = true, repeat = true)
+    discard key("keyUp", " ", "Space", meta = true)
+    discard key("keyUp", "Meta", "MetaLeft")
+    check started()
+    discard pass()
+    discard key("keyDown", "Escape", ctrl = true)
+    check not started()
+    discard key("keyDown", "F1", alt = true)
+    check started()
+    # Up from no row is the last (Control Panel), Down past it the first (Red).
+    discard key("keyDown", "ArrowUp")
+    check desk().state{"menuPick"}.getInt() == 4
+    discard key("keyDown", "ArrowDown")
+    check desk().state{"menuPick"}.getInt() == 0
+    let lit = pass()
+    shot(lit, "8-start-keys")
+    # Red's row lit, right of its name, and no other: not the one under the
+    # pointer left over Blue's by the tests before.
+    let menuTop = H - 42 - (30 * (3 + 2) + 22)
+    check lit.color(200, menuTop + 6 + 15) == colored("#000080")
+    check lit.color(200, menuTop + 6 + 30 + 15) == colored("#c0c0c0")
+    check lit.color(200, menuTop + 6 + 2 * 30 + 15) == colored("#c0c0c0")
+    # The pointer moved over the menu has the rows back (lit from its next move,
+    # once they are drawn with theirs), and the arrows start over.
+    discard send("pointerMove", at(200, menuTop + 6 + 30 + 15, %*{"buttons": 0}))
+    check desk().state{"menuPick"}.getInt(-1) == -1
+    discard pass()
+    discard send("pointerMove", at(201, menuTop + 6 + 30 + 15, %*{"buttons": 0}))
+    let hovered = pass()
+    check hovered.color(200, menuTop + 6 + 15) == colored("#c0c0c0")
+    check hovered.color(200, menuTop + 6 + 30 + 15) == colored("#000080")
+    # Blue, the third row, opens again in a window of its own.
+    discard key("keyDown", "ArrowDown")
+    discard key("keyDown", "ArrowDown")
+    discard key("keyDown", "ArrowDown")
+    check "setCurrentScene" in key("keyDown", "Enter")
+    check current.id.string == "tests/blue"
+    check not started()
+    discard pass()
+    check not winOf("tests/blue").isNil
+    check problems.len == 0
+    # Closed again, for the tests after this one.
+    discard key("keyDown", "F4", alt = true)
+    check current.id.string == "tests/green"
+    check winOf("tests/blue").isNil
+
   test "let go at the top, a window fills the desktop":
     discard pass()
     let g = winOf("tests/green")
