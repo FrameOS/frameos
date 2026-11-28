@@ -163,6 +163,9 @@ export const cloudFramesContractSettings = {
     "click_sounds": {
       "since": "2026.11.15"
     },
+    "auto_rotate": {
+      "since": "2026.11.17"
+    },
     "brightness": {
       "since": "2026.11.16"
     },

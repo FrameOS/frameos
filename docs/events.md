@@ -903,6 +903,29 @@ the dispatcher could (which leaves that key's long press to its `up`:
 a device command its host logs as unsupported. Only the `eventMap` origin may
 emit it, and only the ESP32 host has it.
 
+**Motion** (docs/accelerometer.md) is bound the same way on a frame with an
+accelerometer (the reTerminal Sticky, the Waveshare 1.75" AMOLED: the board's
+`hardware.imu`, else its preset; the SPA's `utils/accelerometer.ts`
+`frameHasAccelerometer`, the iOS app's `Accelerometer.present`). "Button
+actions" and "Map buttons" both offer a `flick` or a `tilt` toward one side,
+a `shake` and the `orientation` it comes to rest in, written as one rule each:
+
+```json
+{"event": "flick", "match": {"direction": "right"}, "emit": "forward", "as": {}}
+{"event": "shake", "emit": "sceneSwitcher", "as": {}}
+{"event": "orientation", "match": {"position": "faceDown"}, "emit": "turnOff", "as": {}}
+```
+
+(`frameEventMap.ts` `bindingRule` / `bindingOfRule`, pinned by
+docs/button-map-fixtures.json: a shake has no `match`; a rule matching more,
+`x` or `strength`, is the owner's own and kept as it is). No preset binds one:
+a motion in the frame's map is taken from every scene, a tilting 2048
+included, so "Button actions" says so and points at the scene's own map,
+where a rule holds only while that scene shows: a reader turns its pages with
+a flick as `forward` and `back` (`sceneMotionBindings`). A motion cannot be a
+scene's own key (a `button` rewrite keeps the event's name, and `button` is
+not the map's to emit): it is one of the actions above.
+
 `gpio` edges are not touched by a `button` rule (a long press cannot be known
 at its `down`); a scene that wants them mapped gets its own `gpio` rules. A
 rule firing is logged as `event:mapped` with its `scope` (`frame` or `scene`),

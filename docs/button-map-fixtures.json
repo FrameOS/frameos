@@ -1,5 +1,5 @@
 {
-  "description": "The frame's \"Button actions\" rows read out of its event map, and written back (docs/events.md \"Event map\"). Each case is one rule of frame.json `eventMap` (`event_map` on the wire); `expect` is the row it means \u2014 its gesture, its action, the two titles the section shows (a key with a name of its own is called by it: the reTerminal Sticky's `AI` is \"Action\"; a scene named by id is called by its name: the scene `weather` is \"Weather\"; a Show scene with settings, `state` beside `sceneId`, says how many), and the rule the row writes back \u2014 or null for a rule the section does not write, which it keeps as it is. Replayed by the SPA (frontend/src/utils/frameEventMap.ts bindingOfRule / bindingRule / frameGestureTitle / frameActionTitle; cloud/apps/auth-web/src/test/shared-spa/button-map-fixtures.test.ts) and the iOS app (ios/FrameOSKit/Sources/FrameOSKit/Contracts/ButtonBindings.swift; ButtonMapFixtureTests.swift).",
+  "description": "The frame's \"Button actions\" rows read out of its event map, and written back (docs/events.md \"Event map\"). Each case is one rule of frame.json `eventMap` (`event_map` on the wire); `expect` is the row it means \u2014 its gesture, its action, the two titles the section shows (a motion of a frame with an accelerometer \u2014 `flick`, `tilt`, `shake`, `orientation`, docs/accelerometer.md \u2014 is its own row: \"Flick to the right\", \"Laid face down\"; a key with a name of its own is called by it: the reTerminal Sticky's `AI` is \"Action\"; a scene named by id is called by its name: the scene `weather` is \"Weather\"; a Show scene with settings, `state` beside `sceneId`, says how many), and the rule the row writes back \u2014 or null for a rule the section does not write, which it keeps as it is. Replayed by the SPA (frontend/src/utils/frameEventMap.ts bindingOfRule / bindingRule / frameGestureTitle / frameActionTitle; cloud/apps/auth-web/src/test/shared-spa/button-map-fixtures.test.ts) and the iOS app (ios/FrameOSKit/Sources/FrameOSKit/Contracts/ButtonBindings.swift; ButtonMapFixtureTests.swift).",
   "cases": [
     {
       "rule": {
@@ -759,6 +759,276 @@
         },
         "emit": "render",
         "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "flick",
+        "match": {
+          "direction": "right"
+        },
+        "emit": "forward",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "flick",
+            "direction": "right"
+          },
+          "action": {
+            "kind": "forward"
+          }
+        },
+        "gestureTitle": "Flick to the right",
+        "actionTitle": "Forward",
+        "rule": {
+          "event": "flick",
+          "match": {
+            "direction": "right"
+          },
+          "emit": "forward",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "flick",
+        "match": {
+          "direction": "left"
+        },
+        "emit": "back",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "flick",
+            "direction": "left"
+          },
+          "action": {
+            "kind": "back"
+          }
+        },
+        "gestureTitle": "Flick to the left",
+        "actionTitle": "Back",
+        "rule": {
+          "event": "flick",
+          "match": {
+            "direction": "left"
+          },
+          "emit": "back",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "tilt",
+        "match": {
+          "direction": "down"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "direction": "next"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "tilt",
+            "direction": "down"
+          },
+          "action": {
+            "kind": "nextScene"
+          }
+        },
+        "gestureTitle": "Tilt down and hold",
+        "actionTitle": "Next scene",
+        "rule": {
+          "event": "tilt",
+          "match": {
+            "direction": "down"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "direction": "next"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "shake",
+        "emit": "sceneSwitcher",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "shake"
+          },
+          "action": {
+            "kind": "sceneSwitcher"
+          }
+        },
+        "gestureTitle": "Shake",
+        "actionTitle": "Scene switcher",
+        "rule": {
+          "event": "shake",
+          "emit": "sceneSwitcher",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "shake",
+        "match": {},
+        "emit": "render",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "shake"
+          },
+          "action": {
+            "kind": "render"
+          }
+        },
+        "gestureTitle": "Shake",
+        "actionTitle": "Refresh",
+        "rule": {
+          "event": "shake",
+          "emit": "render",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "orientation",
+        "match": {
+          "position": "faceDown"
+        },
+        "emit": "turnOff",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "orientation",
+            "position": "faceDown"
+          },
+          "action": {
+            "kind": "turnOff"
+          }
+        },
+        "gestureTitle": "Laid face down",
+        "actionTitle": "Display off",
+        "rule": {
+          "event": "orientation",
+          "match": {
+            "position": "faceDown"
+          },
+          "emit": "turnOff",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "orientation",
+        "match": {
+          "position": "faceUp"
+        },
+        "emit": "setCurrentScene",
+        "as": {
+          "sceneId": "weather"
+        }
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "event": "orientation",
+            "position": "faceUp"
+          },
+          "action": {
+            "kind": "showScene",
+            "sceneId": "weather"
+          }
+        },
+        "gestureTitle": "Laid face up",
+        "actionTitle": "Show scene: Weather",
+        "rule": {
+          "event": "orientation",
+          "match": {
+            "position": "faceUp"
+          },
+          "emit": "setCurrentScene",
+          "as": {
+            "sceneId": "weather"
+          }
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "flick",
+        "match": {
+          "direction": "sideways"
+        },
+        "emit": "forward",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "flick",
+        "match": {
+          "direction": "right",
+          "x": 0.4
+        },
+        "emit": "forward",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "shake",
+        "match": {
+          "strength": 2
+        },
+        "emit": "render",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "orientation",
+        "match": {
+          "rotate": 90
+        },
+        "emit": "render",
+        "as": {}
+      },
+      "expect": null
+    },
+    {
+      "rule": {
+        "event": "flick",
+        "match": {
+          "direction": "right"
+        },
+        "as": {
+          "direction": "left"
+        }
       },
       "expect": null
     }

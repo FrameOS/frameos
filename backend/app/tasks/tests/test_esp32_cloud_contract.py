@@ -115,5 +115,7 @@ def test_single_plane_settings_carry_a_parity_reason():
     # (2026.11.15: a Pi's CPU governor, cpu_governor.nim); 22 with
     # `brightness`, `dim_after_seconds`, `dim_brightness` (2026.11.16: the
     # glass's brightness lives in the ESP32 display drivers, and the Linux
-    # runtime has no backlight control yet).
-    assert by_plane.get("esp32", 0) <= 22, by_plane
+    # runtime has no backlight control yet); 23 with `auto_rotate`
+    # (2026.11.17: the accelerometer is read by the ESP32 firmware, and no Pi
+    # preset has one).
+    assert by_plane.get("esp32", 0) <= 23, by_plane

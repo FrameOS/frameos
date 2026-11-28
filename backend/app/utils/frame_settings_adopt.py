@@ -7,7 +7,8 @@ the rotation and the render scale on the device, and says so in one log line:
 frame_settings_linux.nim), and on a board that has them the sounds of a tap
 and a press (`clickSounds`, the row's device_config) and, on one that deep-sleeps, how long a
 tap keeps it up (`awakeAfterInputSeconds`, device_config too) and, where the glass can dim, its
-`brightness` (device_config too). The row takes them, so the next deploy keeps what
+`brightness` (device_config too) and, on a board with an accelerometer, auto-rotate
+(`autoRotate`, device_config too). The row takes them, so the next deploy keeps what
 the person chose, and so does the deploy baseline, so the drawer does not offer
 to deploy what the frame already has. The cloud follows the hello's hardware
 report instead (frames.ts `settingsWithReported`).
@@ -77,6 +78,11 @@ def panel_settings_changes(frame: Frame, log: dict[str, Any]) -> dict[str, Any]:
     if (isinstance(bright, int) and not isinstance(bright, bool) and 5 <= bright <= 100
             and bright != (held_bright if isinstance(held_bright, int) else BRIGHTNESS_DEFAULT)):
         config["brightness"] = bright
+    auto_rotate = log.get("autoRotate")
+    held_auto = device_config.get("autoRotate", device_config.get("auto_rotate"))
+    if isinstance(auto_rotate, bool) and auto_rotate != (held_auto is True):
+        config.pop("auto_rotate", None)
+        config["autoRotate"] = auto_rotate
     if config != device_config:
         changes["device_config"] = config
     snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None

@@ -9,7 +9,13 @@
 // A touch screen's swipes in from an edge (`edgeSwipe`) are bound the same
 // way: in from the left `back` and from the right `forward` (the scene's own:
 // the photo or the page before or after, never another scene), up from the
-// bottom the scene switcher (docs/scene-switcher.md).
+// bottom the scene switcher (docs/scene-switcher.md). A frame with an
+// accelerometer (docs/accelerometer.md) binds its motion the same way: a
+// `flick` or a `tilt` toward one side, a `shake`, an `orientation` it comes to
+// rest in (laid face down) — a flick right as Forward turns a reader's page.
+// None is bound by default: a motion rule of the frame's map takes that
+// gesture from every scene (a tilting game included), so a scene's own
+// "Map buttons" is the place for one scene's.
 // This module turns the rules into the section's rows — one press of one
 // button or one edge, one action — and the rows back into rules; rules the
 // section did not write (hand-made, a rewrite, another event) are kept as
@@ -57,6 +63,45 @@ export interface EdgeGesture {
   edge: string
 }
 
+/** A motion of the frame itself, read by its accelerometer (docs/accelerometer.md): a
+ * `flick` or a `tilt` toward one side of the picture, a `shake`, or an `orientation` it
+ * came to rest in. `direction` for the first two, `position` for the last. */
+export interface MotionGesture {
+  event: MotionEvent
+  direction?: string
+  position?: string
+}
+
+export type MotionEvent = 'flick' | 'tilt' | 'shake' | 'orientation'
+
+/** The contract's `gestures.directions` (a flick's and a tilt's `direction`). */
+export const motionDirections: readonly string[] = ['left', 'right', 'up', 'down']
+/** The contract's `motion.positions` (an `orientation`'s `position`). */
+export const motionPositions: readonly string[] = [
+  'upright',
+  'turnedLeft',
+  'turnedRight',
+  'upsideDown',
+  'faceUp',
+  'faceDown',
+]
+
+const MOTION_DIRECTION_TITLES: Record<string, string> = {
+  left: 'to the left',
+  right: 'to the right',
+  up: 'up',
+  down: 'down',
+}
+
+const MOTION_POSITION_TITLES: Record<string, string> = {
+  upright: 'Stood upright',
+  turnedLeft: 'Turned onto its left side',
+  turnedRight: 'Turned onto its right side',
+  upsideDown: 'Turned upside down',
+  faceUp: 'Laid face up',
+  faceDown: 'Laid face down',
+}
+
 /** A press of whichever key plays a role (docs/buttons.md): the arrows held,
  * which turn with the frame, and Back, which two keys held together are on a
  * board with no Back key. A hardware preset's map binds these by role. */
@@ -65,8 +110,8 @@ export interface RoleGesture {
   action: string
 }
 
-/** What a row binds: a press of one of the frame's buttons, of a key by its role, or a swipe in from an edge. */
-export type FrameGesture = ButtonGesture | EdgeGesture | RoleGesture
+/** What a row binds: a press of one of the frame's buttons, of a key by its role, a swipe in from an edge, or a motion of the frame. */
+export type FrameGesture = ButtonGesture | EdgeGesture | RoleGesture | MotionGesture
 
 const ROLE_TITLES: Record<string, string> = {
   next: 'Next key',
@@ -157,6 +202,17 @@ export function frameSupportsBackForward(frameosVersion: string | null | undefin
   return cloudFrameSupportsSettingsFrom(backForwardMinVersion, frameosVersion)
 }
 
+/** The first FrameOS that hears its accelerometer (the contract's `flick.since`). */
+export const motionGesturesMinVersion: string = contractEventSpecs.flick.since ?? '0.0.0'
+
+/** Whether a frame on this FrameOS makes the motion events, as `frameSupportsSceneSwitcher`. */
+export function frameSupportsMotionGestures(frameosVersion: string | null | undefined, cloud: boolean): boolean {
+  if (!cloud && (typeof frameosVersion !== 'string' || frameosVersion.trim().length === 0)) {
+    return true
+  }
+  return cloudFrameSupportsSettingsFrom(motionGesturesMinVersion, frameosVersion)
+}
+
 /** The first FrameOS that makes a `triplePress` (the contract's `buttons.triplePressSince`). */
 export const triplePressMinVersion: string = buttonTriplePressSince
 
@@ -199,10 +255,72 @@ export function isRoleGesture(gesture: FrameGesture): gesture is RoleGesture {
   return 'role' in gesture && !('label' in gesture)
 }
 
+export function isMotionGesture(gesture: FrameGesture): gesture is MotionGesture {
+  return 'event' in gesture
+}
+
+/** A motion gesture, when this is one the rows write: a known event with its one known value. */
+export function motionGesture(event: unknown, value?: unknown): MotionGesture | null {
+  if ((event === 'flick' || event === 'tilt') && typeof value === 'string' && motionDirections.includes(value)) {
+    return { event, direction: value }
+  }
+  if (event === 'orientation' && typeof value === 'string' && motionPositions.includes(value)) {
+    return { event, position: value }
+  }
+  return event === 'shake' && value === undefined ? { event } : null
+}
+
+/** What a motion rule matches: the direction, the position, or nothing (any shake). */
+function motionMatch(gesture: MotionGesture): Record<string, string> | undefined {
+  if (gesture.event === 'shake') {
+    return undefined
+  }
+  return gesture.event === 'orientation' ? { position: gesture.position ?? '' } : { direction: gesture.direction ?? '' }
+}
+
+/** The motion a rule's `event` and `match` say, when it is one the rows write. */
+export function motionGestureOfRule(rule: Pick<EventMapRule, 'event' | 'match'>): MotionGesture | null {
+  const match = rule.match ?? {}
+  const keys = Object.keys(match)
+  if (rule.event === 'shake') {
+    return keys.length === 0 ? { event: 'shake' } : null
+  }
+  if (keys.length !== 1) {
+    return null
+  }
+  return motionGesture(rule.event, rule.event === 'orientation' ? match.position : match.direction)
+}
+
+/** What a motion row says: "Flick to the right", "Shake", "Laid face down". */
+export function motionGestureTitle(gesture: MotionGesture): string {
+  switch (gesture.event) {
+    case 'flick':
+      return `Flick ${MOTION_DIRECTION_TITLES[gesture.direction ?? ''] ?? gesture.direction}`
+    case 'tilt':
+      return `Tilt ${MOTION_DIRECTION_TITLES[gesture.direction ?? ''] ?? gesture.direction} and hold`
+    case 'shake':
+      return 'Shake'
+    case 'orientation':
+      return MOTION_POSITION_TITLES[gesture.position ?? ''] ?? `Turned ${gesture.position}`
+  }
+}
+
+/** The motions a frame with an accelerometer offers as rows: flicks, tilts, a shake, the positions. */
+export function motionGestures(): MotionGesture[] {
+  return [
+    ...motionDirections.map((direction): MotionGesture => ({ event: 'flick', direction })),
+    ...motionDirections.map((direction): MotionGesture => ({ event: 'tilt', direction })),
+    { event: 'shake' },
+    ...motionPositions.map((position): MotionGesture => ({ event: 'orientation', position })),
+  ]
+}
+
 /** Whether a press can carry voice chat: a key's long press alone, by its
  * label (the firmware finds its voice key by label, docs/voice-chat.md). */
 export function gestureCanVoiceChat(gesture: FrameGesture): boolean {
-  return !isEdgeGesture(gesture) && !isRoleGesture(gesture) && gesture.action === 'longPress'
+  return (
+    !isEdgeGesture(gesture) && !isRoleGesture(gesture) && !isMotionGesture(gesture) && gesture.action === 'longPress'
+  )
 }
 
 /** A row's press or swipe as one select value, and back. */
@@ -213,6 +331,9 @@ export function frameGestureValue(gesture: FrameGesture): string {
   if (isRoleGesture(gesture)) {
     return JSON.stringify({ role: gesture.role, action: gesture.action })
   }
+  if (isMotionGesture(gesture)) {
+    return JSON.stringify({ event: gesture.event, ...motionMatch(gesture) })
+  }
   return gestureValue(gesture)
 }
 
@@ -220,7 +341,10 @@ export function parseFrameGestureValue(value: string): FrameGesture | null {
   try {
     const parsed = JSON.parse(value) as unknown
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const { edge, role, action } = parsed as { edge?: unknown; role?: unknown; action?: unknown }
+      const { edge, role, action, event, direction, position } = parsed as Record<string, unknown>
+      if (typeof event === 'string') {
+        return motionGesture(event, event === 'orientation' ? position : direction)
+      }
       if (typeof role === 'string' && typeof action === 'string') {
         return { role, action }
       }
@@ -238,6 +362,9 @@ export function frameGestureTitle(gesture: FrameGesture): string {
   }
   if (isRoleGesture(gesture)) {
     return `${ROLE_TITLES[gesture.role] ?? `${gesture.role} key`} · ${actionTitle(gesture.action)}`
+  }
+  if (isMotionGesture(gesture)) {
+    return motionGestureTitle(gesture)
   }
   return gestureTitle(gesture)
 }
@@ -373,21 +500,24 @@ export function showSceneStaleSettings(action: FrameAction, fieldNames: readonly
 /** The rule the section writes for one binding: the press (or the swipe) replaced by the action's event. */
 export function bindingRule(binding: ButtonBinding): EventMapRule {
   const gesture = binding.gesture
-  const event = isEdgeGesture(gesture) ? 'edgeSwipe' : 'button'
-  const match: Record<string, string> = isEdgeGesture(gesture)
+  const event = isEdgeGesture(gesture) ? 'edgeSwipe' : isMotionGesture(gesture) ? gesture.event : 'button'
+  const match: Record<string, string> | undefined = isEdgeGesture(gesture)
     ? { edge: gesture.edge }
     : isRoleGesture(gesture)
       ? { role: gesture.role, action: gesture.action }
-      : { label: gesture.label, action: gesture.action }
+      : isMotionGesture(gesture)
+        ? motionMatch(gesture)
+        : { label: gesture.label, action: gesture.action }
+  // A shake matches any shake: the rule has no `match`.
+  const on = match ? { event, match } : { event }
   switch (binding.action.kind) {
     case 'nextScene':
-      return { event, match, emit: 'setCurrentScene', as: { direction: 'next' } }
+      return { ...on, emit: 'setCurrentScene', as: { direction: 'next' } }
     case 'prevScene':
-      return { event, match, emit: 'setCurrentScene', as: { direction: 'prev' } }
+      return { ...on, emit: 'setCurrentScene', as: { direction: 'prev' } }
     case 'showScene':
       return {
-        event,
-        match,
+        ...on,
         emit: 'setCurrentScene',
         as:
           binding.action.state && Object.keys(binding.action.state).length > 0
@@ -403,7 +533,7 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
     case 'turnOff':
     case 'toggleScreen':
     case 'voiceChat':
-      return { event, match, emit: binding.action.kind, as: {} }
+      return { ...on, emit: binding.action.kind, as: {} }
   }
 }
 
@@ -422,7 +552,7 @@ const SCENE_LESS_EMITS: readonly string[] = [
 /**
  * The binding a rule means, when it is one the section writes: a `button`
  * rule matching one label (or one role) and one press, or an `edgeSwipe` rule matching
- * one edge, that emits a scene switch (by direction, or by id with the
+ * one edge, or a motion rule (`motionGestureOfRule`), that emits a scene switch (by direction, or by id with the
  * scene's settings to show it with), back or
  * forward, the scene switcher, a render or a display switch with nothing
  * else in `as`.
@@ -453,7 +583,11 @@ export function bindingOfRule(rule: EventMapRule): ButtonBinding | null {
   ) {
     gesture = { edge: match.edge }
   } else {
-    return null
+    const motion = motionGestureOfRule(rule)
+    if (!motion) {
+      return null
+    }
+    gesture = motion
   }
   if (!rule.emit) {
     return null
@@ -500,6 +634,30 @@ export function frameBindings(rules: readonly EventMapRule[] | undefined): {
   for (const rule of rules ?? []) {
     const binding = bindingOfRule(rule)
     if (binding) {
+      bindings.push(binding)
+    } else {
+      others.push(rule)
+    }
+  }
+  return { bindings, others }
+}
+
+/**
+ * An installed scene's motion rows ("Map buttons", docs/accelerometer.md): its
+ * rules that bind a motion of the frame to an action, written as the frame's
+ * rows are (`bindingRule`), and every other rule. A scene's map applies only
+ * while that scene shows, so a reader can turn its pages with a flick
+ * (Forward, Back) and a tilting game keep its tilts.
+ */
+export function sceneMotionBindings(rules: readonly EventMapRule[] | undefined): {
+  bindings: ButtonBinding[]
+  others: EventMapRule[]
+} {
+  const bindings: ButtonBinding[] = []
+  const others: EventMapRule[] = []
+  for (const rule of rules ?? []) {
+    const binding = bindingOfRule(rule)
+    if (binding && isMotionGesture(binding.gesture)) {
       bindings.push(binding)
     } else {
       others.push(rule)

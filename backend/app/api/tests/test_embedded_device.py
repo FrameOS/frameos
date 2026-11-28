@@ -1465,6 +1465,28 @@ async def test_settings_carry_the_click_sounds_only_when_set(async_client, no_au
 
 
 @pytest.mark.asyncio
+async def test_settings_carry_auto_rotate_only_when_set(async_client, no_auth_client, db):
+    """Auto-rotate by the accelerometer (auto_rotate): present-only, a bool."""
+    frame = await device_frame(async_client, db)
+    base_config = {
+        key: value for key, value in (frame.device_config or {}).items() if key not in ('autoRotate', 'auto_rotate')
+    }
+    for config, expected in (
+        (base_config, None),
+        ({**base_config, 'auto_rotate': True}, True),
+        ({**base_config, 'autoRotate': False}, False),
+        ({**base_config, 'autoRotate': 'yes'}, None),
+    ):
+        frame.device_config = config
+        db.add(frame)
+        db.commit()
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+        assert response.status_code == 200, response.text
+        assert response.json()['frame'].get('autoRotate') == expected
+
+
+@pytest.mark.asyncio
 async def test_settings_carry_the_cpu_mode_only_when_set(async_client, no_auth_client, db):
     """The chip's clock (cpu_mode) is present-only: unset, the board runs its
     own rule (160 MHz on e-paper, 240 on an LCD or touch panel), and a value

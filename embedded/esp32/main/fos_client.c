@@ -41,6 +41,7 @@
 #include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_events.h"
 #include "fos_framebuffer.h"
 #include "fos_frame_settings.h"
@@ -1693,7 +1694,7 @@ static void switch_cue(void)
     xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
     fos_panel_surface_t surface = {
         .buf = glass_picture(), .width = fos_display_width(), .height = fos_display_height(),
-        .format = fos_display_format(), .rotate = fos_config()->rotate,
+        .format = fos_display_format(), .rotate = fos_rotation(),
     };
     fos_panel_code_box_t box;
     if (surface.buf && fos_panel_mark_box(&surface, &box)) {
@@ -1793,7 +1794,7 @@ static int remote_pull_target(char *url, size_t url_len, char *auth, size_t auth
     } else if (!fos_cloud_api_access(base, sizeof(base), frame, sizeof(frame), auth, auth_len)) {
         return FOS_RENDER_PULL_NONE;
     }
-    return fos_render_pull_url(url, url_len, from, frame, width, height, format, config->rotate)
+    return fos_render_pull_url(url, url_len, from, frame, width, height, format, fos_rotation())
                ? source : FOS_RENDER_PULL_NONE;
 }
 
@@ -2725,7 +2726,7 @@ static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf,
     } else {
         ov->surface = (fos_panel_surface_t){
             .buf = buf, .width = width, .height = height, .format = format,
-            .rotate = fos_config()->rotate,
+            .rotate = fos_rotation(),
         };
         if (fos_panel_code_box(&ov->surface, "Local network access code", FOS_LAN_ACCESS_CODE_LEN,
                                &ov->box)) {
@@ -2824,7 +2825,7 @@ static bool render_held(void)
 
 void fos_client_loading_begin(uint32_t since_tick)
 {
-    fos_display_loading_begin(since_tick, fos_config()->rotate);
+    fos_display_loading_begin(since_tick, fos_rotation());
     if (fos_loading_taps_wanted(fos_display_is_lcd(), fos_config()->touch_beep, render_held(), s_last_input_us,
                                 esp_timer_get_time())) {
         fos_buzzer_loading_begin();
@@ -2859,7 +2860,7 @@ static void notice_overlay_begin(notice_overlay_t *ov, uint8_t *buf, int width, 
     if (s_last_frame == buf) return; /* see lan_overlay_begin */
     ov->surface = (fos_panel_surface_t){
         .buf = buf, .width = width, .height = height, .format = format,
-        .rotate = fos_config()->rotate,
+        .rotate = fos_rotation(),
     };
     /* Glyphs 3 px per font pixel on a big panel (an 800 px line takes ~44
      * characters), smaller where the text would not fit in six lines. */
@@ -3020,7 +3021,7 @@ static void wake_mark_task(void *arg)
         memset(prev, white, len);
         fos_panel_surface_t on_glass = {
             .buf = prev, .width = fos_display_width(), .height = fos_display_height(),
-            .format = fos_display_format(), .rotate = fos_config()->rotate,
+            .format = fos_display_format(), .rotate = fos_rotation(),
         };
         fos_panel_surface_t next = on_glass;
         next.buf = buf;
@@ -3149,7 +3150,7 @@ static esp_err_t band_over_last_image(const char *text, int lines, uint8_t **gla
     size_t len = s_last_frame ? s_last_frame_len : 0;
     fos_panel_surface_t surface = {
         .buf = len ? fos_big_malloc(len) : NULL, .width = s_last_frame_width, .height = s_last_frame_height,
-        .format = s_last_frame_format, .rotate = fos_config()->rotate,
+        .format = s_last_frame_format, .rotate = fos_rotation(),
     };
     if (surface.buf) memcpy(surface.buf, s_last_frame, len);
     if (glass && !*glass && len && !fos_display_is_lcd() && !fos_display_glass_supported()) {
@@ -3269,7 +3270,7 @@ static void draw_sleep_mark(void)
     size_t len = s_last_frame ? s_last_frame_len : 0;
     fos_panel_surface_t surface = {
         .buf = NULL, .width = s_last_frame_width, .height = s_last_frame_height,
-        .format = s_last_frame_format, .rotate = fos_config()->rotate,
+        .format = s_last_frame_format, .rotate = fos_rotation(),
     };
     uint8_t *copy = len ? fos_big_malloc(len) : NULL;
     uint8_t *glass = len ? fos_big_malloc(len) : NULL;
@@ -4609,6 +4610,9 @@ static void client_task(void *arg)
             /* What JSX from .tsx/.jsx apps is laid out for (0 = automatic),
              * the same way: the apps read it off the config every render. */
             frameos_nim_set_render_scale(config->render_scale_milli / 1000.0);
+            /* The rotation the picture is drawn at: the frame's, or with
+             * auto-rotate the way it stands (fos_rotation.c). Live. */
+            fos_rotation_apply();
             /* The colours block (automatic fit switch, frame-wide correction):
              * same contract, the Nim side re-parses only when the text changed. */
             frameos_nim_set_colors(config->colors);

@@ -41,6 +41,7 @@
 #include "fos_codec.h"
 #include "fos_gauge.h"
 #include "fos_imu.h"
+#include "fos_rotation.h"
 #include "fos_touch.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
@@ -521,6 +522,8 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
     cJSON_AddBoolToObject(hw, "touchBeep", config->touch_beep);
+    /* Auto-rotate, set on its screen too: the cloud's mirror follows it. */
+    cJSON_AddBoolToObject(hw, "autoRotate", config->auto_rotate);
     /* Tap and click sounds, and whether the board makes any sound at all (a
      * buzzer, a codec's speaker, an LED that follows the notes): the planes
      * offer the setting only then. */
@@ -2869,6 +2872,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         ws_ack(id, false, contract_error);
         return;
     }
+    bool auto_rotate_restart = false;
     {
         const char *pin_key = NULL;
         const char *pin_why = NULL;
@@ -3087,6 +3091,13 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (touch_beep != NULL) {
         config->touch_beep = cJSON_IsTrue(touch_beep);
     }
+    /* Auto-rotate (docs/accelerometer.md): live (fos_rotation.c). */
+    const cJSON *auto_rotate = cJSON_GetObjectItem(settings, "auto_rotate");
+    if (auto_rotate != NULL) {
+        /* A canvas that is the panel buffer turns only at a boot (main.c). */
+        if (cJSON_IsTrue(auto_rotate) && !config->auto_rotate && fos_rotation_canvas_bound()) auto_rotate_restart = true;
+        config->auto_rotate = cJSON_IsTrue(auto_rotate);
+    }
     /* Tap and click sounds ("silent", "normal"; a newer mode is normal here).
      * Live: fos_buzzer.c reads it at every click. */
     const cJSON *click_sounds = cJSON_GetObjectItem(settings, "click_sounds");
@@ -3132,7 +3143,7 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
      * (main.c), so a change takes the same deferred reboot as rotate. Same
      * floor as the local admin API; the ceiling is the Pi runtime's default
      * (a provider can lower a device's bound, never raise it past that). */
-    bool restart_for_init = false;
+    bool restart_for_init = auto_rotate_restart;
     /* The chip's clock is set once at boot (main.c). */
     const cJSON *cpu_mode = cJSON_GetObjectItem(settings, "cpu_mode");
     if (cJSON_IsString(cpu_mode)) {

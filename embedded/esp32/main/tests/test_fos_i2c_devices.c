@@ -260,6 +260,10 @@ static void test_imu_decode(void)
     CHECK(x == -500 && y == 500 && z == 3999, "signs and range: %d %d %d", x, y, z);
     fos_imu_decode(flat, NULL, NULL, &z);
     CHECK(z == 1000, "an axis left out");
+    /* The LSM6DS3TR-C at +/-4 g sends the same: 0.122 mg a step. */
+    CHECK(strlen(fos_imu_board_axes("seeed_reterminal_sticky")) == 11, "the Sticky has a map");
+    CHECK(strcmp(fos_imu_board_axes("no_such_board"), "x=x,y=y,z=z") == 0, "a board not listed reads the chip's axes");
+    CHECK(strcmp(fos_imu_board_axes(NULL), "x=x,y=y,z=z") == 0, "nor does no board");
 }
 
 int main(void)

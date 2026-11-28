@@ -1808,6 +1808,8 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("touchBeep", ("touchBeep", "touch_beep"), "bool"),
             # The sounds of a tap and a press: silent, or the buzzer's own.
             ("clickSounds", ("clickSounds", "click_sounds"), "click_sounds"),
+            # Auto-rotate by the accelerometer (docs/accelerometer.md): live.
+            ("autoRotate", ("autoRotate", "auto_rotate"), "bool"),
             # The chip's clock (main.c, at boot: the device restarts for it).
             ("cpuMode", ("cpuMode", "cpu_mode"), "cpu_mode"),
             ("micClkPin", ("micClkPin", "mic_clk_pin"), "int"),

@@ -541,6 +541,79 @@
       "since": "2026.9.21"
     },
     {
+      "name": "tilt",
+      "class": "input",
+      "device": "motion",
+      "description": "The frame tipped toward one side of its picture and stayed tipped (docs/accelerometer.md): `direction` is the side that went down, `x` and `y` how far it leans then, in g along the picture's axes (x to its right, y to its bottom). Measured from how the frame rested before, so it works lying on a table and held in a hand alike: past `motion.tiltG` and still there after `motion.tiltHoldMs`. It comes again only once the frame has rested for `motion.restMs`. A frame with an accelerometer: the reTerminal Sticky, the Waveshare 1.75\" AMOLED.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "direction", "label": "Direction", "type": "string", "required": true, "unit": "swipe-direction"},
+        {"name": "x", "label": "X (g)", "type": "float", "required": true, "unit": "g", "filter": "more"},
+        {"name": "y", "label": "Y (g)", "type": "float", "required": true, "unit": "g", "filter": "more"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": false, "esp32": true, "wasm": true},
+      "since": "2026.11.17"
+    },
+    {
+      "name": "flick",
+      "class": "input",
+      "device": "motion",
+      "description": "The frame tipped toward one side of its picture past `motion.tiltG` and straight back within `motion.tiltHoldMs`: a flick of the wrist, as one turns a page (docs/accelerometer.md). `direction` is the side that dipped, `x` and `y` the deepest of it in g. A flick is never also a tilt. The frame's event map binds it like a key: a flick right as `next`, left as `prev`.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "direction", "label": "Direction", "type": "string", "required": true, "unit": "swipe-direction"},
+        {"name": "x", "label": "X (g)", "type": "float", "required": true, "unit": "g", "filter": "more"},
+        {"name": "y", "label": "Y (g)", "type": "float", "required": true, "unit": "g", "filter": "more"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": false, "esp32": true, "wasm": true},
+      "since": "2026.11.17"
+    },
+    {
+      "name": "shake",
+      "class": "input",
+      "device": "motion",
+      "description": "The frame was shaken: `motion.shakeCount` jolts of more than `motion.shakeG` away from gravity within `motion.shakeMs` (docs/accelerometer.md). `strength` is the hardest of them, in g. Once a shake is heard the next one needs the frame to rest for `motion.restMs` first.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "strength", "label": "Strength (g)", "type": "float", "required": true, "unit": "g", "filter": "more"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": false, "esp32": true, "wasm": true},
+      "since": "2026.11.17"
+    },
+    {
+      "name": "orientation",
+      "class": "input",
+      "device": "motion",
+      "description": "The frame came to rest in another position (docs/accelerometer.md): standing on one of its sides or lying flat, for `motion.restMs`. `position` is one of `motion.positions`, next to the way the frame was set up (its rotation in the settings): `upright`, `turnedLeft` (turned a quarter to the left, its left side down), `turnedRight`, `upsideDown`, `faceUp` or `faceDown`. `rotate`, while it stands, is the rotation that shows the picture upright; auto-rotate (the frame's setting) turns the picture by the same reading.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "position", "label": "Position", "type": "string", "required": true, "unit": "frame-position"},
+        {"name": "rotate", "label": "Rotation", "type": "integer", "required": false, "unit": "degrees", "filter": "more"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": false, "esp32": true, "wasm": true},
+      "since": "2026.11.17"
+    },
+    {
       "name": "turnOn",
       "class": "scene-command",
       "description": "Turn the screen on",
@@ -849,6 +922,17 @@
     "safeModePulls": 10,
     "safeModeGapMs": 5000,
     "edges": ["left", "right", "top", "bottom"]
+  },
+  "motion": {
+    "$comment": "How an ESP32 with an accelerometer makes tilt, flick, shake and orientation out of what it reads 50 times a second (fos_motion.c, docs/accelerometer.md), in g and milliseconds along the picture's axes. `tiltG` from where the frame rested is a tip, `restG` close enough to rest again.",
+    "tiltG": 0.35,
+    "restG": 0.12,
+    "tiltHoldMs": 350,
+    "restMs": 600,
+    "shakeG": 0.8,
+    "shakeCount": 3,
+    "shakeMs": 900,
+    "positions": ["upright", "turnedLeft", "turnedRight", "upsideDown", "faceUp", "faceDown"]
   },
   "buttons": {
     "$comment": "GPIO buttons, as two events. `gpio` is the line: `edges`, `down` and `up`, delivered the moment the driver reports them (`up` with `durationMs`), for a scene that wants the key itself (a counter that counts every tap, hold-to-show). `button` is what the person meant (`actions`), and each press is exactly one of them: `press` the moment a short press is over (its `up`), so two quick presses are two presses (the same digit twice on a calculator, two steps of `next`) and nothing waits (`pressAtUpSince`; before it every press waited out `doublePressMs`); only a key a rule of the frame's or the showing scene's event map binds a `doublePress` or `triplePress` of waits: its short press is a `press` once `doublePressMs` has passed since its release with no second down, and a `doublePress` on the second down within that window (the pair is that and nothing more: no `press`, no `longPress`, and the third down starts over); `triplePress` on the third down within that window of the second press's release, only for a key a rule of the frame's or the showing scene's event map binds a `triplePress` of (`triplePressSince`): such a key holds its pair back until a third down comes (`triplePress`, that and nothing more) or the window after the second release closes (`doublePress`, late), so a key no rule binds three times is no slower; `longPress` once a press has been held `longPressMs`, while the key is still down (the dispatcher's tick; a host busy the whole hold delivers it with the `up` it reached, before that `up`), once, with how long it was held then, so whoever holds a key knows when to let go; its `up` is the edge alone. The rules are timed from the edges' `atMs` (when the driver saw the edge, on the frame's monotonic clock; a `button` carries its press's first `down`), never from when they were delivered, so a press made while the panel was refreshing keeps its timing. A `gpio` edge's `level` is the line (0 is down: the line is pulled up). A `button` with a `level`, or with the action `down` or `up`, is an edge from a producer older than `gpio` (2026.10.16) and is taken as one. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label (docs/buttons.md: `primary` is the Action key, `menu` Home, `back` Back, `next` / `prev` the arrows, `screen` the key that turns an LCD's screen on and off; `refresh` and `secondary` are older names a frame may still configure, read as `primary`). A key whose place on the board is a direction is configured as one (`left`, `right`, `up`, `down`: where it sits with the frame unrotated) and is delivered as `next` (towards the right or the bottom of the picture as the frame shows it) or `prev`, through the same rotation and flip a touch goes through, so a frame turned upside down has its next key on the right; a scene never hears a direction as a role. A frame configures a role per button (`gpioButtons[].role`; every hardware preset states its keys'), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). Two keys held together on a frame whose event map binds a `back` press by role rather than by a label (a board with no key of its own for Back, docs/buttons.md) are the Back key: one `button` with `pin` -1, `role` `back` and both labels joined by `+` in alphabetical order (`LEFT+RIGHT`), a `press` when the first of them comes up or a `longPress` once the second has been held `longPressMs`, and neither key makes a `button` of its own (their `gpio` edges are delivered as ever). The ESP32 buzzer clicks on `down`, lower on every `up`, higher on the second `down` of a `doublePress` (a key a rule binds one of), and higher still on the third `down` of a `triplePress`; while a key is held it sounds a short falling pair once, at `longPressMs`, when the scene's `longPress` comes, and nothing more while it stays down; a `press` adds no sound of its own. A `gpio` `up` with `claimed: true` is a key the frame took for itself (a key whose long press the frame's event map binds to `voiceChat` starts the voice chat at the hold and is claimed until it is let go, docs/voice-chat.md): the edge is delivered as the line it is, and the button layer makes nothing of that press (no `press`, no `longPress`: such a key's long press is left to its `up`).",

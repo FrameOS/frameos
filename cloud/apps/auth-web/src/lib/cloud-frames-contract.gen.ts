@@ -901,6 +901,16 @@ export const cloudFramesContract = {
         }
       }
     },
+    "auto_rotate": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.17"
+        }
+      }
+    },
     "brightness": {
       "rule": {
         "type": "int",

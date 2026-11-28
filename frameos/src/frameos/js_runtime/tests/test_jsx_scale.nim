@@ -264,6 +264,36 @@ export function get(app, context) {
     discard ui.runtime.get(ui.owner, %*{}, context)
     check ui.scene.state["quiet"].getBool()
 
+  test "frameos.accelerometer() reads the frame's, and is null without one":
+    const source = """
+      export function get(app) {
+        const g = frameos.accelerometer()
+        frameos.setState('has', app.frame.accelerometer === true)
+        frameos.setState('g', g)
+        return { ok: true }
+      }
+    """
+    let ui = newUi(source, "tests/accelerometer", sourceName = "app.js", outputType = "json")
+    proc run() =
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+    accelerometerReader = nil
+    run()
+    check not ui.scene.state["has"].getBool()
+    check ui.scene.state["g"].kind == JNull
+    accelerometerReader = proc (x, y, z: var float): bool {.nimcall, gcsafe.} =
+      x = -0.25
+      y = 0.5
+      z = -0.812
+      true
+    run()
+    check ui.scene.state["has"].getBool()
+    check ui.scene.state["g"]["x"].getFloat() == -0.25
+    check ui.scene.state["g"]["y"].getFloat() == 0.5
+    check ui.scene.state["g"]["z"].getFloat() == -0.812
+    accelerometerReader = nil
+
   test "the scene's own scale wins over the frame's, and its role field over its setting":
     let ui = newUi(box, "tests/jsx-scale-scene")
     ui.scene.renderScaleSetting = 1.0

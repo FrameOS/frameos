@@ -685,6 +685,23 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     log("nim init failed: " & e.msg)
     false
 
+proc fos_nim_set_rotation_impl(rotate: cint): bool {.exportc, cdecl.} =
+  ## The firmware turned the picture (fos_rotation.c, auto-rotate): the packers
+  ## turn by the new rotation and pack the next picture whole.
+  try:
+    let turn = ((rotate.int mod 360) + 360) mod 360
+    if not setRuntimeRotation(turn):
+      return false
+    if turn != frameRotate:
+      frameRotate = turn
+      packedKnown = false
+      lastPackedFromCanvas = false
+    log(&"picture turned: rotate={frameRotate} ({sceneWidth()}x{sceneHeight()})")
+    true
+  except Exception as e:
+    log("set rotation failed: " & e.msg)
+    false
+
 proc fos_nim_apply_service_settings_impl(payload: cstring) {.exportc, cdecl.} =
   ## The firmware's settings poll (fos_settings.c) delivered the cloud-owned
   ## service settings. `payload` is the pull's `settings` object — group →

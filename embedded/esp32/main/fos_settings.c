@@ -21,6 +21,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_mem.h"
 #include "fos_schedule.h"
 #include "fos_tz.h"
@@ -646,6 +647,15 @@ static bool apply_frame_settings(const cJSON *frame)
         config->voice_chat = cJSON_IsTrue(voice_chat);
         changed = true;
     }
+    /* Auto-rotate (docs/accelerometer.md): live, the render task turns the
+     * picture on its next pass (fos_rotation.c). */
+    const cJSON *auto_rotate = cJSON_GetObjectItem(frame, "autoRotate");
+    if (cJSON_IsBool(auto_rotate) && config->auto_rotate != cJSON_IsTrue(auto_rotate)) {
+        config->auto_rotate = cJSON_IsTrue(auto_rotate);
+        changed = true;
+        /* A canvas that is the panel buffer turns only at a boot (main.c). */
+        if (fos_rotation_canvas_bound() && config->auto_rotate) s_restart_after_apply = true;
+    }
     /* The click of a press on the glass. Live: asked on every press. */
     const cJSON *touch_beep = cJSON_GetObjectItem(frame, "touchBeep");
     if (cJSON_IsBool(touch_beep) && config->touch_beep != cJSON_IsTrue(touch_beep)) {
@@ -1049,6 +1059,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->touch_beep != after->touch_beep) {
         change_append(out, out_len, "touch_beep", after->touch_beep ? "true" : "false");
+    }
+    if (before->auto_rotate != after->auto_rotate) {
+        change_append(out, out_len, "auto_rotate", after->auto_rotate ? "true" : "false");
     }
     if (before->click_sounds != after->click_sounds) {
         change_append(out, out_len, "click_sounds", fos_config_click_sounds_name(after->click_sounds));

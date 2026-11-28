@@ -31,6 +31,7 @@ import { FrameActionsMenu } from '../FrameActionsMenu'
 import { useFrameSettings } from '../frameSettingsContext'
 import { ColorsSection } from '../fields/colorsSection'
 import {
+  AutoRotateField,
   ControlCodeFields,
   ErrorBehaviorFields,
   FlipField,
@@ -105,6 +106,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
                 />
               )}
             </Field>
+            <AutoRotateField />
             <Field
               name="scaling_mode"
               label="Scaling mode"

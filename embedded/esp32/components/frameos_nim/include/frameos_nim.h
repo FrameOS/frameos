@@ -226,6 +226,15 @@ void frameos_nim_set_scaling_mode(const char *mode);
  * anything else is ignored. Live, one value per pass like scaling_mode
  * (console `set render_scale`, settings sync, cloud set_settings). */
 void frameos_nim_set_render_scale(double scale);
+/* The rotation the picture is drawn at, live (fos_rotation.c: auto-rotate):
+ * the scene's canvas turns, the packers and the press map with it, and every
+ * kept canvas is let go. False when the runtime is not up or the rotation is
+ * not 0, 90, 180 or 270. Render task, between renders. */
+bool frameos_nim_set_rotation(int rotate);
+/* Which way gravity pulls along the picture's axes in thousandths of g
+ * (fos_imu.c), for frameos.accelerometer(): false without an accelerometer.
+ * Provided by the firmware, called by the runtime. */
+bool fos_imu_gravity(int *x_mg, int *y_mg, int *z_mg);
 /* frame.json's `colors` block as compact JSON ("" = defaults); live, one
  * string per pass like scaling_mode (docs/asset-color-profiles.md). */
 void frameos_nim_set_colors(const char *json);

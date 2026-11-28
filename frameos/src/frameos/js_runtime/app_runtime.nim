@@ -194,6 +194,11 @@ var currentEnv: JsAppEvalEnv
   ## Every interpreter is entered from one thread, and a scene's apps share
   ## its context, so the call says which app is talking, never the context.
 var nextJsAppKey = 0
+var accelerometerReader*: proc (x, y, z: var float): bool {.nimcall, gcsafe.}
+  ## Which way gravity pulls, in g along the picture's axes as it shows now
+  ## (x to its right, y to its bottom, z out of the glass), where the frame
+  ## has an accelerometer (docs/accelerometer.md): the ESP32's `fos_imu_gravity`
+  ## (embedded_runtime.nim), a test's stub. nil, or false, where there is none.
 var boardRotation* = -1
   ## The board's rotation where the runtime draws for one that turns the
   ## picture itself (the wasm runtime's `set_frame`), else -1: what
@@ -644,6 +649,23 @@ proc storeFacts(asker: string): string =
 
 when defined(testing):
   proc sceneStoreFactsForTests*(asker: string): string = storeFacts(asker)
+
+proc readAccelerometer*(x, y, z: var float): bool =
+  let reader = accelerometerReader
+  not reader.isNil and reader(x, y, z)
+
+proc jsAccelerometer(ctx: ptr JSContext): JSValue {.nimcall.} =
+  ## `frameos.accelerometer()` (docs/accelerometer.md): "x y z" in g, or "" (null
+  ## in JS) where the frame has no accelerometer. A string, not an object: one
+  ## allocation a frame, read 30 times a second by an animation.
+  var x, y, z: float
+  if not readAccelerometer(x, y, z):
+    return nimStringToJS(ctx, "")
+  var answer = ""
+  for i, v in [x, y, z]:
+    if i > 0: answer.add ' '
+    answer.addInt int(v * 1000.0)
+  nimStringToJS(ctx, answer)
 
 proc jsStore(ctx: ptr JSContext): JSValue {.nimcall.} =
   ## `frameos.store()`: the scene store's facts as the host knows them now
@@ -2525,6 +2547,14 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
           undef = true
       else:
         undef = true
+    of "accelerometer":
+      # The frame has one (docs/accelerometer.md): frameos.accelerometer()
+      # reads it. Undefined where it has none.
+      var x, y, z: float
+      if readAccelerometer(x, y, z):
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
     of "wifiRssi":
       when defined(freertos):
         let rssi = fos_client_wifi_rssi()
@@ -2673,7 +2703,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
       "paper", "color", "round", "sceneName", "systemScene", "typing", "fullScreen", "wentBack", "batteryPercent", "wifiRssi",
-      "theme", "eventMap"]
+      "accelerometer", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")
@@ -3633,6 +3663,12 @@ const appJsPrelude* = compactJs("""
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
     dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __appReplacer)),
     store: () => JSON.parse(jsStore() || "null"),
+    accelerometer: () => {
+      const r = jsAccelerometer();
+      if (!r) return null;
+      const v = r.split(" ");
+      return { x: v[0] / 1000, y: v[1] / 1000, z: v[2] / 1000 };
+    },
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __appReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
@@ -4013,6 +4049,7 @@ proc registerAppNatives(js: var QuickJS) =
   for (name, fn) in natives2:
     js.registerFunction(name, fn)
   js.registerFunction("jsStore", jsStore)
+  js.registerFunction("jsAccelerometer", jsAccelerometer)
   js.registerFunction("jsAsyncMode", jsAsyncMode)
   js.registerFunction("jsAssets", jsAssets)
   js.registerFunction("jsAsyncStart", jsAsyncStart)
