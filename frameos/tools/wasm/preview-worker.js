@@ -63,6 +63,8 @@
 //                                            hotX, hotY, pixels, scale, hideMs}; null for "none")
 //   {type: 'assetsResult', requestId, ok, ...} reply to an 'assets' request
 //   {type: 'clipboard', text}                 a Copy or a Cut in a JSX field: for the browser's clipboard
+//   {type: 'tone', notes}                     the scene's frameos.tone() (docs/tones.md): "hz:ms,..." with 0 Hz
+//                                            a rest, for the page to play as the frame's buzzer would
 //   {type: 'fileRequest', id, op, name, data?} the Files scene asks the page: op 'upload' (pick files from the
 //                                            computer for the folder `name`, answered with `fileUpload`) or
 //                                            'download' (save `data`, an ArrayBuffer, as `name`, answered with
@@ -1002,6 +1004,7 @@ function renderNow() {
     postSceneInfo()
     postState()
     postCursor()
+    postTones()
     postMemory(0)
   } catch (e) {
     post({ type: 'error', message: 'render crashed: ' + errorText(e) })
@@ -1305,6 +1308,18 @@ function postClipboardIfChanged() {
   }
 }
 
+// A scene's frameos.tone() since the last look (docs/tones.md): the page
+// plays it. Bundles from before 2026.11.17 have no tones.
+function postTones() {
+  if (!Module || typeof Module._frameos_wasm_tones !== 'function') {
+    return
+  }
+  const notes = call('frameos_wasm_tones', 'string', [], [])
+  if (notes) {
+    post({ type: 'tone', notes })
+  }
+}
+
 function setClipboard(text) {
   if (!hasClipboard()) {
     return
@@ -1321,6 +1336,7 @@ function dispatchEvent(name, payload) {
   try {
     call('frameos_wasm_event', 'boolean', ['string', 'string'], [name, JSON.stringify(payload || {})])
     postClipboardIfChanged()
+    postTones()
   } catch (e) {
     post({ type: 'error', message: 'event failed: ' + errorText(e) })
   }

@@ -1121,13 +1121,14 @@ class _Drawn:
     was packed from (None for the card), for the workspace's copy, when the
     scene wants its next picture (next_render_seconds; None: no opinion) and
     where a press on it does something (press_map_of; None: nowhere, or not
-    said)."""
+    said), and the tone the render asked for (tones_of; None: none)."""
 
     body: bytes
     scene_id: str | None
     rgba: bytes | None
     next_render: int | None = None
     press_map: str | None = None
+    tones: str | None = None
 
 
 # docs/server-rendering.md "When the next picture is due": the seconds a
@@ -1199,6 +1200,24 @@ def press_map_of(rendered_state: dict | None) -> str | None:
     if not isinstance(value, str) or not value or len(value) > MAX_PRESS_MAP_CHARS:
         return None
     return value if _PRESS_MAP_CHARS.match(value) else None
+
+
+# docs/tones.md: the notes a scene's frameos.tone() asked for in this render
+# (frameos_wasm_tones), "hz:ms,..." with 0 Hz a rest, which the board plays
+# on its buzzer as the answer comes (fos_tone.c reads it with the runtime's
+# bounds). Sent once, with the render that asked: on a 304 too, never again.
+SERVER_RENDER_TONE_HEADER = "X-FrameOS-Tone"
+MAX_TONE_CHARS = 256
+_TONE_CHARS = re.compile(r"^[0-9]+:[0-9]+(?:,[0-9]+:[0-9]+)*$")
+
+
+def tones_of(rendered_state: dict | None) -> str | None:
+    """The tone a render reported, as the header carries it; None when the
+    scene asked for none, or the bundle says nothing, or it is not one."""
+    value = rendered_state.get("tones") if isinstance(rendered_state, dict) else None
+    if not isinstance(value, str) or not value or len(value) > MAX_TONE_CHARS:
+        return None
+    return value if _TONE_CHARS.match(value) else None
 
 
 def _kept_next_render(record: dict) -> int | None:
@@ -1280,6 +1299,7 @@ async def _render_thin_client_now(
         rgba,
         next_render_seconds(rendered_state),
         press_map_of(rendered_state),
+        tones_of(rendered_state),
     )
 
 
@@ -1320,6 +1340,7 @@ async def _embedded_render_response(
                 None,
                 _kept_next_render(kept.record),
                 press_map_of(kept.record),
+                tones_of(kept.record),
             )
             preview = kept.preview
             # Its state is the scene's now: committed when shown, not drawn.
@@ -1342,6 +1363,9 @@ async def _embedded_render_response(
         headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(held_to_panel_floor(drawn.next_render, plan.pixel_format))
     if drawn.press_map:
         headers[SERVER_RENDER_PRESS_HEADER] = drawn.press_map
+    if drawn.tones:
+        # The scene's reminder, say: the board plays it as the answer comes.
+        headers[SERVER_RENDER_TONE_HEADER] = drawn.tones
     if etag_matches(if_none_match, etag):
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
     content = drawn.body
@@ -1499,6 +1523,8 @@ async def prerender_thin_client(db: Session, redis, frame: Frame, as_of_ms: int)
             "nextRender": next_render_seconds(rendered_state),
             # Where a press on it does something (X-FrameOS-Press).
             "pressMap": press_map_of(rendered_state),
+            # The tone the render asked for, at the wake (X-FrameOS-Tone).
+            "tones": tones_of(rendered_state),
         },
         body,
         int(as_of_ms),

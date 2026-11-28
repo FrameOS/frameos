@@ -219,6 +219,13 @@ export type SceneRenderResult = {
    */
   pressMap?: string;
   /**
+   * The notes the scene's frameos.tone() asked for in this render
+   * (`frameos_wasm_tones`, docs/tones.md), "hz:ms,..." with 0 Hz a rest: what
+   * a board rendered on the server plays (X-FrameOS-Tone). Absent when the
+   * scene asked for none, or the runtime predates the report.
+   */
+  tones?: string;
+  /**
    * When the scene wants its next render, in seconds: this render's own
    * `nextSleep` (logic/nextSleepDuration), absent when it set none, and the
    * scene's `refreshInterval`, absent when it has none. Absent too when the
@@ -464,6 +471,7 @@ type WorkerResult =
       state: unknown;
       keptState: string | null;
       pressMap: string | null;
+      tones?: string | null;
       width: number;
     }
   | {
@@ -567,6 +575,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
           ...(result.sceneId ? { sceneId: result.sceneId } : {}),
           ...(typeof result.keptState === "string" ? { keptState: result.keptState } : {}),
           ...(typeof result.pressMap === "string" && result.pressMap.length > 0 ? { pressMap: result.pressMap } : {}),
+          ...(typeof result.tones === "string" && result.tones.length > 0 ? { tones: result.tones } : {}),
         };
         if (result.packed) {
           resolve({
@@ -1165,6 +1174,15 @@ async function main() {
   } catch {
     pressMap = null;
   }
+  // The notes the scene's frameos.tone() asked for (docs/tones.md), taken
+  // once. A runtime without the export says nothing.
+  let tones = null;
+  try {
+    const reported = call("frameos_wasm_tones", "string", [], []);
+    tones = typeof reported === "string" && reported ? reported : null;
+  } catch {
+    tones = null;
+  }
   // Packed for the panel here, where the pixels are (SceneRenderOptions.pack):
   // the packer is panel-pack.ts's own, built from its text, and only the
   // FOSB crosses to the main thread. Anything that goes wrong hands the
@@ -1188,7 +1206,7 @@ async function main() {
       );
       const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
       parentPort.postMessage(
-        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, pressMap },
+        { ok: true, packed: true, buffer: body, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, pressMap, tones },
         [body],
       );
       return;
@@ -1198,7 +1216,7 @@ async function main() {
   }
   const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len);
   parentPort.postMessage(
-    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, pressMap, ...(packError ? { packError } : {}) },
+    { ok: true, buffer, width, height, logs, nextSleep, palette, refreshInterval, renderMs: Date.now() - started, sceneId, state, keptState, pressMap, tones, ...(packError ? { packError } : {}) },
     [buffer],
   );
 }

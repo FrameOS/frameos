@@ -7,6 +7,7 @@ import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
 import { attachKeyboardInput, attachPointerInput, previewHasGesture, writeHostClipboard } from './pointer'
 import { PreviewCursor, type CursorSprite } from './cursor'
 import { pageHasGesture, pickFiles, safeFileName, saveFile, type PreviewFileRequest } from './files'
+import { playTones } from './tones'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -189,6 +190,11 @@ export interface FrameOSPreviewOptions {
   /** Files in the browser asset folder changed: the scene saved something,
    * or an asset op completed. */
   onAssetsChanged?: () => void
+  /** The scene's frameos.tone() (docs/tones.md), its notes as "hz:ms,..."
+   * with 0 Hz a rest. Given, the page plays them as it likes (or not at all);
+   * absent, the preview plays them with Web Audio, as the frame's buzzer
+   * would. */
+  onTone?: (notes: string) => void
 }
 
 interface PendingFrame {
@@ -409,6 +415,14 @@ export class FrameOSPreview {
       case 'clipboard':
         // A Copy or a Cut in the frame's UI: the computer's clipboard too.
         writeHostClipboard(String(msg.text ?? ''))
+        break
+      case 'tone':
+        // The scene sounded the buzzer: the page's speakers stand in for it.
+        if (this.options.onTone) {
+          this.options.onTone(String(msg.notes ?? ''))
+        } else {
+          playTones(String(msg.notes ?? ''))
+        }
         break
       case 'fileRequest':
         this.takeFileRequest(msg)

@@ -124,3 +124,21 @@ export function pressMapOf(value: unknown): string | null {
   }
   return /^[0-9,;!]+$/.test(value) ? value : null;
 }
+
+/** The response header a pull's answer carries a scene's tone in (docs/tones.md). */
+export const toneHeader = "X-FrameOS-Tone";
+export const maxToneChars = 256;
+
+/**
+ * The notes a render's frameos.tone() asked for (`frameos_wasm_tones`), as
+ * the header carries them: `hz:ms` pairs, `,` between them, 0 Hz a rest. The
+ * board plays them as the answer comes (fos_tone.c). Null when the scene
+ * asked for none, the runtime said nothing, or it is not one. The backend's
+ * `tones_of` is the same rule.
+ */
+export function tonesOf(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxToneChars) {
+    return null;
+  }
+  return /^[0-9]+:[0-9]+(?:,[0-9]+:[0-9]+)*$/.test(value) ? value : null;
+}

@@ -1530,6 +1530,18 @@ Silent leaves the voice chat's cues alone. Live, no restart; the plane's
 report says `sounds` (a buzzer, a codec speaker or an LED that follows the
 notes: `fos_buzzer_sounds`) and `clickSounds`.
 
+### A scene's tones
+
+A scene sounds the buzzer itself with `frameos.tone()` (docs/tones.md): the
+runtime hands the notes as text, "hz:ms,...", to `fos_buzzer_scene_tone`,
+which reads them with `fos_tone.c` (pure, host-tested in `test_fos_tone.c`)
+and plays them like any sequence (16 notes at most, `FOS_BUZZER_NOTES_MAX`),
+on the buzzer, the codec's speaker or the LED. Tap and click sounds do not
+mute them. A frame about to deep-sleep waits for them to end
+(`fos_buzzer_wait_quiet`, 10 s at most), and a board rendered on its plane
+plays the `X-FrameOS-Tone` of the render pull's answer. The console's `beep`
+is still one note.
+
 ### Brightness and dimming when idle
 
 Where the display can set it (`fos_display_brightness`: the round AMOLED's

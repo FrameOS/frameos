@@ -12,6 +12,7 @@ import {
   fosbV2,
   fosbV2Payload,
   pressMapOf,
+  tonesOf,
 } from "./fosb";
 
 // docs/fosb-fixtures.json: the backend writes it by its rule
@@ -95,5 +96,19 @@ describe("the press map", () => {
     expect(pressMapOf("1,2,3,4\r\nX-Injected: 1")).toBeNull();
     expect(pressMapOf("a,b,c,d")).toBeNull();
     expect(pressMapOf("1,".repeat(3000))).toBeNull();
+  });
+});
+
+describe("a scene's tone", () => {
+  it("goes out as the runtime wrote it, and nothing else does (the backend's tones_of)", () => {
+    expect(tonesOf("2093:120,0:40,3136:240")).toBe("2093:120,0:40,3136:240");
+    expect(tonesOf("880:200")).toBe("880:200");
+    expect(tonesOf("")).toBeNull();
+    expect(tonesOf(undefined)).toBeNull();
+    expect(tonesOf("880:200\r\nX-Injected: 1")).toBeNull();
+    expect(tonesOf("880")).toBeNull();
+    expect(tonesOf("a:b")).toBeNull();
+    expect(tonesOf("880:200,")).toBeNull();
+    expect(tonesOf("1:" + "9".repeat(300))).toBeNull();
   });
 });
