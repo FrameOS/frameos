@@ -174,10 +174,9 @@ What the page holds, top to bottom:
   be drawn on directly, so each frame is copied to its place (30 ms at
   480x480 on an ESP32, `packImageRgb565`); on e-paper the frame is packed
   anyway.
-- **Scale**: Automatic (with what that is on this panel), then the steps of
-  `RENDER_SCALE_STEPS` from 0.25x that leave a layout of at least 320 px on
-  the panel's shorter edge (up to 1.5x at 480 px), and a scale set elsewhere
-  as it is. Below 1 everything is drawn smaller. The scale is the frame's: a
+- **Scale**: Automatic (with what that is on this panel), then every step of
+  `RENDER_SCALE_STEPS`, 0.25x to 4x, on any panel, as the control plane
+  offers them. Below 1 everything is drawn smaller. The scale is the frame's: a
   scene with its own (`settings.renderScale`, a `renderScale` field) keeps
   it. The settings panel and the scene switcher follow it too (below).
 - **Tap and click sounds**: Silent or Normal (`ClickSounds` in the scene, a
@@ -253,9 +252,10 @@ panel shows more of them at the same size; the scale makes them larger, and
 the automatic one picks it from the panel (2 on the reTerminal E1003's
 1872x1404, docs/jsx-ui.md "Scale"), as it does for every scene. They stop at
 0.75 and at a layout of 320 px, whatever the scale, so the page that sets it
-can always set it back. The frame page's Scale offers the steps that leave
-320 px of the panel's own shorter edge (`panelEdge`), and names the
-automatic one for the panel.
+can always set it back. That is why the frame page's Scale offers every step
+whatever the panel (until 2026-11-28 it offered only those leaving a 320 px
+layout: 1.25x at most under 480 px), and names the automatic one for the
+panel.
 
 **Turned off by the control plane.** The frame's `frame_settings_on_screen`
 (frame.json `frameSettingsOnScreen`, on unless the owner turns it off in the

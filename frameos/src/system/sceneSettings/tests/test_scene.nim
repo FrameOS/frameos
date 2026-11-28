@@ -846,9 +846,17 @@ block the_frame_page:
   scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[^1])
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-scale.png")
-  # On 480 px the scales stop at 1.5 (a layout of 320 px): Automatic, 0.25,
-  # 0.5, 0.75, 1, 1.25, 1.5.
-  doAssert uiTarget(SceneSettingsId, 1, create = false).regions.allIt(it.handlers[ueClick] != OptionBase + 7 + 1)
+  # Every scale the control plane offers, on 480 px too: Automatic, 0.25,
+  # 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, in a list that scrolls to the last.
+  let scales = uiTarget(SceneSettingsId, 1, create = false).regions
+  for option in 7 .. 9:
+    doAssert scales.anyIt(it.handlers[ueClick] == OptionBase + option + 1), "no option " & $option
+  doAssert scales.anyIt(it.scrollY > 0), "the list scrolls"
+  proc labels(node: SvgNode): seq[string] =
+    if node.isNil: return
+    result.add node.text
+    for child in node.children: result.add labels(child)
+  doAssert "4\xc3\x97" in labels(SceneSettingsScene(scene).tree(480, 480, false, "", info = frameSettingsRead()))
   scene.tap(regionWith(OptionBase + 6))
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-changed.png")
