@@ -1,0 +1,10 @@
+{
+  "name": "Life counter",
+  "description": "A table-top life counter for card and board games, for 2 to 4 players. Tap the left or right half of a player's part to lose or gain a life, hold it or tap -5 / +5 to change by five, and see the change since the last pause. With the frame lying flat between the players, the top row is turned to face across the table. Dice rolls a d6, two d6, a d20 or a coin. The game is kept through a restart.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

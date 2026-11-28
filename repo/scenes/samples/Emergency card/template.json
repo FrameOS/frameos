@@ -1,0 +1,10 @@
+{
+  "name": "Emergency card",
+  "description": "An in case of emergency card for a frame by the door or on the fridge: allergies first and loudest, then the people to call, with QR codes that dial them where there is room, medical conditions, medications, doctor, insurance and address, in type as large as the screen allows. Everything comes from the scene's settings, and what you leave empty does not show. On e-paper it stays readable with the power off.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
