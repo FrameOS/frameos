@@ -328,6 +328,12 @@
       "profiles": {"esp32": {"since": "2026.11.15"}},
       "parity": {"only": "esp32", "why": "The tap and button feedback lives in the ESP32 firmware's buzzer path (fos_buzzer.c, fos_touch.c, fos_buttons.c); a Pi frame has no buzzer."}
     },
+    "auto_rotate": {
+      "$comment": "Auto-rotate (docs/accelerometer.md): on a board with an accelerometer (the reTerminal Sticky, the Waveshare 1.75\" AMOLED; reported as hardware.imu), the picture turns to stand upright as the frame is turned, by the same reading as the `orientation` event; while it lies flat it keeps the way it stood last, and at boot the rotation set (`rotate`) until the first reading. The stored `rotate` stays the frame's as it was set up. Default off. Live, though switching it on or off may restart the board once: it decides at boot whether its canvas can be the panel's own buffer, which only an unturned picture allows. Set from the plane or on the frame page, where it is adopted back like the rotation. Reported as hardware.autoRotate. A board without an accelerometer ignores it.",
+      "rule": {"type": "bool"},
+      "profiles": {"esp32": {"since": "2026.11.17"}},
+      "parity": {"only": "esp32", "why": "The accelerometer is read by the ESP32 firmware (fos_imu.c, fos_motion.c); no Pi frame preset has one."}
+    },
     "brightness": {
       "$comment": "The glass's brightness in percent, on an ESP32 display whose firmware can set it (fos_display_brightness): the round AMOLED's own brightness register (CO5300 0x51) and the PWM of a backlit SPI LCD's backlight (the Elecrow CrowPanel 2.01\" watch's GPIO13, the CrowPanel 1.46\" rotary's GPIO46). Another display ignores it. Default 100. Live, no reboot; screen off (turnOff, toggleScreen) still turns the glass off, and on comes back at this level.",
       "rule": {"type": "int", "min": 5, "max": 100},

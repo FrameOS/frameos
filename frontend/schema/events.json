@@ -787,6 +787,114 @@
     ]
   },
   {
+    "name": "tilt",
+    "description": "The frame tipped toward one side of its picture and stayed tipped (docs/accelerometer.md): `direction` is the side that went down, `x` and `y` how far it leans then, in g along the picture's axes (x to its right, y to its bottom). Measured from how the frame rested before, so it works lying on a table and held in a hand alike: past `motion.tiltG` and still there after `motion.tiltHoldMs`. It comes again only once the frame has rested for `motion.restMs`. A frame with an accelerometer: the reTerminal Sticky, the Waveshare 1.75\" AMOLED.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "direction",
+        "label": "Direction",
+        "type": "string",
+        "required": true,
+        "options": [
+          "left",
+          "right",
+          "up",
+          "down"
+        ]
+      },
+      {
+        "name": "x",
+        "label": "X (g)",
+        "type": "float",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "y",
+        "label": "Y (g)",
+        "type": "float",
+        "required": true,
+        "filter": "more"
+      }
+    ]
+  },
+  {
+    "name": "flick",
+    "description": "The frame tipped toward one side of its picture past `motion.tiltG` and straight back within `motion.tiltHoldMs`: a flick of the wrist, as one turns a page (docs/accelerometer.md). `direction` is the side that dipped, `x` and `y` the deepest of it in g. A flick is never also a tilt. The frame's event map binds it like a key: a flick right as `next`, left as `prev`.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "direction",
+        "label": "Direction",
+        "type": "string",
+        "required": true,
+        "options": [
+          "left",
+          "right",
+          "up",
+          "down"
+        ]
+      },
+      {
+        "name": "x",
+        "label": "X (g)",
+        "type": "float",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "y",
+        "label": "Y (g)",
+        "type": "float",
+        "required": true,
+        "filter": "more"
+      }
+    ]
+  },
+  {
+    "name": "shake",
+    "description": "The frame was shaken: `motion.shakeCount` jolts of more than `motion.shakeG` away from gravity within `motion.shakeMs` (docs/accelerometer.md). `strength` is the hardest of them, in g. Once a shake is heard the next one needs the frame to rest for `motion.restMs` first.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "strength",
+        "label": "Strength (g)",
+        "type": "float",
+        "required": true,
+        "filter": "more"
+      }
+    ]
+  },
+  {
+    "name": "orientation",
+    "description": "The frame came to rest in another position (docs/accelerometer.md): standing on one of its sides or lying flat, for `motion.restMs`. `position` is one of `motion.positions`, next to the way the frame was set up (its rotation in the settings): `upright`, `turnedLeft` (turned a quarter to the left, its left side down), `turnedRight`, `upsideDown`, `faceUp` or `faceDown`. `rotate`, while it stands, is the rotation that shows the picture upright; auto-rotate (the frame's setting) turns the picture by the same reading.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "position",
+        "label": "Position",
+        "type": "string",
+        "required": true,
+        "options": [
+          "upright",
+          "turnedLeft",
+          "turnedRight",
+          "upsideDown",
+          "faceUp",
+          "faceDown"
+        ]
+      },
+      {
+        "name": "rotate",
+        "label": "Rotation",
+        "type": "integer",
+        "required": false,
+        "filter": "more"
+      }
+    ]
+  },
+  {
     "name": "turnOn",
     "description": "Turn the screen on",
     "canListen": true,

@@ -38,7 +38,7 @@ import {
   normalizeEsp32PinLayout,
 } from '../esp32Hardware'
 import { Esp32HardwareFields } from './esp32HardwareFields'
-import { FlipField } from '../fields/sharedFields'
+import { AutoRotateField, FlipField } from '../fields/sharedFields'
 import { FrameSettingsSection, SectionBody, SectionHeading } from './FrameSettingsSection'
 
 /** The frame itself: where it is, what board it is, how it is powered. */
@@ -353,6 +353,7 @@ export function DeviceSettingsSection(): JSX.Element {
             />
           )}
         </Field>
+        <AutoRotateField />
         <FlipField />
         {isBuildrootMode ? (
           <Group name="buildroot">

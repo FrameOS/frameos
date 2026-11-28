@@ -6726,6 +6726,155 @@
       "current": "fixtures/dispatcher/settingsA"
      }
     ]
+   },
+   {
+    "name": "the frame's motion is input: a tilt reaches the scene that listens, a flick the frame's map binds is the map's",
+    "why": "`tilt`, `flick`, `shake` and `orientation` (docs/accelerometer.md) are input from the frame's accelerometer, origin `driver`, delivered as keys and swipes are: under their own names to a scene that listens, and to the event maps first. A frame-map rule that binds a flick takes it from every scene (here `forward`: a page turned); a flick no rule matches and no scene hears goes nowhere, and so does a shake.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/motion",
+      "name": "motion",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "tilt"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "tilted",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "forward"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "turned",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "flick",
+      "match": {
+       "direction": "right"
+      },
+      "emit": "forward"
+     }
+    ],
+    "scene": "fixtures/dispatcher/motion",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "tilt",
+        "payload": {
+         "direction": "left",
+         "x": -0.41,
+         "y": 0.02
+        }
+       }
+      ],
+      "trace": [
+       "run motion tilt",
+       "render"
+      ],
+      "state": {
+       "tilted": true,
+       "turned": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "flick",
+        "payload": {
+         "direction": "right",
+         "x": 0.52,
+         "y": 0.0
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame flick -> forward",
+       "run motion forward",
+       "render"
+      ],
+      "state": {
+       "turned": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "flick",
+        "payload": {
+         "direction": "left",
+         "x": -0.5,
+         "y": 0.0
+        }
+       }
+      ],
+      "trace": []
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "shake",
+        "payload": {
+         "strength": 1.4
+        }
+       }
+      ],
+      "trace": []
+     }
+    ]
    }
   ]
  },

@@ -595,6 +595,13 @@ export const esp32BrightnessFrameSettingsMinVersion = "2026.11.16";
 export const esp32BrightnessFrameSettingKeys = new Set<string>(
   contractSettingKeysSince("esp32", esp32BrightnessFrameSettingsMinVersion),
 );
+// 2026.11.17: `auto_rotate`, the picture turned upright as the frame is
+// turned, by its accelerometer (docs/accelerometer.md). Live; set on the frame
+// page too, and adopted.
+export const esp32AutoRotateFrameSettingsMinVersion = "2026.11.17";
+export const esp32AutoRotateFrameSettingKeys = new Set<string>(
+  contractSettingKeysSince("esp32", esp32AutoRotateFrameSettingsMinVersion),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
@@ -711,6 +718,8 @@ const reportedFrameSettings: ReadonlyArray<readonly [string, string, unknown]> =
   ["awakeAfterInputSeconds", "awake_after_input_seconds", 300],
   // The glass's brightness (2026.11.16), set on the frame page too.
   ["brightness", "brightness", 100],
+  // Auto-rotate (2026.11.17), set on the frame page too.
+  ["autoRotate", "auto_rotate", false],
 ];
 
 // The stored settings with what the frame reports, or undefined when there is

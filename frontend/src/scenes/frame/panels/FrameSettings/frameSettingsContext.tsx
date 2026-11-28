@@ -13,6 +13,8 @@ import {
   cloudFrameSupportsEsp32Buzzer,
   cloudFrameSupportsEsp32TouchBeep,
   cloudFrameSupportsEsp32ClickSounds,
+  cloudFrameSupportsEsp32AutoRotate,
+  esp32AutoRotateCloudFrameSettingsMinVersion,
   esp32ClickSoundsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Brightness,
   esp32BrightnessCloudFrameSettingsMinVersion,
@@ -59,6 +61,7 @@ import type {
 import { backendFrameRenderMode, cloudFrameRenderMode, frameCanRenderItself } from '../../../../utils/renderOnServer'
 import { deviceCanDim } from '../../../../utils/displayBrightness'
 import { clickSoundsOf, frameHasSounds } from '../../../../utils/clickSounds'
+import { frameHasAccelerometer } from '../../../../utils/accelerometer'
 import type {
   ClickSounds,
   FrameEmbeddedHardwarePreset,
@@ -208,6 +211,14 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
    */
   clickSounds: { value: ClickSounds; disabledReason: string | undefined } | null
   setClickSounds: (value: ClickSounds) => void
+  /**
+   * ESP32 boards with an accelerometer (utils/accelerometer.ts), null elsewhere:
+   * auto-rotate, the picture turned upright as the frame is turned. The cloud
+   * pushes `auto_rotate`; the backend keeps `autoRotate` in device_config for
+   * the settings poll. Also set on the frame page, which both planes adopt.
+   */
+  autoRotate: { value: boolean; disabledReason: string | undefined } | null
+  setAutoRotate: (value: boolean) => void
   /**
    * ESP32 only, null elsewhere: the PDM microphone's clock, data and power
    * GPIO (docs/voice-chat.md; fos_mic.c), -1 = none, undefined = the board's
@@ -818,6 +829,39 @@ export function FrameSettingsProvider({
     next.clickSounds = value
     setFrameFormValues({ device_config: next })
   }
+  // Auto-rotate: only an ESP32 with an accelerometer.
+  const hasAccelerometer =
+    (esp32CloudProfile || (!cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform)) &&
+    frameHasAccelerometer({
+      hardware: {
+        imu: frame.hardware?.imu,
+        hardwarePreset: esp32CloudProfile ? frame.hardware?.hardwarePreset : embeddedHardwarePreset,
+      },
+    })
+  const autoRotate: FrameSettingsContextValue['autoRotate'] = !hasAccelerometer
+    ? null
+    : esp32CloudProfile
+      ? {
+          value: (frameForm.auto_rotate ?? frame.hardware?.autoRotate) === true,
+          disabledReason: cloudFrameSupportsEsp32AutoRotate(frame.frameos_version)
+            ? undefined
+            : `Auto-rotate needs FrameOS ${esp32AutoRotateCloudFrameSettingsMinVersion} or newer on the frame.`,
+        }
+      : {
+          value: (powerDeviceConfig.autoRotate ?? powerDeviceConfig.auto_rotate) === true,
+          disabledReason: undefined,
+        }
+  const setAutoRotate = (value: boolean): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({ auto_rotate: value })
+      return
+    }
+    // The camelCase key wins, as for the power keys: drop a snake_case copy.
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    delete next.auto_rotate
+    next.autoRotate = value
+    setFrameFormValues({ device_config: next })
+  }
   const setButtonBeep = (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
@@ -1145,6 +1189,8 @@ export function FrameSettingsProvider({
     setButtonBeep,
     clickSounds,
     setClickSounds,
+    autoRotate,
+    setAutoRotate,
     microphone,
     setMicrophonePins,
     statusLed,

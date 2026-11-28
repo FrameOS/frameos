@@ -13,6 +13,8 @@ idf_component_register(
         "fos_climate.c"
         "fos_gauge.c"
         "fos_imu.c"
+        "fos_motion.c"
+        "fos_rotation.c"
         "fos_touch.c"
         "fos_usb_pads.c"
         "fos_usj_attach.c"

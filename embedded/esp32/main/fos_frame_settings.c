@@ -41,6 +41,8 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_imu.h"
+#include "fos_rotation.h"
 #include "fos_cpu.h"
 #include "fos_lan_access.h"
 #include "fos_mem.h"
@@ -213,6 +215,8 @@ char *fos_frame_settings_json(void)
              fos_wifi_scanning() ? "true" : "false", config->wifi_pass[0] ? "true" : "false",
              (unsigned)config->rotate, config->render_scale_milli / 1000.0);
     put(&out, line);
+    /* A frame with an accelerometer offers auto-rotate (docs/accelerometer.md). */
+    if (fos_imu_present()) put(&out, config->auto_rotate ? ",\"autoRotate\":true" : ",\"autoRotate\":false");
     /* A glass whose level the client sets (fos_client_brightness_now: never
      * on one that cannot dim) offers its brightness; the page has the words. */
     if (fos_client_brightness_now() >= 0) {
@@ -318,7 +322,8 @@ static void restart_task(void *arg)
 /* One `settings:frame` line for what was saved, with the values a control
  * plane adopts (a backend reads it from the log, app/models/log.py; the cloud
  * follows the hardware report instead). Never the network's name. */
-static void log_applied(const char *changes, bool rotate, bool scale, bool sounds, bool awake, bool bright)
+static void log_applied(const char *changes, bool rotate, bool scale, bool sounds, bool awake, bool bright,
+                        bool turns)
 {
     const fos_config_t *config = fos_config();
     char line[288];
@@ -340,6 +345,9 @@ static void log_applied(const char *changes, bool rotate, bool scale, bool sound
     }
     if (bright && n > 0 && n < (int)sizeof(line)) {
         n += snprintf(line + n, sizeof(line) - n, ",\"brightness\":%u", (unsigned)config->brightness);
+    }
+    if (turns && n > 0 && n < (int)sizeof(line)) {
+        n += snprintf(line + n, sizeof(line) - n, ",\"autoRotate\":%s", config->auto_rotate ? "true" : "false");
     }
     if (n > 0 && n < (int)sizeof(line) - 1) strlcat(line, "}", sizeof(line));
     frameos_nim_log_hook(line);
@@ -389,9 +397,11 @@ void fos_frame_settings_apply(const char *json)
      * them (docs/scene-settings.md "What a control plane learns"). */
     const cJSON *rotate = cJSON_GetObjectItem(root, "rotate");
     uint16_t value = 0;
+    bool rotated = false;
     if (cJSON_IsNumber(rotate) && fos_config_normalize_rotate(rotate->valuedouble, &value) && value != config->rotate) {
         config->rotate = value;
         restart = true;
+        rotated = true;
     }
     const cJSON *render_scale = cJSON_GetObjectItem(root, "renderScale");
     if (cJSON_IsNumber(render_scale) && fos_config_normalize_render_scale(render_scale->valuedouble, &value) &&
@@ -399,6 +409,16 @@ void fos_frame_settings_apply(const char *json)
         /* Live: fos_client.c hands the runtime the scale on every pass. */
         config->render_scale_milli = value;
         scale = true;
+    }
+    /* Auto-rotate: live (fos_rotation.c turns the picture at the next pass);
+     * adopted like the rotation. A canvas that is the panel buffer turns
+     * only at a boot. */
+    const cJSON *auto_rotate = cJSON_GetObjectItem(root, "autoRotate");
+    bool turns = false;
+    if (cJSON_IsBool(auto_rotate) && fos_imu_present() && cJSON_IsTrue(auto_rotate) != config->auto_rotate) {
+        config->auto_rotate = cJSON_IsTrue(auto_rotate);
+        turns = true;
+        if (config->auto_rotate && fos_rotation_canvas_bound()) restart = true;
     }
     /* Tap and click sounds: live (fos_buzzer.c reads it at every click); the
      * planes adopt it like the rotation (the settings:frame line, the
@@ -472,7 +492,8 @@ void fos_frame_settings_apply(const char *json)
     if (awake) strlcat(changes, "awakeAfterInputSeconds,", sizeof(changes));
     if (bright) strlcat(changes, "brightness,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
-    if (restart) strlcat(changes, "rotate,", sizeof(changes));
+    if (turns) strlcat(changes, "autoRotate,", sizeof(changes));
+    if (rotated) strlcat(changes, "rotate,", sizeof(changes));
     if (scale) strlcat(changes, "renderScale,", sizeof(changes));
     if (!changes[0]) return;
     changes[strlen(changes) - 1] = '\0';
@@ -481,7 +502,7 @@ void fos_frame_settings_apply(const char *json)
         ESP_LOGW(TAG, "frame settings not saved: %s", esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "frame settings from the panel: %s", changes);
-    log_applied(changes, restart, scale, sounds, awake, bright);
+    log_applied(changes, rotated, scale, sounds, awake, bright, turns);
     if (restart || (wifi && fos_wifi_state() == FOS_WIFI_PORTAL)) {
         /* The runtime sizes its canvas at init (fos_settings.c does the same
          * for a rotation from a plane), and a frame on the setup hotspot
@@ -498,7 +519,8 @@ void fos_frame_settings_apply(const char *json)
         fos_client_render_now();
     }
     /* The cloud's mirror follows the hardware report (hardware.clickSounds). */
-    if ((sounds || awake || bright) && !scale) fos_cloud_request_state();
+    if ((sounds || awake || bright || turns) && !scale) fos_cloud_request_state();
+    if (turns) fos_client_render_fresh();
     if (cloud) {
         /* The link on the page, under way or failed, starts over at the new
          * address. */

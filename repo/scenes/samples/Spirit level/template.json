@@ -1,0 +1,10 @@
+{
+  "name": "Spirit level",
+  "description": "The frame as a spirit level: lay it down for a bullseye, stand it up for a tube along its level side, with how many degrees off it is. A tap zeroes it. Made for a frame with an accelerometer (the reTerminal Sticky, the round AMOLED); elsewhere it shows a demo.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.17"
+}

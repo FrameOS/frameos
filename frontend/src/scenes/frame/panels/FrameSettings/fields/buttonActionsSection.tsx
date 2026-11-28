@@ -30,6 +30,9 @@ import {
   frameGestureValue,
   frameOffersEdgeGestures,
   frameSupportsBackForward,
+  frameSupportsMotionGestures,
+  isMotionGesture,
+  motionGestures,
   frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
   frameSupportsTriplePress,
@@ -40,6 +43,7 @@ import {
   showSceneStaleSettings,
   withShowSceneSetting,
 } from '../../../../../utils/frameEventMap'
+import { frameHasAccelerometer } from '../../../../../utils/accelerometer'
 import { locatedValues, locationFieldPair } from '../../../../../utils/geolocation'
 import { REFRESH_INTERVAL_ROLE, sceneStateFields } from '../../../../../utils/refreshInterval'
 import { buttonGestures, frameButtons } from '../../../../../utils/sceneEventMap'
@@ -180,10 +184,16 @@ export function ButtonActionsSection(): JSX.Element {
   // A touch screen's rows include the swipes in from its edges.
   const touch = frameOffersEdgeGestures(frame.hardware?.touch, device, [...rules, ...(reported ?? [])])
   const triplePress = frameSupportsTriplePress(frame.frameos_version, cloudProfile)
+  // A frame with an accelerometer binds its motion too (docs/accelerometer.md):
+  // a flick, a tilt, a shake, laid face down. Never by default.
+  const motion =
+    (frameHasAccelerometer(frame) && frameSupportsMotionGestures(frame.frameos_version, cloudProfile)) ||
+    bindings.some((binding) => isMotionGesture(binding.gesture))
   const gestures: FrameGesture[] = [
     ...buttonGestures(buttons, { triplePress }),
     ...(buttons.length > 0 ? roleGestures() : []),
     ...(touch ? edgeGestures() : []),
+    ...(motion ? motionGestures() : []),
   ]
   // What this frame can do with a press: Display on / off only where the
   // device switches the panel (not e-paper), Voice chat only on a frame with a
@@ -215,7 +225,14 @@ export function ButtonActionsSection(): JSX.Element {
   const gestureOptions = (binding: ButtonBinding): SelectOptionEntry[] => {
     const groups = new Map<string, { value: string; label: string }[]>()
     for (const gesture of gestures) {
-      const group = 'edge' in gesture ? 'Touch screen' : 'role' in gesture ? 'Keys by what they do' : gesture.label
+      const group =
+        'edge' in gesture
+          ? 'Touch screen'
+          : 'event' in gesture
+            ? 'Moving the frame'
+            : 'role' in gesture
+              ? 'Keys by what they do'
+              : gesture.label
       const entry = { value: frameGestureValue(gesture), label: frameGestureTitle(gesture) }
       groups.set(group, [...(groups.get(group) ?? []), entry])
     }
@@ -315,6 +332,9 @@ export function ButtonActionsSection(): JSX.Element {
           What a press does on this frame, whatever scene is showing. A press bound here never reaches the scene; a
           scene&apos;s own buttons are mapped from its menu, under Map buttons.
           {touch ? ' A swipe in from an edge of the screen is bound the same way.' : ''}
+          {motion
+            ? " So is moving the frame: a flick, a tilt, a shake, laying it face down. A motion bound here is taken from every scene, a tilting game included; to turn one scene's pages with a flick, map it under that scene's Map buttons."
+            : ''}
           {offer.voiceChat
             ? ' Voice chat goes on a long press: the frame listens while the key is held and stops when it is let go, so a press or a double press has no end to it.'
             : ''}
@@ -420,7 +440,7 @@ export function ButtonActionsSection(): JSX.Element {
                 </ul>
               </div>
             ) : null}
-            {buttons.length === 0 && !touch ? (
+            {buttons.length === 0 && !touch && !motion ? (
               <p className="frameos-muted text-xs">
                 This frame has no buttons yet; add them under GPIO buttons and the presses appear here.
               </p>

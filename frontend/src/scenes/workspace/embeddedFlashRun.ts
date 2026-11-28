@@ -125,6 +125,8 @@ const OPTIONAL_ON_OLDER_FIRMWARE: ReadonlySet<EmbeddedUsbConfigKey> = new Set<Em
   'touch_beep',
   // 2026.11.15: the sounds of a tap and a press, on the settings pull too.
   'click_sounds',
+  // 2026.11.17: auto-rotate by the accelerometer, on the settings pull too.
+  'auto_rotate',
   // 2026.11.7: the chip's clock, on the settings pull too (`cpuMode`).
   'cpu_mode',
   // 2026.11.16: the glass's brightness and its idle dim, on the settings pull too.

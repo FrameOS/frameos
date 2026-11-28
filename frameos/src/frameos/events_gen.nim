@@ -25,6 +25,7 @@ type
     edKeyboard = "keyboard"
     edPointer = "pointer"
     edButton = "button"
+    edMotion = "motion"
   EventRenderAfter* = enum
     raNever = "never"
     raAlways = "always"
@@ -114,6 +115,10 @@ const
   evPinch* = "pinch"
   evEdgeSwipe* = "edgeSwipe"
   evWheel* = "wheel"
+  evTilt* = "tilt"
+  evFlick* = "flick"
+  evShake* = "shake"
+  evOrientation* = "orientation"
   evTurnOn* = "turnOn"
   evTurnOff* = "turnOff"
   evToggleScreen* = "toggleScreen"
@@ -132,7 +137,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[39, string] = [
+  ContractEventNames*: array[43, string] = [
     evInit,
     evRender,
     evOpen,
@@ -155,6 +160,10 @@ const
     evPinch,
     evEdgeSwipe,
     evWheel,
+    evTilt,
+    evFlick,
+    evShake,
+    evOrientation,
     evTurnOn,
     evTurnOff,
     evToggleScreen,
@@ -174,7 +183,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[39, EventPolicy] = [
+  ContractEventPolicies*: array[43, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -329,6 +338,34 @@ const
       aliasOfIndex: -1,
       heardByAll: true,
       linux: true, esp32: false, wasm: true),
+    EventPolicy( # tilt
+      class: ecInput, device: edMotion, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      heardByAll: true,
+      linux: false, esp32: true, wasm: true),
+    EventPolicy( # flick
+      class: ecInput, device: edMotion, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      heardByAll: true,
+      linux: false, esp32: true, wasm: true),
+    EventPolicy( # shake
+      class: ecInput, device: edMotion, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      heardByAll: true,
+      linux: false, esp32: true, wasm: true),
+    EventPolicy( # orientation
+      class: ecInput, device: edMotion, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      heardByAll: true,
+      linux: false, esp32: true, wasm: true),
     EventPolicy( # turnOn
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
@@ -477,23 +514,27 @@ proc contractEventIndex*(name: string): int =
   of evPinch: 19
   of evEdgeSwipe: 20
   of evWheel: 21
-  of evTurnOn: 22
-  of evTurnOff: 23
-  of evToggleScreen: 24
-  of evGpio: 25
-  of evButton: 26
-  of evSetSceneState: 27
-  of evSetCurrentScene: 28
-  of evSceneSwitcher: 29
-  of evSceneSettings: 30
-  of evBack: 31
-  of evForward: 32
-  of evMetrics: 33
-  of evReload: 34
-  of evRestart: 35
-  of evReboot: 36
-  of evUploadScenes: 37
-  of evVoiceChat: 38
+  of evTilt: 22
+  of evFlick: 23
+  of evShake: 24
+  of evOrientation: 25
+  of evTurnOn: 26
+  of evTurnOff: 27
+  of evToggleScreen: 28
+  of evGpio: 29
+  of evButton: 30
+  of evSetSceneState: 31
+  of evSetCurrentScene: 32
+  of evSceneSwitcher: 33
+  of evSceneSettings: 34
+  of evBack: 35
+  of evForward: 36
+  of evMetrics: 37
+  of evReload: 38
+  of evRestart: 39
+  of evReboot: 40
+  of evUploadScenes: 41
+  of evVoiceChat: 42
   else: -1
 
 proc eventAliasCount*(name: string): int =

@@ -332,6 +332,13 @@ export function cloudFrameSupportsEsp32Brightness(frameosVersion: string | null 
   return cloudFrameSupportsSettingsFrom(esp32BrightnessCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** 2026.11.17: the picture turned upright as the frame is turned (`auto_rotate`, docs/accelerometer.md). Live. */
+export const esp32AutoRotateCloudFrameSettingsMinVersion = '2026.11.17'
+
+export function cloudFrameSupportsEsp32AutoRotate(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32AutoRotateCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** 2026.11.6: the click of a press on the glass (`touch_beep`). */
 export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
 

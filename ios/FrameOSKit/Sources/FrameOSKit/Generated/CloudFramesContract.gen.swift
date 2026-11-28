@@ -6,6 +6,9 @@ enum CloudFramesContractSource {
 {
   "profiles": {
     "esp32": {
+      "auto_rotate": {
+        "since": "2026.11.17"
+      },
       "awake_after_input_seconds": {
         "since": "2026.11.6"
       },
@@ -263,6 +266,9 @@ enum CloudFramesContractSource {
     }
   },
   "rules": {
+    "auto_rotate": {
+      "type": "bool"
+    },
     "awake_after_input_seconds": {
       "max": 3600,
       "min": 0,

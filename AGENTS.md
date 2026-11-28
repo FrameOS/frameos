@@ -615,6 +615,32 @@
   (`docs/events-contract.json` `gpio`): the dispatcher makes no `button` of it. `voice_chat` (the
   microphone switch) is an esp32-only contract setting.
 
+## The accelerometer: `docs/accelerometer.md`
+
+- The reTerminal Sticky's LSM6DS3TR-C and the AMOLED 1.75's QMI8658 are read
+  by one task (`embedded/esp32/main/fos_imu.c`, the chip's axes turned into
+  the panel's by `k_board_axes` or `set imu_axes`), and what the readings mean
+  is `fos_motion.c` (pure, `tests/test_fos_motion.c`): gravity along the
+  picture for `frameos.accelerometer()` (`app_runtime.accelerometerReader`),
+  the input events `tilt`, `flick`, `shake`, `orientation` (device `motion`,
+  their numbers the contract's `motion` block: never a threshold of a host's
+  own), and the rotation auto-rotate follows. A new gesture is a contract
+  event, a case in `fos_motion.c` and a test there, never a scene's polling.
+- **Auto-rotate turns the picture live** (`fos_rotation.c`): every reader of
+  the picture's orientation in the firmware asks `fos_rotation()`, never
+  `config->rotate`, which is the frame's own rotation (reported, adopted,
+  restarted on). The render task hands a new one to the runtime between
+  renders (`frameos_nim_set_rotation`, `setRuntimeRotation`): a new canvas,
+  packer, press map or input geometry that depends on the rotation reads it
+  per render, never once at init. `auto_rotate` is an esp32-only contract
+  setting on both planes.
+- Gestures bind in both event maps like keys (`frameEventMap.ts`,
+  `frameHasAccelerometer` in `utils/accelerometer.ts`; never a preset
+  default: a frame-map rule takes the gesture from every scene). The store
+  tag is `accelerometer` (`utils/sceneNeeds.ts`): it puts a scene first on a
+  frame that has one and leaves it out nowhere, so every such scene plays by
+  touch, keys or buttons too.
+
 ## Home Assistant: `docs/home-assistant.md`
 
 - The self-hosted backend's Home Assistant link is `backend/app/ha/` (one task

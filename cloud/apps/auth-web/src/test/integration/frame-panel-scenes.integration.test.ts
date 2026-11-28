@@ -411,6 +411,25 @@ describe("GET /api/store/device/scenes", () => {
     expect((await read("without=round")).scenes).toHaveLength(6);
   });
 
+  it("puts the scenes moved by tilting first on a frame with an accelerometer, ruling none out", async () => {
+    const { accountId } = await account("Publisher");
+    for (let i = 0; i < 3; i += 1) {
+      await storeScene(accountId, `Weather ${i}`);
+    }
+    const sand = await storeScene(accountId, "Sand", { category: "fun", needs: ["fast", "accelerometer"] });
+    const tilt = await storeScene(accountId, "Tilt maze", { category: "games", needs: ["accelerometer"] });
+    const read = async (query: string) =>
+      (await (await getDeviceStore(get(`/api/store/device/scenes?${query}`))).json()) as {
+        scenes: { id: string; needs?: string[] }[];
+      };
+
+    const first = await read("prefer=accelerometer");
+    expect(first.scenes.slice(0, 2).map((scene) => scene.id).sort()).toEqual([sand.id, tilt.id].sort());
+    expect(first.scenes.find((scene) => scene.id === tilt.id)?.needs).toEqual(["accelerometer"]);
+    // A frame without one is still offered them: they play by touch or keys there.
+    expect((await read("without=accelerometer")).scenes).toHaveLength(5);
+  });
+
   it("answers one listed scene with its newest version and a short description", async () => {
     const { accountId } = await account("Publisher");
     const scene = await storeScene(accountId, "Rain radar", { description: "word ".repeat(100) });

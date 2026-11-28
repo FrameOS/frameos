@@ -690,6 +690,13 @@ EMBEDDED_SOUND_PRESETS = frozenset({
     "elecrow_crowpanel_watch_2in01",
     "elecrow_crowpanel_advance_2in8",
 })
+# The presets whose board has an accelerometer (fos_imu.c; docs/accelerometer.md):
+# the settings offer auto-rotate for them, and the device reports `hardware.imu`.
+# Mirrored by ACCELEROMETER_HARDWARE_PRESETS in frontend/src/utils/autoRotate.ts.
+EMBEDDED_ACCELEROMETER_PRESETS = frozenset({
+    "seeed_reterminal_sticky",
+    "waveshare_esp32_s3_touch_amoled_1_75",
+})
 EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
     "ledPin": 6,
     "ledType": "gpio_inverted",
@@ -2519,6 +2526,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     click_sounds = _embedded_device_config_value(frame, "clickSounds", "click_sounds")
     if isinstance(click_sounds, str) and click_sounds in EMBEDDED_CLICK_SOUNDS:
         settings.append(_provisioning_setting("click_sounds", click_sounds))
+    auto_rotate = _embedded_device_config_value(frame, "autoRotate", "auto_rotate")
+    if isinstance(auto_rotate, bool):
+        settings.append(_provisioning_setting("auto_rotate", 1 if auto_rotate else 0))
     cpu_mode = _embedded_device_config_value(frame, "cpuMode", "cpu_mode")
     if isinstance(cpu_mode, str) and cpu_mode in EMBEDDED_CPU_MODES:
         settings.append(_provisioning_setting("cpu_mode", cpu_mode))

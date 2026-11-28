@@ -462,6 +462,10 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string): J
     options.elems.add option(angle, angle & "\xc2\xb0")
   rotate.put("options", options)
   result.elems.add rotate
+  if not info{"autoRotate"}.isNil:
+    # Only a frame with an accelerometer (docs/accelerometer.md): the host
+    # says so by handing the setting over.
+    result.elems.add field("autoRotate", "Auto-rotate", "boolean")
   var scale = field("renderScale", "Scale", "float")
   options = newJArray()
   options.elems.add option("0", "Automatic (" & scaleLabel(autoScale) & ")")
@@ -1378,6 +1382,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     let note =
       if name == "rotate" and not look.paper: "A new rotation restarts the frame. Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
       elif name == "rotate": "A new rotation restarts the frame."
+      elif name == "autoRotate": "The picture turns to stand upright as the frame is turned. Rotation is how it stands when it lies flat."
       elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
       else: ""
     if note.len > 0:

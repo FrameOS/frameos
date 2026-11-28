@@ -330,6 +330,38 @@ function ClickSoundsField(): JSX.Element | null {
 }
 
 /**
+ * Auto-rotate (`auto_rotate`): the picture turned upright as the frame is
+ * turned, by its accelerometer. Only on a board that has one; also set on the
+ * frame's own screen (its frame page), which this follows.
+ */
+export function AutoRotateField(): JSX.Element | null {
+  const { autoRotate, setAutoRotate } = useFrameSettings()
+  if (!autoRotate) {
+    return null
+  }
+  return (
+    <fieldset disabled={autoRotate.disabledReason !== undefined} className="min-w-0 space-y-1 @md:flex @md:gap-2">
+      <Label className="@md:w-1/3">
+        Auto-rotate
+        <Tooltip
+          title={
+            autoRotate.disabledReason ??
+            'Turn the picture to stand upright as the frame is turned, by its accelerometer. Lying flat it keeps the way it stood last, and the rotation above is where it starts. Also set on the frame itself, on its settings page. Switching it on or off may restart the frame once.'
+          }
+        />
+      </Label>
+      <div className="w-full">
+        <Switch
+          value={autoRotate.value}
+          onChange={(value) => setAutoRotate(value)}
+          label={autoRotate.value ? 'On: the picture stands upright as the frame turns' : 'Off: the rotation above'}
+        />
+      </div>
+    </fieldset>
+  )
+}
+
+/**
  * The buzzer a press sounds, under the buttons it answers for (ESP32 only).
  * A GPIO like the battery pins next door: empty leaves the board's own (its
  * preset's), -1 turns the beep off. The pitch below it is in Hz; empty

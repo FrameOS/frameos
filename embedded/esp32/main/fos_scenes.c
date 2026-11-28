@@ -24,6 +24,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_restart.h"
 #include "fos_events_gen.h"
 #include "fos_json_guard.h"
@@ -1387,7 +1388,7 @@ static bool apply_index_change(void)
         slot_path(resident_slot, path, sizeof(path));
         if (resident_slot < 0 || resident_slot != before_slot || resident_embeds_changed(&before, path)) {
             s_scene_switched = true;
-            fos_display_loading_begin(xTaskGetTickCount(), fos_config()->rotate);
+            fos_display_loading_begin(xTaskGetTickCount(), fos_rotation());
             if (resident_slot >= 0) {
                 ok = load_scene_slot(resident_slot, resident, "stored");
                 if (!ok && !s_store_changing && before_slot >= 0 && before_slot != resident_slot) {

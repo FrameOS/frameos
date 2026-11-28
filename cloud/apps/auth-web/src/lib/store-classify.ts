@@ -277,6 +277,9 @@ export function ruleTags(facts: SceneFacts & { category?: string | null | undefi
   if (needs.includes("buttons")) {
     tags.push("buttons");
   }
+  if (needs.includes("accelerometer")) {
+    tags.push("accelerometer");
+  }
   if (needs.includes("video")) {
     tags.push("video");
   }

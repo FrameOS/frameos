@@ -161,6 +161,11 @@ describe("ruleTags", () => {
     ]);
     expect(ruleTags({ appKeywords: ["immich"], name: "Family", needs: [] })).toEqual(["e-ink", "immich"]);
     expect(ruleTags({ name: "Shell", needs: ["linux"] })).toEqual(["raspberry-pi"]);
+    expect(ruleTags({ category: "games", name: "Tilt maze", needs: ["accelerometer"] })).toEqual([
+      "e-ink",
+      "accelerometer",
+      "games",
+    ]);
     expect(ruleTags({ name: "x", needs: ["touch"] }).length).toBeGreaterThan(0);
   });
 });

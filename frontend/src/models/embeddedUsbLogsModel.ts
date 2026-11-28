@@ -1349,6 +1349,7 @@ export type EmbeddedUsbConfigKey =
   | 'buzzer_tone_hz'
   | 'touch_beep'
   | 'click_sounds'
+  | 'auto_rotate'
   | 'cpu_mode'
   | 'brightness'
   | 'dim_after'

@@ -53,6 +53,8 @@ import {
   cloudFrameSupportsEsp32ClickSounds,
   esp32BrightnessCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Brightness,
+  esp32AutoRotateCloudFrameSettingsMinVersion,
+  cloudFrameSupportsEsp32AutoRotate,
   esp32RenderModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32RenderMode,
   cloudFrameSupportsEsp32Led,
@@ -92,6 +94,8 @@ import {
   esp32ClickSoundsFrameSettingKeys,
   esp32BrightnessFrameSettingKeys,
   esp32BrightnessFrameSettingsMinVersion,
+  esp32AutoRotateFrameSettingKeys,
+  esp32AutoRotateFrameSettingsMinVersion,
   esp32CpuModeFrameSettingsMinVersion,
   cpuModeFrameSettingKeys,
   cpuModeFrameSettingsMinVersion,
@@ -202,7 +206,8 @@ describe("cloud settings push", () => {
         !esp32TouchBeepFrameSettingKeys.has(key) &&
         !esp32CpuModeFrameSettingKeys.has(key) &&
         !esp32ClickSoundsFrameSettingKeys.has(key) &&
-        !esp32BrightnessFrameSettingKeys.has(key),
+        !esp32BrightnessFrameSettingKeys.has(key) &&
+        !esp32AutoRotateFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -385,6 +390,13 @@ describe("cloud settings push", () => {
     expect(esp32BrightnessCloudFrameSettingsMinVersion).toBe(esp32BrightnessFrameSettingsMinVersion);
     expect(cloudFrameSupportsEsp32Brightness("2026.11.15")).toBe(false);
     expect(cloudFrameSupportsEsp32Brightness("2026.11.16")).toBe(true);
+  });
+
+  it("gates auto-rotate on its floor", () => {
+    expect([...esp32AutoRotateFrameSettingKeys]).toEqual(["auto_rotate"]);
+    expect(esp32AutoRotateCloudFrameSettingsMinVersion).toBe(esp32AutoRotateFrameSettingsMinVersion);
+    expect(cloudFrameSupportsEsp32AutoRotate("2026.11.16")).toBe(false);
+    expect(cloudFrameSupportsEsp32AutoRotate("2026.11.17")).toBe(true);
   });
 
   it("gates the processor speed on its floor, a power key no older push carries", () => {

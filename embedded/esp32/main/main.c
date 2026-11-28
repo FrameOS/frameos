@@ -58,6 +58,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_rotation.h"
 #include "fos_console.h"
 #include "fos_frame_settings.h"
 #include "fos_store.h"
@@ -258,7 +259,7 @@ static void boot_splash_task(void *arg)
         memset(buf, fos_panel_white_fill(fos_display_format()), len);
         const fos_panel_surface_t surface = {
             .buf = buf, .width = fos_display_width(), .height = fos_display_height(),
-            .format = fos_display_format(), .rotate = fos_config()->rotate,
+            .format = fos_display_format(), .rotate = fos_rotation(),
         };
         fos_panel_code_box_t box;
         const char *text = "FrameOS - Starting...";
@@ -366,7 +367,7 @@ static void log_bootup_event(bool online);
 static bool canvas_is_panel_picture(const fos_config_t *config)
 {
     return fos_display_format() == FOS_PIXEL_4BPP_GRAY && fos_display_canvas_bits_per_pixel() == 4 &&
-           config->rotate == 0 && fos_display_canvas_bytes() == fos_display_buffer_size() &&
+           config->rotate == 0 && !config->auto_rotate && fos_display_canvas_bytes() == fos_display_buffer_size() &&
            fos_framebuffer_reserved_bytes() == fos_display_buffer_size();
 }
 
@@ -394,7 +395,7 @@ static bool canvas_holds_panel_picture(const fos_config_t *config)
     fos_pixel_format_t format = fos_display_format();
     return (format == FOS_PIXEL_2BPP_BWYR || format == FOS_PIXEL_4BPP_7COLOR ||
             format == FOS_PIXEL_4BPP_SPECTRA6) &&
-           fos_display_canvas_bits_per_pixel() == 16 && config->rotate == 0 &&
+           fos_display_canvas_bits_per_pixel() == 16 && config->rotate == 0 && !config->auto_rotate &&
            !fos_display_supports_partial() && fos_display_buffer_size() <= fos_display_canvas_bytes() &&
            fos_display_canvas_bytes() + fos_display_buffer_size() >
                heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR;
@@ -560,7 +561,7 @@ void app_main(void)
     };
     BOOTMEM("after-config");
     /* An LCD's boot mark is drawn the way up the frame's pictures are. */
-    fos_lcd_splash_set_rotation(config->rotate);
+    fos_lcd_splash_set_rotation(fos_rotation());
     fos_display_set_i2c_lender(lend_i2c_bus);
     /* An RGB data line on the USB pads (the Guition's GPIO20) is claimed by
      * the LCD driver as the panel comes up, before touch and the console. */
@@ -669,6 +670,10 @@ void app_main(void)
     /* The renderer's scene canvas, claimed now for the same reason the thin-
      * client framebuffer was above: it is the one multi-MB contiguous PSRAM
      * run the device needs, and before Wi-Fi/TLS there is always one. */
+    /* Such a canvas turns only at a restart (fos_rotation.c): auto-rotate
+     * switched on later waits for one. */
+    fos_rotation_set_canvas_bound(fos_display_present() &&
+                                  (canvas_is_panel_picture(config) || canvas_holds_panel_picture(config)));
     if (local_render_ok && frameos_nim_available() && fos_display_present()) {
         if (canvas_is_panel_picture(config)) {
             frameos_nim_share_canvas(fos_framebuffer_reserved_buffer(), fos_framebuffer_reserved_bytes());

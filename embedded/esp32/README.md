@@ -1561,6 +1561,20 @@ A full-refresh-only panel draws nothing (seconds the restart would wait out),
 and the caller waits 2 s at most. The log line `restart:notice` says what
 became of it.
 
+### The accelerometer
+
+The reTerminal Sticky (LSM6DS3TR-C at 0x6a) and the AMOLED 1.75 (QMI8658 at
+0x6b) are read by `fos_imu.c`'s task while the frame is awake, 50 times a
+second while a scene reads `frameos.accelerometer()` and 25 otherwise, and
+`fos_motion.c` makes the `tilt`, `flick`, `shake` and `orientation` events of
+it (docs/accelerometer.md). `set auto_rotate 1` (`autoRotate` on a backend's
+settings pull, `auto_rotate` on the cloud's, "Auto-rotate" on the frame page)
+turns the picture to stand upright as the frame is turned, live, without the
+restart a new rotation takes (`fos_rotation.c`). The console's `imu` prints
+the chip's reading, gravity along the picture, the axis map, the position and
+auto-rotate's reading; `set imu_axes x=-y,y=x,z=z` (or `default`) changes
+which chip axis is which panel axis, live, should a board's map be wrong.
+
 ### Voice chat
 
 Hold the voice key — the key whose long press the frame's event map binds

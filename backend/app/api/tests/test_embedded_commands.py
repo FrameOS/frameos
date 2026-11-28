@@ -734,6 +734,25 @@ async def test_the_frame_page_click_sounds_land_in_device_config(_pub, async_cli
 
 @pytest.mark.asyncio
 @patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_auto_rotate_lands_in_device_config(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.device_config = {"hardwarePreset": "seeed_reterminal_sticky", "auto_rotate": False}
+    db.commit()
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'autoRotate',
+        'autoRotate': True,
+    })
+    db.refresh(frame)
+    assert frame.device_config == {"hardwarePreset": "seeed_reterminal_sticky", "autoRotate": True}
+    # Not a bool, or from anyone but the page: nothing changes.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'autoRotate': 'off'})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'autoRotate': False})
+    db.refresh(frame)
+    assert frame.device_config["autoRotate"] is True
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
 async def test_the_frame_page_brightness_lands_in_device_config(_pub, async_client, db, redis):
     frame = await _embedded_frame(async_client, db)
     frame.device_config = {"hardwarePreset": "elecrow_crowpanel_watch_2in01"}

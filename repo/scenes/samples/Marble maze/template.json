@@ -1,0 +1,10 @@
+{
+  "name": "Marble maze",
+  "description": "Roll a marble through a maze into its hole by tipping the frame: on a fast screen it rolls and bounces, on e-paper it moves a corridor at a time with each tilt. Swipes and arrow keys play it on a frame without an accelerometer.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.17"
+}

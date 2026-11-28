@@ -1,0 +1,10 @@
+{
+  "name": "Sand",
+  "description": "A box of sand you tip around: it runs the way the frame leans (an accelerometer: the reTerminal Sticky, the round AMOLED), a shake throws it up in the air and a finger pours more. On a fast screen it flows; on e-paper it settles a second at a time. Without an accelerometer, swipe to tip the box.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.17"
+}

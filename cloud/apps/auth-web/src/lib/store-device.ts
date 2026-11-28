@@ -58,8 +58,8 @@ export type StoreDeviceSceneInfo = StoreDeviceScene & { description: string };
 // grid), a shelf to put first, shelves to leave out, what it cannot do
 // (`without=fast` on e-paper, `linux` on an ESP32: docs/scene-store.md "What a
 // scene needs") and the needs to put first (`prefer=fast` on an LCD,
-// `round` on a round panel, `prefer=fast,round` on both, the first said
-// weighing most). The app before needs asked `prefer=realtime` /
+// `round` on a round panel, `accelerometer` on a frame with one,
+// `prefer=fast,round` on both, the first said weighing most). The app before needs asked `prefer=realtime` /
 // `exclude=realtime` of the Real time shelf, which was the fast scenes: both
 // still mean that.
 // `featured=1` is the app's Featured: what an admin featured, then each
@@ -77,7 +77,12 @@ const categorySlugs = new Set(storeCategories.map((category) => category.slug));
 // The needs a frame can say it lacks: touch and keys never rule a scene out.
 const ruledOutNeeds = new Set(["fast", "linux", "video"]);
 // The needs a frame can put first, by what it says.
-const preferredNeeds: Record<string, string> = { fast: "fast", realtime: "fast", round: "round" };
+const preferredNeeds: Record<string, string> = {
+  fast: "fast",
+  realtime: "fast",
+  round: "round",
+  accelerometer: "accelerometer",
+};
 
 export function parseStoreDeviceOptions(params: URLSearchParams): StoreDeviceOptions {
   const limit = Number.parseInt(params.get("limit") ?? "", 10);

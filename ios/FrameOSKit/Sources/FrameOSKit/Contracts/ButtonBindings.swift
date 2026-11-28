@@ -16,6 +16,10 @@ public struct ButtonBinding: Hashable, Sendable, Identifiable {
         /// held, which turn with the frame, and Back, which two keys held
         /// together are on a board with no Back key.
         case role(role: String, action: String)
+        /// A motion of a frame with an accelerometer (docs/accelerometer.md):
+        /// `flick` or `tilt` with its direction, `orientation` with its
+        /// position, `shake` with none.
+        case motion(event: String, value: String?)
     }
 
     public var gesture: Gesture
@@ -79,6 +83,44 @@ public enum ButtonBindings {
     /// The contract's `screenEdges` (docs/events-contract.json).
     public static let screenEdges = ["left", "right", "top", "bottom"]
 
+    /// The contract's `gestures.directions` and `motion.positions`: a flick's
+    /// and a tilt's direction, an orientation's position (the SPA's
+    /// motionDirections / motionPositions).
+    public static let motionDirections = ["left", "right", "up", "down"]
+    public static let motionPositions = ["upright", "turnedLeft", "turnedRight", "upsideDown", "faceUp", "faceDown"]
+    static let motionDirectionTitles = ["left": "to the left", "right": "to the right", "up": "up", "down": "down"]
+    static let motionPositionTitles = [
+        "upright": "Stood upright", "turnedLeft": "Turned onto its left side", "turnedRight": "Turned onto its right side",
+        "upsideDown": "Turned upside down", "faceUp": "Laid face up", "faceDown": "Laid face down",
+    ]
+
+    /// A motion the rows write: a known event with its one known value (the SPA's motionGesture).
+    public static func motionGesture(event: String, value: String?) -> ButtonBinding.Gesture? {
+        if event == "flick" || event == "tilt", let value, motionDirections.contains(value) {
+            return .motion(event: event, value: value)
+        }
+        if event == "orientation", let value, motionPositions.contains(value) {
+            return .motion(event: event, value: value)
+        }
+        return event == "shake" && value == nil ? .motion(event: event, value: nil) : nil
+    }
+
+    /// Every motion a frame with an accelerometer offers as a row (the SPA's motionGestures).
+    public static func motionGestures() -> [ButtonBinding.Gesture] {
+        motionDirections.map { .motion(event: "flick", value: $0) } + motionDirections.map { .motion(event: "tilt", value: $0) }
+            + [.motion(event: "shake", value: nil)] + motionPositions.map { .motion(event: "orientation", value: $0) }
+    }
+
+    static func motionTitle(event: String, value: String?) -> String {
+        let value = value ?? ""
+        switch event {
+        case "flick": return "Flick \(motionDirectionTitles[value] ?? value)"
+        case "tilt": return "Tilt \(motionDirectionTitles[value] ?? value) and hold"
+        case "shake": return "Shake"
+        default: return motionPositionTitles[value] ?? "Turned \(value)"
+        }
+    }
+
     static let pressTitles = [
         "press": "press", "doublePress": "double press", "triplePress": "triple press", "longPress": "long press",
     ]
@@ -102,6 +144,7 @@ public enum ButtonBindings {
         case .button(let label, let action): return "\(keyTitle(label)) · \(pressTitles[action] ?? action)"
         case .edge(let edge): return edgeTitles[edge] ?? "Swipe from \(edge)"
         case .role(let role, let action): return "\(roleTitles[role] ?? "\(role) key") · \(pressTitles[action] ?? action)"
+        case .motion(let event, let value): return motionTitle(event: event, value: value)
         }
     }
 
@@ -116,7 +159,7 @@ public enum ButtonBindings {
     /// The rule the section writes for one binding (the SPA's bindingRule).
     public static func rule(_ binding: ButtonBinding) -> JSONValue {
         let event: JSONValue
-        let match: JSONValue
+        let match: JSONValue?
         switch binding.gesture {
         case .button(let label, let action):
             event = "button"
@@ -127,19 +170,31 @@ public enum ButtonBindings {
         case .role(let role, let action):
             event = "button"
             match = ["role": .string(role), "action": .string(action)]
+        case .motion(let name, let value):
+            // A shake matches any shake: the rule has no `match`.
+            event = .string(name)
+            let key = name == "orientation" ? "position" : "direction"
+            match = value.map { v -> JSONValue in .object([key: .string(v)]) }
         }
+        var rule: [String: JSONValue] = ["event": event]
+        if let match { rule["match"] = match }
         switch binding.kind {
         case "nextScene":
-            return ["event": event, "match": match, "emit": "setCurrentScene", "as": ["direction": "next"]]
+            rule["emit"] = "setCurrentScene"
+            rule["as"] = ["direction": "next"]
         case "prevScene":
-            return ["event": event, "match": match, "emit": "setCurrentScene", "as": ["direction": "prev"]]
+            rule["emit"] = "setCurrentScene"
+            rule["as"] = ["direction": "prev"]
         case "showScene":
             var values: [String: JSONValue] = ["sceneId": .string(binding.sceneId ?? "")]
             if !binding.state.isEmpty { values["state"] = .object(binding.state) }
-            return ["event": event, "match": match, "emit": "setCurrentScene", "as": .object(values)]
+            rule["emit"] = "setCurrentScene"
+            rule["as"] = .object(values)
         default:
-            return ["event": event, "match": match, "emit": .string(binding.kind), "as": [:]]
+            rule["emit"] = .string(binding.kind)
+            rule["as"] = [:]
         }
+        return .object(rule)
     }
 
     /// The binding a rule means, when it is one the section writes (the SPA's bindingOfRule).
@@ -158,6 +213,10 @@ public enum ButtonBindings {
                   screenEdges.contains(edge), match.count == 1
         {
             gesture = .edge(edge)
+        } else if let event = rule["event"]?.stringValueIfString,
+                  let motion = motionGesture(event: event, match: match)
+        {
+            gesture = motion
         } else {
             return nil
         }
@@ -184,6 +243,14 @@ public enum ButtonBindings {
             return ButtonBinding(gesture: gesture, kind: emit)
         }
         return nil
+    }
+
+    /// The motion a rule's event and match say (the SPA's motionGestureOfRule).
+    static func motionGesture(event: String, match: [String: JSONValue]) -> ButtonBinding.Gesture? {
+        if event == "shake" { return match.isEmpty ? .motion(event: event, value: nil) : nil }
+        guard match.count == 1, let value = match[event == "orientation" ? "position" : "direction"]?.stringValueIfString
+        else { return nil }
+        return motionGesture(event: event, value: value)
     }
 
     /// The section's rows, and every rule it keeps as it is (the SPA's frameBindings).
