@@ -813,6 +813,46 @@ async def test_a_relayed_tap_lands_on_a_ui_in_the_real_runtime():
     assert left.rgba[:3] == bytes((0, 0, 0))
 
 
+def _relayed_presses(*roles: str) -> dict:
+    """The frame's own keys pressed by role (docs/buttons.md), each as its
+    driver's two `gpio` edges, decided on the board a moment before it sent
+    them."""
+    pins = {"next": (1, "LEFT"), "primary": (3, "REFRESH")}
+    events: list[dict] = []
+    at = 30_000
+    for role in roles:
+        pin, label = pins[role]
+        for action, level, dt in (("down", 0, 0), ("up", 1, 60)):
+            events.append({"origin": "driver", "name": "gpio", "payload": {
+                "pin": pin, "label": label, "role": role, "level": level, "action": action, "atMs": at + dt}})
+        at += 150
+    return {"nowMs": 31_000, "events": events}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_relayed_events(), reason="no wasm bundle with frameos_wasm_set_frame")
+async def test_relayed_key_presses_reach_a_ui_in_a_fresh_process():
+    """A board's Next then Action walks the UI's ring of elements to its one
+    button and presses it (docs/jsx-ui.md "Keys"), in the render the pull
+    asked for: the keys, like a tap, find the UI the scene draws first in the
+    plane's fresh process."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[TAP_UI_SCENE])
+    pressed = await render_scene(frame, 80, 60, device_input=_relayed_presses("next", "primary"))
+    assert pressed.rgba is not None, pressed.error
+    if sum('"event":"render:scene"' in line for line in pressed.scene_logs) < 2:
+        pytest.skip("wasm bundle from before relayed keys drew the scene first (rebuild frameos/tools/build_wasm.sh)")
+    assert pressed.rgba[:3] == bytes((255, 255, 255))
+
+    # Next alone walks to the button and presses nothing.
+    walked = await render_scene(frame, 80, 60, device_input=_relayed_presses("next"))
+    assert walked.rgba is not None, walked.error
+    assert walked.rgba[:3] == bytes((0, 0, 0))
+
+
 FIELD_UI_SOURCE = """
 let name = ''
 export function get(app) {

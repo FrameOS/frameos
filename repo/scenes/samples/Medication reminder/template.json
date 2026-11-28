@@ -1,0 +1,10 @@
+{
+  "name": "Medication reminder",
+  "description": "A medication schedule that wakes the frame at each dose and chimes on its buzzer, shows what to take now in large type with a big Taken button, and keeps today's checklist and the last seven days.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
