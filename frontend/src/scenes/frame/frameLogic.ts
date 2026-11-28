@@ -50,6 +50,7 @@ import {
   pushCloudFrameSchedule,
   pushCloudFrameSettings,
   pushCloudFrameVoicePermissions,
+  pushCloudFrameDither,
   setCloudFrameServiceSettingsEnabled,
 } from '../../utils/cloudFrameApi'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
@@ -491,6 +492,9 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'error_behavior',
   'palette',
   'colors',
+  // The plane's own (docs/dithering.md): saved with the form, never part of
+  // a deploy (PLANE_ONLY_FRAME_KEYS).
+  'dither',
   'buildroot',
   'embedded',
   'rpios',
@@ -638,6 +642,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   error_behavior: 'Global error handling',
   palette: 'Palette',
   colors: 'Colors',
+  dither: 'Dithering',
   buildroot: 'Buildroot settings',
   embedded: 'Embedded settings',
   rpios: 'Raspberry Pi OS settings',
@@ -945,6 +950,11 @@ function deployChangeDetails(
   return remoteUpgrade ? [...details, remoteUpgrade] : details
 }
 
+// The control plane's own settings: saved with the form, read by the plane
+// (the packer's dithering), never sent to the device, so never a pending
+// deploy.
+const PLANE_ONLY_FRAME_KEYS = new Set<keyof FrameType>(['dither'])
+
 // Backend-side fields with no meaning on a frame the backend has no shell on.
 const SHELL_LESS_BACKEND_ONLY_KEYS = new Set<keyof FrameType>([
   'mode',
@@ -1039,6 +1049,9 @@ function computeChangeDetails(
     shellLess && Boolean(shellLessDeviceVersion) && frameosVersionRequiresDeploy(shellLessDeviceVersion)
 
   for (const key of frameDiffKeys().filter((k) => k !== 'scenes')) {
+    if (PLANE_ONLY_FRAME_KEYS.has(key)) {
+      continue
+    }
     if (shellLess && SHELL_LESS_BACKEND_ONLY_KEYS.has(key)) {
       continue
     }
@@ -2135,6 +2148,23 @@ async function pushCloudFrameVoicePermissionsIfChanged(frameId: FrameId, frame: 
   return true
 }
 
+/**
+ * The packer's dithering (docs/dithering.md) rides its own route too
+ * (POST .../dither): plane-side, never a device key. Pushed only when the
+ * form's value differs from server truth.
+ */
+async function pushCloudFrameDitherIfChanged(frameId: FrameId, frame: Partial<FrameType>): Promise<boolean> {
+  if (frame.dither === undefined) {
+    return false
+  }
+  const saved = framesModel.findMounted()?.values.frames?.[frameId]?.dither ?? null
+  if (equal(frame.dither ?? null, saved)) {
+    return false
+  }
+  await pushCloudFrameDither(frameId, frame.dither ?? null)
+  return true
+}
+
 async function saveFrameForm(
   frame: Partial<FrameType>,
   frameId: FrameId,
@@ -2162,6 +2192,7 @@ async function saveFrameForm(
       await pushCloudFrameSchedule(frameId, schedule)
     }
     const voicePermissionsPushed = await pushCloudFrameVoicePermissionsIfChanged(frameId, normalizedFrame)
+    const ditherPushed = await pushCloudFrameDitherIfChanged(frameId, normalizedFrame)
     const scenes = normalizedFrame.scenes ?? []
     if (scenes.length > 0) {
       const outcome = await persistAndPushCloudFrameScenes(
@@ -2174,7 +2205,7 @@ async function saveFrameForm(
         clearCloudSceneJsonCache(storeSceneId)
       }
       framesModel.actions.hydrateCloudFrameScenes(frameId, true)
-    } else if (!settingsPushed && !schedulePushed && !voicePermissionsPushed) {
+    } else if (!settingsPushed && !schedulePushed && !voicePermissionsPushed && !ditherPushed) {
       throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
     }
     return null

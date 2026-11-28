@@ -513,6 +513,11 @@ class Frame(Base):
     # panel's range and the frame-wide colour correction
     # (docs/asset-color-profiles.md). NULL = the runtime's defaults.
     colors = mapped_column(JSON, nullable=True)
+    # How the control plane dithers this frame's picture when it packs it
+    # (thin clients, server rendering): NULL = Floyd-Steinberg, or
+    # {"method": "opendisplay", …} (app/utils/panel_dither.py). The plane's
+    # own setting: never sent to the device.
+    dither = mapped_column(JSON, nullable=True)
     # Service-settings groups (openAI, homeAssistant, …) that scenes from the
     # public scene store may read on this frame. A scene the owner authored is
     # granted what its apps declare, as it always was; a store scene is
@@ -597,6 +602,7 @@ class Frame(Base):
             'input_settings': normalize_input_settings(self.input_settings),
             'palette': self.palette,
             'colors': self.colors,
+            'dither': self.dither,
             'service_setting_groups': self.service_setting_groups,
             'buildroot': self.buildroot,
             'embedded': self.embedded,

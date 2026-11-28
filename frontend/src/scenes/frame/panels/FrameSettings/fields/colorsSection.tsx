@@ -1,20 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '../../../../../components/Button'
 import { Tooltip } from '../../../../../components/Tooltip'
 import { H6 } from '../../../../../components/H6'
 import { Select } from '../../../../../components/Select'
-import { Spinner } from '../../../../../components/Spinner'
-import { Switch } from '../../../../../components/Switch'
-import { frameAssetsApiPath } from '../../../../../utils/frameAssetsApi'
-import { getBasePath } from '../../../../../utils/getBasePath'
-import { applyAssetColors, autoEndPoints } from '../../../../../utils/assetColors/adjust'
-import {
-  paletteDeviceOf,
-  panelAutoFitByDefault,
-  panelPaletteForFrame,
-  visiblePalette,
-} from '../../../../../utils/assetColors/devicePalette'
-import { ditherToPalette } from '../../../../../utils/assetColors/dither'
+import { paletteDeviceOf, panelAutoFitByDefault } from '../../../../../utils/assetColors/devicePalette'
 import {
   type AssetColorProfile,
   defaultAssetColorProfile,
@@ -25,6 +14,7 @@ import type { FrameColorGlobal, FrameColors, FrameType } from '../../../../../ty
 import { ColorAdjustmentControls } from '../../Assets/ColorAdjustmentControls'
 import { deviceLabelFor } from '../../Assets/assetColorsLogic'
 import { useFrameSettings } from '../frameSettingsContext'
+import { PanelPreview } from './panelPreview'
 
 /** frame.json's `colors.global` → the editor's profile (no palette there). */
 export function globalProfileOf(colors: FrameColors | null | undefined): AssetColorProfile {
@@ -38,110 +28,6 @@ export function globalOfProfile(profile: AssetColorProfile): FrameColorGlobal {
     colors: FrameColorGlobal
   }
   return colors
-}
-
-function frameImageUrl(frameId: FrameType['id']): string {
-  return `${getBasePath()}${frameAssetsApiPath(frameId, 'image')}?t=-1`
-}
-
-/**
- * The frame's current image with the correction (and, when on, the
- * automatic fit) applied, dithered as the panel will show it. What the
- * frame renders next is what this shows, source for source.
- */
-function FrameColorsPreview({
-  frame,
-  colors,
-  global,
-}: {
-  frame: Partial<FrameType> & Pick<FrameType, 'id'>
-  colors: FrameColors
-  global: AssetColorProfile
-}): JSX.Element {
-  const [source, setSource] = useState<ImageBitmap | null>(null)
-  const [failed, setFailed] = useState(false)
-  const [dithered, setDithered] = useState(true)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const panel = {
-    device: frame.device,
-    palette: frame.palette,
-    device_config: frame.device_config,
-    embedded: frame.embedded,
-    hardware: frame.hardware,
-  }
-  const deviceLabel = deviceLabelFor(paletteDeviceOf(panel))
-  const palette = visiblePalette(panelPaletteForFrame(panel, deviceLabel))
-  const autoFit = colors.autoFit === 'on' || (colors.autoFit !== 'off' && panelAutoFitByDefault(panel, deviceLabel))
-
-  useEffect(() => {
-    let cancelled = false
-    fetch(frameImageUrl(frame.id), { credentials: 'include' })
-      .then((response) => (response.ok ? response.blob() : Promise.reject(new Error(String(response.status)))))
-      .then((blob) => createImageBitmap(blob))
-      .then((bitmap) => {
-        if (cancelled) {
-          bitmap.close()
-        } else {
-          setSource(bitmap)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFailed(true)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [frame.id])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !source) {
-      return
-    }
-    const handle = window.requestAnimationFrame(() => {
-      canvas.width = source.width
-      canvas.height = source.height
-      const context = canvas.getContext('2d', { willReadFrequently: true })
-      if (!context) {
-        return
-      }
-      context.drawImage(source, 0, 0)
-      const imageData = context.getImageData(0, 0, source.width, source.height)
-      if (autoFit) {
-        // The whole image counts as "the drawn photo" here: the frame fits
-        // each image it draws, and the stored image is usually one photo.
-        const endPoints = autoEndPoints(imageData.data, palette.length > 0 ? palette : null)
-        if (endPoints) {
-          applyAssetColors(imageData.data, { ...defaultAssetColorProfile(), ...endPoints })
-        }
-      }
-      applyAssetColors(imageData.data, global)
-      if (dithered && palette.length > 0) {
-        ditherToPalette(imageData.data, source.width, source.height, palette)
-      }
-      context.putImageData(imageData, 0, 0)
-    })
-    return () => window.cancelAnimationFrame(handle)
-  }, [source, global, autoFit, dithered, palette.length, frame.palette])
-
-  return (
-    <div className="space-y-2">
-      <div className="frame-tool-card flex min-h-[8rem] items-center justify-center overflow-hidden rounded-2xl bg-slate-900/80 p-2">
-        {failed ? (
-          <span className="frame-tool-muted p-4 text-xs">No current image to preview on.</span>
-        ) : source ? (
-          <canvas ref={canvasRef} className="max-h-[22rem] max-w-full object-contain" />
-        ) : (
-          <Spinner className="h-6 w-6" color="white" />
-        )}
-      </div>
-      {palette.length > 0 ? (
-        <Switch value={dithered} onChange={setDithered} label="Preview dithered as on the panel" />
-      ) : null}
-    </div>
-  )
 }
 
 /**
@@ -168,6 +54,10 @@ export function ColorsSection(): JSX.Element {
   }
   const fitsByDefault = panelAutoFitByDefault(panel, deviceLabelFor(paletteDeviceOf(panel)))
   const setColors = (next: FrameColors): void => setFrameFormValues({ colors: next })
+  // OpenDisplay dithering (docs/dithering.md) fits the picture itself, so the
+  // server's render skips the automatic fit whatever is set here.
+  const dither = 'dither' in frameForm ? frameForm.dither : frame.dither
+  const openDisplay = dither?.method === 'opendisplay'
 
   return (
     <>
@@ -203,6 +93,12 @@ export function ColorsSection(): JSX.Element {
             className="min-w-0 flex-1"
           />
         </label>
+        {openDisplay ? (
+          <p className="frameos-muted text-xs">
+            Not used when FrameOS renders this frame&apos;s scenes on the server: OpenDisplay dithering (above) fits the
+            picture to the panel&apos;s colors itself, and fitting it twice makes it far too dark.
+          </p>
+        ) : null}
         <p className="frameos-muted text-xs">
           {fitsByDefault
             ? 'Default is on here: this panel dithers to a fixed set of color inks. Off shows the image as it is.'
@@ -231,10 +127,11 @@ export function ColorsSection(): JSX.Element {
         </div>
         {!showFineTuning ? null : (
           <div className="grid gap-3 @3xl:grid-cols-[minmax(0,1fr)_20rem]">
-            <FrameColorsPreview
+            <PanelPreview
               frame={{ ...frame, ...frameForm, id: frame.id } as Partial<FrameType> & Pick<FrameType, 'id'>}
               colors={colors}
               global={global}
+              dither={dither}
             />
             <div className="space-y-3">
               <ColorAdjustmentControls

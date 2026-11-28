@@ -1028,6 +1028,24 @@ async def test_the_render_is_told_the_frames_event_map_palette_colours_buttons_a
     assert sent['rotate'] == 90
     assert isinstance(sent['pixelFormat'], int)
 
+
+@pytest.mark.asyncio
+async def test_opendisplay_dithering_switches_the_renders_auto_fit_off_even_when_set_on(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    # docs/dithering.md: OpenDisplay fits to the panel's white itself; the
+    # render's auto fit on top darkens the picture twice.
+    frame = await server_rendered_frame(async_client, db)
+    frame.colors = {'autoFit': 'on', 'global': {'whites': 10}}
+    frame.dither = {'method': 'opendisplay'}
+    db.add(frame)
+    db.commit()
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', recording_renderer(calls))
+    await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert calls[-1]['frame_json']['colors'] == {'autoFit': 'off', 'global': {'whites': 10}}
+    assert frame.colors == {'autoFit': 'on', 'global': {'whites': 10}}
+
     # A frame never given a map leaves the key out (the board's own applies).
     frame.event_map = None
     db.add(frame)

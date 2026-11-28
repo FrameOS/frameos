@@ -444,7 +444,9 @@ backend's thin-client renderer always has (`pack_image_for_panel` in
 `backend/app/api/embedded_device.py`; the cloud's port is
 `cloud/apps/auth-web/src/lib/panel-pack.ts`): Floyd-Steinberg dithered against
 the panel's palette, greys from luma 0.21 / 0.72 / 0.07, Spectra 6's unused
-index 4 skipped. A frame hung at 90 or 270 degrees renders on the swapped
+index 4 skipped. A frame whose `dither` setting picks OpenDisplay is
+dithered with that instead, the same bytes on both planes
+(`docs/dithering.md`). A frame hung at 90 or 270 degrees renders on the swapped
 canvas and is turned clockwise by its rotation into the panel's orientation.
 
 Neither plane packs on its event loop: a 13.3" Spectra 6 panel is 0.1 to

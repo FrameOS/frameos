@@ -75,6 +75,7 @@ from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 from app.utils.embedded_scene_import import scene_import_pending, start_scene_import
+from app.utils.panel_dither import DEFAULT_PPI, normalize_dither, opendisplay_indices, panel_ppi
 from app.utils.events_contract_gen import BUILT_IN_SCENE_IDS
 from app.utils.frame_commands import pending_command_types, previewed_scenes
 from app.utils.server_render import (
@@ -379,14 +380,28 @@ def panel_palette(
     return fit_palette_override(palette_colors(photo_palette), fit_palette_override(palette_colors(frame_palette), stock))
 
 
-def pack_image_for_panel(image, pixel_format: int, palette: list[tuple[int, int, int]] | None = None) -> bytes:
+def pack_image_for_panel(
+    image,
+    pixel_format: int,
+    palette: list[tuple[int, int, int]] | None = None,
+    dither: dict | None = None,
+    ppi: float = DEFAULT_PPI,
+) -> bytes:
     """Pack an RGB(A) PIL image into the panel's FOSB payload format.
     ``palette`` replaces a palette panel's stock colours (panel_palette):
-    what each pixel is dithered to, never which index it is written as."""
+    what each pixel is dithered to, never which index it is written as.
+    ``dither`` is the frame's normalized `dither` setting (normalize_dither):
+    None packs with Floyd-Steinberg; OpenDisplay applies to palette panels
+    only and falls back to Floyd-Steinberg if it cannot run."""
     if pixel_format in STOCK_PANEL_PALETTES:
         stock = STOCK_PANEL_PALETTES[pixel_format]
         colors = palette if palette is not None and len(palette) == len(stock) else stock
-        return _pack_palette(image, colors, 2 if pixel_format == FOS_PIXEL_2BPP_BWYR else 4)
+        bits = 2 if pixel_format == FOS_PIXEL_2BPP_BWYR else 4
+        if dither is not None:
+            indices = opendisplay_indices(image, colors, dither, ppi)
+            if indices is not None:
+                return _pack_bits(indices, image.width, image.height, bits)
+        return _pack_palette(image, colors, bits)
     if pixel_format == FOS_PIXEL_1BPP:
         return _pack_1bpp(image)
     if pixel_format == FOS_PIXEL_DUAL_1BPP_RED:
@@ -948,6 +963,18 @@ class _ThinClientPlan:
     fingerprint: str
 
 
+def _panel_name(frame: Frame) -> str | None:
+    """The frame's panel (`EPD_7in3e`, …) for its pixel density, None when it
+    cannot be named."""
+    from app.tasks.embedded_firmware import embedded_panel_for_frame
+
+    try:
+        panel = embedded_panel_for_frame(frame)
+    except Exception:
+        return getattr(frame, "device", None)
+    return panel if panel and panel != "none" else getattr(frame, "device", None)
+
+
 def _hardware_preset(frame: Frame) -> dict:
     """The frame's board preset (EMBEDDED_HARDWARE_PRESETS), {} for none or
     one this backend does not know."""
@@ -971,9 +998,17 @@ def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
     backend holds them, the board having the preset itself. A stored empty
     map stays empty: the owner cleared it."""
     colors = getattr(frame, "colors", None)
+    colors = dict(colors) if isinstance(colors, dict) else {}
+    if normalize_dither(getattr(frame, "dither", None)) is not None:
+        # OpenDisplay fits the picture to the panel's own white itself; the
+        # render's automatic fit on top would tone-map it twice and come out
+        # far too dark. Off whatever the frame's setting says (an "on" kept
+        # from Floyd-Steinberg days included); a frame that renders its own
+        # scenes still reads it.
+        colors["autoFit"] = "off"
     frame_json: dict = {
         "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in palette_colors(getattr(frame, "palette", None))],
-        "colors": colors if isinstance(colors, dict) else {},
+        "colors": colors,
         "pixelFormat": int(pixel_format),
         "rotate": int(getattr(frame, "rotate", 0) or 0) % 360,
     }
@@ -1017,9 +1052,9 @@ async def _thin_client_plan(db: Session, redis, frame: Frame, device_scene: str 
     frame_json = thin_client_frame_json(frame, pixel_format)
     fingerprint = render_fingerprint(
         scenes_override if scenes_override is not None else (frame.scenes or []),
-        # The packer's palette and the render's event map and colours are
-        # what the picture was drawn from too.
-        {"settings": settings, "frame": frame_json},
+        # The packer's palette and dithering and the render's event map and
+        # colours are what the picture was drawn from too.
+        {"settings": settings, "frame": frame_json, "dither": normalize_dither(getattr(frame, "dither", None))},
         scene_id,
         width,
         height,
@@ -1070,10 +1105,19 @@ class _PanelFrame:
     name: str | None
     rotate: int
     palette: object
+    dither: dict | None = None
+    panel: str | None = None
 
     @classmethod
     def of(cls, frame: Frame) -> "_PanelFrame":
-        return cls(int(frame.id), frame.name, int(frame.rotate or 0), getattr(frame, "palette", None))
+        return cls(
+            int(frame.id),
+            frame.name,
+            int(frame.rotate or 0),
+            getattr(frame, "palette", None),
+            normalize_dither(getattr(frame, "dither", None)),
+            _panel_name(frame),
+        )
 
 
 async def _fosb_off_the_loop(
@@ -1106,7 +1150,13 @@ def _fosb_from_rgba(
     palette = panel_palette(
         plan.pixel_format, getattr(frame, "palette", None), photo_palette if rgba is not None else None
     )
-    packed = pack_image_for_panel(rotate_for_panel(image, frame.rotate), plan.pixel_format, palette)
+    facts = frame if isinstance(frame, _PanelFrame) else _PanelFrame.of(frame)
+    # The diagnostic card is flat colour and text: it keeps the default packer.
+    dither = facts.dither if rgba is not None else None
+    packed = pack_image_for_panel(
+        rotate_for_panel(image, frame.rotate), plan.pixel_format, palette, dither,
+        panel_ppi(facts.panel, plan.width, plan.height),
+    )
     expected = embedded_buffer_size(plan.width, plan.height, plan.pixel_format)
     if len(packed) != expected:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,

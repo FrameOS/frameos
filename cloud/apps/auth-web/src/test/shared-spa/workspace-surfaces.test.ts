@@ -332,10 +332,12 @@ describe("the esp32 cloud device profile", () => {
     // Local network access too: the switch is a device verb, not a pushed setting.
     // Button actions (the frame's event map, 2026.10.20) renders on every
     // surface from the shared list below the cloud blocks.
+    // Dithering: the cloud's packer setting (docs/dithering.md), plane-side.
     const esp32Sections = [
       "frame-settings-layouts",
       "frame-settings-power",
       "frame-settings-palette",
+      "frame-settings-dithering",
       "frame-settings-colors",
       "frame-settings-lan-access",
       "frame-settings-button-actions",
@@ -350,11 +352,14 @@ describe("the esp32 cloud device profile", () => {
     // A cloud Pi still gets the full form, so its nav is untouched — except
     // Power, which only the esp32 profile renders, and Palette, which a Pi
     // edits inside the Panel fieldset (no heading of its own to link).
-    // And the Virtual frame section, which only a frame with no hardware has.
+    // Dithering, which applies only where the cloud packs the picture (an
+    // ESP32). And the Virtual frame section, which only a frame with no
+    // hardware has.
     for (const section of allowedFrameSettingsSections.cloud) {
       expect(frameSettingsSectionIsAllowed("cloud", section, piFrame), section).toBe(
         section !== "frame-settings-power" &&
           section !== "frame-settings-palette" &&
+          section !== "frame-settings-dithering" &&
           section !== "frame-settings-virtual",
       );
     }

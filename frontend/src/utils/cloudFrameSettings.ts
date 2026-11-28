@@ -489,10 +489,17 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
  * cloudFrameSettingKeysForVersion / esp32CloudFrameSettingKeysForVersion at
  * a far-future version, so a new batch cannot be added to one and not here.
  */
-export function cloudFrameFormDiffKeys(): (CloudFrameSettingKey | 'scenes' | 'schedule' | 'voice_permissions')[] {
+export function cloudFrameFormDiffKeys(): (
+  | CloudFrameSettingKey
+  | 'scenes'
+  | 'schedule'
+  | 'voice_permissions'
+  | 'dither'
+)[] {
   // `voice_permissions` rides its own route too (POST .../voice/permissions):
   // the owner's switches for what the voice chat may do, never a device key.
-  return [...allCloudFrameSettingKeys, 'scenes', 'schedule', 'voice_permissions']
+  // So does `dither` (POST .../dither), the packer's dithering.
+  return [...allCloudFrameSettingKeys, 'scenes', 'schedule', 'voice_permissions', 'dither']
 }
 
 /**

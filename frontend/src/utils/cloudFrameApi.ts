@@ -1,4 +1,4 @@
-import type { EventMapRule, FrameScene, FrameSchedule, FrameType, SceneLayoutRef } from '../types'
+import type { EventMapRule, FrameDither, FrameScene, FrameSchedule, FrameType, SceneLayoutRef } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
@@ -212,6 +212,20 @@ export async function pushCloudFrameVoicePermissions(frameId: FrameId, permissio
     body: JSON.stringify(permissions),
   })
   await assertOk(response, 'Failed to save what the voice chat may do on this frame')
+}
+
+/**
+ * How the cloud dithers the picture it packs for this frame's palette panel
+ * (docs/dithering.md): its own route, plane-side, applied at the next render
+ * pull; nothing is queued to the device. null goes back to Floyd–Steinberg.
+ */
+export async function pushCloudFrameDither(frameId: FrameId, dither: FrameDither | null): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/dither`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dither }),
+  })
+  await assertOk(response, "Failed to save the frame's dithering")
 }
 
 /**

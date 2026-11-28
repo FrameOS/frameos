@@ -97,6 +97,7 @@ FRAME_RESTORE_FIELDS = (
     "error_behavior",
     "input_settings",
     "palette",
+    "dither",
     "buildroot",
     "embedded",
     "rpios",

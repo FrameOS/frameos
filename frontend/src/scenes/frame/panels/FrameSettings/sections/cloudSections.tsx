@@ -30,6 +30,7 @@ import type { FrameType } from '../../../../../types'
 import { FrameActionsMenu } from '../FrameActionsMenu'
 import { useFrameSettings } from '../frameSettingsContext'
 import { ColorsSection } from '../fields/colorsSection'
+import { DitheringSection } from '../fields/ditheringSection'
 import {
   ControlCodeFields,
   ErrorBehaviorFields,
@@ -442,6 +443,9 @@ export function CloudEsp32Sections(): JSX.Element | null {
             {palette ? <PaletteField /> : null}
           </SectionBody>
         </fieldset>
+      </FrameSettingsSection>
+      <FrameSettingsSection sectionKey="dithering">
+        <DitheringSection />
       </FrameSettingsSection>
       <FrameSettingsSection sectionKey="colors">
         {cloudFrameSupportsEsp32Colors(frame.frameos_version) ? (

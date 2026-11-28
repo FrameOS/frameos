@@ -13,6 +13,7 @@ import { reportError } from "./log";
 import { previewSettingsGroups } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
 import { decryptSecret, encryptSecret } from "./secrets";
 import { isMaskedSettingValue, maskSettingValue } from "./setting-mask";
+import { type DitherPreset, readDitherPresets } from "./panel-dither";
 
 export { isMaskedSettingValue, maskSettingValue } from "./setting-mask";
 
@@ -384,7 +385,7 @@ export const storableAccountSettingsFields: ReadonlyMap<
 
 export type FilteredAccountSettings = Record<
   string,
-  Record<string, string> | { keys: StoredSshKey[] }
+  Record<string, string> | { keys: StoredSshKey[] } | DitherPreset[]
 >;
 
 // Reduce a settings POST body to what the account may store.
@@ -402,6 +403,17 @@ export function filterAccountSettings(payload: Record<string, unknown>):
   | { error: string; settings?: undefined } {
   const settings: FilteredAccountSettings = {};
   for (const [group, value] of Object.entries(payload)) {
+    if (group === "ditherPresets") {
+      // The owner's own dithering presets (docs/dithering.md): a list, as on
+      // the backend, checked like the frame's own `dither`. Plane-only: a
+      // list never reaches a frame (revealedServiceSettings takes maps only).
+      const read = readDitherPresets(value ?? []);
+      if (read.presets === undefined) {
+        return { error: "invalid_settings" };
+      }
+      settings.ditherPresets = read.presets;
+      continue;
+    }
     if (group === "ssh_keys") {
       const filtered = filterAccountSshKeys(value);
       if (filtered.keys === undefined) {
