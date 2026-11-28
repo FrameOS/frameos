@@ -236,6 +236,10 @@ void frameos_nim_set_palette(const char *json);
  * "Event map"): what the frame's buttons do whatever scene shows. Live, one
  * string per pass like colors; the dispatcher applies it to the next press. */
 void frameos_nim_set_event_map(const char *json);
+/* The frame's own keyboard layout as JSON (keyboard.json, main/fos_bt.c;
+ * frameos/keyboard_tables.nim has the shape), "" for none: the firmware
+ * knows `us` alone. False when it did not read (the log says why). */
+bool frameos_nim_set_keyboard_layout_json(const char *json);
 /* Facts for the built-in status screen (drawn when no scene is loaded):
  * a JSON object with name, panel, ip, cloud_url, cloud_state,
  * cloud_connected, backend_url, version, setup_on_screen. Push it

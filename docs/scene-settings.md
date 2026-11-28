@@ -121,9 +121,9 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (a plane's render of a board) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), `brightness` (5 to 100: only where the glass can dim), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`; `about`, what the frame is (below, "About") |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock`; and with no Save, `brightness` as it moves (`live: true` while a finger drags it: set, not kept) |
-| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `linkCloud`, `adopt`, `cancelLink` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (a plane's render of a board) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), `brightness` (5 to 100: only where the glass can dim), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`, and on an S3 `bluetooth` (`on`, `ready`, `pairing`, `devices`: each bond's `address`, `name`, `keyboard`, `mouse`, `connected`; absent: no Bluetooth in the image); `about`, what the frame is (below, "About") |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock`, `bluetooth`; and with no Save, `brightness` as it moves (`live: true` while a finger drags it: set, not kept) |
+| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `linkCloud`, `adopt`, `cancelLink`, `btPair` / `btStop` (a minute of pairing), `btForget <address>` |
 
 The page is for somebody at the frame. A key or a tap that came in over the
 frame's HTTP API with the frame access key (origin `http:write`,
@@ -212,6 +212,19 @@ What the page holds, top to bottom:
   where it has one. A frame that reaches the internet goes back to network time
   at its next sync, which the page says. One field and no `strftime`, which
   alone brings 12 KB of libc into the image.
+- **Bluetooth keyboards and mice** (an ESP32 S3, `main/fos_bt.c`): a switch
+  that takes effect on Save, no restart (`fos_bt_set_enabled`: the stack is
+  started, or stopped and its heap given back; when memory is too short to
+  start it now, the note says it starts at the next restart). While it is on, a
+  **Bluetooth** card lists every bonded device by the name it serves (GAP
+  Device Name, kept in NVS beside the bond; a bond without one by its
+  address), what it is, connected or not, each with **Forget** (a second
+  tap: the bond, the name and the link go). Under them **Pair a keyboard or
+  mouse** opens a minute in which the frame connects to the first HID device
+  advertising and pairs ("Just Works"), and **Stop** closes it early. The
+  page is drawn again when a device comes or goes and when the minute ends
+  (`fos_bt_set_change_hook`). No plane is told: the console's `bt` is the
+  same list.
 - **Update** (an ESP32 with a control plane): the page asks the plane whether a
   release exists when it opens on Wi-Fi, at most hourly, and on **Check for
   updates** (`fos_ota_check_start`: the same manifest and signature checks as

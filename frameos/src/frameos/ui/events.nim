@@ -25,8 +25,7 @@ import std/[json, monotimes, strutils, times]
 import frameos/events_gen
 import frameos/ui/layout
 import frameos/ui/keyboard
-when not defined(frameosEmbedded):
-  import frameos/cursor_shape
+import frameos/cursor_shape
 
 type
   UiHit* = array[4, float32]
@@ -400,8 +399,8 @@ proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
   of "pointerDown", "pointerUp", "pointerCancel":
     r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls or
-      # A field: a mouse pressed on it selects as it drags (no mouse on an ESP32).
-      (not defined(frameosEmbedded) and event == "pointerDown" and r.typesIn)
+      # A field: a mouse pressed on it selects as it drags.
+      (event == "pointerDown" and r.typesIn)
   of "tap": r.field > 0 or r.handlers[ueClick] > 0 or r.labelFor > 0
   of "longPress", "doubleTap":
     # A field: the word there is selected, as on a phone. On a slow panel a
@@ -582,7 +581,7 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32, extend = false) 
     i.accents = 0
     i.sel = 0
     i.secret = true # until a layout says what it is: nothing copied before
-  elif not defined(frameosEmbedded) and extend: # shift: no keyboard on an ESP32
+  elif extend: # shift
     if i.sel == 0:
       i.sel = clamp(i.caret, 0, i.text.len) + 1
   else:
@@ -989,7 +988,7 @@ proc moveCaret(target: UiTarget, key: string, extend = false) =
   let (a, z) = i.selected
   i.handles = false
   i.menu = false
-  if not defined(frameosEmbedded) and extend: # shift: no keyboard on an ESP32
+  if extend: # shift
     if i.sel == 0:
       i.sel = clamp(i.caret, 0, i.text.len) + 1
   elif i.sel > 0:
@@ -1125,67 +1124,66 @@ proc spaceDrag(target: UiTarget, lx, ly: float32, slop: float32): bool =
     target.moveCaret(key)
     result = true
 
-when not defined(frameosEmbedded):
-  # No keyboard on an ESP32 (docs/events.md "Input"): typed keys and the
-  # wheel are Linux's and the preview's.
-  proc typedKey(target: UiTarget, event: string, payload: JsonNode) =
-    ## A key typed on a keyboard, into the focused field: `textInput` is the
-    ## text, `keyDown` everything else (and the field's onKeyDown).
-    template i: untyped = target.input
-    physicalKeyboard = true
-    if i.keyboard:
-      i.keyboard = false # typed on: no keyboard on the screen
-      target.inputOnly = true
-    if event == "textInput":
-      target.insert(payload{"text"}.getStr())
-      return
-    target.fieldCall(ueKeyDown, "keyDown", payload)
-    let key = payload{"key"}.getStr()
-    if (payload{"ctrl"}.getBool() or payload{"meta"}.getBool()) and not payload{"alt"}.getBool():
-      # Ctrl (or Cmd) and a letter: the letter as the layout has it, else
-      # the key it is on (a layout that is not Latin).
-      let code = payload{"code"}.getStr()
-      let letter =
-        if key.len == 1: key[0].toLowerAscii
-        elif code.len == 4 and code.startsWith("Key"): code[3].toLowerAscii
-        else: '\0'
-      case letter
-      of 'a': target.selectAll()
-      of 'c': target.copySelected(cut = false)
-      of 'x': target.copySelected(cut = true)
-      of 'v': target.paste()
-      else: discard
-      return
-    case key
-    of "Backspace": target.erase(false)
-    of "Delete": target.erase(true)
-    of "Enter": target.enter(heard = true)
-    of "Escape": target.blurField()
-    else: target.moveCaret(key, extend = payload{"shift"}.getBool())
-
-  const WheelNotchPx = 72'f32
-    ## A notch of the wheel: about three lines of text, as a browser scrolls.
-    ## A trackpad's fractions of a notch scroll their share of it.
-
-  var wheelScrolled* {.threadvar.}: bool
-    ## A wheel scrolled a box (set, never cleared, here): a layout that handed
-    ## the wheel to the scene under it scrolls its own box under the pointer
-    ## only when the scene's did not move (interpreter.runEventInner).
-
-  proc wheel(target: UiTarget, r: UiRegion, payload: JsonNode): bool =
-    ## A wheel over a box that scrolls. False when the box is at its end that
-    ## way, so the box around it scrolls instead, as in a browser.
-    let (fromX, fromY) = target.input.scrolled(r.key)
-    let
-      sx = clamp(fromX + payload{"deltaX"}.getFloat() * WheelNotchPx, 0, r.scrollX)
-      sy = clamp(fromY + payload{"deltaY"}.getFloat() * WheelNotchPx, 0, r.scrollY)
-    if sx == fromX and sy == fromY:
-      return false
-    target.input.scrollTo(r.key, sx, sy)
+# Typed keys and the wheel: a keyboard and a mouse on Linux, in the preview
+# and over Bluetooth on an ESP32 (docs/events.md "Input").
+proc typedKey(target: UiTarget, event: string, payload: JsonNode) =
+  ## A key typed on a keyboard, into the focused field: `textInput` is the
+  ## text, `keyDown` everything else (and the field's onKeyDown).
+  template i: untyped = target.input
+  physicalKeyboard = true
+  if i.keyboard:
+    i.keyboard = false # typed on: no keyboard on the screen
     target.inputOnly = true
-    target.scrolledBy(r)
-    wheelScrolled = true
-    true
+  if event == "textInput":
+    target.insert(payload{"text"}.getStr())
+    return
+  target.fieldCall(ueKeyDown, "keyDown", payload)
+  let key = payload{"key"}.getStr()
+  if (payload{"ctrl"}.getBool() or payload{"meta"}.getBool()) and not payload{"alt"}.getBool():
+    # Ctrl (or Cmd) and a letter: the letter as the layout has it, else
+    # the key it is on (a layout that is not Latin).
+    let code = payload{"code"}.getStr()
+    let letter =
+      if key.len == 1: key[0].toLowerAscii
+      elif code.len == 4 and code.startsWith("Key"): code[3].toLowerAscii
+      else: '\0'
+    case letter
+    of 'a': target.selectAll()
+    of 'c': target.copySelected(cut = false)
+    of 'x': target.copySelected(cut = true)
+    of 'v': target.paste()
+    else: discard
+    return
+  case key
+  of "Backspace": target.erase(false)
+  of "Delete": target.erase(true)
+  of "Enter": target.enter(heard = true)
+  of "Escape": target.blurField()
+  else: target.moveCaret(key, extend = payload{"shift"}.getBool())
+
+const WheelNotchPx = 72'f32
+  ## A notch of the wheel: about three lines of text, as a browser scrolls.
+  ## A trackpad's fractions of a notch scroll their share of it.
+
+var wheelScrolled* {.threadvar.}: bool
+  ## A wheel scrolled a box (set, never cleared, here): a layout that handed
+  ## the wheel to the scene under it scrolls its own box under the pointer
+  ## only when the scene's did not move (interpreter.runEventInner).
+
+proc wheel(target: UiTarget, r: UiRegion, payload: JsonNode): bool =
+  ## A wheel over a box that scrolls. False when the box is at its end that
+  ## way, so the box around it scrolls instead, as in a browser.
+  let (fromX, fromY) = target.input.scrolled(r.key)
+  let
+    sx = clamp(fromX + payload{"deltaX"}.getFloat() * WheelNotchPx, 0, r.scrollX)
+    sy = clamp(fromY + payload{"deltaY"}.getFloat() * WheelNotchPx, 0, r.scrollY)
+  if sx == fromX and sy == fromY:
+    return false
+  target.input.scrollTo(r.key, sx, sy)
+  target.inputOnly = true
+  target.scrolledBy(r)
+  wheelScrolled = true
+  true
 
 # ------------------------------------------------------------------ keys
 #
@@ -1512,12 +1510,11 @@ proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, 
     of "back", "menu": result.key = "Escape"
     else: result.times = 0
   else:
-    when not defined(frameosEmbedded):
-      result.key = payload{"key"}.getStr()
-      if event == "keyDown" and result.key in ["Tab", "Enter", "Escape"] and not payload{"ctrl"}.getBool() and
-          not payload{"alt"}.getBool() and not payload{"meta"}.getBool():
-        result.back = payload{"shift"}.getBool()
-        result.times = 1
+    result.key = payload{"key"}.getStr()
+    if event == "keyDown" and result.key in ["Tab", "Enter", "Escape"] and not payload{"ctrl"}.getBool() and
+        not payload{"alt"}.getBool() and not payload{"meta"}.getBool():
+      result.back = payload{"shift"}.getBool()
+      result.times = 1
 
 proc uiKeysFor*(sceneIds: openArray[string], event: string, payload: JsonNode, dry = false): bool =
   ## A frame's button, or a key typed on a keyboard, as the keys
@@ -1534,10 +1531,9 @@ proc uiButtonKeys*(sceneIds: openArray[string], payload: JsonNode): bool =
   ## A frame's button as the keys (`uiKeyOf`).
   uiKeysFor(sceneIds, "button", payload)
 
-when not defined(frameosEmbedded):
-  proc uiTypedKeys*(sceneIds: openArray[string], payload: JsonNode): bool =
-    ## A keyboard's Tab, Shift+Tab, Enter and Escape as the keys (`uiKeyOf`).
-    uiKeysFor(sceneIds, "keyDown", payload)
+proc uiTypedKeys*(sceneIds: openArray[string], payload: JsonNode): bool =
+  ## A keyboard's Tab, Shift+Tab, Enter and Escape as the keys (`uiKeyOf`).
+  uiKeysFor(sceneIds, "keyDown", payload)
 
 # ------------------------------------------------------------------ dispatch
 
@@ -1603,41 +1599,40 @@ proc uiSceneHandler*(sceneId, event: string, payload: JsonNode): bool =
         target.inputOnly = false # whatever the handler changed, get() shows it
         return true
 
-when not defined(frameosEmbedded):
-  proc uiCursorAt*(sceneId: string; x, y: float32; pointer = 0): int =
-    ## The mouse cursor a UI of the scene asks for at (x, y), in the scene's
-    ## pixels, as the last render drew it: the shape (`ord`) of the topmost
-    ## element there, from its `cursor-*` class, the arrow for one without.
-    ## -1 when no element is there or a `<Scene>` / `<yield />` is on top:
-    ## the scene in it, or the scene's own, decides (interpreter
-    ## `cursorShapeAt`). A press the UI holds is its element's to the end, so
-    ## a window being resized keeps its arrows wherever the pointer goes.
-    result = -1
-    for target in targets:
-      if target.sceneId != sceneId:
-        continue
-      let
-        scale = if target.scale > 0: target.scale else: 1'f32
-        lx = (x - target.offsetX) / scale
-        ly = (y - target.offsetY) / scale
-      var index = -1
-      let held = target.captureOf(pointer)
-      if held >= 0:
-        index = target.regionOf(held)
-      else:
-        for i in countdown(target.regions.high, 0):
-          if target.regions[i].inside(lx, ly):
-            index = i
-            break
-      if index < 0:
-        continue
-      template r: untyped = target.regions[index]
-      result =
-        if r.scene and held < 0: -1
-        elif r.cursor == CursorEdges: ord(edgeCursor(lx - r.x, ly - r.y, r.w, r.h, r.cursorBand))
-        else: ord(cursorOfCode(r.cursor))
-      if held >= 0:
-        return
+proc uiCursorAt*(sceneId: string; x, y: float32; pointer = 0): int =
+  ## The mouse cursor a UI of the scene asks for at (x, y), in the scene's
+  ## pixels, as the last render drew it: the shape (`ord`) of the topmost
+  ## element there, from its `cursor-*` class, the arrow for one without.
+  ## -1 when no element is there or a `<Scene>` / `<yield />` is on top:
+  ## the scene in it, or the scene's own, decides (interpreter
+  ## `cursorShapeAt`). A press the UI holds is its element's to the end, so
+  ## a window being resized keeps its arrows wherever the pointer goes.
+  result = -1
+  for target in targets:
+    if target.sceneId != sceneId:
+      continue
+    let
+      scale = if target.scale > 0: target.scale else: 1'f32
+      lx = (x - target.offsetX) / scale
+      ly = (y - target.offsetY) / scale
+    var index = -1
+    let held = target.captureOf(pointer)
+    if held >= 0:
+      index = target.regionOf(held)
+    else:
+      for i in countdown(target.regions.high, 0):
+        if target.regions[i].inside(lx, ly):
+          index = i
+          break
+    if index < 0:
+      continue
+    template r: untyped = target.regions[index]
+    result =
+      if r.scene and held < 0: -1
+      elif r.cursor == CursorEdges: ord(edgeCursor(lx - r.x, ly - r.y, r.w, r.h, r.cursorBand))
+      else: ord(cursorOfCode(r.cursor))
+    if held >= 0:
+      return
 
 proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
   ## Whether a press at (x, y), in the scene's pixels, lands on something a UI
@@ -1798,17 +1793,16 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     if not target.dragging:
       for r in target.regions:
         target.scrolledBy(r, unheard = true)
-    when not defined(frameosEmbedded):
-      if event in ["keyDown", "textInput"]:
-        if (target.input.open > 0 or target.input.link.len > 0) and payload{"key"}.getStr() == "Escape":
-          target.input.open = 0
-          target.input.link = ""
-          target.inputOnly = true
-          result = true
-        elif target.input.focus > 0:
-          target.typedKey(event, payload)
-          result = true
-        continue
+    if event in ["keyDown", "textInput"]:
+      if (target.input.open > 0 or target.input.link.len > 0) and payload{"key"}.getStr() == "Escape":
+        target.input.open = 0
+        target.input.link = ""
+        target.inputOnly = true
+        result = true
+      elif target.input.focus > 0:
+        target.typedKey(event, payload)
+        result = true
+      continue
     var moved = false
     let captured = if follows: target.captureOf(pointer) else: -1
     # The regions are in the UI's own pixels: at render scale 2 a UI laid out
@@ -1926,12 +1920,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
         target.selectPointer = -1
       elif kind == ord(uePointerMove) and placed:
         let box = target.regions[r]
-        when not defined(frameosEmbedded):
-          # A mouse's drag (a touch keeps its end: selectKept): no mouse on an ESP32.
-          if not target.selectKept:
-            target.input.anchor = true
-            target.input.anchorX = target.selectX
-            target.input.anchorY = target.selectY
+        # A mouse's drag (a touch keeps its end: selectKept).
+        if not target.selectKept:
+          target.input.anchor = true
+          target.input.anchorX = target.selectX
+          target.input.anchorY = target.selectY
         target.input.place = true
         target.input.placeX = lx - target.selectDX - box.x
         target.input.placeY = ly - target.selectDY - box.y
@@ -2059,22 +2052,21 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
             takes = -1
             box = -1
             moved = true
-        when not defined(frameosEmbedded):
-          if not grabbed and payload{"pointerType"}.getStr() != "touch" and payload{"button"}.getInt() == 0:
-            # A mouse (or a pen) on a field: it has the keyboard at once, the
-            # caret where it went down, and a drag from there selects, as on
-            # a desktop. Shift extends what was selected.
-            let hit = target.hitAt(lx, ly, uePointerDown)
-            if hit >= 0 and target.regions[hit].typesIn and target.input.open == 0:
-              let r = target.regions[hit]
-              let extend = payload{"shift"}.getBool() and target.input.focus == r.key + 1
-              target.focusField(r, lx, ly, extend)
-              target.follow(pointer, kept = extend)
-              target.selectX = lx - r.x
-              target.selectY = ly - r.y
-              takes = -1
-              box = -1
-              moved = true
+        if not grabbed and payload{"pointerType"}.getStr() != "touch" and payload{"button"}.getInt() == 0:
+          # A mouse (or a pen) on a field: it has the keyboard at once, the
+          # caret where it went down, and a drag from there selects, as on
+          # a desktop. Shift extends what was selected.
+          let hit = target.hitAt(lx, ly, uePointerDown)
+          if hit >= 0 and target.regions[hit].typesIn and target.input.open == 0:
+            let r = target.regions[hit]
+            let extend = payload{"shift"}.getBool() and target.input.focus == r.key + 1
+            target.focusField(r, lx, ly, extend)
+            target.follow(pointer, kept = extend)
+            target.selectX = lx - r.x
+            target.selectY = ly - r.y
+            takes = -1
+            box = -1
+            moved = true
         if takes >= 0 and box < takes:
           target.captures.add((pointer, target.regions[takes].key))
         elif box >= 0:
@@ -2084,13 +2076,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
           target.dragX = x
           target.dragY = y
           target.dragging = false
-    when not defined(frameosEmbedded):
-      if event == "wheel" and placed:
-        for i in countdown(target.regions.high, 0):
-          if target.regions[i].scrolls and target.regions[i].inside(lx, ly) and
-              target.wheel(target.regions[i], payload):
-            result = true
-            break
+    if event == "wheel" and placed:
+      for i in countdown(target.regions.high, 0):
+        if target.regions[i].scrolls and target.regions[i].inside(lx, ly) and
+            target.wheel(target.regions[i], payload):
+          result = true
+          break
     if kind == ord(ueSwipe) and target.dragged:
       # The swipe a drag made scrolled the box: nothing else hears it.
       target.dragged = false
@@ -2143,7 +2134,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
       elif hit >= 0 and target.regions[hit].field > 0:
         let r = target.regions[hit]
         # Shift+click extends; a tap on an ESP32 has no shift to hold.
-        target.focusField(r, lx, ly, not defined(frameosEmbedded) and payload{"shift"}.getBool() and
+        target.focusField(r, lx, ly, payload{"shift"}.getBool() and
           target.input.focus == r.key + 1)
         moved = true
       elif target.input.focus > 0 and (hit < 0 or target.regions[hit].handlers[ueClick] <= KeyBase):

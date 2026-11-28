@@ -31,3 +31,7 @@ CONFIG_LWIP_TCP_WND_DEFAULT=5760
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=5760
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=6
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=32
+
+# No Bluetooth on the C3: a thin client has no runtime to hand the keys to,
+# and its 4 MB has no room for the stack.
+# CONFIG_BT_ENABLED is not set

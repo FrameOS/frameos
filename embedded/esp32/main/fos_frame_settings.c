@@ -38,6 +38,7 @@
 #include "fos_assets_sd.h"
 #include "fos_board.h"
 #include "fos_buzzer.h"
+#include "fos_bt.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -80,7 +81,10 @@ static const char *manager(void)
  * bytes each, every byte escaped to \u00XX, a link code with its QR text,
  * its server and why it failed, and the About facts (the server, the preset,
  * the panel and the host name escaped). */
-#define JSON_CAP (1536 + (FOS_URL_LEN * 2 + 64) * 6 + 3 * FOS_STR_LEN * 6 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
+#define JSON_CAP (1536 + (FOS_URL_LEN * 2 + 64) * 6 + 3 * FOS_STR_LEN * 6 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4) + \
+                  BT_FACTS_CAP)
+/* The Bluetooth section (fos_bt_facts_json): four bonds, each name escaped. */
+#define BT_FACTS_CAP 1280
 
 typedef struct {
     char *buf;
@@ -290,6 +294,7 @@ char *fos_frame_settings_json(void)
         }
         put(&out, "}");
     }
+    out.len += fos_bt_facts_json(out.buf + out.len, JSON_CAP - out.len);
     /* Restart is a reboot here: the page shows Reboot alone. Connecting is
      * offered to a frame no plane holds, online, with nothing pending. */
     put(&out, ",\"actions\":[");
@@ -354,7 +359,7 @@ void fos_frame_settings_apply(const char *json)
     }
     fos_config_t *config = fos_config();
     bool wifi = false, restart = false, scale = false;
-    char changes[96] = "";
+    char changes[112] = "";
     s_refused[0] = '\0';
 
     const cJSON *ssid = cJSON_GetObjectItem(root, "wifiSsid");
@@ -464,9 +469,22 @@ void fos_frame_settings_apply(const char *json)
             cloud = true;
         }
     }
+    /* Bluetooth on or off, at once (fos_bt_set_enabled). Kept on when the
+     * stack cannot start now: it starts at the next boot, and the page says so. */
+    const cJSON *bluetooth = cJSON_GetObjectItem(root, "bluetooth");
+    bool bluetooth_changed = false;
+    if (cJSON_IsBool(bluetooth) && cJSON_IsTrue(bluetooth) != config->bluetooth) {
+        config->bluetooth = cJSON_IsTrue(bluetooth);
+        bluetooth_changed = true;
+        if (fos_bt_set_enabled(config->bluetooth) != ESP_OK) {
+            strlcpy(s_refused, "Not enough memory for Bluetooth now: it starts at the next restart",
+                    sizeof(s_refused));
+        }
+    }
     cJSON_Delete(root);
 
     if (cloud) strlcat(changes, "cloudUrl,", sizeof(changes));
+    if (bluetooth_changed) strlcat(changes, "bluetooth,", sizeof(changes));
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (sounds) strlcat(changes, "clickSounds,", sizeof(changes));
     if (awake) strlcat(changes, "awakeAfterInputSeconds,", sizeof(changes));
@@ -494,7 +512,7 @@ void fos_frame_settings_apply(const char *json)
     if (scale) {
         fos_cloud_request_state();
         fos_client_render_now();
-    } else if (clock_changed) {
+    } else if (clock_changed || bluetooth_changed) {
         fos_client_render_now();
     }
     /* The cloud's mirror follows the hardware report (hardware.clickSounds). */
@@ -527,6 +545,13 @@ static void on_wifi_change(void)
     }
 }
 
+/* A Bluetooth device came or went, or pairing opened or closed: drawn again
+ * if the page is up. From the Bluetooth host's task or a timer's. */
+static void on_bt_change(void)
+{
+    if (fos_scenes_settings_shown()) fos_client_render_now();
+}
+
 /* The update check moved on. From its own task: bits set, no more. */
 static void on_update_check(void)
 {
@@ -537,6 +562,7 @@ void fos_frame_settings_init(void)
 {
     fos_wifi_set_change_hook(on_wifi_change);
     fos_ota_set_check_hook(on_update_check);
+    fos_bt_set_change_hook(on_bt_change);
 }
 
 void fos_frame_settings_action(const char *action)
@@ -544,6 +570,12 @@ void fos_frame_settings_action(const char *action)
     if (action == NULL) return;
     if (strcmp(action, "scan") == 0) {
         fos_wifi_scan_start();
+    } else if (strcmp(action, "btPair") == 0) {
+        fos_bt_pair(FOS_BT_PAIR_SECONDS);
+    } else if (strcmp(action, "btStop") == 0) {
+        fos_bt_pair(0);
+    } else if (strncmp(action, "btForget ", 9) == 0) {
+        fos_bt_forget_one(action + 9);
     } else if (strcmp(action, "checkUpdate") == 0) {
         fos_ota_check_start(0);
     } else if (strcmp(action, "installUpdate") == 0) {

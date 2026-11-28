@@ -295,6 +295,8 @@ typedef struct {
                                     * of touch_beep. The frame's own (its frame
                                     * page, the console): no plane sets it.
                                     * Default normal. */
+    bool bluetooth;                /* Bluetooth LE keyboards and mice
+                                    * (fos_bt.c), read at boot. Default off. */
     uint8_t cpu_mode;              /* fos_cpu_mode_t, read at boot */
     /* The glass's brightness in percent where the display can set it
      * (fos_display_brightness: the AMOLED's register, a backlight's PWM):

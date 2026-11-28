@@ -346,7 +346,12 @@ back before the next push (`frameos/cursor_panel.nim`, under the loading
 mark's lock; docs/realtime-rendering.md "The mouse cursor"). A move writes
 the cursor's old rectangle and its new one: no scene runs, nothing is pushed,
 and the cursor is never in the canvas, the stored frame (`GET /image`,
-snapshots) or the driver's copy of the panel. Its shape is what the JSX UI
+snapshots) or the driver's copy of the panel. An ESP32 with an RGB LCD (the
+SenseCAP Indicator) draws the same sprite for a Bluetooth mouse: the loading
+mark's task on core 0 puts it over the buffer on the glass, and the driver
+puts it away before a picture is presented (`fos_lcd_st7701s_cursor`,
+`embedded_runtime.syncCursor`); on any other ESP32 panel a mouse clicks
+where its cursor is without one drawn. Its shape is what the JSX UI
 under it asks for with a `cursor-*` class (docs/jsx-ui.md "The mouse
 cursor"; a window's frame its resize arrows), the arrow elsewhere, asked
 again after every move and every render. It shows for `CursorHideMs`
@@ -681,12 +686,18 @@ double-press window opens.
 what was typed; pointer events not at all.
 
 **Hosts.** Pointer and keyboard events are described for every host. The
-ESP32 has buttons and, on some boards, a touch panel, but no keyboard: it
-compiles the button and pointer halves of the input state and the pointer
-aliases (`mouseMove` / `mouseDown` / `mouseUp`, `hosts.esp32: true`, so a
-store scene written for a mouse runs on its glass), and none of the keyboard
-tables — the keyboard code is behind `when not defined(frameosEmbedded)`, and
-the contract's generated lookups are
+ESP32 has buttons, on some boards a touch panel, and, with `set bluetooth 1`
+on an S3, Bluetooth LE keyboards and mice (`embedded/esp32/main/fos_bt.c`:
+HID over GATT, "Just Works" pairing with `bt pair`, bonds in NVS; off by
+default, and not a Bluetooth-qualified product: `embedded/esp32/README.md`
+"Qualification and licences"). It compiles
+the whole input state but the Linux driver struct: a key
+arrives as `keyDown` / `keyUp` with its Linux number (`linuxCode`, from the
+HID usage) and the dispatcher's keyboard tables name it under the frame's
+layout (the firmware ships `us` alone; a frame's own is its `keyboard.json`,
+`frameos/keyboard_tables.nim`) and make its `textInput`; the mouse is
+pointer 0, its motion `movementX` / `movementY` on a `pointerMove`, its
+wheels `wheel`. The contract's generated lookups are
 procs, never inline iterators (an iterator's loop body is copied per `yield`;
 with eighty payload keys that was 20 KB of flash in the interpreter). The
 preview forwards the browser's pointer, wheel and keyboard from the focused
@@ -737,9 +748,8 @@ which the snapshot harness drives with their `e2eEvents`).
   dispatching `render`. State an app keeps to itself is not scene state: say
   `render` for that too.
 - **`hosts`** — whether a host produces or handles the event at all. Pointer
-  and keyboard events are described for every host and are
-  `hosts.esp32: false`: no board in the tree has touch, and nothing is built
-  for hardware that is not there.
+  and keyboard events are described for every host, the ESP32's included
+  (its glass and its Bluetooth keyboards and mice).
 - **`aliasOf`** — an old name of another event; **`synthesized`** — made by
   the dispatcher out of other events (a tap, a textInput). See [Input](#input).
 - **`wildcard`** — `false` keeps a listenable event out of an app's `"*"` (the
@@ -937,7 +947,7 @@ an event means:
 | When a queued event is delivered | the runner thread's message loop | on the task that sent it, before `frameos_nim_send_event` returns; what a render dispatched, right after the render | before `frameos_wasm_event` returns; right after a render |
 | An event aimed at a scene that is not the current one (`target`) | delivered if that scene is in memory | dropped: one resident scene | dropped |
 | An event before the current scene is built | not a state the runner has: scenes are built when selected | the event builds it (`single_scene_host.send`), so a boot's replayed button press reaches the scene it woke; a scene switch is served without building the scene being left | same as the ESP32 |
-| Input devices | pointers and keyboards (evdev), GPIO buttons | GPIO buttons and a touch panel (`fos_touch.c`); no keyboard, so `keyDown` / `keyUp` / `textInput` / `wheel` have no producer and the keyboard tables are not compiled | the browser's pointer and keyboard |
+| Input devices | pointers and keyboards (evdev), GPIO buttons | GPIO buttons, a touch panel (`fos_touch.c`) and, on an S3 with Bluetooth on, LE keyboards and mice (`fos_bt.c`): `keyDown` / `keyUp` with `linuxCode`, the mouse as pointer 0 with `movementX` / `movementY`, its buttons and `wheel`; US keys, or the frame's `keyboard.json` | the browser's pointer and keyboard |
 | The old pointer names (`mouseMove`, `mouseDown`, `mouseUp`) | delivered to a scene that listens for them | delivered to a scene that listens for them (since 2026-10-25: store scenes are immutable, and the Touch test listens for the old names) | delivered |
 | `close` on `reload` / `uploadScenes` | not sent | not sent | — |
 | The scene switcher (`sceneSwitcher`) | each tile the scene's last snapshot (`scene_images/`) | names only; selected without a slot (`fos_scenes.c`), the frame kept awake its idle time, never `last_scene` | names only |

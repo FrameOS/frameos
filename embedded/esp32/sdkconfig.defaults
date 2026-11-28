@@ -240,3 +240,30 @@ CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 # the same stdout lock. −28.5 KB (2026-11-10, docs/esp32-image-size.md); it
 # costs a little stack per log call (a 32-byte timestamp buffer).
 CONFIG_LOG_VERSION_2=y
+
+# Bluetooth LE: keyboards and mice (main/fos_bt.c, docs/events.md "Input").
+# NimBLE as a central and an observer only: the frame scans, connects, pairs
+# ("Just Works", bonded in NVS) and reads HID over GATT as a client; it never
+# advertises and serves no GATT database, so the peripheral role, the GATT
+# server and its services stay out of the image. No BLE 5 features (no
+# extended advertising: keyboards and mice advertise the legacy way). Two
+# links (a keyboard and a mouse). The host's memory is PSRAM's, and the stack
+# starts only with `set bluetooth 1`: off, its static RAM is given back at
+# boot (esp_bt_controller_mem_release). The host logs errors only.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+# CONFIG_BT_NIMBLE_ROLE_PERIPHERAL is not set
+# CONFIG_BT_NIMBLE_ROLE_BROADCASTER is not set
+CONFIG_BT_NIMBLE_GATT_CLIENT=y
+# CONFIG_BT_NIMBLE_GATT_SERVER is not set
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
+CONFIG_BT_NIMBLE_SM_LEGACY=y
+CONFIG_BT_NIMBLE_SM_SC=y
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+CONFIG_BT_NIMBLE_MAX_BONDS=4
+# CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT is not set
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
+CONFIG_BT_NIMBLE_LOG_LEVEL_ERROR=y

@@ -36,6 +36,7 @@
 #include "fos_gauge.h"
 #include "fos_buzzer.h"
 #include "fos_touch.h"
+#include "fos_bt.h"
 #include "fos_charger.h"
 #include "fos_codec.h"
 #include "fos_rtc.h"
@@ -831,7 +832,7 @@ static int64_t s_glass_lead_us = 0;
 
 static bool input_queued(void)
 {
-    return fos_touch_pending() || fos_buttons_pending();
+    return fos_touch_pending() || fos_buttons_pending() || fos_bt_pending();
 }
 
 /* Who the input hold is for (fos_input_hold_applies). */
@@ -957,6 +958,9 @@ static void process_input_events(void)
      * in the touch queue until it lifts (its moves folded to the newest
      * there), so the plane gets it whole. */
     if (local || !fos_touch_finger_down()) fos_touch_process_events();
+    /* A Bluetooth keyboard's keys and a mouse's motion (fos_bt.c): after the
+     * glass, before the tick, like it. */
+    fos_bt_process_events();
     if (local && frameos_nim_tick()) {
         fos_client_wake_for_events();
     }
@@ -5065,7 +5069,7 @@ static void client_task(void *arg)
         }
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
         bool local = renders_locally(config);
-        bool button_pending = local && (fos_buttons_pending() || fos_touch_pending());
+        bool button_pending = local && (fos_buttons_pending() || fos_touch_pending() || fos_bt_pending());
         /* Rendered on the server: a key, a touch or a scheduled event waits
          * for the plane (the relay), or arrived since the pull. Held a few
          * times at most (s_relay_holds), and not on a flat cell. */

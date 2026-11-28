@@ -309,4 +309,24 @@ proc drawCursorSprite*(view: MarkView, at: CursorAt, rect: MarkRect, pixels: Mar
         d[pixels.greenByte] = value
         d[pixels.blueByte] = value
 
+when defined(freertos):
+  # The ESP32's RGB LCD (lcd_st7701s_rgb.c), the loading mark's way
+  # (loading_mark.nim): plain values and pointers, on the mark's task, which
+  # the Nim runtime knows nothing about. With no `src` it is where the cursor
+  # goes, else one frame of it over the pixels that were there.
+  proc cursorSpriteEntry(panelWidth, panelHeight, rotation, x, y, sceneWidth, sceneHeight, shape: int32,
+      rect: ptr MarkRect, src: pointer, srcStride: int32, dst: pointer, dstStride: int32) {.cdecl.} =
+    let view = MarkView(panelWidth: panelWidth, panelHeight: panelHeight, rotation: rotation)
+    let shapeIndex = if shape >= 0 and shape <= ord(high(CursorShape)): shape else: 0
+    let at = CursorAt(x: x, y: y, sceneWidth: sceneWidth, sceneHeight: sceneHeight,
+      shape: CursorShape(shapeIndex))
+    if src.isNil:
+      rect[] = cursorRect(view, at)
+    else:
+      drawCursorSprite(view, at, rect[], Rgb565MarkPixels, cast[ptr UncheckedArray[uint8]](src), srcStride,
+        cast[ptr UncheckedArray[uint8]](dst), dstStride)
+
+  proc setCursorSprite(sprite: pointer) {.importc: "fos_lcd_st7701s_set_cursor_sprite", cdecl.}
+  setCursorSprite(cast[pointer](cursorSpriteEntry))
+
 {.pop.}

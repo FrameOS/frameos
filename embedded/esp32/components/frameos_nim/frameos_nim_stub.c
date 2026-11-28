@@ -125,6 +125,11 @@ void frameos_nim_set_render_scale(double scale) { (void)scale; }
 void frameos_nim_set_colors(const char *json) { (void)json; }
 void frameos_nim_set_palette(const char *json) { (void)json; }
 void frameos_nim_set_event_map(const char *json) { (void)json; }
+bool frameos_nim_set_keyboard_layout_json(const char *json)
+{
+    (void)json;
+    return false;
+}
 void frameos_nim_set_status_info(const char *info_json) { (void)info_json; }
 bool frameos_nim_set_portal_screen(const char *ssid, const char *pass, const char *ip)
 {

@@ -13,8 +13,7 @@
 
 import std/strutils
 import pixie
-when not defined(frameosEmbedded):
-  import frameos/cursor_shape
+import frameos/cursor_shape
 
 type
   LenKind* = enum
@@ -66,12 +65,10 @@ type
     aspect*: float32
     fit*: Fit
     overflowX*, overflowY*: Overflow
-    when not defined(frameosEmbedded):
-      # `cursor-*`: the mouse cursor over it (cursor_shape.nim `cursorCode`,
-      # or `CursorEdges` for `cursor-resize`, `cursorBand` wide at its edges).
-      # Not on an ESP32, which has no mouse.
-      cursor*: uint8
-      cursorBand*: float32
+    # `cursor-*`: the mouse cursor over it (cursor_shape.nim `cursorCode`,
+    # or `CursorEdges` for `cursor-resize`, `cursorBand` wide at its edges).
+    cursor*: uint8
+    cursorBand*: float32
 
   Text* = object
     ## The text style. Inherited: a child starts from its parent's.
@@ -586,27 +583,24 @@ proc applyClass(box: var Box, text: var Text, s: string, a, b: int, neg: bool) =
     if axis != 'y': box.overflowX = o
     if axis != 'x': box.overflowY = o
   of hCursor:
-    when not defined(frameosEmbedded):
-      # cursor-pointer, cursor-ew-resize, ...: CSS's names, a side's resize as
-      # its axis'. cursor-resize[-[14px]]: a frame that resizes from its
-      # edges, the shape by where the pointer is (cursor_shape.edgeCursor).
-      if s.continuesWith("resize", r) and (b == r + 6 or s[r + 6] == '-'):
-        if b == r + 6 or pxLength(s, r + 7, b, v):
-          box.cursor = CursorEdges
-          box.cursorBand = if b == r + 6: 12 else: v
-      else:
-        const shapes = [csArrow, csArrow, csPointer, csText, csMove, csPointer, csPointer,
-          csEwResize, csNsResize, csNwseResize, csNeswResize, csEwResize, csNsResize,
-          csEwResize, csEwResize, csNsResize, csNsResize, csNeswResize, csNeswResize,
-          csNwseResize, csNwseResize, csNone]
-        const names = "auto default pointer text move grab grabbing ew-resize ns-resize " &
-          "nwse-resize nesw-resize col-resize row-resize e-resize w-resize n-resize s-resize " &
-          "ne-resize sw-resize nw-resize se-resize none "
-        let i = pick(s, r, b, names)
-        if i >= 0:
-          box.cursor = shapes[i].cursorCode
+    # cursor-pointer, cursor-ew-resize, ...: CSS's names, a side's resize as
+    # its axis'. cursor-resize[-[14px]]: a frame that resizes from its
+    # edges, the shape by where the pointer is (cursor_shape.edgeCursor).
+    if s.continuesWith("resize", r) and (b == r + 6 or s[r + 6] == '-'):
+      if b == r + 6 or pxLength(s, r + 7, b, v):
+        box.cursor = CursorEdges
+        box.cursorBand = if b == r + 6: 12 else: v
     else:
-      discard
+      const shapes = [csArrow, csArrow, csPointer, csText, csMove, csPointer, csPointer,
+        csEwResize, csNsResize, csNwseResize, csNeswResize, csEwResize, csNsResize,
+        csEwResize, csEwResize, csNsResize, csNsResize, csNeswResize, csNeswResize,
+        csNwseResize, csNwseResize, csNone]
+      const names = "auto default pointer text move grab grabbing ew-resize ns-resize " &
+        "nwse-resize nesw-resize col-resize row-resize e-resize w-resize n-resize s-resize " &
+        "ne-resize sw-resize nw-resize se-resize none "
+      let i = pick(s, r, b, names)
+      if i >= 0:
+        box.cursor = shapes[i].cursorCode
 
 proc applyClasses*(box: var Box, text: var Text, classes: string, width, height: float32,
     states: set[UiState] = {}) =

@@ -207,14 +207,14 @@ const
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       aliasOfIndex: -1,
       heardByAll: true,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # keyUp
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elNameOnly,
       aliasOfIndex: -1,
       heardByAll: true,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # textInput
       class: ecInput, device: edKeyboard, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
@@ -222,7 +222,7 @@ const
       synthesized: true,
       aliasOfIndex: -1,
       heardByAll: true,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # pointerMove
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
@@ -328,7 +328,7 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: -1,
       heardByAll: true,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # turnOn
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
