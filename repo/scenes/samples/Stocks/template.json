@@ -1,0 +1,10 @@
+{
+  "name": "Stocks",
+  "description": "A watchlist of stocks, indexes, crypto and currencies: each price, its change since the previous close (an arrow, a sign and green or red) and a chart of the last month, from Yahoo Finance with no key (US stocks live, other markets 15 to 20 minutes late) or Twelve Data with a free key. Shows when markets are closed, updates every 15 minutes while they are open and hourly otherwise. One symbol, or a row tapped, is a big chart.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

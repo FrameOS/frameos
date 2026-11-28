@@ -1,0 +1,10 @@
+{
+  "name": "Transit departures",
+  "description": "The next departures from one or two stops, like a station board: each line in its color, where it goes and the minutes until it leaves, live where the agency predicts it, with delays and cancellations. MBTA, Entur (Norway) and TfL work without a key; any agency's GTFS-Realtime feed works too, read on the frame.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

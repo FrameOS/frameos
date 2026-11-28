@@ -1,0 +1,10 @@
+{
+  "name": "Notion database",
+  "description": "A Notion database on a touch screen: each row's title with up to two of its properties, done rows left out, sorted as you choose. Name a checkbox and a tap ticks it in Notion. Needs a Notion connection the database is shared with.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
