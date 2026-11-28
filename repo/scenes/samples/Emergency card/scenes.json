@@ -1,0 +1,427 @@
+[
+  {
+    "id": "emergency-card",
+    "name": "Emergency card",
+    "settings": {
+      "category": "Notes & tools",
+      "execution": "interpreted",
+      "refreshInterval": 86400,
+      "backgroundColor": "#ffffff",
+      "windowSize": "480x640",
+      "icon": "M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M18,14H14V18H10V14H6V10H10V6H14V10H18V14Z"
+    },
+    "fields": [
+      {
+        "name": "title",
+        "label": "Title",
+        "type": "string",
+        "value": "In case of emergency",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "emergencyNumber",
+        "label": "Local emergency number",
+        "type": "string",
+        "value": "112",
+        "access": "public",
+        "persist": "disk",
+        "description": "The number to call for an ambulance where the frame is: 112 in Europe, 911 in North America, 000 in Australia. Leave it empty to hide it."
+      },
+      {
+        "name": "name",
+        "label": "Name",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "born",
+        "label": "Date of birth",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "allergies",
+        "label": "Allergies",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "One per line. Shown first, in large type."
+      },
+      {
+        "name": "contacts",
+        "label": "Emergency contacts",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "One per line: Name, relation, phone. For example: Sam Example, partner, +32 470 12 34 56"
+      },
+      {
+        "name": "conditions",
+        "label": "Medical conditions",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "One per line."
+      },
+      {
+        "name": "medications",
+        "label": "Medications",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "One per line, with the dose."
+      },
+      {
+        "name": "bloodType",
+        "label": "Blood type",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "organDonor",
+        "label": "Organ donor",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "For example: Yes, or: Yes, card in wallet"
+      },
+      {
+        "name": "doctor",
+        "label": "Doctor",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "Name and phone."
+      },
+      {
+        "name": "insurance",
+        "label": "Insurance",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "Provider and policy number."
+      },
+      {
+        "name": "address",
+        "label": "Address",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "notes",
+        "label": "Notes",
+        "type": "text",
+        "value": "",
+        "access": "public",
+        "persist": "disk",
+        "description": "Anything else a helper should know: a spare key, a pet, a language."
+      },
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -126
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "tel1",
+        "type": "code",
+        "position": {
+          "x": -520,
+          "y": -620
+        },
+        "data": {
+          "codeJS": "(() => {\n  // Emergency contact 1's phone as a tel: link for its QR code, read as the card reads it (card.ts).\n  const lines = String(state.contacts ?? '').split(/\\r?\\n/).map((line) => line.replace(/\\s+/g, ' ').trim()).filter((line) => line !== '')\n  const parts = (lines[0] ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '')\n  const isPhone = (part) => part.replace(/\\D/g, '').length >= 3 && /^[+(\\d][\\d\\s().\\-\\/]*$/.test(part)\n  let phone = ''\n  for (let i = parts.length - 1; i >= 0 && !phone; i--) if (isPhone(parts[i])) phone = parts[i]\n  if (!phone && parts.length > 0) {\n    const trailing = /(\\+?\\(?\\d[\\d\\s().\\-\\/]{4,}\\d)$/.exec(parts[parts.length - 1])\n    if (trailing) phone = trailing[1]\n  }\n  const kept = phone.replace(/[^\\d+]/g, '')\n  const digits = kept.replace(/\\+/g, '')\n  return digits ? 'tel:' + (kept.startsWith('+') ? '+' : '') + digits : ''\n})()",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "tel",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      {
+        "id": "qr1",
+        "type": "app",
+        "position": {
+          "x": -90,
+          "y": -620
+        },
+        "data": {
+          "keyword": "data/qr",
+          "config": {
+            "codeType": "Custom",
+            "size": "15",
+            "sizeUnit": "percent",
+            "padding": "1",
+            "alRad": "0",
+            "moRad": "0",
+            "moSep": "0",
+            "qrCodeColor": "#000000",
+            "backgroundColor": "#ffffff"
+          }
+        }
+      },
+      {
+        "id": "tel2",
+        "type": "code",
+        "position": {
+          "x": -520,
+          "y": -430
+        },
+        "data": {
+          "codeJS": "(() => {\n  // Emergency contact 2's phone as a tel: link for its QR code, read as the card reads it (card.ts).\n  const lines = String(state.contacts ?? '').split(/\\r?\\n/).map((line) => line.replace(/\\s+/g, ' ').trim()).filter((line) => line !== '')\n  const parts = (lines[1] ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '')\n  const isPhone = (part) => part.replace(/\\D/g, '').length >= 3 && /^[+(\\d][\\d\\s().\\-\\/]*$/.test(part)\n  let phone = ''\n  for (let i = parts.length - 1; i >= 0 && !phone; i--) if (isPhone(parts[i])) phone = parts[i]\n  if (!phone && parts.length > 0) {\n    const trailing = /(\\+?\\(?\\d[\\d\\s().\\-\\/]{4,}\\d)$/.exec(parts[parts.length - 1])\n    if (trailing) phone = trailing[1]\n  }\n  const kept = phone.replace(/[^\\d+]/g, '')\n  const digits = kept.replace(/\\+/g, '')\n  return digits ? 'tel:' + (kept.startsWith('+') ? '+' : '') + digits : ''\n})()",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "tel",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      {
+        "id": "qr2",
+        "type": "app",
+        "position": {
+          "x": -90,
+          "y": -430
+        },
+        "data": {
+          "keyword": "data/qr",
+          "config": {
+            "codeType": "Custom",
+            "size": "15",
+            "sizeUnit": "percent",
+            "padding": "1",
+            "alRad": "0",
+            "moRad": "0",
+            "moSep": "0",
+            "qrCodeColor": "#000000",
+            "backgroundColor": "#ffffff"
+          }
+        }
+      },
+      {
+        "id": "tel3",
+        "type": "code",
+        "position": {
+          "x": -520,
+          "y": -240
+        },
+        "data": {
+          "codeJS": "(() => {\n  // Emergency contact 3's phone as a tel: link for its QR code, read as the card reads it (card.ts).\n  const lines = String(state.contacts ?? '').split(/\\r?\\n/).map((line) => line.replace(/\\s+/g, ' ').trim()).filter((line) => line !== '')\n  const parts = (lines[2] ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '')\n  const isPhone = (part) => part.replace(/\\D/g, '').length >= 3 && /^[+(\\d][\\d\\s().\\-\\/]*$/.test(part)\n  let phone = ''\n  for (let i = parts.length - 1; i >= 0 && !phone; i--) if (isPhone(parts[i])) phone = parts[i]\n  if (!phone && parts.length > 0) {\n    const trailing = /(\\+?\\(?\\d[\\d\\s().\\-\\/]{4,}\\d)$/.exec(parts[parts.length - 1])\n    if (trailing) phone = trailing[1]\n  }\n  const kept = phone.replace(/[^\\d+]/g, '')\n  const digits = kept.replace(/\\+/g, '')\n  return digits ? 'tel:' + (kept.startsWith('+') ? '+' : '') + digits : ''\n})()",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "tel",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      {
+        "id": "qr3",
+        "type": "app",
+        "position": {
+          "x": -90,
+          "y": -240
+        },
+        "data": {
+          "keyword": "data/qr",
+          "config": {
+            "codeType": "Custom",
+            "size": "15",
+            "sizeUnit": "percent",
+            "padding": "1",
+            "alRad": "0",
+            "moRad": "0",
+            "moSep": "0",
+            "qrCodeColor": "#000000",
+            "backgroundColor": "#ffffff"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      },
+      {
+        "id": "tel1-qr1",
+        "type": "codeNodeEdge",
+        "source": "tel1",
+        "target": "qr1",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/code"
+      },
+      {
+        "id": "qr1-ui",
+        "type": "codeNodeEdge",
+        "source": "qr1",
+        "target": "ui",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/qr1"
+      },
+      {
+        "id": "tel2-qr2",
+        "type": "codeNodeEdge",
+        "source": "tel2",
+        "target": "qr2",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/code"
+      },
+      {
+        "id": "qr2-ui",
+        "type": "codeNodeEdge",
+        "source": "qr2",
+        "target": "ui",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/qr2"
+      },
+      {
+        "id": "tel3-qr3",
+        "type": "codeNodeEdge",
+        "source": "tel3",
+        "target": "qr3",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/code"
+      },
+      {
+        "id": "qr3-ui",
+        "type": "codeNodeEdge",
+        "source": "qr3",
+        "target": "ui",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/qr3"
+      }
+    ],
+    "customEvents": [],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Emergency card",
+        "category": "data",
+        "description": "An in case of emergency card from the scene's settings: allergies first and loudest, the contacts to call with QR codes that dial them, conditions, medications and more, the type as large as the panel lets it be.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "qr1",
+            "label": "QR code for contact 1",
+            "type": "image",
+            "required": false
+          },
+          {
+            "name": "qr2",
+            "label": "QR code for contact 2",
+            "type": "image",
+            "required": false
+          },
+          {
+            "name": "qr3",
+            "label": "QR code for contact 3",
+            "type": "image",
+            "required": false
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Emergency card\",\n  \"category\": \"data\",\n  \"description\": \"An in case of emergency card from the scene's settings: allergies first and loudest, the contacts to call with QR codes that dial them, conditions, medications and more, the type as large as the panel lets it be.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"qr1\",\n      \"label\": \"QR code for contact 1\",\n      \"type\": \"image\",\n      \"required\": false\n    },\n    {\n      \"name\": \"qr2\",\n      \"label\": \"QR code for contact 2\",\n      \"type\": \"image\",\n      \"required\": false\n    },\n    {\n      \"name\": \"qr3\",\n      \"label\": \"QR code for contact 3\",\n      \"type\": \"image\",\n      \"required\": false\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Emergency card\n// @background #ffffff\n// @refresh 86400\n// An \"in case of emergency\" card for a frame by the door or on the fridge:\n// who lives here, their allergies (first and loudest), the people to call,\n// their conditions and medications, their doctor, insurance and address.\n// Everything is in the scene's settings, and a field left empty shows\n// nothing. The type is as large as the panel lets it be, and on e-paper the\n// card stays readable with the power off.\n//\n// Each contact's phone is a link: a tap shows its QR code on the frame, for\n// a phone to dial. Where there is room, the QR code is on the card itself\n// (the scene's data/qr nodes make one for each of the first three contacts).\nimport { cardOf, telOf } from './card'\nimport type { Card } from './card'\nimport { captionOf, contactWords, dropNote, fitLine, fitsLine, hasQr, lineHeight, planCard, textClass } from './fit'\nimport type { Room } from './fit'\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\ntype Theme = {\n  page: string\n  band: string\n  bandLabel: string\n  accent: string\n  muted: string\n  box: string\n  boxLabel: string\n  boxText: string\n  button: string\n}\n\nconst THEMES: Record<string, Theme> = {\n  color: {\n    page: 'bg-white text-[#111827]',\n    band: 'bg-[#b91c1c] text-white',\n    bandLabel: 'text-[#fecaca]',\n    accent: 'text-[#b91c1c]',\n    muted: 'text-[#4b5563]',\n    box: 'bg-[#fef2f2] border-[#b91c1c]',\n    boxLabel: 'text-[#b91c1c]',\n    boxText: 'text-[#111827]',\n    button: 'bg-[#b91c1c] text-white',\n  },\n  high: {\n    page: 'bg-white text-black',\n    band: 'bg-black text-white',\n    bandLabel: 'text-white',\n    accent: 'text-black',\n    muted: 'text-black',\n    box: 'bg-white border-black',\n    boxLabel: 'text-black',\n    boxText: 'text-black',\n    button: 'bg-black text-white',\n  },\n}\n\n// Color e-paper (Spectra's six inks): the high-contrast card with its red in\n// the panel's own red ink (dither.nim's measured table), so nothing is\n// dithered into confetti.\nTHEMES.inks = {\n  ...THEMES.high,\n  band: 'bg-[#6b1119] text-white',\n  accent: 'text-[#6b1119]',\n  box: 'bg-white border-[#6b1119]',\n  boxLabel: 'text-[#6b1119]',\n  button: 'bg-[#6b1119] text-white',\n}\n\nconst themeOf = (app): Theme => {\n  if (highContrast(app)) return THEMES.high\n  if ((app.state.contrast || 'auto') === 'auto' && app.frame.paper === true) return THEMES.inks\n  return THEMES.color\n}\n\n// The QR code the scene's data/qr node made for contact i (the first three).\nconst qrOf = (app, i: number) => {\n  const ref = app.config[`qr${i + 1}`]\n  return ref && ref.__frameosType === 'imageRef' && ref.width > 0 ? ref : null\n}\n\nconst px = (n: number) => `${Math.round(n * 100) / 100}px`\n\n// ---------------------------------------------------------------- icons\n\nconst Warning = ({ size, className }) => (\n  <svg className={`w-[${size}px] h-[${size}px] shrink-0 ${className}`} viewBox=\"0 0 24 24\">\n    <path d=\"M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z\" fill=\"currentColor\" />\n  </svg>\n)\n\nconst Cross = ({ size, className }) => (\n  <svg className={`w-[${size}px] h-[${size}px] ${className}`} viewBox=\"0 0 24 24\">\n    <path d=\"M19,3H5C3.89,3 3,3.89 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M18,14H14V18H10V14H6V10H10V6H14V10H18V14Z\" fill=\"currentColor\" />\n  </svg>\n)\n\n// ---------------------------------------------------------------- the card's parts\n\n// The emergency number: a link, so a tap shows its QR code for a phone.\nconst Dial = ({ number, className, children }) => {\n  const tel = telOf(number)\n  return tel ? <a href={tel} className={className}>{children}</a> : <div className={className}>{children}</div>\n}\n\n// The band at the top: the title, and the number to call.\nconst Header = ({ t, card, W, hh, pad }) => {\n  const numberSize = Math.round(hh * 0.46)\n  const labelSize = Math.max(9, Math.round(hh * 0.17))\n  const numberW = card.number ? Math.max(card.number.length * 0.62 * numberSize, 9 * 0.7 * labelSize) : 0\n  const titleW = W - 2 * pad - (card.number ? numberW + pad : 0)\n  const titleSize = fitLine(card.title, titleW, Math.round(hh * 0.42), Math.max(10, Math.round(hh * 0.24)))\n  return (\n    <div className={`flex flex-row items-center w-full h-[${hh}px] shrink-0 px-[${pad}px] gap-[${pad}px] ${t.band}`}>\n      <div className={`flex-1 min-w-0 ${textClass(titleSize, 'font-bold')}`}>{card.title}</div>\n      {card.number ? (\n        <Dial number={card.number} className=\"flex flex-col items-end shrink-0\">\n          <span className={`${textClass(labelSize, 'font-bold')} ${t.bandLabel}`}>EMERGENCY</span>\n          <span className={textClass(numberSize, 'font-bold')}>{card.number}</span>\n        </Dial>\n      ) : null}\n    </div>\n  )\n}\n\n// Who the card is about: the name, and what is known at a glance.\nconst Person = ({ card, s }) => (\n  <div className={`flex flex-col gap-[${s.lineGap}px]`}>\n    {card.name ? <div className={s.name}>{card.name}</div> : null}\n    {card.facts.length ? (\n      <div className={s.body}>\n        {card.facts.map((fact, i) => (\n          <>\n            {i > 0 ? ' · ' : ''}\n            {`${fact.label}: `}\n            <span className=\"font-bold\">{fact.value}</span>\n          </>\n        ))}\n      </div>\n    ) : null}\n  </div>\n)\n\nconst Label = ({ section, s, className }) => <div className={`${s.label} ${className}`}>{section.label.toUpperCase()}</div>\n\n// The allergies: in a box with a thick border, larger and bold.\nconst Loud = ({ section, s, t }) => (\n  <div className={`flex flex-col w-full border-[${s.border}px] p-[${s.boxPad}px] rounded-[${Math.round(s.f * 0.35)}px] ${t.box}`}>\n    <div className={`flex flex-row items-center gap-[${2 * s.labelGap}px]`}>\n      <Warning size={s.icon} className={t.boxLabel} />\n      <div className={`flex-1 min-w-0 ${s.label} ${t.boxLabel}`}>{section.label.toUpperCase()}</div>\n    </div>\n    <div className={`flex flex-col gap-[${s.lineGap}px] mt-[${s.labelGap}px]`}>\n      {section.lines.map((line) => <div className={`${s.loud} ${t.boxText}`}>{line}</div>)}\n    </div>\n  </div>\n)\n\n// One contact: the name and relation, and the phone (a link: a tap shows its\n// QR code), with its QR code beside them where the card has them there.\nconst ContactRow = ({ contact, s, t, words, qr }) => (\n  <div className={`flex flex-row items-center gap-[${s.qrGap}px]`}>\n    <div className={`flex flex-col w-[${words}px]`}>\n      {contact.name || contact.relation ? (\n        <div className={s.bold}>\n          {contact.name}\n          {contact.relation ? <span className={`font-normal ${t.muted}`}>{contact.name ? ` (${contact.relation})` : contact.relation}</span> : null}\n        </div>\n      ) : null}\n      {contact.phone && contact.tel ? (\n        <a href={contact.tel} className={`${s.phone} whitespace-nowrap`}>{contact.phone}</a>\n      ) : contact.phone ? (\n        <div className={`${s.phone} whitespace-nowrap`}>{contact.phone}</div>\n      ) : null}\n    </div>\n    {qr ? <img src={qr.ref} className={`w-[${px(qr.side)}] h-[${px(qr.side)}] shrink-0`} /> : null}\n  </div>\n)\n\n// The QR codes in a row under the list, each with its contact's name.\nconst CodeRow = ({ codes, s, side }) => (\n  <div className={`flex flex-row gap-[${s.qrGap}px]`}>\n    {codes.map((code) => (\n      <div className={`flex flex-col items-center w-[${px(side)}]`}>\n        <img src={code.ref} className={`w-[${px(side)}] h-[${px(side)}]`} />\n        <div className={`${s.label} mt-[${s.labelGap}px] w-full text-center truncate`}>{code.caption}</div>\n      </div>\n    ))}\n  </div>\n)\n\nconst Contacts = ({ section, s, t, room, plan, width, refs }) => {\n  const words = contactWords(plan.place, plan.qr, width, s)\n  const codes = section.contacts\n    .map((contact, j) => (hasQr(room, plan.qr, contact, j) ? { ref: refs[j], caption: captionOf(contact, j) } : null))\n    .filter((code) => code)\n  return (\n    <div className=\"flex flex-col\">\n      <Label section={section} s={s} className={t.accent} />\n      <div className={`flex flex-col gap-[${s.contactGap}px] mt-[${s.labelGap}px]`}>\n        {section.contacts.map((contact, j) => (\n          <ContactRow contact={contact} s={s} t={t} words={words}\n            qr={plan.place === 'beside' && hasQr(room, plan.qr, contact, j) ? { ref: refs[j], side: plan.qr } : null} />\n        ))}\n        {plan.place === 'below' && codes.length ? <CodeRow codes={codes} s={s} side={plan.qr} /> : null}\n      </div>\n    </div>\n  )\n}\n\nconst Plain = ({ section, s, t }) => (\n  <div className=\"flex flex-col\">\n    <Label section={section} s={s} className={t.accent} />\n    <div className={`flex flex-col gap-[${s.lineGap}px] mt-[${s.labelGap}px]`}>\n      {section.lines.map((line) => <div className={s.body}>{line}</div>)}\n    </div>\n  </div>\n)\n\nconst SectionBlock = ({ section, s, t, room, plan, width, refs }) =>\n  section.loud ? <Loud section={section} s={s} t={t} />\n    : section.contacts ? <Contacts section={section} s={s} t={t} room={room} plan={plan} width={width} refs={refs} />\n      : <Plain section={section} s={s} t={t} />\n\n// The person, then the sections in one column or two, then what had no room.\nconst Body = ({ card, plan, room, t, refs }) => {\n  const s = plan.sizes\n  const columns = plan.columns.filter((column) => column.length > 0)\n  return (\n    <div className={`flex flex-col w-[${room.width}px] gap-[${s.sectionGap}px]`}>\n      {card.name || card.facts.length ? <Person card={card} s={s} /> : null}\n      {columns.length > 1 ? (\n        <div className={`flex flex-row items-start gap-[${room.width - 2 * plan.columnWidth}px]`}>\n          {columns.map((column) => (\n            <div className={`flex flex-col w-[${plan.columnWidth}px] gap-[${s.sectionGap}px]`}>\n              {column.map((section) => <SectionBlock section={section} s={s} t={t} room={room} plan={plan} width={plan.columnWidth} refs={refs} />)}\n            </div>\n          ))}\n        </div>\n      ) : columns.length === 1 ? (\n        <div className={`flex flex-col w-full gap-[${s.sectionGap}px]`}>\n          {columns[0].map((section) => <SectionBlock section={section} s={s} t={t} room={room} plan={plan} width={plan.columnWidth} refs={refs} />)}\n        </div>\n      ) : null}\n      {plan.dropped.length ? <div className={`${s.label} ${t.muted}`}>{dropNote(plan.dropped)}</div> : null}\n    </div>\n  )\n}\n\n// Nothing filled in yet: how to fill the card, and on a touch screen a\n// button that opens the scene's settings.\nconst Empty = ({ t, size }) => {\n  const f = Math.max(11, Math.round(size / 26))\n  const openSettings = () => {\n    if (typeof frameos.dispatch === 'function') frameos.dispatch('sceneSettings')\n  }\n  return (\n    <div className={`flex flex-col items-center justify-center gap-[${Math.round(f * 0.8)}px] text-center`}>\n      <Cross size={Math.round(f * 3.2)} className={t.accent} />\n      <div className={textClass(Math.round(f * 1.4), 'font-bold')}>This card is empty</div>\n      <div className={`${textClass(f)} ${t.muted}`}>Open the scene's settings to fill in this card: allergies, emergency contacts, medications and more. Only what you fill in shows.</div>\n      <div className={`${textClass(f, 'font-bold')} px-[${f}px] py-[${Math.round(f * 0.5)}px] rounded-[${Math.round(f * 0.4)}px] ${t.button}`}\n        onClick={openSettings}>\n        Fill in the card\n      </div>\n    </div>\n  )\n}\n\n// The body sizes the type may take, by the panel's shorter side: from `lo`\n// to `hi`, and down to `least` only when the allergies and the contacts\n// alone need it.\nconst typeRange = (side: number) => ({\n  least: 9,\n  lo: Math.max(12, Math.round(side * 0.02)),\n  hi: Math.max(14, Math.round(side * 0.075)),\n})\n\n// ---------------------------------------------------------------- a rectangle\n\nconst flatCard = (app, t: Theme, card: Card, W: number, H: number) => {\n  const side = Math.min(W, H)\n  const pad = Math.round(Math.max(6, Math.min(48, side * 0.035)))\n  const refs = [0, 1, 2].map((i) => qrOf(app, i))\n  const scale = app.frame.scale || 1\n  // The QR codes are drawn at their own size (a pixel of the code a pixel of\n  // the panel), and only where the panel is not small.\n  const firstQr = refs.find((ref) => ref)\n  const qr = side >= 360 && firstQr ? firstQr.width / scale : 0\n  const roomUnder = (band: number): Room => ({\n    width: W - 2 * pad,\n    height: H - band - 2 * pad,\n    twoColumns: W >= H * 1.2 && W >= 560,\n    columnGap: Math.round(pad * 1.5),\n    qr,\n    qrRows: refs.map((ref) => !!ref),\n  })\n  const range = typeRange(side)\n  let hh = Math.round(Math.max(30, Math.min(160, side * 0.13)))\n  let room = roomUnder(hh)\n  let plan = card.empty ? null : planCard(card, room, range.least, range.lo, range.hi)\n  // A card with little on it has large type: the band grows with it, so the\n  // title still reads first.\n  const grown = plan ? Math.min(Math.round(side * 0.2), Math.round(plan.sizes.f * 3)) : 0\n  if (plan && grown > hh) {\n    hh = grown\n    room = roomUnder(hh)\n    plan = planCard(card, room, range.least, range.lo, range.hi)\n  }\n  return (\n    <div className={`flex flex-col w-full h-full overflow-hidden ${t.page}`}>\n      <Header t={t} card={card} W={W} hh={hh} pad={pad} />\n      <div className={`flex-1 min-h-0 flex flex-col p-[${pad}px] overflow-hidden`}>\n        {plan ? (\n          <Body card={card} plan={plan} room={room} t={t} refs={refs} />\n        ) : (\n          <div className=\"flex-1 flex flex-col items-center justify-center\">\n            <div className={`w-[${Math.min(room.width, Math.round(side * 1.1))}px]`}>\n              <Empty t={t} size={side} />\n            </div>\n          </div>\n        )}\n      </div>\n    </div>\n  )\n}\n\n// ---------------------------------------------------------------- a circle\n\n// The title in a band over the arc at the top, the card in the square inside\n// the circle, the emergency number in the arc at the bottom. No QR codes: a\n// tap on a phone shows one.\nconst roundCard = (app, t: Theme, card: Card, W: number, H: number) => {\n  const cx = W / 2\n  const cy = H / 2\n  const R = Math.min(W, H) / 2 - 12\n  const side = Math.floor(R * Math.SQRT2)\n  const top = Math.round(cy - side / 2)\n  const left = Math.round(cx - side / 2)\n  const chord = (y: number) => Math.floor(2 * Math.sqrt(Math.max(0, R * R - (y - cy) * (y - cy))))\n  const gap = Math.round(R * 0.04)\n  // The title as large as fits the arc it sits in.\n  const titleBottom = top - gap\n  let titleSize = Math.round(R * 0.11)\n  const titleMin = Math.max(10, Math.round(R * 0.06))\n  while (titleSize > titleMin && !fitsLine(card.title, chord(titleBottom - lineHeight(titleSize)) - 8, titleSize)) titleSize--\n  const titleTop = titleBottom - lineHeight(titleSize)\n  const titleW = Math.max(40, chord(titleTop) - 8)\n  const numberSize = Math.round(R * 0.1)\n  const numberTop = top + side + gap\n  const numberW = chord(numberTop + lineHeight(numberSize))\n  const room: Room = { width: side, height: side, twoColumns: false, columnGap: 0, qr: 0, qrRows: [] }\n  // A round screen is a small, dense one (1.75\" to 2.1\"): larger type, and\n  // the allergies and the contacts before the rest.\n  const range = { least: 12, lo: 15, hi: Math.max(15, Math.round(side * 0.08)) }\n  const plan = card.empty ? null : planCard(card, room, range.least, range.lo, range.hi)\n  // What fits sits in the middle of the circle, where it is widest.\n  const middle = !plan || plan.fits ? 'justify-center' : ''\n  return (\n    <div className={`relative w-[${W}px] h-[${H}px] ${t.page}`}>\n      <div className={`absolute left-0 top-0 w-[${W}px] h-[${top - Math.round(gap / 2)}px] ${t.band}`} />\n      <div className={`absolute left-[${Math.round(cx - titleW / 2)}px] top-[${titleTop}px] w-[${titleW}px] text-center ${textClass(titleSize, 'font-bold')} text-white`}>\n        {card.title}\n      </div>\n      <div className={`absolute left-[${left}px] top-[${top}px] w-[${side}px] h-[${side}px] flex flex-col ${middle} overflow-hidden`}>\n        {plan ? (\n          <Body card={card} plan={plan} room={room} t={t} refs={[]} />\n        ) : (\n          <div className=\"flex-1 flex flex-col items-center justify-center\">\n            <Empty t={t} size={side * 1.25} />\n          </div>\n        )}\n      </div>\n      {card.number ? (\n        <div className={`absolute left-[${Math.round(cx - numberW / 2)}px] top-[${numberTop}px] w-[${numberW}px] flex flex-row justify-center`}>\n          <Dial number={card.number} className={`flex flex-row items-end gap-[${gap}px] ${t.accent}`}>\n            <span className={textClass(Math.round(numberSize * 0.5), 'font-bold')}>EMERGENCY</span>\n            <span className={textClass(numberSize, 'font-bold')}>{card.number}</span>\n          </Dial>\n        </div>\n      ) : null}\n    </div>\n  )\n}\n\nexport function get(app, context) {\n  const t = themeOf(app)\n  const card = cardOf(app.state)\n  const W = context?.imageWidth ?? app.frame.width\n  const H = context?.imageHeight ?? app.frame.height\n  if (context?.round === true) return roundCard(app, t, card, W, H)\n  return flatCard(app, t, card, W, H)\n}\n",
+          "card.ts": "// What the card says, read from the scene's settings: who it is about, the\n// sections in the order a helper reads them (allergies first), and the\n// emergency contacts. Nothing here draws; app.tsx lays it out.\n\nexport const DEFAULT_TITLE = 'In case of emergency'\nexport const DEFAULT_NUMBER = '112'\n\nexport type Contact = { name: string; relation: string; phone: string; tel: string }\n\nexport type Section = {\n  key: string\n  label: string\n  lines: string[]\n  // Allergies: the first section, in a box of its own, in larger bold type.\n  loud?: boolean\n  // Emergency contacts: drawn as contacts (a name, a phone, a QR code).\n  contacts?: Contact[]\n}\n\nexport type Card = {\n  title: string\n  number: string\n  name: string\n  facts: { label: string; value: string }[]\n  sections: Section[]\n  empty: boolean\n}\n\n// The sections in the order they show: allergies and contacts first, then\n// what a paramedic reads next, then the rest.\nexport const SECTIONS: { key: string; label: string }[] = [\n  { key: 'allergies', label: 'Allergies' },\n  { key: 'contacts', label: 'Emergency contacts' },\n  { key: 'conditions', label: 'Medical conditions' },\n  { key: 'medications', label: 'Medications' },\n  { key: 'doctor', label: 'Doctor' },\n  { key: 'insurance', label: 'Insurance' },\n  { key: 'address', label: 'Address' },\n  { key: 'notes', label: 'Notes' },\n]\n\n// A field's text as the lines it was typed in: white space made single, empty\n// lines left out.\nexport const linesOf = (value: unknown): string[] =>\n  String(value ?? '')\n    .split(/\\r?\\n/)\n    .map((line) => line.replace(/\\s+/g, ' ').trim())\n    .filter((line) => line !== '')\n\nconst textOf = (value: unknown): string => linesOf(value).join(' ')\n\n// A phone number: digits with the usual punctuation, at least three digits.\nexport const isPhone = (part: string): boolean =>\n  part.replace(/\\D/g, '').length >= 3 && /^[+(\\d][\\d\\s().\\-\\/]*$/.test(part)\n\n// The number to dial: \"+32 470 12 34 56\" is \"tel:+32470123456\".\nexport const telOf = (phone: string): string => {\n  const kept = phone.replace(/[^\\d+]/g, '')\n  const digits = kept.replace(/\\+/g, '')\n  return digits ? `tel:${kept.startsWith('+') ? '+' : ''}${digits}` : ''\n}\n\n// One contact line, \"Name, relation, phone\". The phone is the last part that\n// is one; a line with no commas may end in its number (\"Sam 555 0100\").\nexport const parseContact = (line: string): Contact => {\n  const parts = line.split(',').map((part) => part.trim()).filter((part) => part !== '')\n  let phoneAt = -1\n  for (let i = parts.length - 1; i >= 0 && phoneAt < 0; i--) {\n    if (isPhone(parts[i])) phoneAt = i\n  }\n  let phone = phoneAt >= 0 ? parts[phoneAt] : ''\n  const rest = parts.filter((_, i) => i !== phoneAt)\n  if (!phone && rest.length > 0) {\n    const last = rest[rest.length - 1]\n    const trailing = /^(.*?)[\\s:]*(\\+?\\(?\\d[\\d\\s().\\-\\/]{4,}\\d)$/.exec(last)\n    if (trailing) {\n      phone = trailing[2]\n      if (trailing[1].trim()) rest[rest.length - 1] = trailing[1].trim()\n      else rest.pop()\n    }\n  }\n  return { name: rest[0] ?? '', relation: rest.slice(1).join(', '), phone, tel: telOf(phone) }\n}\n\nexport const parseContacts = (value: unknown): Contact[] => linesOf(value).map(parseContact)\n\n// The card from the scene's state. A field that is empty shows nothing.\nexport const cardOf = (state: Record<string, any>): Card => {\n  const name = textOf(state.name)\n  const facts: { label: string; value: string }[] = []\n  const born = textOf(state.born)\n  if (born) facts.push({ label: 'Born', value: born })\n  const blood = textOf(state.bloodType)\n  if (blood) facts.push({ label: 'Blood type', value: blood })\n  const donor = textOf(state.organDonor)\n  if (donor) facts.push({ label: 'Organ donor', value: donor })\n  const sections: Section[] = []\n  for (const { key, label } of SECTIONS) {\n    if (key === 'contacts') {\n      const contacts = parseContacts(state.contacts)\n      if (contacts.length > 0) sections.push({ key, label, lines: [], contacts })\n      continue\n    }\n    const lines = linesOf(state[key])\n    if (lines.length > 0) sections.push({ key, label, lines, loud: key === 'allergies' })\n  }\n  const title = textOf(state.title) || DEFAULT_TITLE\n  // The emergency number shows unless it is cleared; 112 until it is set.\n  const number = state.emergencyNumber === undefined || state.emergencyNumber === null ? DEFAULT_NUMBER : textOf(state.emergencyNumber)\n  return { title, number, name, facts, sections, empty: !name && facts.length === 0 && sections.length === 0 }\n}\n",
+          "fit.ts": "// How large the card's type can be: the largest body size at which every\n// section fits the panel, measured with the frame's own typesetting\n// (frameos.measureText), with no word broken across two lines and every\n// phone number on one. app.tsx draws with exactly the sizes, classes and\n// widths worked out here.\nimport type { Card, Contact, Section } from './card'\n\n// A text size and its line height as classes: what is measured is what is drawn.\nexport const lineHeight = (size: number) => Math.round(size * 1.2)\nexport const textClass = (size: number, weight = '') =>\n  `text-[${size}px] leading-[${lineHeight(size)}px]${weight ? ` ${weight}` : ''}`\nexport const lineHeightOf = (className: string): number => Number(/leading-\\[(\\d+)px\\]/.exec(className)?.[1] ?? 0)\n\nexport type Sizes = {\n  f: number\n  body: string\n  bold: string\n  label: string\n  loud: string\n  name: string\n  phone: string\n  labelGap: number\n  lineGap: number\n  sectionGap: number\n  contactGap: number\n  boxPad: number\n  border: number\n  icon: number\n  qrGap: number\n}\n\n// Every size on the card from the body size f.\nexport const sizesFor = (f: number): Sizes => {\n  const label = Math.min(f, Math.max(10, Math.round(f * 0.7)))\n  return {\n    f,\n    body: textClass(f),\n    bold: textClass(f, 'font-bold'),\n    label: textClass(label, 'font-bold'),\n    loud: textClass(Math.round(f * 1.2), 'font-bold'),\n    name: textClass(Math.round(f * 1.45), 'font-bold'),\n    phone: textClass(Math.round(f * 1.15), 'font-bold'),\n    labelGap: Math.max(1, Math.round(f * 0.15)),\n    lineGap: Math.round(f * 0.1),\n    sectionGap: Math.round(f * 0.8),\n    contactGap: Math.round(f * 0.5),\n    boxPad: Math.round(f * 0.45),\n    border: Math.max(2, Math.round(f * 0.18)),\n    icon: lineHeight(label),\n    qrGap: Math.round(f * 0.6),\n  }\n}\n\n// Texts to measure, each set in a class list at a width.\ntype Ask = { text: string; cls: string; width: number }\n\n// The frame's typesetting, one call per class list and width; a runtime\n// without it (before FrameOS 2026.11.12) gets a careful estimate.\nconst measure = (asks: Ask[]): number[] => {\n  const heights: number[] = new Array(asks.length).fill(0)\n  const groups = new Map<string, number[]>()\n  asks.forEach((ask, i) => {\n    const key = `${ask.cls}|${ask.width}`\n    const list = groups.get(key)\n    if (list) list.push(i)\n    else groups.set(key, [i])\n  })\n  const native = typeof frameos !== 'undefined' && typeof frameos.measureText === 'function'\n  for (const list of groups.values()) {\n    const { cls: className, width } = asks[list[0]]\n    const texts = list.map((i) => asks[i].text)\n    const got = native ? frameos.measureText(texts, { className, width: Math.max(1, Math.floor(width)) }) : null\n    list.forEach((i, j) => {\n      heights[i] = got && typeof got[j] === 'number' ? got[j] : estimate(texts[j], className, width)\n    })\n  }\n  return heights\n}\n\nconst estimate = (text: string, className: string, width: number): number => {\n  const size = Number(/text-\\[(\\d+)px\\]/.exec(className)?.[1] ?? 16)\n  const perLine = Math.max(1, Math.floor(width / (size * 0.62)))\n  let lines = 1\n  let used = 0\n  for (const word of text.split(' ')) {\n    const n = word.length + (used > 0 ? 1 : 0)\n    if (used > 0 && used + n > perLine) {\n      lines += 1 + Math.floor(word.length / perLine)\n      used = word.length % perLine\n    } else used += n\n  }\n  return lines * lineHeightOf(className)\n}\n\n// Whether a text set at a size stays on one line of a width.\nexport const fitsLine = (text: string, width: number, size: number, weight = 'font-bold'): boolean => {\n  const className = textClass(size, weight)\n  return width > 0 && measure([{ text, cls: className, width }])[0] <= lineHeightOf(className)\n}\n\n// The size, from start down to min, at which a text stays on one line.\nexport const fitLine = (text: string, width: number, start: number, min: number, weight = 'font-bold'): number => {\n  for (let size = start; size > min; size -= Math.max(1, Math.round(size * 0.06))) {\n    if (fitsLine(text, width, size, weight)) return size\n  }\n  return min\n}\n\n// The longest words of a text: each must fit on a line of its own.\nconst longWords = (text: string, count = 3): string[] =>\n  Array.from(new Set(text.split(' ').filter((word) => word.length > 4)))\n    .sort((a, b) => b.length - a.length)\n    .slice(0, count)\n\n// A contact's first line: its name and how they are related.\nexport const nameLine = (contact: Contact): string =>\n  contact.name && contact.relation ? `${contact.name} (${contact.relation})` : contact.name || contact.relation\n\n// The words under a contact's QR code in a row of them: the first name, with\n// a title before it (\"Dr. Jo\"), else the relation.\nexport const captionOf = (contact: Contact, j: number): string => {\n  const words = contact.name.split(' ').filter((word) => word !== '')\n  const titles = words.findIndex((word) => !word.endsWith('.'))\n  if (titles >= 0) return words.slice(0, titles + 1).join(' ')\n  return contact.relation || `Contact ${j + 1}`\n}\n\n// The person's line under the name: born, blood type, organ donor.\nexport const factsLine = (card: Card): string => card.facts.map((fact) => `${fact.label}: ${fact.value}`).join(' · ')\n\nexport const dropNote = (dropped: string[]) => `No room on this screen for: ${dropped.join(', ')}`\n\n// What there is room for: the width, the height under the header, one column\n// or two, the QR codes' side (0 for none) and which contacts have one.\nexport type Room = {\n  width: number\n  height: number\n  twoColumns: boolean\n  columnGap: number\n  qr: number\n  qrRows: boolean[]\n}\n\n// Where the contacts' QR codes go: beside each contact, in a row under the\n// list (each with the contact's name under it), or nowhere.\nexport type QrPlace = 'beside' | 'below' | 'none'\n\nexport type Plan = {\n  sizes: Sizes\n  columns: Section[][]\n  columnWidth: number\n  // The QR codes' side and where they go.\n  qr: number\n  place: QrPlace\n  fits: boolean\n  dropped: string[]\n}\n\n// Whether contact j gets a QR code: it has a number, and the scene made one.\nexport const hasQr = (room: Room, qr: number, contact: Contact, j: number) => qr > 0 && !!contact.tel && !!room.qrRows[j]\n\n// The width of a contact's words: the column, less a QR code's room beside it.\nexport const contactWords = (place: QrPlace, qr: number, column: number, s: Sizes) =>\n  place === 'beside' ? column - qr - s.qrGap : column\n\n// The heights of the person, each section, and the note of what was left\n// out, at the sizes s; whether every long word and phone stays whole; and\n// where the QR codes go.\nconst heightsAt = (card: Card, sections: Section[], s: Sizes, full: number, column: number, room: Room, qr: number, dropped: string[]) => {\n  const asks: Ask[] = []\n  // What must stay on one line: for every arrangement (\"\"), or only for one.\n  const checks: { at: number; place: string }[] = []\n  const ask = (text: string, className: string, width: number, place = '', oneLine = false) => {\n    asks.push({ text, cls: className, width })\n    const at = asks.length - 1\n    if (oneLine) checks.push({ at, place })\n    else {\n      for (const word of longWords(text)) {\n        asks.push({ text: word, cls: className, width })\n        checks.push({ at: asks.length - 1, place })\n      }\n    }\n    return at\n  }\n  const name = card.name ? ask(card.name, s.name, full) : -1\n  const facts = card.facts.length ? ask(factsLine(card), s.bold, full) : -1\n  const note = dropped.length ? ask(dropNote(dropped), s.label, full) : -1\n  type Row = { name: number; phone: number }\n  const rowsAt = (contacts: Contact[], width: number, place: string): Row[] =>\n    contacts.map((contact) => {\n      const line = nameLine(contact)\n      return {\n        name: line ? ask(line, s.bold, width, place) : -1,\n        phone: contact.phone ? ask(contact.phone, s.phone, width, place, true) : -1,\n      }\n    })\n  const per = sections.map((section) => {\n    const inner = section.loud ? column - 2 * s.border - 2 * s.boxPad : column\n    const label = ask(section.label.toUpperCase(), s.label, inner - (section.loud ? s.icon + 2 * s.labelGap : 0))\n    const lines = section.contacts ? [] : section.lines.map((line) => ask(line, section.loud ? s.loud : s.body, inner))\n    const withQr = section.contacts ? section.contacts.map((contact, j) => hasQr(room, qr, contact, j)) : []\n    const anyQr = withQr.some((on) => on)\n    const plain = section.contacts ? rowsAt(section.contacts, column, 'plain') : []\n    const beside = section.contacts && anyQr ? rowsAt(section.contacts, column - qr - s.qrGap, 'beside') : []\n    return { label, lines, withQr, anyQr, plain, beside }\n  })\n  const got = measure(asks)\n  const whole = (place: string) => checks.every((check) => (check.place !== '' && check.place !== place) || got[check.at] <= lineHeightOf(asks[check.at].cls))\n  const rowHeight = (row: Row) => (row.name >= 0 ? got[row.name] : 0) + (row.phone >= 0 ? got[row.phone] : 0)\n  let unbroken = whole('')\n  let place: QrPlace = 'none'\n  const personHeight = (name >= 0 ? got[name] : 0) + (facts >= 0 ? got[facts] + (name >= 0 ? s.lineGap : 0) : 0)\n  const heights = per.map((p, i) => {\n    let h = got[p.label] + s.labelGap\n    p.lines.forEach((at, j) => {\n      h += got[at] + (j > 0 ? s.lineGap : 0)\n    })\n    if (sections[i].loud) h += 2 * s.border + 2 * s.boxPad\n    if (!sections[i].contacts) return h\n    // The contacts: the list alone, with a row of QR codes under it, or with\n    // each code beside its contact, whichever is shortest.\n    const gaps = (p.plain.length - 1) * s.contactGap\n    const list = p.plain.reduce((sum, row) => sum + rowHeight(row), 0) + gaps\n    const options: { place: QrPlace; height: number }[] = []\n    if (whole('plain')) options.push({ place: 'none', height: list })\n    if (p.anyQr) {\n      const codes = p.withQr.filter((on) => on).length\n      if (whole('plain') && codes * qr + (codes - 1) * s.qrGap <= column) {\n        options.push({ place: 'below', height: list + s.contactGap + qr + s.labelGap + lineHeightOf(s.label) })\n      }\n      if (whole('beside')) {\n        const height = p.beside.reduce((sum, row, j) => sum + Math.max(rowHeight(row), p.withQr[j] ? qr : 0), 0) + gaps\n        options.push({ place: 'beside', height })\n      }\n    }\n    const withCodes = options.filter((option) => option.place !== 'none')\n    const best = (withCodes.length ? withCodes : options).reduce((a, b) => (b.height < a.height ? b : a), { place: 'none' as QrPlace, height: Infinity })\n    if (best.height === Infinity) {\n      unbroken = false\n      return h + list\n    }\n    place = best.place\n    return h + best.height\n  })\n  return { personHeight, heights, noteHeight: note >= 0 ? got[note] : 0, unbroken, place }\n}\n\n// The sections in two columns. Read down the left one and then the right,\n// split where the taller of the two is shortest: the allergies and the\n// contacts usually on the left, the rest on the right. When that leaves one\n// column much taller (a contact list with QR codes), each section goes into\n// the column that is shorter so far instead, each column still in the\n// card's order.\nconst intoColumns = (sections: Section[], heights: number[], gap: number) => {\n  const stack = (from: number, to: number) =>\n    heights.slice(from, to).reduce((sum, h, i) => sum + h + (i > 0 ? gap : 0), 0)\n  let split = 1\n  let height = Infinity\n  for (let k = 1; k < sections.length; k++) {\n    const taller = Math.max(stack(0, k), stack(k, sections.length))\n    if (taller < height) {\n      height = taller\n      split = k\n    }\n  }\n  const balanced: Section[][] = [[], []]\n  const used = [0, 0]\n  sections.forEach((section, i) => {\n    const c = used[1] < used[0] ? 1 : 0\n    used[c] += (balanced[c].length ? gap : 0) + heights[i]\n    balanced[c].push(section)\n  })\n  const even = Math.max(used[0], used[1])\n  if (even < height * 0.92) return { columns: balanced, height: even }\n  return { columns: [sections.slice(0, split), sections.slice(split)], height }\n}\n\n// The card at body size f: its columns, and whether it fits the room.\nconst layoutAt = (card: Card, sections: Section[], f: number, room: Room, qr: number, dropped: string[]) => {\n  const s = sizesFor(f)\n  const two = room.twoColumns && sections.length > 1\n  const columnWidth = two ? Math.floor((room.width - room.columnGap) / 2) : room.width\n  const measured = heightsAt(card, sections, s, room.width, columnWidth, room, qr, dropped)\n  let columns: Section[][] = [sections]\n  let body = measured.heights.reduce((sum, h, i) => sum + h + (i > 0 ? s.sectionGap : 0), 0)\n  if (two) {\n    const split = intoColumns(sections, measured.heights, s.sectionGap)\n    columns = split.columns\n    body = split.height\n  }\n  const parts = [measured.personHeight, body, measured.noteHeight].filter((h) => h > 0)\n  const total = parts.reduce((sum, h) => sum + h, 0) + Math.max(0, parts.length - 1) * s.sectionGap\n  return { sizes: s, columns, columnWidth, place: measured.place, fits: measured.unbroken && total <= room.height }\n}\n\n// The largest body size from lo to hi at which the card fits; lo when none does.\nconst largest = (card: Card, sections: Section[], room: Room, qr: number, lo: number, hi: number, dropped: string[]) => {\n  let best = lo\n  let fits = false\n  let a = lo\n  let b = hi\n  while (a <= b) {\n    const mid = (a + b) >> 1\n    if (layoutAt(card, sections, mid, room, qr, dropped).fits) {\n      best = mid\n      fits = true\n      a = mid + 1\n    } else b = mid - 1\n  }\n  return { f: best, fits }\n}\n\n// The card's plan for the room: the largest type that fits, from `lo` up,\n// with the QR codes while they cost the type little (or the type stays\n// large anyway); when even `lo` does not fit, the last sections left out\n// (never the allergies or the contacts) and named at the bottom, and only\n// then type smaller than `lo`, down to `least`.\nexport const planCard = (card: Card, room: Room, least: number, lo: number, hi: number): Plan => {\n  let sections = card.sections\n  const dropped: string[] = []\n  let qr = room.qr\n  let found = largest(card, sections, room, 0, lo, hi, dropped)\n  if (qr > 0) {\n    const tried = largest(card, sections, room, qr, lo, hi, dropped)\n    if (tried.fits && tried.f >= 14 && (tried.f >= found.f * 0.85 || tried.f >= 24)) found = tried\n    else qr = 0\n  }\n  while (!found.fits && sections.length > 0) {\n    const last = sections[sections.length - 1]\n    if (last.loud || last.contacts) break\n    dropped.unshift(last.label)\n    sections = sections.slice(0, -1)\n    found = largest(card, sections, room, qr, lo, hi, dropped)\n  }\n  if (!found.fits && least < lo) found = largest(card, sections, room, qr, least, lo - 1, dropped)\n  const done = layoutAt(card, sections, found.f, room, qr, dropped)\n  const place = qr > 0 ? done.place : 'none'\n  return { sizes: done.sizes, columns: done.columns, columnWidth: done.columnWidth, qr: place === 'none' ? 0 : qr, place, fits: found.fits, dropped }\n}\n",
+          "app.test.ts": "import { get } from './app'\nimport { cardOf, parseContact, parseContacts, telOf } from './card'\nimport { captionOf, nameLine } from './fit'\n\n// Everything a drawn tree says, as one text, and every element of a kind.\nconst textIn = (node: any): string => {\n  if (node === null || node === undefined || typeof node === 'boolean') return ''\n  if (typeof node === 'string' || typeof node === 'number') return String(node)\n  if (Array.isArray(node)) return node.map(textIn).join('')\n  return textIn(node.props?.children)\n}\nconst elementsIn = (node: any, type: string, found: any[] = []): any[] => {\n  if (!node || typeof node !== 'object') return found\n  if (Array.isArray(node)) {\n    node.forEach((child) => elementsIn(child, type, found))\n    return found\n  }\n  if (node.type === type) found.push(node)\n  elementsIn(node.props?.children, type, found)\n  return found\n}\n\nconst FILLED = {\n  title: 'In case of emergency',\n  emergencyNumber: '112',\n  name: 'Alex Example',\n  born: '4 May 1980',\n  allergies: 'Penicillin\\nPeanuts',\n  contacts: 'Sam Example, partner, +32 470 12 34 56\\nRobin Example, sister, 0470 98 76 54',\n  conditions: 'Type 1 diabetes',\n  medications: 'Insulin, with meals',\n  bloodType: 'O+',\n  organDonor: 'Yes',\n  doctor: 'Dr. Lee, 02 555 01 00',\n  notes: 'Spare key with the neighbor at number 12',\n}\n\nconst qrRef = (id: number) => ({ __frameosType: 'imageRef', id, width: 72, height: 72 })\n\ndescribe('a contact line', () => {\n  it('reads name, relation and phone', () => {\n    expect(parseContact('Sam Example, partner, +32 470 12 34 56')).toEqual({\n      name: 'Sam Example', relation: 'partner', phone: '+32 470 12 34 56', tel: 'tel:+32470123456',\n    })\n  })\n\n  it('takes the phone where it is, and keeps the rest as the relation', () => {\n    expect(parseContact('Dr. Lee, 555-0100')).toEqual({ name: 'Dr. Lee', relation: '', phone: '555-0100', tel: 'tel:5550100' })\n    expect(parseContact('Kim, neighbor, upstairs, (555) 010-0199')).toEqual({\n      name: 'Kim', relation: 'neighbor, upstairs', phone: '(555) 010-0199', tel: 'tel:5550100199',\n    })\n    expect(parseContact('+1 (555) 010-0199, Jo, brother').tel).toBe('tel:+15550100199')\n    expect(parseContact('+1 (555) 010-0199, Jo, brother').name).toBe('Jo')\n  })\n\n  it('finds a number at the end of a line with no commas', () => {\n    expect(parseContact('Jamie Example 0470 12 34 56')).toEqual({\n      name: 'Jamie Example', relation: '', phone: '0470 12 34 56', tel: 'tel:0470123456',\n    })\n    expect(parseContact('+44 20 7946 0000')).toEqual({ name: '', relation: '', phone: '+44 20 7946 0000', tel: 'tel:+442079460000' })\n  })\n\n  it('leaves a line without a number as a name', () => {\n    expect(parseContact('Neighbor Kim, flat 2')).toEqual({ name: 'Neighbor Kim', relation: 'flat 2', phone: '', tel: '' })\n  })\n\n  it('is named under its QR code by first name, a title kept', () => {\n    expect(captionOf(parseContact('Sam Example, partner, 555 0100'), 0)).toBe('Sam')\n    expect(captionOf(parseContact('Dr. Jo Sample, family doctor, 02 555 01 00'), 1)).toBe('Dr. Jo')\n    expect(captionOf(parseContact('+44 20 7946 0000'), 2)).toBe('Contact 3')\n    expect(nameLine(parseContact('Sam Example, partner, 555 0100'))).toBe('Sam Example (partner)')\n  })\n\n  it('skips empty lines and extra space', () => {\n    const contacts = parseContacts('  Sam ,  partner , 555 0100 \\r\\n\\r\\n\\n Robin, 555 0101  ')\n    expect(contacts.map((c) => c.name)).toEqual(['Sam', 'Robin'])\n    expect(contacts[0].relation).toBe('partner')\n    expect(telOf(contacts[1].phone)).toBe('tel:5550101')\n  })\n})\n\ndescribe('the card', () => {\n  it('shows only what is filled, allergies first and loud', () => {\n    const card = cardOf({ allergies: 'Bee stings', notes: 'Has a dog', contacts: 'Sam, 555 0100', doctor: '' })\n    expect(card.sections.map((s) => s.key)).toEqual(['allergies', 'contacts', 'notes'])\n    expect(card.sections[0].loud).toBe(true)\n    expect(card.sections[2].loud).toBeFalsy()\n    expect(card.empty).toBe(false)\n  })\n\n  it('keeps the order a helper reads in, whatever is filled', () => {\n    const card = cardOf(FILLED)\n    expect(card.sections.map((s) => s.key)).toEqual(['allergies', 'contacts', 'conditions', 'medications', 'doctor', 'notes'])\n    expect(card.sections[0].lines).toEqual(['Penicillin', 'Peanuts'])\n    expect(card.facts.map((f) => f.label)).toEqual(['Born', 'Blood type', 'Organ donor'])\n  })\n\n  it('is empty with nothing filled, and keeps 112 and the title until they are changed', () => {\n    const card = cardOf({ title: '', name: '  ', allergies: '\\n' })\n    expect(card.empty).toBe(true)\n    expect(card.title).toBe('In case of emergency')\n    expect(card.number).toBe('112')\n    expect(cardOf({ emergencyNumber: '' }).number).toBe('')\n    expect(cardOf({ emergencyNumber: '911', name: 'Alex' }).number).toBe('911')\n    // The title and the number alone are no card.\n    expect(cardOf({ emergencyNumber: '911', title: 'ICE' }).empty).toBe(true)\n  })\n})\n\ndescribe('drawing it', () => {\n  it('says how to fill it in when it is empty', () => {\n    const app = makeApp({ state: { title: 'In case of emergency', emergencyNumber: '112' } })\n    const text = textIn(get(app, makeContext()))\n    expect(text).toContain(\"Open the scene's settings to fill in this card\")\n    expect(text).toContain('112')\n    expect(text).not.toContain('ALLERGIES')\n  })\n\n  it('draws the filled card, its phones as links and its QR codes beside them', () => {\n    const app = makeApp({ state: FILLED, config: { qr1: qrRef(1), qr2: qrRef(2), qr3: qrRef(3) } })\n    const tree = get(app, makeContext())\n    const text = textIn(tree)\n    expect(text).toContain('ALLERGIES')\n    expect(text).toContain('Penicillin')\n    expect(text).toContain('Alex Example')\n    expect(text).not.toContain('Open the scene')\n    const links = elementsIn(tree, 'a').map((a) => a.props.href)\n    expect(links).toEqual(['tel:112', 'tel:+32470123456', 'tel:0470987654'])\n    expect(elementsIn(tree, 'img').map((img) => img.props.src.id)).toEqual([1, 2])\n    // The allergies come before the contacts.\n    expect(text.indexOf('Penicillin')).toBeLessThan(text.indexOf('Sam Example'))\n  })\n\n  it('leaves the QR codes out on a small panel, and on a round one', () => {\n    const small = makeApp({ state: FILLED, config: { qr1: qrRef(1), qr2: qrRef(2) }, frame: { width: 240, height: 320 } })\n    const smallTree = get(small, makeContext())\n    expect(elementsIn(smallTree, 'img').length).toBe(0)\n    expect(textIn(smallTree)).toContain('Penicillin')\n    const round = makeApp({ state: FILLED, config: { qr1: qrRef(1) }, frame: { width: 466, height: 466 } })\n    const roundTree = get(round, makeContext({ round: true }))\n    expect(elementsIn(roundTree, 'img').length).toBe(0)\n    expect(textIn(roundTree)).toContain('EMERGENCY')\n    expect(elementsIn(roundTree, 'a').map((a) => a.props.href)).toContain('tel:+32470123456')\n  })\n\n  it('names what had no room rather than cutting it off', () => {\n    const lots = { ...FILLED, notes: Array.from({ length: 40 }, (_, i) => `Note line ${i + 1} about the house`).join('\\n') }\n    const app = makeApp({ state: lots, frame: { width: 480, height: 800 } })\n    const text = textIn(get(app, makeContext()))\n    expect(text).toContain('No room on this screen for: Notes')\n    expect(text).not.toContain('Note line 1 ')\n    expect(text).toContain('Penicillin')\n    expect(text).toContain('Type 1 diabetes')\n    // A small screen keeps the allergies and the contacts first.\n    const small = makeApp({ state: lots, frame: { width: 240, height: 320 } })\n    const smallText = textIn(get(small, makeContext()))\n    expect(smallText).toMatch(/No room on this screen for: .*Notes$/)\n    expect(smallText).toContain('Penicillin')\n    expect(smallText).toContain('0470 98 76 54')\n  })\n})\n"
+        }
+      }
+    }
+  }
+]

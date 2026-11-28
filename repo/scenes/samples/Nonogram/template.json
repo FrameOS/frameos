@@ -1,0 +1,10 @@
+{
+  "name": "Nonogram",
+  "description": "A daily nonogram (picross), the same puzzle on every frame each day: fill the squares the numbers ask for and a picture appears. Tap a square to fill it, again for an X, again to clear it, or play with the frame's buttons. 5x5, 10x10 or 15x15, each with one solution you can reach without guessing. Today's progress is kept, and a new puzzle comes at midnight.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
