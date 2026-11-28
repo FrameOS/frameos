@@ -280,6 +280,14 @@ describe("GET /api/store/device/scenes", () => {
       slug: "weather",
       title: "Weather",
     });
+    expect(page1.categories.find((category) => category.slug === "video")).toEqual({ slug: "video", title: "Video" });
+    // An ESP32 plays no video: its store has no Video shelf, which would always be empty.
+    const esp32 = (await (await getDeviceStore(get("/api/store/device/scenes?categories=1&without=linux,video"))).json()) as {
+      categories: { slug: string }[];
+    };
+    expect(esp32.categories.map((category) => category.slug)).toEqual(
+      page1.categories.map((category) => category.slug).filter((slug) => slug !== "video"),
+    );
 
     const second = (await (await getDeviceStore(get("/api/store/device/scenes?page=2"))).json()) as {
       categories?: unknown;

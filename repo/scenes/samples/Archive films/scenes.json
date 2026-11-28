@@ -3,7 +3,7 @@
     "id": "archive-films",
     "name": "Archive films",
     "settings": {
-      "category": "Art & galleries",
+      "category": "Video",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",

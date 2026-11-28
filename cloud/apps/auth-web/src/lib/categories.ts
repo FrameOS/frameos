@@ -28,6 +28,10 @@ export type StoreCategory = {
   // Only a scene that names it (settings.category) or its owner files it
   // here: the classifier is never offered it (store-classify.ts).
   statedOnly?: boolean;
+  // What every scene on the shelf needs of a frame (sceneNeeds.ts): a frame's
+  // store that says it lacks it (`without=video` on an ESP32) is not offered
+  // the shelf, which would always be empty there (storeDeviceCategories).
+  needs?: string;
 };
 
 export const storeCategories: StoreCategory[] = [
@@ -46,6 +50,15 @@ export const storeCategories: StoreCategory[] = [
       "Curated image collections that rotate on a schedule, no configuration needed.",
     hint: "a bundled, curated collection of artwork or themed images that ships with the scene and rotates through them",
     kind: "scene",
+  },
+  {
+    slug: "video",
+    title: "Video",
+    description:
+      "Films and video clips on the frame: your own videos, Immich, old films from the Internet Archive and a film slowed down for e-paper. Plays on a Raspberry Pi.",
+    hint: "plays films or video clips, or shows a video's frames: a folder of videos, a photo service's videos (Immich), films from an archive, a film slowed down to a still every few minutes (a live camera feed is a tool)",
+    kind: "scene",
+    needs: "video",
   },
   {
     slug: "clocks",

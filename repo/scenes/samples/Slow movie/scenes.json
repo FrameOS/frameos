@@ -3,7 +3,7 @@
     "id": "slow-movie",
     "name": "Slow movie",
     "settings": {
-      "category": "Art & galleries",
+      "category": "Video",
       "execution": "interpreted",
       "refreshInterval": 180,
       "backgroundColor": "#000000",
