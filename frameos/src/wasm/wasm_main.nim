@@ -1144,10 +1144,13 @@ proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
     # handlers are the last render's (ui/events.nim), and a plane renders in
     # a fresh process that has drawn nothing yet. So a pull carrying pointer
     # events draws the scene once first and throws that picture away (found
-    # on the bench: a tap on the scene switcher's tile did nothing).
+    # on the bench: a tap on the scene switcher's tile did nothing). Keys and
+    # the frame's buttons reach the UI the same way, through its ring of
+    # elements (docs/jsx-ui.md "Keys"): a Next or an Action press relayed into
+    # a fresh process found no ring and did nothing.
     if not renderedThisProcess:
       for event in events:
-        if event.name.startsWith("pointer"):
+        if eventPolicy(event.name).device in {edPointer, edKeyboard, edButton}:
           discard frameos_wasm_render_guarded()
           break
     for event in events:
