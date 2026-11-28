@@ -1544,6 +1544,14 @@ def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
 # column: losing it costs one whole-set pull (a patch is only ever a saving).
 SERVED_SCENES_KEY = "frame:{}:embedded_served_scenes"
 SERVED_SCENES_TTL_SECONDS = 30 * 24 * 3600
+# The sets served last, newest first, each by its ETag: a pull is answered the
+# same way however often it is made. A board that had no room on /state for
+# the first answer asks again from the same base to read it in memory, sized
+# by that answer (fos_scenes.c `held`); with only the newest set remembered,
+# the first answer had already moved it, the second was the whole list,
+# bigger than the board made room for, and it refused the set (the SenseCAP's
+# layout push, 2026-11-28).
+SERVED_SETS_KEPT = 4
 # The ESP32 scene store's slot files (FOS_SCENE_STORE_SLOTS in
 # embedded/esp32/main/fos_scene_store.h; the cloud's esp32SceneStoreSlots in
 # scenes-patch.ts): test_embedded_scenes_patch_slots.py reads both. 256 from
@@ -1575,14 +1583,11 @@ async def _embedded_scenes_patch(redis, frame: Frame, payload: bytes, if_none_ma
     if redis is None:
         return None
     try:
-        raw = await redis.get(SERVED_SCENES_KEY.format(int(frame.id)))
-        served = json.loads(raw) if raw else None
+        sets = _served_sets(await redis.get(SERVED_SCENES_KEY.format(int(frame.id))))
     except Exception:
         return None
-    if not isinstance(served, dict) or served.get("etag") != if_none_match:
-        return None
-    hashes = served.get("hashes")
-    if not isinstance(hashes, dict):
+    hashes = next((served["hashes"] for served in sets if served["etag"] == if_none_match), None)
+    if hashes is None:
         return None
     scenes = json.loads(payload)
     ids = [scene.get("id") for scene in scenes if isinstance(scene, dict)]
@@ -1607,9 +1612,24 @@ async def _embedded_scenes_patch(redis, frame: Frame, payload: bytes, if_none_ma
     ).encode("utf-8")
 
 
+def _served_sets(raw) -> list[dict]:
+    """What `_remember_served_scenes` kept: `{"sets": [{etag, hashes}, ...]}`,
+    or one `{etag, hashes}` as a backend before 2026.11.17 kept it."""
+    served = json.loads(raw) if raw else None
+    if not isinstance(served, dict):
+        return []
+    listed = served.get("sets")
+    sets: list = listed if isinstance(listed, list) else [served]
+    return [
+        item for item in sets
+        if isinstance(item, dict) and isinstance(item.get("etag"), str) and isinstance(item.get("hashes"), dict)
+    ]
+
+
 async def _remember_served_scenes(redis, frame: Frame, payload: bytes, etag: str) -> None:
     if redis is None:
         return
+    key = SERVED_SCENES_KEY.format(int(frame.id))
     try:
         scenes = json.loads(payload)
         hashes = {
@@ -1617,11 +1637,12 @@ async def _remember_served_scenes(redis, frame: Frame, payload: bytes, etag: str
             for scene in scenes
             if isinstance(scene, dict) and isinstance(scene.get("id"), str)
         }
-        await redis.set(
-            SERVED_SCENES_KEY.format(int(frame.id)),
-            json.dumps({"etag": etag, "hashes": hashes}, separators=(",", ":")),
-            ex=SERVED_SCENES_TTL_SECONDS,
-        )
+        try:
+            kept = [item for item in _served_sets(await redis.get(key)) if item["etag"] != etag]
+        except Exception:
+            kept = []
+        sets = [{"etag": etag, "hashes": hashes}, *kept][:SERVED_SETS_KEPT]
+        await redis.set(key, json.dumps({"sets": sets}, separators=(",", ":")), ex=SERVED_SCENES_TTL_SECONDS)
     except Exception:
         return
 

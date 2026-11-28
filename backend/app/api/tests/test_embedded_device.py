@@ -1024,6 +1024,59 @@ async def test_scenes_patch_sends_only_what_changed(async_client, no_auth_client
 
 
 @pytest.mark.asyncio
+async def test_a_pull_made_again_gets_the_same_answer(async_client, no_auth_client, db, redis):
+    """A board with no room on /state for an answer asks again from the same
+    base, to read it in memory sized by the first answer (fos_scenes.c
+    `held`). The second answer must be the first one: when serving the first
+    moved what the backend remembered, the second was the whole list, bigger
+    than the board made room for, and it refused the set (the SenseCAP's
+    layout push, 2026-11-28)."""
+    frame = await device_frame(async_client, db)
+    a = {'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}
+    b = {'id': 'b', 'name': 'B', 'nodes': [], 'edges': []}
+    c = {'id': 'c', 'name': 'C', 'nodes': [], 'edges': []}
+    frame.scenes = [a, b, c]
+    db.commit()
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+    held = (await no_auth_client.get(url, headers=auth(frame))).headers['etag']
+
+    frame.scenes = [a, {**b, 'name': 'B laid out'}, c]
+    db.commit()
+    first = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': held})
+    again = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': held})
+    assert first.json()['patch'] is True
+    assert again.content == first.content
+    assert again.headers['etag'] == first.headers['etag']
+
+    # The set changes again before the board took either: still a patch
+    # against what it holds, and against the set it was served in between.
+    frame.scenes = [{**a, 'name': 'A laid out'}, {**b, 'name': 'B laid out'}, c]
+    db.commit()
+    later = (await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': held})).json()
+    assert later['patch'] is True and later['base'] == held
+    assert [item['name'] for item in later['put']] == ['A laid out', 'B laid out']
+    between = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': first.headers['etag']})
+    assert [item['name'] for item in between.json()['put']] == ['A laid out']
+
+
+@pytest.mark.asyncio
+async def test_what_a_backend_before_kept_still_patches(async_client, no_auth_client, db, redis):
+    """One remembered set, as a backend before 2026.11.17 kept it: the pull
+    after an upgrade is still a patch."""
+    from app.api.embedded_device import SERVED_SCENES_KEY, _scene_hash
+
+    frame = await device_frame(async_client, db)
+    a = {'id': 'a', 'name': 'A', 'nodes': [], 'edges': []}
+    frame.scenes = [a, {'id': 'b', 'name': 'B2', 'nodes': [], 'edges': []}]
+    db.commit()
+    await redis.set(SERVED_SCENES_KEY.format(frame.id),
+                    json.dumps({'etag': '"old"', 'hashes': {'a': _scene_hash(a), 'b': 'x'}}))
+    url = f'/api/frames/{frame.id}/embedded/scenes?patch=1'
+    body = (await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': '"old"'})).json()
+    assert body['patch'] is True and [item['name'] for item in body['put']] == ['B2']
+
+
+@pytest.mark.asyncio
 async def test_a_preview_patches_in_one_scene_and_keeps_the_list(async_client, no_auth_client, db, redis):
     """The editor's preview goes to an ESP32 as its saved scenes with the
     previewed one in them: one scene put, the list kept. Served alone, the
