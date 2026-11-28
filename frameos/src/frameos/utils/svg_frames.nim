@@ -93,6 +93,10 @@ type
     width*, height*, size*: int
     palette*: PixelPalette
     cells*: seq[uint8]
+    margin*: Option[Color]
+      ## The background the panel holds around a grid that stops short of
+      ## its edges, painted when this frame was written; none for a grid
+      ## that covers the panel.
 
 const MaxHeldPixelFrames = 4
   ## An LCD has three buffers; a panel change forgets them all anyway.

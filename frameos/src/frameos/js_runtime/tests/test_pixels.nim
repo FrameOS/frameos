@@ -70,12 +70,13 @@ proc render(app: App, config: JsonNode): Image =
     wholeFrame: false)
   app.runtime.get(app.owner, config, context).asImage()
 
-proc intoPanel(app: App, target: Image, config: JsonNode, generation: uint32 = 1): tuple[image: Image, stillOwed: bool] =
+proc intoPanel(app: App, target: Image, config: JsonNode, generation: uint32 = 1,
+    background = rgba(9, 9, 9, 255)): tuple[image: Image, stillOwed: bool] =
   ## One render of a panel buffer, the way the ESP32's render does it.
   let context = ExecutionContext(scene: app.scene, event: "render", payload: %*{},
     hasImage: true, image: target, loopIndex: 0, loopKey: ".", nextSleep: -1,
     decodeTargetImage: target, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
-    wholeFrame: true, backgroundPending: true, backgroundColor: rgba(9, 9, 9, 255).color)
+    wholeFrame: true, backgroundPending: true, backgroundColor: background.color)
   beginPanelFrame(target.bufferPointer, generation)
   let image = app.runtime.get(app.owner, config, context).asImage()
   endPanelFrame()
@@ -112,6 +113,25 @@ suite "frameos.pixels":
     check target[97, 30] == owedGray.as565 # the column it does not reach
     check target[50, 30] == black.as565
     check target[2, 2] == black.as565 # index 2, past a palette of two
+
+  test "a grid that stops short paints its margin once, then writes only the cells that differ":
+    # A panel no cell size divides (466 px: 58 cells of 8 are 464) owes its
+    # background every frame; the buffer already holds it in the margin.
+    forgetPanelFrames()
+    let app = newApp("tests/pixels-short-known")
+    let target = newImage565(100, 60)
+    discard app.intoPanel(target, %*{"cols": 19, "step": 0}) # every cell, and the margin
+    check target[97, 30] == owedGray.as565
+    target[50, 2] = poked
+    target[97, 31] = poked
+    discard app.intoPanel(target, %*{"cols": 19, "step": 0}) # nothing differs: nothing written
+    check target[50, 2] == poked.as565 and target[97, 31] == poked.as565
+    discard app.intoPanel(target, %*{"cols": 19, "step": 1}) # rows 4 and 5 only
+    check target[50, 2] == poked.as565 and target[50, 20] == red.as565
+    # Another background: the margin is not what the buffer holds, so all of it.
+    discard app.intoPanel(target, %*{"cols": 19, "step": 1}, background = rgba(30, 60, 90, 255))
+    check target[97, 31] == rgbx(30, 60, 90, 255).as565 and target[50, 2] == black.as565
+    check target[50, 20] == red.as565
 
   test "each panel buffer writes only the cells that differ from what it holds":
     forgetPanelFrames()
