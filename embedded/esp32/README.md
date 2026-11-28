@@ -72,6 +72,8 @@ main/                     boot orchestration + platform modules
   fos_assets_sd.c         SD card mount/probe/format for the assets root
   fos_assets_flash.c      the state partition's files: /srv/internal, and the assets root with no SD card in use
   fos_sd_probe.c          SD presence probe used by the assets layer
+  fos_sd_diskio.c         FatFS's disk driver for the card: a buffer in PSRAM moves 16 sectors a
+                          command through internal RAM, where IDF's moves it one sector a command
   fos_framebuffer.c       canvas allocation (RGB565, luma or 4-bit grey by panel) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
@@ -269,7 +271,11 @@ for the two Spectra boards most of the bench work runs on:
   the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
   `fos_assets_sd.c` joins the display's bus instead of opening SPI3
   (`fos_display_spi_bus_share`), the panel holds the bus for each refresh
-  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. The
+  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. MISO
+  does not read high between commands there, so the card is mounted with
+  `wait_for_miso = -1`: IDF's default waited 40 ms before every command,
+  which made a sector read 80 ms and a cloud upload 66 s a 256 KiB chunk
+  (3 s without it, 2026-11-28; `fos_assets_sd.c`). The
   socket is powered through GPIO16 (GPIO39 on the E1003) and has a
   card-detect contact on GPIO15 (`pwr=16,det=15` in the spec; an empty slot
   is reported without a bus probe). The green status LED (`led_pin 6` with

@@ -1287,6 +1287,13 @@ export const assetsLogic = kea<assetsLogicType>([
                   retries: isInFrameAdminMode() ? 0 : 2,
                   storage,
                   onProgress: (size) => updateProgress(size),
+                  // A chunk the frame has not acked within the request: say
+                  // so, so a slow card reads as slow and not as a hang.
+                  onWaiting: (waiting) =>
+                    updateProgress(
+                      task.lastReportedBytes - task.completedBytes,
+                      waiting ? `Waiting for the frame to save ${file.name}` : `Uploading ${file.name}`
+                    ),
                 })
               : await (async () => {
                   const formData = new FormData()

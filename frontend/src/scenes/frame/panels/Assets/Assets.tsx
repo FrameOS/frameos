@@ -12,6 +12,7 @@ import {
   type DiskStats,
   isThumbnailAssetName,
 } from './assetsLogic'
+import { deviceThumbnailMaxBytes, thumbnailSizeAllowed } from '../../../../utils/deviceThumbnails'
 import {
   DocumentIcon,
   ExclamationTriangleIcon,
@@ -19,6 +20,7 @@ import {
   EyeSlashIcon,
   FolderIcon,
   FolderOpenIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline'
 import {
   AdjustmentsHorizontalIcon,
@@ -158,6 +160,7 @@ function TreeNode({
   // five at once makes the whole panel slower than asking for one.
   const { frame } = useValues(frameLogic)
   const thumbnailConcurrency = isEsp32Frame(frame) ? 1 : undefined
+  const thumbnailMaxBytes = deviceThumbnailMaxBytes(isEsp32Frame(frame))
   const expansionPath = assetFolderExpansionPath(storage, node.path)
   const expansionKey = frameAssetFolderExpansionKey(frameId, expansionPath)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
@@ -385,6 +388,7 @@ function TreeNode({
   } else {
     // This is a file
     const hasThumbnail = hasAssetThumbnail(node.name)
+    const showsThumbnail = hasThumbnail && thumbnailSizeAllowed(node.size, thumbnailMaxBytes)
     const opensInline = opensAsBrowserImage(node.name)
     const isPlayableImage = nodeHasPlayableImages(node)
     const isUploading = node.mtime === -1
@@ -399,7 +403,15 @@ function TreeNode({
         onDragLeave={onDragLeave}
         onDrop={onDropFiles}
       >
-        {hasThumbnail &&
+        {hasThumbnail && !showsThumbnail && node.mtime !== undefined && node.mtime >= 0 ? (
+          <span
+            className="asset-file-thumb w-8 h-8 flex items-center justify-center"
+            title="No thumbnail: the frame would have to send the whole file. Open it to see it."
+          >
+            <PhotoIcon className="asset-row-icon h-5 w-5 shrink-0 frame-tool-muted" />
+          </span>
+        ) : null}
+        {showsThumbnail &&
           node.size !== undefined &&
           node.mtime !== undefined &&
           node.size >= 0 &&
@@ -408,6 +420,7 @@ function TreeNode({
             <div className="asset-file-thumb w-8 h-8">
               <DeferredImage
                 url={frameAssetUrl(frameId, node.path, { thumb: true, storage })}
+                maxConcurrent={thumbnailConcurrency}
                 className="frameos-card-media w-8 h-8 object-cover border rounded"
                 spinnerClassName="w-4 h-4"
               />

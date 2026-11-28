@@ -57,6 +57,13 @@ int main(void)
     check_u32(fos_upload_payload_timeout_ms(4u * 1024 * 1024, 921600), 118000, 122000,
               "faster link, shorter wait");
 
+    check(fos_upload_part_stale(10000, 10000), false, "a part written now is live");
+    check(fos_upload_part_stale(10000, 10000 - FOS_UPLOAD_PART_STALE_SECONDS + 1), false,
+          "a part just under the stale age is live");
+    check(fos_upload_part_stale(10000, 10000 - FOS_UPLOAD_PART_STALE_SECONDS), true,
+          "a part at the stale age goes");
+    check(fos_upload_part_stale(10000, 20000), false, "a part from the future is live");
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

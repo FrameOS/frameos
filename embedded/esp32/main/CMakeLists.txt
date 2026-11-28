@@ -77,6 +77,7 @@ idf_component_register(
         "fos_spiffs_gc.c"
         "fos_spiffs_footprint.c"
         "fos_sd_probe.c"
+        "fos_sd_diskio.c"
         "fos_sscanf.c"
         "fos_printf.c"
         "fos_cxx_new.c"
