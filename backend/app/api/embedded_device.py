@@ -1618,7 +1618,8 @@ def _served_sets(raw) -> list[dict]:
     served = json.loads(raw) if raw else None
     if not isinstance(served, dict):
         return []
-    sets = served.get("sets") if isinstance(served.get("sets"), list) else [served]
+    listed = served.get("sets")
+    sets: list = listed if isinstance(listed, list) else [served]
     return [
         item for item in sets
         if isinstance(item, dict) and isinstance(item.get("etag"), str) and isinstance(item.get("hashes"), dict)
