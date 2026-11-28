@@ -402,11 +402,12 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
     slot_config.host_id = host.slot;
     slot_config.gpio_cs = (gpio_num_t)config->assets_sd.cs;
     /* No wait for MISO to read high before each command. IDF's default polls
-     * it up to 40 ms and goes ahead anyway; on the reTerminal E1004 (the
-     * card on the panel's bus) MISO never reads high there, so EVERY command
+     * it up to 40 ms and goes ahead anyway; on the bench reTerminal E1004 (the
+     * card on the panel's bus) MISO never read high there, so EVERY command
      * waited 40 ms: a sector read took 80 ms, a 256 KiB file 42 s to read and
      * a cloud upload 66 s a chunk (2026-11-28; 5 s and 3 s without it). The
-     * card's real busy time after a write is still waited for, after the
+     * bench E1002's card does read high, and loses nothing without the wait.
+     * The card's real busy time after a write is still waited for, after the
      * write, by the driver's own poll. */
     slot_config.wait_for_miso = -1;
 
