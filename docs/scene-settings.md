@@ -65,7 +65,9 @@ several scenes stay open side by side, each with its own `from`, fields and
 edits. Save in one sets its scene's fields where that scene runs, in its window
 (`setSceneState` aimed at it), and the settings window stays open with the
 focus, its Save quiet until the next edit; Cancel goes back to its scene and
-closes only it. The
+closes only it. The code button opens the code editor in a window of its own
+and the settings window stays open beside it, as it is when another window is
+clicked. The
 frame page is one window, the plain `system/sceneSettings`: `sceneSettings
 {page: "frame"}` opens it over the scene in front, or over the scene whose
 settings are in front, and the gear in a scene's settings brings it forward
@@ -96,10 +98,11 @@ Commander from F4, the frame's from F1 and the clock.
 A gear left of Save opens the frame's own settings: **Frame settings**, where
 Cancel becomes Back and the gear stays lit. On a rectangular panel the gear and
 the code button beside it (docs/code-editor.md) are wider than they are tall,
-for a thumb, and both are on every page of the panel: the scene's, the frame's
-and a layout's (the gear lit on the last two, where it goes back to the
-scene's form; the code button opens the scene's code, on a layout's page the
-layout's). Back, the gear again, a key with
+for a thumb. The gear is on every page of the panel: the scene's, the frame's
+and a layout's (lit on the last two, where it goes back to the scene's form).
+The code button is on the scene's page, where it opens the scene's code, and
+on a layout's, where it opens the layout's; the frame page and its Service
+keys are the frame's and have none. Back, the gear again, a key with
 the role `back` and the frame's `back` (once any keyboard is away) go back to
 the scene's form with its edits kept; the swipe that opened the panel closes
 it from either page. `sceneSettings {page: "frame"}` (the tray of the Windows 98

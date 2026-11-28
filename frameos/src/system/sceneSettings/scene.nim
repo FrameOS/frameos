@@ -520,10 +520,11 @@ proc codeEditor(): string =
 
 proc codeOf(self: SceneSettingsScene, editor: string): string =
   ## The scene the header's code button opens in the code editor `editor`:
-  ## on the layout's page the layout's, on the scene's and the frame's the
-  ## scene's it was opened from. "" for none: no editor, a built-in scene,
-  ## or the editor itself (open on it already).
-  if editor.len == 0:
+  ## on the layout's page the layout's, on the scene's form the scene's it
+  ## was opened from. "" for none: no editor, the frame page and the service
+  ## keys (the frame's, no scene's), a built-in scene, or the editor itself
+  ## (open on it already).
+  if editor.len == 0 or self.onFrame() or self.onKeysPage():
     return ""
   if self.onLayoutPage():
     let worn = self.frameLayout()
@@ -540,12 +541,15 @@ proc leave() =
   wentBack = true
   sendEvent(evSceneSettings, newJObject(), eoScene)
 
-proc goTo(sceneId: string, state: JsonNode) =
+proc goTo(sceneId: string, state: JsonNode, stay = false) =
   ## To `sceneId`, its public fields set to `state`, as a Save goes back.
+  ## With `stay` on a desktop it does not go back: the focus goes to that
+  ## scene's window and this one stays open beside it, as when a window
+  ## beside it is clicked (docs/scene-layouts.md "Windows").
   let payload = newJObject()
   payload.put("sceneId", newJString(sceneId))
   payload.put("state", state)
-  wentBack = true
+  wentBack = not (stay and builtInScenesStay)
   sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc collect(fields, values: JsonNode): JsonNode =
@@ -760,12 +764,14 @@ proc acting(self: SceneSettingsScene) =
   elif handler == HCode:
     # The scene's code (the layout's, on its page) in the code editor, which
     # opens on it (its public field `open`, set as a Save sets the scene's).
+    # On a desktop the editor opens in a window of its own and these settings
+    # stay open in theirs.
     let editor = codeEditor()
     let code = self.codeOf(editor)
     if code.len > 0:
       let state = newJObject()
       state.put("open", newJString(code))
-      goTo(editor, state)
+      goTo(editor, state, stay = true)
   elif handler == HGear:
     if self.ownWindow():
       # The frame page has a window of its own: it comes forward.
@@ -1494,7 +1500,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     SvgNode(text: if connecting: "Connect" elif frame and self.state{"unlinking"}.getBool(): "Unlink"
       elif frame: "Frame settings" else: title))
   # The scene's code (on the layout's page the layout's), where the frame
-  # holds the code editor (not the editor's own: it is open on it already).
+  # holds the code editor (not the editor's own: it is open on it already),
+  # and none on the frame's own pages.
   let code = self.codeOf(codeEditor()).len > 0
   if code:
     header.children.add look.iconButton(false, CodePath, HCode, wide = true)

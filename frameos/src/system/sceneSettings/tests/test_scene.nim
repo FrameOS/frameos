@@ -1209,13 +1209,17 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   scene.tap(regionWith(3))
   doAssert sent.len >= 1 and sent[0][1] == %*{"sceneId": "my-editor", "state": {"open": "layouts/bar"}}, $sent
   sent.setLen(0)
-  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
-    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
   # Back to the frame page; a layout chosen there is the frame's, not the host's.
   discard scene.draw()
   scene.tap(regionWith(0))
   doAssert scene.state["page"].getStr() == "frame"
   doAssert scene.shownName == "Frame settings"
+  # The frame page is the frame's, no scene's: no code button on it.
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    doAssert r.handlers[ueClick] != 3 + 1, "a code button on the frame page"
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
   # In a window beside the scene with the focus (a desktop) the page wears no
   # layout itself: the one instance went along with the focus. It still holds
   # the frame's, and its gear is that instance's (types.frameLayoutShown).
@@ -1558,6 +1562,44 @@ block on_a_desktop_save_keeps_a_scenes_settings_window:
   doAssert scene.state{"edited"}.isNil or scene.state{"edited"}.len == 0, $scene.state{"edited"}
   builtInScenesStay = false
   echo "save keeps a window ok"
+
+block on_a_desktop_the_code_button_keeps_the_settings_window:
+  # The code button opens the editor on the scene as everywhere, but on a
+  # desktop the editor gets a window of its own and the settings stay open in
+  # theirs, edits kept; off a desktop they close as the editor takes the panel.
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather"), SwitcherEntry(id: "my-editor", name: "Code editor")]
+  for desktop in [true, false]:
+    builtInScenesStay = desktop
+    let id = if desktop: settingsWindowId("scenes/weather") else: SceneSettingsId
+    let scene = settings.exportedScene.init(SceneId(id), frameConfig, logger, %*{})
+    scene.send("setCurrentScene", %*{"sceneId": id, "state": {
+      "from": "scenes/weather",
+      "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "Where?", "secret": false}],
+      "values": {"city": "Oslo"}}})
+    scene.send("open", %*{})
+    scene.state["values"]["city"] = %"Bergen"
+    discard scene.draw()
+    var code: UiRegion
+    for r in uiTarget(id, 1, create = false).regions:
+      if r.handlers[ueClick] == 3 + 1: code = r
+    doAssert code.w > 0, "a code button"
+    sent.setLen(0)
+    scene.tap(code)
+    doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
+    doAssert sent[0][1] == %*{"sceneId": "my-editor", "state": {"open": "scenes/weather"}}, $sent[0][1]
+    # The focus goes to the editor.
+    scene.send("close", %*{})
+    if desktop:
+      doAssert scene.state{"away"}.getBool(), "the settings stay open in their window"
+      doAssert scene.state["values"]["city"].getStr() == "Bergen", $scene.state["values"]
+    else:
+      doAssert not scene.state{"away"}.getBool(), "off a desktop the settings close"
+  builtInScenesStay = false
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
+  sent.setLen(0)
+  echo "the code button keeps a window ok"
 
 block the_frame_page_types_service_keys:
   # The service keys (docs/scene-settings.md "Service keys"): a button on the

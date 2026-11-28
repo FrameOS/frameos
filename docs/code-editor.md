@@ -20,7 +20,7 @@ nothing of a plane: `previewOnly`).
 | The host in the browser preview (reads only) | `frameos/src/frameos/scene_code_preview.nim`, through `frameos/src/wasm/wasm_main.nim` |
 | What a frame asks its plane | `POST /api/frames/{id}/panel/code`: backend `app/api/panel_code.py` (also `/api/panel/code`), cloud `src/lib/panel-code.ts` |
 | The AI | the voice chat's scene builder, typed instead of spoken: backend `app/utils/voice_scene_builder.py`, cloud `src/lib/ai/voice-scene-builder.ts` (`asked: "typed"`) |
-| The way in from a scene | the scene settings' **Code** button (`system/sceneSettings`, `HCode`), shown while the frame holds the editor, on the scene's and the frame's page (that scene) and a layout's (that layout) |
+| The way in from a scene | the scene settings' **Code** button (`system/sceneSettings`, `HCode`), shown while the frame holds the editor, on the scene's page (that scene) and a layout's (that layout), not on the frame page |
 
 ## Using it
 
@@ -131,6 +131,8 @@ JSX layer's, for any app (`docs/jsx-ui.md` "Fields and the keyboard",
   the layout settings' page, on that layout): the button switches to the
   editor with its public field `open` set to the scene's id (`setCurrentScene {sceneId: "code-editor", state: {open}}`), and
   the app opens it and clears the field (`frameos.setState('open', '')`).
+  On a desktop the editor opens in a window of its own and the settings
+  stay open in theirs (they do not go back: `goTo(..., stay = true)`).
 
 ## `frameos.code(op, arg)`
 
