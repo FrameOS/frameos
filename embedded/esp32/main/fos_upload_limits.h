@@ -13,6 +13,22 @@
  * client could fill the card with abandoned parts. */
 #define FOS_UPLOAD_MAX_PENDING_PARTS 8
 
+/* A part nobody has written for this long is an upload that was given up
+ * (a browser closed, a file the control plane failed): the cloud's command
+ * for a chunk lives two minutes and its uploader asks about one chunk for ten
+ * at most. With the cap reached, such parts go to make room for a new one,
+ * where they used to refuse every upload (`too_many_uploads`) until the next
+ * boot's sweep: eight failed files and a folder of photos stopped. */
+#define FOS_UPLOAD_PART_STALE_SECONDS 900
+
+/* Whether a part last written at `mtime` is stale at `now` (both seconds of
+ * the same clock). A part from the future (a clock set back) is not: the
+ * oldest-first eviction below still gets to it once the clock passes. */
+static inline bool fos_upload_part_stale(long long now, long long mtime)
+{
+    return now - mtime >= FOS_UPLOAD_PART_STALE_SECONDS;
+}
+
 /* True when [offset, offset + len) is a sane, non-negative range that keeps
  * the assembled file within max_bytes. len == 0 is not a write. */
 static inline bool fos_upload_range_ok(long long offset, long long len, long long max_bytes)

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "esp_log.h"
@@ -403,6 +404,35 @@ static int pending_upload_parts(const char *dir_path)
     return count;
 }
 
+/* With the cap reached, remove the parts nobody has written for
+ * FOS_UPLOAD_PART_STALE_SECONDS (fos_upload_limits.h). Returns how many
+ * parts are left. Not inlined: its path buffer stays off the frame of every
+ * chunk's begin, which runs on the cloud task's small stack. */
+static __attribute__((noinline)) int drop_stale_upload_parts(const char *dir_path)
+{
+    DIR *dir = opendir(dir_path);
+    if (!dir) return 0;
+    const long long now = (long long)time(NULL);
+    int left = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char full[FOS_ASSETS_FULL_PATH_MAX + sizeof(entry->d_name)];
+        snprintf(full, sizeof(full), "%s/%s", dir_path, entry->d_name);
+        struct stat st;
+        /* An mtime of 0 is a file system that keeps none (SPIFFS without
+         * it): such a part is never taken for stale. */
+        if (stat(full, &st) == 0 && st.st_mtime > 0 && fos_upload_part_stale(now, (long long)st.st_mtime) &&
+            unlink(full) == 0) {
+            ESP_LOGW(TAG, "dropped a stale upload part %s (%ld bytes)", entry->d_name, (long)st.st_size);
+            continue;
+        }
+        left++;
+    }
+    closedir(dir);
+    return left;
+}
+
 static void chunk_part_path(char *out, size_t out_len, const char *upload_id)
 {
     if (on_flash()) {
@@ -440,10 +470,12 @@ esp_err_t fos_assets_chunk_begin(const char *upload_id, long long offset,
     if (offset <= 0) {
         /* A NEW part (a retry from offset 0 of an existing id reuses its
          * slot): cap how many can be pending at once, so abandoned uploads
-         * cannot fill the card — the boot sweep is the only other cleanup. */
+         * cannot fill the card. Full, the parts nobody wrote for 15 minutes
+         * go first; the boot sweep is the only other cleanup. */
         struct stat existing;
         if (stat(writer->tmp_path, &existing) != 0 &&
-            pending_upload_parts(dir) >= FOS_UPLOAD_MAX_PENDING_PARTS) {
+            pending_upload_parts(dir) >= FOS_UPLOAD_MAX_PENDING_PARTS &&
+            drop_stale_upload_parts(dir) >= FOS_UPLOAD_MAX_PENDING_PARTS) {
             set_err(err, "too_many_uploads");
             return ESP_ERR_INVALID_STATE;
         }

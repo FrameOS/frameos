@@ -80,7 +80,10 @@ static const char *NVS_NS = "frameos";
 #define FOS_CLOUD_RESPONSE_MAX 2048
 #define FOS_CLOUD_BACKOFF_MIN_MS (10 * 1000)
 #define FOS_CLOUD_BACKOFF_MAX_MS (15 * 60 * 1000)
-#define FOS_CLOUD_TASK_STACK 8192
+/* Enrollment's 5.1 KB is the most it was seen to use, with the provider
+ * answers off the stack (response_alloc); docs/esp32-memory.md "Task stacks"
+ * has the rule (the peak plus 3 KB) and the measurement. */
+#define FOS_CLOUD_TASK_STACK 8704
 /* Device cap on a single management WebSocket text frame. Deliberately well
  * under the provider-side limit: the reassembly buffer plus the cJSON tree of
  * a max-size set_scenes already crowd an ESP32. It bounds one message, not
@@ -692,6 +695,25 @@ static bool json_field_str(const cJSON *root, const char *key, char *out, size_t
     return false;
 }
 
+/* A provider answer's buffer, FOS_CLOUD_RESPONSE_MAX bytes, never on the
+ * cloud task's stack: four of them sat there (one in cloud_task's own
+ * frame), and the enroll path, which walks /state for the hardware report,
+ * overflowed it on every boot of an E1004 with a claim token (2026-11-28).
+ * Wiped on the way out: it can hold a token. */
+static char *response_alloc(void)
+{
+    char *response = fos_big_malloc(FOS_CLOUD_RESPONSE_MAX);
+    if (response) response[0] = '\0';
+    return response;
+}
+
+static void response_free(char *response)
+{
+    if (!response) return;
+    crypto_wipe(response, FOS_CLOUD_RESPONSE_MAX);
+    free(response);
+}
+
 /* POST a JSON body to {base}{path}, with `Authorization: Bearer <bearer>`
  * when `bearer` is not NULL, and read the answer into `response`
  * (FOS_CLOUD_RESPONSE_MAX bytes, NUL-terminated, cut short past that). The
@@ -739,6 +761,9 @@ static int provider_post(const char *base, const char *path, const char *body, c
     return status > 0 ? status : 0;
 }
 
+static esp_err_t enroll_post(const char *base, const char *bearer, const char *body,
+                             bool *permanent);
+
 /* One enrollment attempt with the provider at `base`: flow A by the
  * configured claim token (`bearer` NULL), flow B by the device-flow Bearer
  * token, which stays the link's access token (the enroll answer carries none
@@ -784,9 +809,36 @@ static esp_err_t enroll_once(const char *base, const char *bearer, bool *permane
     }
 
     ESP_LOGI(TAG, "enrolling with %s", base);
-    char response[FOS_CLOUD_RESPONSE_MAX];
-    int status = provider_post(base, "/api/frames/enroll", body, bearer, response);
+    esp_err_t result = enroll_post(base, bearer, body, permanent);
     cJSON_free(body);
+    return result;
+}
+
+/* The request and its answer, in frames of their own (never inlined into
+ * enroll_once): the body above walks /state for the hardware report
+ * (fos_scenes_add_storage_json, SPIFFS lookups), the deepest thing the cloud
+ * task does, and must not have the answer's token and URLs beneath it. */
+static esp_err_t enroll_answer(const char *base, const char *bearer, int status,
+                               const char *response, bool *permanent);
+
+static __attribute__((noinline)) esp_err_t enroll_post(const char *base, const char *bearer,
+                                                       const char *body, bool *permanent)
+{
+    char *response = response_alloc();
+    if (!response) {
+        set_last_error("no memory for the enroll answer");
+        return ESP_ERR_NO_MEM;
+    }
+    int status = provider_post(base, "/api/frames/enroll", body, bearer, response);
+    esp_err_t result = enroll_answer(base, bearer, status, response, permanent);
+    response_free(response);
+    return result;
+}
+
+static esp_err_t enroll_answer(const char *base, const char *bearer, int status,
+                               const char *response, bool *permanent)
+{
+    fos_config_t *config = fos_config();
     if (status == 0) {
         set_last_error("provider unreachable");
         return ESP_FAIL;
@@ -1067,9 +1119,10 @@ static uint32_t link_begin(const char *base, uint32_t gen)
              "{\"public_display_name\":\"%s\",\"reported_frameos_version\":\"%s\",\"client_kind\":\"frame\","
              "\"scopes\":[\"frame:link\",\"frame:managed\"]}",
              name, esp_app_get_description()->version);
-    char response[FOS_CLOUD_RESPONSE_MAX];
-    const int status = provider_post(base, "/api/device/start", body, NULL, response);
+    char *response = response_alloc();
+    const int status = response ? provider_post(base, "/api/device/start", body, NULL, response) : 0;
     cJSON *json = status == 200 ? cJSON_Parse(response) : NULL;
+    response_free(response);
     char code[sizeof(s_link_user_code)];
     char uri[sizeof(s_link_uri)];
     /* The device code goes back to the provider inside a JSON string. */
@@ -1129,10 +1182,10 @@ static uint32_t link_poll(const char *base, uint32_t gen)
     if (link_lapsed()) return 0;
     char body[sizeof(s_link_device_code) + 24];
     snprintf(body, sizeof(body), "{\"device_code\":\"%s\"}", s_link_device_code);
-    char response[FOS_CLOUD_RESPONSE_MAX];
-    const int status = provider_post(base, "/api/device/poll", body, NULL, response);
+    char *response = response_alloc();
+    const int status = response ? provider_post(base, "/api/device/poll", body, NULL, response) : 0;
     cJSON *json = status == 200 ? cJSON_Parse(response) : NULL;
-    crypto_wipe(response, sizeof(response)); /* the token, on approval */
+    response_free(response); /* wiped: the token, on approval */
     const bool approved = json_field_str(json, "access_token", s_access_token, sizeof(s_access_token));
     cJSON_Delete(json);
     if (approved) {
@@ -2040,6 +2093,10 @@ static void asset_job_run_get(const asset_job_t *job)
         asset_chunk_send_error(job->id, "not_found");
         return;
     }
+    /* Unbuffered: newlib's FILE buffer is 128 bytes here, so each fread of a
+     * chunk was 192 small reads and FatFS fetched the file a sector a
+     * command; straight through, a chunk is a few multi-sector reads. */
+    setvbuf(file, NULL, _IONBF, 0);
     size_t total = (size_t)st.st_size;
     uint8_t *raw = fos_big_malloc(FOS_CLOUD_ASSET_CHUNK_BYTES);
     /* +2 for base64 rounding, +1 for NUL */
@@ -4243,8 +4300,11 @@ static void cloud_task(void *arg)
              * owner revokes it), and the frame leaves whatever it answers. */
             s_unlink_requested = false;
             if (fos_wifi_state() == FOS_WIFI_CONNECTED) {
-                char response[FOS_CLOUD_RESPONSE_MAX];
-                provider_post(fos_cloud_link_server(), "/api/backends/unlink", "{}", s_access_token, response);
+                char *response = response_alloc();
+                if (response) {
+                    provider_post(fos_cloud_link_server(), "/api/backends/unlink", "{}", s_access_token, response);
+                    response_free(response);
+                }
             }
             cloud_demote("unlinked on the frame");
             s_state = FOS_CLOUD_NONE;
@@ -4367,7 +4427,7 @@ static void cloud_task(void *arg)
 
 /* Whether this frame has anything for the cloud task to do. A frame that was
  * never on the cloud (a backend's, a standalone one) has nothing: the task
- * would wake every 5 s to re-derive a policy that cannot change, on an 8 KB
+ * would wake every 5 s to re-derive a policy that cannot change, on an 8.5 KB
  * internal stack it used 0.8 KB of (docs/esp32-memory.md, "Task stacks").
  * Enrolled, enrolling (a claim token), a permanent enroll error a new claim
  * token re-arms, or demoted with the cloud's scenes still resident (the
