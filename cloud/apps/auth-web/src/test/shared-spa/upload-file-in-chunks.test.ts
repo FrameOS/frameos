@@ -7,14 +7,14 @@
 // ESP32 writing a photo to its card took over 90 s a chunk at times
 // (2026-11-28), and the two retries the panel had then failed the file and
 // left it half-written on the frame. And the row thumbnails: an ESP32 is not
-// asked for the thumbnail of a big file (assetsLogic deviceThumbnailMaxBytes).
+// asked for the thumbnail of a big file (utils/deviceThumbnails.ts).
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  assetThumbnailShown,
   deviceThumbnailMaxBytes,
   ESP32_THUMBNAIL_MAX_BYTES,
-} from '../../../../../../frontend/src/scenes/frame/panels/Assets/assetsLogic'
+  thumbnailSizeAllowed,
+} from '../../../../../../frontend/src/utils/deviceThumbnails'
 import { uploadFileInChunks } from '../../../../../../frontend/src/utils/uploadFileInChunks'
 
 function fakeXhr(statuses: number[]) {
@@ -119,19 +119,19 @@ describe('a chunk the frame has not acked yet', () => {
 })
 
 describe('row thumbnails', () => {
-  it('asks an ESP32 only for the thumbnails of small images', () => {
+  it('asks an ESP32 only for the thumbnails of small files', () => {
     const max = deviceThumbnailMaxBytes(true)
     expect(max).toBe(ESP32_THUMBNAIL_MAX_BYTES)
-    expect(assetThumbnailShown('cat.jpg', 300_000, max)).toBe(true)
-    expect(assetThumbnailShown('IMG_4101.jpg', 9_060_723, max)).toBe(false)
-    expect(assetThumbnailShown('cat.jpg', undefined, max)).toBe(false)
-    expect(assetThumbnailShown('notes.txt', 10, max)).toBe(false)
+    expect(thumbnailSizeAllowed(300_000, max)).toBe(true)
+    expect(thumbnailSizeAllowed(ESP32_THUMBNAIL_MAX_BYTES, max)).toBe(true)
+    expect(thumbnailSizeAllowed(9_060_723, max)).toBe(false)
+    expect(thumbnailSizeAllowed(undefined, max)).toBe(false)
   })
 
   it('asks any other frame for every image', () => {
     const max = deviceThumbnailMaxBytes(false)
     expect(max).toBeUndefined()
-    expect(assetThumbnailShown('IMG_4101.jpg', 9_060_723, max)).toBe(true)
-    expect(assetThumbnailShown('cat.jpg', undefined, max)).toBe(true)
+    expect(thumbnailSizeAllowed(9_060_723, max)).toBe(true)
+    expect(thumbnailSizeAllowed(undefined, max)).toBe(true)
   })
 })

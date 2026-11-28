@@ -11,9 +11,8 @@ import {
   type AssetStats,
   type DiskStats,
   isThumbnailAssetName,
-  assetThumbnailShown,
-  deviceThumbnailMaxBytes,
 } from './assetsLogic'
+import { deviceThumbnailMaxBytes, thumbnailSizeAllowed } from '../../../../utils/deviceThumbnails'
 import {
   DocumentIcon,
   ExclamationTriangleIcon,
@@ -389,7 +388,7 @@ function TreeNode({
   } else {
     // This is a file
     const hasThumbnail = hasAssetThumbnail(node.name)
-    const showsThumbnail = assetThumbnailShown(node.name, node.size, thumbnailMaxBytes)
+    const showsThumbnail = hasThumbnail && thumbnailSizeAllowed(node.size, thumbnailMaxBytes)
     const opensInline = opensAsBrowserImage(node.name)
     const isPlayableImage = nodeHasPlayableImages(node)
     const isUploading = node.mtime === -1
