@@ -3129,28 +3129,28 @@ proc jsCanvas(ctx: ptr JSContext, key: JSValue, optionsJson: JSValue): JSValue {
       # has beside its own (Sketchbook, Touch test, Handwriting notes: the UX
       # bench, 2026-11-27). Without the room the app gets null, which it
       # already draws without (docs/scene-guide.md).
-      let bytes = case (if like.isNil: pfRgbx else: like.format)
-        of pfRgbx: width * height * 4
-        of pfRgb565: width * height * 2
-        of pfGray8: width * height
-        of pfGray4: ((width + 1) div 2) * height
+      let bytes = imageBytes(if like.isNil: pfRgbx else: like.format, width, height)
       if not roomForImage(bytes):
         frameos_apps.logError(e.owner, "frameos.canvas: no room for a " & $width & "x" & $height &
           " canvas (" & $bytes & " bytes)")
-        return nimStringToJS(ctx, "null")
-      let image = if like.isNil: newImage(width, height) else: newImageLike(like, width, height)
-      if not like.isNil:
-        image.ditherStores = like.ditherStores
-      let color = options{"color"}.getStr("")
-      image.fill(parseHtmlColor(if color.len > 0: color else: "#ffffff").rgbx)
-      inc runtime.nextImageId
-      id = runtime.nextImageId
-      runtime.images[id] = image
-      runtime.canvases.add((name, id))
-      discard registerCanvas(image)
-      fresh = true
+      else:
+        let image = if like.isNil: newImage(width, height) else: newImageLike(like, width, height)
+        if not like.isNil:
+          image.ditherStores = like.ditherStores
+        let color = options{"color"}.getStr("")
+        image.fill(parseHtmlColor(if color.len > 0: color else: "#ffffff").rgbx)
+        inc runtime.nextImageId
+        id = runtime.nextImageId
+        runtime.images[id] = image
+        runtime.canvases.add((name, id))
+        discard registerCanvas(image)
+        fresh = true
     except CatchableError as err:
       frameos_apps.logError(e.owner, "frameos.canvas failed: " & err.msg)
+      id = 0
+    # No room, or the canvas failed: one way out for both (every return is
+    # every live local's cleanup written out again).
+    if id == 0:
       return nimStringToJS(ctx, "null")
   let log = canvasLogOf(runtime.images[id])
   nimStringToJS(ctx, $(%*{"__frameosType": "imageRef", "id": id, "width": width, "height": height,

@@ -1684,3 +1684,65 @@ bytecode), not built:
   link order misses QuickJS's objects and the image grows ~6 KB.
 - `drop_nim_dead_checks.py`, `fold_identical_code.py --report` and the
   map's cross-reference table answer "who calls this" without a disassembler.
+
+---
+
+# What came after 2026.11.15, and what came back (2026-11-28)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, fresh `ci_build_image.sh` builds in
+`frameos-esp32-ci-local`. v2026.11.15 builds at 3,161,088 bytes and main at
+f268860bc at 3,196,288, both the same as CI's. Per function from the two
+maps' input sections; a function that nothing here touched moves ±8–60 bytes
+between two builds as calls change length, so read small numbers as noise.*
+
+**Main at f268860bc 3,196,288 → 3,191,168 bytes (−5,120).** No behaviour
+change: the same maps, roles, pictures and log lines, every check kept.
+
+## Where the +35.2 KB went
+
+By subsystem (CI's comment): FrameOS core (Nim) +19.1 KB, the C shell
++7.2, display drivers +4.1, the string pool +2.9, Nim apps +1.6.
+
+| Since the release (Nim) | Δ | Where |
+|---|---:|---|
+| The frame page's About card and brightness (#1078, #1081) | ≈ +3.9 KB | `addAbout` 955, `brightnessRow` 963, `aboutCard` 372, `addBytes` 279, `setBrightness` 227, their words ≈ 880 |
+| The button standard (#1085, #1089) | ≈ +2.6 KB | `input_state` `button` +833, `tickButtons` +387, `facing` 364, `frame_keys` 387, `bound` (was `tripleWanted`) +145, `backFrom` +195 |
+| A dark screen woken by a key or a swipe (#1134, #1142, #1147) | ≈ +2.1 KB | `processInput` +1,122, `keyOf` 567, `wakesFor` 374 |
+| The scene list (#1115, #1117, #1149, its gear) | ≈ +1.9 KB | `tile` +873 (a name's words fitted), `reveal` +254, `choose` +201, `switcherGrid` +175 |
+| render/text on a round panel, whole words, the render scale (#1097, #1131, #1088, #1144) | ≈ +2.4 KB | `roundBox` 599, `typesetIntoBounds` +445, `breaksWord` 204, `panelInches` 485, `autoRenderScale` +347 |
+| A layout's picture fitted around its scenes (#1137) | ≈ +1.6 KB | `applyAutoFitAround` 626, `rectsAround` 569, render/image +260 |
+| `frameos.canvas` asks for its room (#1111) | +701 | `jsCanvas` |
+| The rest: a scene that fails to start, keys paging a list, … | | `buildForInput` 388, `enterBox` 432, `selectScene` +333 |
+
+| Since the release (C) | Δ | Where |
+|---|---:|---|
+| The shell and the drivers | ≈ +14.3 KB | `fos_board.c` +3.0 (1.9 of it the generated maps' rule text, #1089), `lcd_qspi_amoled.c` +2.0 (the CrowPanels' round panels, brightness), the console +1.9 and touch +1.0 (the benches' `lcd`, `set`, `touch` and touch injection), `fos_buttons` +1.1 (the knob, holds), `fos_frame_settings` +0.9 (the About facts, brightness), `EPD_5in79` +0.7, `it8951` +0.6 (drawing on e-paper), `EPD_4in2` +0.45, their strings in the pool +2.9 |
+
+Feature code, written with this doc's rules in mind: no `%*{…}` log
+builders, cstring tables, classes appended in place. What was left came
+from the usual places, below.
+
+## The cuts
+
+| Cut | Saves |
+|---|---:|
+| The board maps' 27 rules with what they share (`{"event":"button","match":{"label":"`, `","action":"longPress"},"emit":"`, …) as one byte each (`k_rule_words`), put back by `fos_board.c` `put_rule` / `rule_follows`; every board's map and its default check byte for byte as before | ≈ −1,600 |
+| `buttonRoleForLabel` (generated): one ` LABEL=role` text read in place, not a `case` of 28 strings | −798 |
+| `jsCanvas`: one way out for "no room" and a failure, `imageBytes` shared with the windows' check (`renderEmbeddedScene`) | ≈ −290 |
+| The colour fit: one `fitRects` for both hooks, `autoEndPoints` left to the tests | −534 |
+| The dark screen's wake: one `wake` for a key, a swipe and a touch (`setDisplay` had an unused policy argument, computed at each call), `wakesFor` with `startsWith`/`endsWith` instead of two slices, `keyOf` one lookup less | −481 |
+| `panelInches`: the Linux panels' names off the ESP32, the size as one integer over a power of ten (`10in3` is 103 / 10, `Number("10.3")` in the SPA, where the digit sum could be an ulp off) | −347 |
+| `bound`: one map at a time, by index (the two maps' array and `items` copied the rule list, a reference a rule, every call) | −312 |
+| The scene list's name fit: the classes appended in place, not three `&` | −229 |
+| `selectScene`: the host's `showing` asked once | ≈ −160 |
+| `typesetIntoBounds`: the options copied once | −131 |
+| `deliverInput`: next/prev heard as forward/back without an early return (every return is every live local's cleanup again) | −118 |
+| `turnPage` and `enterBox` end in one `ringBox` | ≈ 0 (one copy of the code) |
+
+## Measured, not worth it
+
+- The link order written again from main's build: the model counted 7,657
+  long calls going to 6,701; the relinked image has 7,615 (from 7,753) and
+  is 80 bytes smaller. Not committed; run it again before the release.
+- The brightness pill's three handler attributes in a loop: +85 (an array of
+  literals and its loop cost more than three `add`s of a constant).

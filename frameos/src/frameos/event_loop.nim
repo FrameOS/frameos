@@ -25,7 +25,7 @@
 ## other threads reach it through `channels.eventChannel`, which the runner
 ## empties into `enqueue`.
 
-import std/[deques, hashes, json, monotimes, options, sequtils, tables]
+import std/[deques, hashes, json, monotimes, options, sequtils, strutils, tables]
 import ./events
 import ./event_log
 import ./types
@@ -152,6 +152,18 @@ proc hasStatePayload*(payload: JsonNode): bool =
   let state = payload{"state"}
   not state.isNil and state.kind == JObject
 
+proc boundIn(rules, probe: JsonNode, action: string, voice: bool): bool =
+  ## `bound`'s question of one map: a rule of `action` that fits the key
+  ## (`probe`), and with `voice` one that makes it `voiceChat`. By index, not
+  ## `items`: that copies the rule list (a reference a rule) every call.
+  if rules.isNil or rules.kind != JArray:
+    return false
+  for i in 0 ..< rules.elems.len:
+    let rule = rules.elems[i]
+    if rule{"match", "action"}.getStr() == action and (not voice or rule{"emit"}.getStr() == evVoiceChat) and
+        rule.eventMapRuleMatches(evButton, probe):
+      return true
+
 proc bound(loop: EventLoop, pin: int, label, role, action: string): bool =
   ## input_state's question of the maps (`InputState.bound`). `triplePress`:
   ## a rule of the frame's event map or the showing scene's whose `match`
@@ -162,14 +174,8 @@ proc bound(loop: EventLoop, pin: int, label, role, action: string): bool =
   let voice = action == "longPress"
   let probe = %*{"pin": pin, "label": label, "role": role, "action": action}
   let scene = if voice or loop.host.sceneFor.isNil: nil else: loop.host.sceneFor(none(SceneId))
-  for rules in [(if loop.frameConfig.isNil: nil else: loop.frameConfig.eventMap),
-                (if scene.isNil: nil else: scene.eventMap)]:
-    if rules.isNil or rules.kind != JArray:
-      continue
-    for rule in rules.elems:
-      if rule{"match", "action"}.getStr() == action and (not voice or rule{"emit"}.getStr() == evVoiceChat) and
-          rule.eventMapRuleMatches(evButton, probe):
-        return true
+  (not loop.frameConfig.isNil and boundIn(loop.frameConfig.eventMap, probe, action, voice)) or
+    (not scene.isNil and boundIn(scene.eventMap, probe, action, voice))
 
 proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
                    laneCapacity = DefaultLaneCapacity): EventLoop =
@@ -468,8 +474,11 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
       let opener = switcherOpener(current)
       var index = if opener.len > 0: order.find(SceneId(opener))
         elif not current.isNil: order.find(current.id)
-        elif not loop.host.showing.isNil and loop.host.showing().isSome: order.find(loop.host.showing().get())
         else: -1
+      if opener.len == 0 and current.isNil and not loop.host.showing.isNil:
+        # A scene that failed to start: no instance, still where the walk is.
+        let shown = loop.host.showing()
+        if shown.isSome: index = order.find(shown.get())
       if direction == "next":
         index = if index < 0: 0 else: (index + 1) mod order.len
       else:
@@ -719,7 +728,7 @@ proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
     if payload.hasKey(key):
       result[key] = payload[key]
 
-proc setDisplay(loop: EventLoop, on: bool, envelope: EventEnvelope, policy: EventPolicy): bool =
+proc setDisplay(loop: EventLoop, on: bool, envelope: EventEnvelope): bool =
   ## `turnOn`, `turnOff` and `toggleScreen`: the host switches the panel, and
   ## the scene hears what it became (a toggle is a `turnOn` or a `turnOff` to
   ## it, so a scene that pauses on `turnOff` needs to know nothing more).
@@ -729,6 +738,12 @@ proc setDisplay(loop: EventLoop, on: bool, envelope: EventEnvelope, policy: Even
   heard.name = if on: evTurnOn else: evTurnOff
   discard loop.deliver(heard, eventPolicy(heard.name))
   true
+
+proc wake(loop: EventLoop, target: Option[SceneId]) =
+  ## A key, an edge swipe or a touch on a dark screen: the screen turns on,
+  ## and the scene hears `turnOn` from the frame itself.
+  discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(), origin: eoSystem,
+    target: target))
 
 proc pointerIdOf(delivery: InputDelivery): int =
   ## The pointer a pointer event or a gesture is about, -1 for anything else.
@@ -796,8 +811,10 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
     # with keys as it is. One with a UI moves its focus with them instead.
     let role = payload{"role"}.getStr()
     if role in ["next", "prev", "down", "up"]:
+      # `result =`, not `return`: no alias follows a button, and an early
+      # return is every live local's cleanup written out once more.
       let name = if role in ["next", "down"]: evForward else: evBack
-      return loop.deliver(EventEnvelope(name: name, payload: newJObject(), origin: eoSystem, target: target,
+      result = loop.deliver(EventEnvelope(name: name, payload: newJObject(), origin: eoSystem, target: target,
         fromRender: fromRender), eventPolicy(name))
   # The old names are pointer events' (docs/events-contract.json `aliasOf`),
   # on every host: store scenes are immutable, and a touch scene written for
@@ -815,10 +832,9 @@ proc keyOf(delivery: InputDelivery): string =
   if p.isNil or p.kind != JObject:
     return ""
   result = p{"label"}.getStr()
-  if result.len == 0 and p.hasKey("pin") and p{"pin"}.getInt(-1) >= 0:
-    result = "#" & $p{"pin"}.getInt()
   if result.len == 0:
-    result = "key:" & p{"code"}.getStr(p{"key"}.getStr())
+    let pin = p{"pin"}.getInt(-1)
+    result = if pin >= 0: "#" & $pin else: "key:" & p{"code"}.getStr(p{"key"}.getStr())
 
 proc wakesFor(loop: EventLoop, key: string): bool =
   ## Whether a key event is about a key that woke the screen, or a pair of
@@ -826,10 +842,9 @@ proc wakesFor(loop: EventLoop, key: string): bool =
   for k in loop.wakingKeys:
     if k == key:
       return true
-    # A pair: "A+B", this key one of the two (no strutils for two compares).
+    # A pair: "A+B", this key one of the two.
     let n = k.len
-    if key.len > n and (key[n] == '+' and key[0 ..< n] == k or
-        key[key.len - n - 1] == '+' and key[key.len - n .. ^1] == k):
+    if key.len > n and (key[n] == '+' and key.startsWith(k) or key[^(n + 1)] == '+' and key.endsWith(k)):
       return true
 
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
@@ -860,8 +875,7 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
       if not loop.displayOn and delivery.origin in {eoDriver, eoSystem} and not loop.wakesFor(key) and
           (delivery.name == evKeyDown or delivery.name == evGpio and action == "down" or
            delivery.name == evButton):
-        discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
-          origin: eoSystem, target: envelope.target), eventPolicy(evTurnOn))
+        loop.wake(envelope.target)
         if delivery.name != evButton:
           # Its up, press or hold follow; a `button` with no edges (a host
           # that sends presses) is all there is of it.
@@ -878,8 +892,7 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
       # this is the first the dispatcher hears of that touch, and the rest of
       # it never comes. It opened the scene list in the dark (the UX bench,
       # the CrowPanel 2.8", 2026-11-27).
-      discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
-        origin: eoSystem, target: envelope.target), eventPolicy(evTurnOn))
+      loop.wake(envelope.target)
       result = true
       continue
     let id = pointerIdOf(delivery)
@@ -888,8 +901,7 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
       # moves, its release, the tap it makes) reaches the scene: nobody can
       # see what they would be pressing.
       if not loop.displayOn and delivery.name == evPointerDown:
-        discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
-          origin: eoSystem, target: envelope.target), eventPolicy(evTurnOn))
+        loop.wake(envelope.target)
         loop.waking.add(id)
         result = true
         continue
@@ -952,9 +964,9 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     if result:
       loop.renderWanted = true
   of evTurnOn, evTurnOff:
-    result = loop.setDisplay(envelope.name == evTurnOn, envelope, policy)
+    result = loop.setDisplay(envelope.name == evTurnOn, envelope)
   of evToggleScreen:
-    result = loop.setDisplay(not loop.displayOn, envelope, policy)
+    result = loop.setDisplay(not loop.displayOn, envelope)
   else:
     result = loop.deliver(envelope, policy)
 

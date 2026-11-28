@@ -79,27 +79,29 @@ proc panelInches*(device: string): float =
   ## The panel's diagonal in inches from its driver's name: the number around
   ## its `in` ("EPD_10in3" 10.3, "waveshare.EPD_2in13_V4" 2.13, "EPD_13in3e"
   ## 13.3), else `NamedPanelInches`; 0 when unknown.
-  for (name, inches) in NamedPanelInches:
-    if device == name:
-      return inches
+  when not defined(frameosEmbedded): # Linux panels' names: an ESP32's display is never one
+    for (name, inches) in NamedPanelInches:
+      if device == name:
+        return inches
   for i in 1 .. device.len - 3:
     if device[i] == 'i' and device[i + 1] == 'n' and device[i - 1] in {'0' .. '9'} and
         device[i + 2] in {'0' .. '9'}:
-      var whole = 0
+      # The digits around the `in` as one number, over 10 for each digit after
+      # it: "10in3" is 103 / 10, as parseFloat("10.3") reads it.
       var at = i - 1
-      var scale = 1
-      while at >= 0 and device[at] in {'0' .. '9'}:
-        whole += (ord(device[at]) - ord('0')) * scale
-        scale *= 10
+      while at > 0 and device[at - 1] in {'0' .. '9'}:
         dec at
-      var fraction = 0.0
-      var place = 0.1
-      at = i + 2
-      while at < device.len and device[at] in {'0' .. '9'}:
-        fraction += (ord(device[at]) - ord('0')).float * place
-        place /= 10.0
+      var number = 0
+      var scale = 1.0
+      while at < device.len:
+        if at < i or at > i + 1:
+          if device[at] notin {'0' .. '9'}:
+            break
+          number = number * 10 + (ord(device[at]) - ord('0'))
+          if at > i:
+            scale *= 10.0
         inc at
-      return whole.float + fraction
+      return number.float / scale
   0.0
 
 proc autoRenderScale*(width, height: int, device: string, inches = 0.0): float =

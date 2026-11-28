@@ -839,6 +839,24 @@ proc applyAssetColors*(image: Image, profile: AssetColorProfile,
 
 # ----------------------------------------------------------------- hooks
 
+proc fitRects(canvas: Image, rects: openArray[array[4, int]]) =
+  ## The fit, for both hooks below: one histogram of the rectangles (x0, y0,
+  ## x1, y1, inside the canvas), the Whites and Blacks it gives
+  ## (autoEndPoints' answer), and each rectangle adjusted by them.
+  probe(phFit):
+    var histogram: array[256, int]
+    var total = 0
+    for r in rects:
+      fitHistogram(canvas, r[0], r[1], r[2], r[3], histogram)
+      total += (r[2] - r[0]) * (r[3] - r[1])
+    let endPoints = endPointsOf(histogram, total, assetColorsPanelPalette)
+    if endPoints.isSome:
+      var profile = AssetColorProfile()
+      profile.whites = endPoints.get().whites
+      profile.blacks = endPoints.get().blacks
+      for r in rects:
+        applyAssetColors(canvas, profile, r[0], r[1], r[2] - r[0], r[3] - r[1])
+
 proc applyAutoFitToDrawn*(canvas: Image, x0, y0, width, height: int, source: Image = nil) =
   ## The consumer's half: called by whoever just drew an image onto the
   ## canvas, with the rectangle it landed on. Fits that rectangle into the
@@ -850,13 +868,14 @@ proc applyAutoFitToDrawn*(canvas: Image, x0, y0, width, height: int, source: Ima
     return
   if source.isNil and isImageGraded(canvas):
     return
-  probe(phFit):
-    let endPoints = autoEndPoints(canvas, x0, y0, width, height, assetColorsPanelPalette)
-    if endPoints.isSome:
-      var profile = AssetColorProfile()
-      profile.whites = endPoints.get().whites
-      profile.blacks = endPoints.get().blacks
-      applyAssetColors(canvas, profile, x0, y0, width, height)
+  # The rectangle inside the canvas, as autoEndPoints takes it.
+  let
+    xStart = max(0, x0)
+    yStart = max(0, y0)
+    xEnd = min(canvas.width, x0 + width)
+    yEnd = min(canvas.height, y0 + height)
+  if xEnd > xStart and yEnd > yStart:
+    fitRects(canvas, [[xStart, yStart, xEnd, yEnd]])
 
 proc rectsAround*(width, height: int, around: openArray[array[4, int]]): seq[array[4, int]] =
   ## The canvas but for the rectangles `around` (x0, y0, x1, y1), as
@@ -903,19 +922,7 @@ proc applyAutoFitAround*(canvas: Image, around: openArray[array[4, int]]) =
   let rects = rectsAround(canvas.width, canvas.height, around)
   if rects.len == 0:
     return
-  probe(phFit):
-    var histogram: array[256, int]
-    var total = 0
-    for r in rects:
-      fitHistogram(canvas, r[0], r[1], r[2], r[3], histogram)
-      total += (r[2] - r[0]) * (r[3] - r[1])
-    let endPoints = endPointsOf(histogram, total, assetColorsPanelPalette)
-    if endPoints.isSome:
-      var profile = AssetColorProfile()
-      profile.whites = endPoints.get().whites
-      profile.blacks = endPoints.get().blacks
-      for r in rects:
-        applyAssetColors(canvas, profile, r[0], r[1], r[2] - r[0], r[3] - r[1])
+  fitRects(canvas, rects)
 
 proc applyGlobalColorCorrection*(canvas: Image) =
   ## The frame-wide correction, once per render on the finished canvas.

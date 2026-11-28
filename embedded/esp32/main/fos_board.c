@@ -123,6 +123,24 @@ static const fos_board_keys_t *board_keys(const char *hardware_preset)
     return NULL;
 }
 
+/* `text` written at out[*used] with each byte below 0x10 as the word it
+ * stands for (k_rule_words); false when it and its terminator do not fit. */
+static bool put_rule(char *out, size_t out_len, size_t *used, const char *text)
+{
+    for (; *text; text++) {
+        unsigned char c = (unsigned char)*text;
+        if (c < 0x10) {
+            if (!put_rule(out, out_len, used, k_rule_words[c - 1])) return false;
+        } else if (*used + 1 < out_len) {
+            out[(*used)++] = (char)c;
+        } else {
+            return false;
+        }
+    }
+    out[*used] = '\0';
+    return true;
+}
+
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
 {
     if (out_len == 0) return;
@@ -130,21 +148,14 @@ void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
     const fos_board_keys_t *board = board_keys(hardware_preset);
     if (board == NULL || board->rules[0] == '\0') return;
     size_t used = 0;
-    for (const char *n = board->rules; *n && used + 1 < out_len; n++) {
-        const char *rule = k_board_rules[(unsigned char)*n - 1];
-        int wrote = snprintf(out + used, out_len - used, "%c%s", n == board->rules ? '[' : ',', rule);
-        if (wrote < 0 || (size_t)wrote >= out_len - used) {
+    for (const char *n = board->rules; *n; n++) {
+        if (!put_rule(out, out_len, &used, n == board->rules ? "[" : ",") ||
+            !put_rule(out, out_len, &used, k_board_rules[(unsigned char)*n - 1])) {
             out[0] = '\0'; /* a map cut short is no map */
             return;
         }
-        used += (size_t)wrote;
     }
-    if (used + 2 > out_len) {
-        out[0] = '\0';
-        return;
-    }
-    out[used++] = ']';
-    out[used] = '\0';
+    if (!put_rule(out, out_len, &used, "]")) out[0] = '\0';
 }
 
 static uint32_t fnv1a(const char *text)
@@ -157,6 +168,21 @@ static uint32_t fnv1a(const char *text)
     return h;
 }
 
+/* Whether the text at *at goes on as `text` does, its words written out
+ * (put_rule's reading); *at moves past what matched. */
+static bool rule_follows(const char **at, const char *text)
+{
+    for (; *text; text++) {
+        unsigned char c = (unsigned char)*text;
+        if (c < 0x10) {
+            if (!rule_follows(at, k_rule_words[c - 1])) return false;
+        } else if (*(*at)++ != (char)c) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Whether `map` is exactly what fos_board_event_map makes for the board,
  * compared rule by rule: no second 1 KB copy on the stack. */
 static bool is_current_map(const fos_board_keys_t *board, const char *map)
@@ -165,10 +191,7 @@ static bool is_current_map(const fos_board_keys_t *board, const char *map)
     const char *at = map;
     for (const char *n = board->rules; *n; n++) {
         if (*at++ != (n == board->rules ? '[' : ',')) return false;
-        const char *rule = k_board_rules[(unsigned char)*n - 1];
-        size_t len = strlen(rule);
-        if (strncmp(at, rule, len) != 0) return false;
-        at += len;
+        if (!rule_follows(&at, k_board_rules[(unsigned char)*n - 1])) return false;
     }
     return at[0] == ']' && at[1] == '\0';
 }

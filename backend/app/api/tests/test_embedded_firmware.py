@@ -1605,9 +1605,17 @@ def _board_keys_header() -> dict[str, tuple[str, str]]:
     the firmware joins it from `k_board_rules` by the numbers in its row
     (fos_board_event_map), and its keys' roles (`LABEL=role ...`)."""
     source = _FOS_BOARD_KEYS_GEN_H.read_text(encoding="utf-8")
+    words_table = re.search(r"k_rule_words\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert words_table, "k_rule_words[] not found in fos_board_keys_gen.h"
+    words = [_c_unescape(literal) for literal in re.findall(_C_STRING, words_table.group(1))]
     rules_table = re.search(r"k_board_rules\[\] = \{(.*?)\n\};", source, re.DOTALL)
     assert rules_table, "k_board_rules[] not found in fos_board_keys_gen.h"
-    rules = [_c_unescape(literal) for literal in re.findall(_C_STRING, rules_table.group(1))]
+    # A rule a line, in adjacent literals; a byte below 0x10 in it is that
+    # entry of k_rule_words, from 1 (fos_board.c put_rule).
+    rules = []
+    for line in rules_table.group(1).strip().splitlines():
+        packed = "".join(_c_unescape(literal) for literal in re.findall(_C_STRING, line))
+        rules.append("".join(words[ord(ch) - 1] if ord(ch) < 0x10 else ch for ch in packed))
     assert rules, "no rules parsed from fos_board_keys_gen.h"
     boards_table = re.search(r"k_board_keys\[\] = \{(.*?)\n\};", source, re.DOTALL)
     assert boards_table, "k_board_keys[] not found in fos_board_keys_gen.h"

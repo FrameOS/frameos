@@ -969,7 +969,9 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid
     for ch in word:
       if (ord(ch) and 0xC0) != 0x80: inc letters # a character's first byte
     while letters * size * perMille > (room - 2 * pad) * 1000 and (size > 9 or pad > 0):
-      let classes = "leading-tight text-[" & $size & "px]" & (if look.paper: " font-bold" else: "")
+      var classes = "leading-tight"
+      classes.px("text", size)
+      if look.paper: classes.add " font-bold"
       let h = measureText([word, "x"], classes, float32(room - 2 * pad))
       if h[0] <= h[1] * 1.5:
         break # one line: it fits
