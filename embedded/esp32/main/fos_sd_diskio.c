@@ -12,7 +12,8 @@
  * where the HTTP upload (internal buffers, multi-block) took 3 s a chunk.
  *
  * So the same driver, but such a buffer goes through an internal DMA buffer
- * of up to FOS_SD_BOUNCE_SECTORS sectors, one multi-block command each.
+ * of up to FOS_SD_BOUNCE_SECTORS sectors, one multi-block command each, and
+ * a transfer that fails is asked again (FOS_SD_ATTEMPTS).
  * The buffer is allocated per call, like IDF's (FatFS calls this under its
  * volume lock), and a board without the internal memory for it falls back
  * to IDF's own path, sector by sector, as before. */
@@ -26,6 +27,8 @@
 #include "esp_log.h"
 #include "esp_memory_utils.h"
 #include "ff.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "fos_sd_diskio";
 
@@ -36,6 +39,32 @@ static const char *TAG = "fos_sd_diskio";
 
 static sdmmc_card_t *s_cards[FF_VOLUMES];
 
+/* A transfer the card answers with a timeout or a garbled response is asked
+ * again, twice, a few milliseconds apart. On the E1004 such errors came
+ * right as the panel took the shared bus for a refresh (twice in 85 MB of
+ * uploads beside a render every 90 s, 2026-11-28), and the same sectors
+ * asked again were fine; without this each was a failed render or a
+ * refused upload chunk. Writing the same sectors twice is the same write. */
+#define FOS_SD_ATTEMPTS 3
+
+static esp_err_t transfer(sdmmc_card_t *card, bool write, void *buff, DWORD sector, UINT count)
+{
+    esp_err_t err = ESP_OK;
+    for (int attempt = 0; attempt < FOS_SD_ATTEMPTS; attempt++) {
+        if (attempt > 0) vTaskDelay(pdMS_TO_TICKS(5 << attempt));
+        err = write ? sdmmc_write_sectors(card, buff, sector, count)
+                    : sdmmc_read_sectors(card, buff, sector, count);
+        if (err == ESP_OK) {
+            if (attempt > 0) {
+                ESP_LOGW(TAG, "%s %lu+%u took %d attempts", write ? "write" : "read",
+                         (unsigned long)sector, count, attempt + 1);
+            }
+            return ESP_OK;
+        }
+    }
+    ESP_LOGE(TAG, "%s %lu+%u failed (0x%x)", write ? "write" : "read", (unsigned long)sector, count, err);
+    return err;
+}
 
 static bool direct_ok(const void *buff)
 {
@@ -77,17 +106,13 @@ static DRESULT sd_read(BYTE pdrv, BYTE *buff, DWORD sector, UINT count)
     UINT step = 0;
     uint8_t *bounce = direct_ok(buff) || count == 1 ? NULL : bounce_alloc(card, count, &step);
     if (!bounce) {
-        esp_err_t err = sdmmc_read_sectors(card, buff, sector, count);
-        if (err != ESP_OK) ESP_LOGE(TAG, "read %lu+%u failed (0x%x)", (unsigned long)sector, count, err);
-        return err == ESP_OK ? RES_OK : RES_ERROR;
+        return transfer(card, false, buff, sector, count) == ESP_OK ? RES_OK : RES_ERROR;
     }
     const size_t size = card->csd.sector_size;
     DRESULT res = RES_OK;
     for (UINT done = 0; done < count;) {
         UINT n = count - done < step ? count - done : step;
-        esp_err_t err = sdmmc_read_sectors(card, bounce, sector + done, n);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "read %lu+%u failed (0x%x)", (unsigned long)(sector + done), n, err);
+        if (transfer(card, false, bounce, sector + done, n) != ESP_OK) {
             res = RES_ERROR;
             break;
         }
@@ -104,18 +129,14 @@ static DRESULT sd_write(BYTE pdrv, const BYTE *buff, DWORD sector, UINT count)
     UINT step = 0;
     uint8_t *bounce = direct_ok(buff) || count == 1 ? NULL : bounce_alloc(card, count, &step);
     if (!bounce) {
-        esp_err_t err = sdmmc_write_sectors(card, buff, sector, count);
-        if (err != ESP_OK) ESP_LOGE(TAG, "write %lu+%u failed (0x%x)", (unsigned long)sector, count, err);
-        return err == ESP_OK ? RES_OK : RES_ERROR;
+        return transfer(card, true, (void *)buff, sector, count) == ESP_OK ? RES_OK : RES_ERROR;
     }
     const size_t size = card->csd.sector_size;
     DRESULT res = RES_OK;
     for (UINT done = 0; done < count;) {
         UINT n = count - done < step ? count - done : step;
         memcpy(bounce, buff + (size_t)done * size, (size_t)n * size);
-        esp_err_t err = sdmmc_write_sectors(card, bounce, sector + done, n);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "write %lu+%u failed (0x%x)", (unsigned long)(sector + done), n, err);
+        if (transfer(card, true, bounce, sector + done, n) != ESP_OK) {
             res = RES_ERROR;
             break;
         }

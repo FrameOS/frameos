@@ -520,7 +520,10 @@ esp_err_t fos_assets_chunk_finish(fos_assets_writer_t *writer,
     bool closed = fclose(writer->file) == 0;
     writer->file = NULL;
     if (!flushed || !closed) {
-        unlink(writer->tmp_path);
+        /* The part stays: the chunk is asked for again at the same offset and
+         * overwrites what this one left. Removing it turned one card error
+         * (the E1004's, as the panel took the shared bus) into a chunk_gap
+         * and the whole file from the start (2026-11-28). */
         set_err(err, "write_failed");
         return ESP_FAIL;
     }
