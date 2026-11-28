@@ -1146,8 +1146,20 @@ def suite_desktop(ctx, frame, layouts=None):
 
 
 def _console_rotate(con):
-    """The rotation the board has now: the console `status` says it."""
-    for line in con.command('status', 3):
+    """The rotation the board has now: the console `status` says it. Read to
+    its end (the heap line, `fos_console.c` cmd_status), not for a fixed
+    time: a board can go quiet for seconds in the middle of it (the E1004's
+    `internal:` line, 8 s of its 24 MB /state), and what is sent then waits
+    behind it. The key hold sent after a 3 s read reached the E1004's button
+    task as one 9 ms press (2026-11-28)."""
+    if type(con) is Console:
+        con.drain()
+        con.send('status')
+        _, _, got = con.wait_for(lambda x: 'lowest-ever free' in x, 30)
+        lines = [x for _, x in got]
+    else:
+        lines = con.command('status', 3)  # a Linux frame's answers at once (linux.py)
+    for line in lines:
         m = re.match(r'rotate:\s+(\d+)', line.strip())
         if m:
             return int(m.group(1))
