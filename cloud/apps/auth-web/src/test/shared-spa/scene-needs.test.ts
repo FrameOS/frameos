@@ -81,6 +81,9 @@ describe("scene needs", () => {
     expect(needsOf("Immich")).toContain("round");
     expect(needsOf("Webcam RSTP")).not.toContain("round");
     expect(needsOf("Windows 98 layout")).not.toContain("round");
+    // Book highlights takes taps, keys and buttons and needs none of them: a
+    // picture that changes by itself (settings.needs: []), set in a round one's circle.
+    expect(needsOf("Book highlights")).toEqual(["round"]);
     for (const name of readdirSync(samples)) {
       if (existsSync(join(samples, name, "scenes.json"))) {
         expect(Array.isArray(needsOf(name))).toBe(true);

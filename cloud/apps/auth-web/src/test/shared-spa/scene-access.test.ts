@@ -268,6 +268,8 @@ describe("repo sample scenes", () => {
     // Books reads the EPUBs on the card, and writes the books it downloads
     // and the notes it exports into it.
     ["repo/scenes/samples/Books/scenes.json", ["assets", "assets-write"]],
+    // Book highlights reads the highlights the reader keeps there, and writes nothing.
+    ["repo/scenes/samples/Book highlights/scenes.json", ["assets"]],
     // The PDF viewer reads the PDFs on the card, and writes nothing there either.
     ["repo/scenes/samples/PDF viewer/scenes.json", ["assets"]],
     // Fonts lists the fonts folder and writes the fonts it gets into it.
