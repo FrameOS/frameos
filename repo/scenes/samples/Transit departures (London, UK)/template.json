@@ -1,0 +1,10 @@
+{
+  "name": "Transit departures (London, UK)",
+  "description": "The next arrivals at one or two stops in London, like a station board: the Underground, the Elizabeth line, the DLR, the Overground, trams and buses, from Transport for London's own API, no key needed. Each line in its color, where it goes and the minutes until it comes, every one a live prediction.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

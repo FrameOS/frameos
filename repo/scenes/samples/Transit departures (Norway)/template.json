@@ -1,0 +1,10 @@
+{
+  "name": "Transit departures (Norway)",
+  "description": "The next departures from one or two stops anywhere in Norway, like a station board: every bus, tram, metro, train and boat in the country, from Entur's journey planner, no key needed. Each line in its color, where it goes and the minutes until it leaves, live where the operator predicts it, with delays and cancellations.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
