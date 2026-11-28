@@ -1141,6 +1141,12 @@ proc applyNamedInput*(state: var InputState, name: string, payload: JsonNode, or
   if name == evGpio or name == evButton:
     state.button(name, payload, origin, now, output)
     return true
+  if eventPolicy(name).device == edMotion:
+    # The frame's accelerometer (docs/accelerometer.md): the firmware made
+    # the gesture already, so it is delivered as it came, through the maps
+    # and to a scene only when it listens, as any input is.
+    output.add(InputDelivery(name: name, payload: payload, origin: origin))
+    return true
   state.applyNamedPointerOrKey(name, payload, origin, now, output)
 
 proc tick*(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
