@@ -1209,13 +1209,17 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   scene.tap(regionWith(3))
   doAssert sent.len >= 1 and sent[0][1] == %*{"sceneId": "my-editor", "state": {"open": "layouts/bar"}}, $sent
   sent.setLen(0)
-  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
-    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
   # Back to the frame page; a layout chosen there is the frame's, not the host's.
   discard scene.draw()
   scene.tap(regionWith(0))
   doAssert scene.state["page"].getStr() == "frame"
   doAssert scene.shownName == "Frame settings"
+  # The frame page is the frame's, no scene's: no code button on it.
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    doAssert r.handlers[ueClick] != 3 + 1, "a code button on the frame page"
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
   # In a window beside the scene with the focus (a desktop) the page wears no
   # layout itself: the one instance went along with the focus. It still holds
   # the frame's, and its gear is that instance's (types.frameLayoutShown).
