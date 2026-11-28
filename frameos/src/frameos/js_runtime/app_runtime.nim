@@ -5019,14 +5019,23 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     known: Cells = nil
     recolored: Recolored
     anyRecolored = false
-  if owed.isSome and (width * ps != target.width or height * ps != target.height):
-    payBackground(target, owed.get())
-  elif panel and frame.width == width and frame.height == height and frame.size == ps and frame.cells.len == count:
+  # A grid that stops short of the target's edges leaves a margin the
+  # background owed must fill. The buffer's record says what it holds there:
+  # the same background, painted when its cells were, needs nothing. Only a
+  # margin nobody knows is painted, and then the whole target, cells and all.
+  # Most panels a cell size never divides (466 px, the round AMOLED: 58 cells
+  # of 8 are 464), and painting it all every frame cost Sand 20 ms of 70.
+  let short = width * ps != target.width or height * ps != target.height
+  let margin = if owed.isSome and short: owed else: none(Color)
+  if panel and frame.width == width and frame.height == height and frame.size == ps and frame.cells.len == count and
+      (margin.isNone or frame.margin == margin):
     known = cast[Cells](addr frame.cells[0])
     for i in 0 ..< 256:
       if frame.palette[i] != palette[i]:
         recolored[i] = true
         anyRecolored = true
+  elif margin.isSome:
+    payBackground(target, margin.get())
   writeCells(target, cells, known, width, height, ps, palette, addr recolored, anyRecolored)
   if panel and count <= MaxPixelFrameBytes:
     if known.isNil:
@@ -5035,6 +5044,9 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
       frame = PixelFrame(width: width, height: height, size: ps, cells: newSeqUninit[uint8](count))
     copyMem(addr frame.cells[0], cells, count)
     frame.palette = palette
+    # The background the margin holds now (painted, or known to be there
+    # already); none when no background was owed, which leaves it unknown.
+    frame.margin = margin
     keepPanelPixelFrame(move frame)
 
 proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst,
