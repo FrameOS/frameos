@@ -1,0 +1,10 @@
+{
+  "name": "Transit departures (Boston, USA)",
+  "description": "The next MBTA departures from one or two stops in and around Boston, like a station board: subway, bus, commuter rail and ferry, from the MBTA's own API, no key needed. Each line in its color, where it goes and the minutes until it leaves, live predictions with delays and cancellations, and the timetable where nothing is predicted yet.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

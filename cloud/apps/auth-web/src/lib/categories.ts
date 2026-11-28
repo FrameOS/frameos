@@ -82,6 +82,13 @@ export const storeCategories: StoreCategory[] = [
     kind: "scene",
   },
   {
+    slug: "transit",
+    title: "Transit",
+    description: "The next departures from your stops: buses, trams, metro, trains and ferries, live where the agency predicts them.",
+    hint: "shows the next departures from public transport stops or stations (buses, trams, metro, trains, ferries), live or from a timetable",
+    kind: "scene",
+  },
+  {
     slug: "dashboards",
     title: "Home & dashboards",
     description:

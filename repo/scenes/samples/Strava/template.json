@@ -1,0 +1,10 @@
+{
+  "name": "Strava",
+  "description": "Your week of running, cycling or swimming from Strava: this week's distance and time against a weekly goal, the last eight weeks as bars, the year so far and your last activities with their pace or speed, in kilometers or miles. Signs in with a Strava API app of your own, straight from the frame, and asks Strava for only what changed every half hour.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

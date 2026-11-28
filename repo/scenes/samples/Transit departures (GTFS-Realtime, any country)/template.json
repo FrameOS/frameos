@@ -1,0 +1,10 @@
+{
+  "name": "Transit departures (GTFS-Realtime, any country)",
+  "description": "The next departures from one or two stops of any transit agency in the world that publishes a GTFS-Realtime TripUpdates feed, like a station board: the frame downloads the agency's feed itself, reads it in pieces and keeps only your stops. Each line in its color, where it goes and the minutes until it leaves, with delays and cancellations. A feed has times but no names, so the lines are named in a table. It comes set up with the MBTA's feed and Boston's subway.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

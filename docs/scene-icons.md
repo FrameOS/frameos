@@ -43,7 +43,7 @@ warns. The rule is written twice, `frameos/src/frameos/scene_icon.nim`
 `"Photos"`, `"Art & galleries"`, `"Clocks & time"`. People pick it from the store's
 category titles (the Category select in the scene's settings, the store's
 `categories.ts` / the SPA's `storeCategories.ts`): Photos, Art & galleries,
-Video, Clocks & time, Calendars & agendas, Weather, Home & dashboards, Games, Fun &
+Video, Clocks & time, Calendars & agendas, Weather, Transit, Home & dashboards, Games, Fun &
 animations, Notes & tools, AI & generative, Demos & examples, System (the
 frame's own apps, listed first on a frame), and Multi app
 layouts / Single app layouts / Device layouts for a layout. The scene keeps the name as text and nothing

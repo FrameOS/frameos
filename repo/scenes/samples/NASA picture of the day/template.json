@@ -1,0 +1,10 @@
+{
+  "name": "NASA picture of the day",
+  "description": "NASA's Astronomy Picture of the Day filling the screen, with its title, date and credit, and its explanation as a line or as a page beside the picture. A new one every day, straight from NASA; no key needed.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

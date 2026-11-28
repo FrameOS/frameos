@@ -38,6 +38,7 @@ const storeCategories = [
   "clocks",
   "calendar",
   "weather",
+  "transit",
   "dashboards",
   "games",
   "fun",

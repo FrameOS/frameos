@@ -39,7 +39,8 @@ A scenes file is a JSON array of scenes. Each scene is
   collection of artwork the scene carries), `"Video"` (films and video clips
   it plays), `"Clocks & time"` (clocks, timers,
   the year at a glance), `"Calendars & agendas"`, `"Weather"` (real
-  forecasts), `"Home & dashboards"` (a smart home, data, charts, maps, stats
+  forecasts), `"Transit"` (departures from public transport stops),
+  `"Home & dashboards"` (a smart home, data, charts, maps, stats
   from a service), `"Games"`, `"Fun & animations"` (comics, toys,
   animations), `"Notes & tools"` (to-dos, notes, drawing, practical tools),
   `"AI & generative"` (made by an AI service), `"Demos & examples"` (a demo,

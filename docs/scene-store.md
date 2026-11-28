@@ -154,13 +154,15 @@ copy `frontend/src/utils/storeCategories.ts`, the iOS app's
 **Scenes | Layouts**: what a scene is (`settings.isLayout`, `settings.desktop`,
 `settings.devices`),
 never a category it states. The scenes' shelves say what a scene is about:
-Photos, Art & galleries, Video, Clocks & time, Calendars & agendas, Weather, Home &
-dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
+Photos, Art & galleries, Video, Clocks & time, Calendars & agendas, Weather, Transit,
+Home & dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
 examples, System (the frame's own apps, only for a scene that names it: the
 classifier never picks it). Video is films and clips played (migration 0086
 moved the video scenes off Photos and Art & galleries; a live camera stays a
 tool), and a frame that plays no video (`without=video`, an ESP32) is not
-offered the shelf at all: a category's `needs` (`storeDeviceCategories`). The layouts' are Multi app layouts, Single app layouts and Device
+offered the shelf at all: a category's `needs` (`storeDeviceCategories`). Transit is
+departures from public transport stops, one scene per country or city it
+covers (and one for any agency's GTFS-Realtime feed). The layouts' are Multi app layouts, Single app layouts and Device
 layouts (one made for a device: `settings.devices` names it, docs/scene-layouts.md),
 and a layout is always on its kind's (`validateSceneZip`), a scene never.
 

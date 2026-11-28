@@ -1,0 +1,10 @@
+{
+  "name": "On this day",
+  "description": "What happened on today's date in other years, from Wikipedia in your language: one event at a time in big type, with its year, how long ago that was and a picture, the next one every hour or at a tap. Starts over each midnight.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Google Tasks",
+  "description": "The open tasks of one of your Google Tasks lists, with due dates and subtasks set in. Tap a task to tick it off (tap again to reopen it), tap the list's name to pick another list. Signs in with a Google Cloud OAuth client of your own (a Desktop app client), straight from the frame, and reads the list again every 15 minutes, keeping the last one through a lost network.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

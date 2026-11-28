@@ -1,0 +1,10 @@
+{
+  "name": "Todoist",
+  "description": "Your Todoist tasks on a touch screen: today and overdue by default, or any Todoist filter or project. Overdue tasks come first, each with its time, priority and project; tap a ring to tick a task off in Todoist. Needs your Todoist API token.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
