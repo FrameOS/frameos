@@ -2,6 +2,7 @@ import std/[json, tables, strutils, unittest]
 import pixie
 import ../channels
 import ../interpreter
+from ../scene_compiler import sceneGraph
 import ../types
 import ../utils/app_images
 import ../values
@@ -433,13 +434,12 @@ suite "interpreter error paths":
       clearEventChannel()
 
   test "malformed field path is handled as literal key during edge wiring":
-    var scene = InterpretedFrameScene(nodes: initTable[NodeId, DiagramNode]())
-    scene.nodes[1.NodeId] = node(1, "app", %*{"name": "newImage", "keyword": "data/newImage"})
+    let app = node(1, "app", %*{"name": "newImage", "keyword": "data/newImage"})
 
-    scene.setNodeFieldFromEdge(edge(1, 1, "field/state[broken", 7, "prev"))
+    discard sceneGraph(@[app], @[edge(1, 1, "field/state[broken", 7, "prev")])
 
-    check scene.nodes[1.NodeId].data["config"].hasKey("state[broken")
-    check scene.nodes[1.NodeId].data["config"]["state[broken"].getInt() == 7
+    check app.data["config"].hasKey("state[broken")
+    check app.data["config"]["state[broken"].getInt() == 7
 
   test "invalid code syntax logs compile errors during interpreted scene init":
     let sceneId = "tests/interpreter-errors/invalid-code".SceneId
