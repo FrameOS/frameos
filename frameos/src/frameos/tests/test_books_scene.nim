@@ -470,6 +470,46 @@ suite "the Books scene":
     check scene.state{"file"}.getStr() == ""
     noProblems()
 
+  test "keeps highlights made before Highlights.json in it, and opens a book at the mark another scene hands it":
+    problems = @[]
+    let key = "assets:Books/the-long-walk.epub"
+    let highlightsFile = assets / "Books" / "Notes" / "Highlights.json"
+    removeFile(highlightsFile)
+    let config = frame(800, 480)
+    # A highlight from before the file: in the second chapter, its first paragraph.
+    let mark = %*{"id": "m1", "k": "h", "s": 2, "p": 0, "b": 1, "c": 0, "b2": 1, "c2": 40,
+      "t": "Chapter 2, paragraph 1. It was a bright cold day in April", "n": "", "at": 1795000000000,
+      "f": 0.6, "ch": "Two: The Road"}
+    let scene = load(config, %*{"marks": {key: {"title": "The Long Walk", "author": "Ada Writer", "list": [mark]}}})
+    discard scene.draw(config, "library")
+    check scene.view == "library"
+    check fileExists(highlightsFile)
+    if fileExists(highlightsFile):
+      check parseFile(highlightsFile){"highlights"}{0}{"chapter"}.getStr() == "Two: The Road"
+    # Once: not written again while nothing changes.
+    removeFile(highlightsFile)
+    discard scene.draw(config, "")
+    check not fileExists(highlightsFile)
+    # The Book highlights scene's long press: the file, and the mark to open it at.
+    scene.state["file"] = %key
+    scene.state["mark"] = %"m1"
+    discard scene.draw(config, "at-mark")
+    check scene.view == "book"
+    check scene.at[0] == 2 and scene.at[1] <= 1
+    check scene.state{"file"}.getStr() == ""
+    check scene.state{"mark"}.getStr() == ""
+    # A mark it does not have opens the book where it was left.
+    scene.press("DOWN")
+    discard scene.draw(config, "")
+    let left = scene.at
+    scene.state["spot"] = %*{"view": "library", "books": scene.spot{"books"}}
+    scene.state["file"] = %key
+    scene.state["mark"] = %"gone"
+    discard scene.draw(config, "")
+    check scene.view == "book"
+    check scene.at == left
+    noProblems()
+
   test "text and layout: a bigger text keeps the paragraph it was on, justified, a dark page":
     problems = @[]
     let config = frame(800, 480)
@@ -552,13 +592,17 @@ suite "the Books scene":
     let config = frame(800, 480)
     let scene = load(config)
     let key = "assets:Books/the-long-walk.epub"
+    let highlightsFile = assets / "Books" / "Notes" / "Highlights.json"
+    removeFile(highlightsFile)
     scene.openBook(config, key)
     scene.press("DOWN")
     discard scene.draw(config, "")
-    # The ribbon: a bookmark, drawn in the page's corner.
+    # The ribbon: a bookmark, drawn in the page's corner. A bookmark is no
+    # highlight: no Highlights.json for it.
     scene.tap(tools()[3])
     let marked = scene.draw(config, "bookmarked")
     check scene.marksOf(key).len == 1
+    check not fileExists(highlightsFile)
     check scene.marksOf(key)[0]{"k"}.getStr() == "b"
     check scene.marksOf(key)[0]{"t"}.getStr().len > 20
     let ribbon = marked[800 - 18, 40]
@@ -587,6 +631,19 @@ suite "the Books scene":
     check highlight{"n"}.getStr() == "Cabbage again"
     check highlight{"t"}.getStr().len > 40
     check highlight{"b2"}.getInt() >= highlight{"b"}.getInt()
+    # Kept in Highlights.json for other scenes (Book highlights), its note
+    # with it, and no bookmark.
+    check fileExists(highlightsFile)
+    if fileExists(highlightsFile):
+      let kept = parseFile(highlightsFile)
+      check kept{"format"}.getStr() == "frameos-highlights"
+      check kept{"highlights"}.len == 1
+      check kept{"highlights"}{0}{"id"}.getStr() == highlight{"id"}.getStr()
+      check kept{"highlights"}{0}{"book"}.getStr() == key
+      check kept{"highlights"}{0}{"title"}.getStr() == "The Long Walk"
+      check kept{"highlights"}{0}{"author"}.getStr() == "Ada Writer"
+      check kept{"highlights"}{0}{"note"}.getStr() == "Cabbage again"
+      check kept{"highlights"}{0}{"text"}.getStr() == highlight{"t"}.getStr()
     # Go to it: the page shows it marked.
     scene.tap(taps()[1]) # Go to it
     let page = scene.draw(config, "highlighted")

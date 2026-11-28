@@ -1,0 +1,10 @@
+{
+  "name": "Book highlights",
+  "description": "Your highlights from the ePub reader as full-screen quotes, one at a time: the passage as big as the screen takes, the book, its author and chapter, and your note. A new one every hour (or as often as you set), the one you made last first. Tap, swipe, the arrows or the buttons for the next; a long press opens the book at it. Can show a Kindle's My Clippings.txt too.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.15"
+}
