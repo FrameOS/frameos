@@ -410,14 +410,14 @@ proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   if not worn.isNil and worn.id.string == held and InterpretedFrameScene(worn).publicStateFields.len > 0:
     result.put("button", newJInt(ALayout))
 
-proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, unit = 0): JsonNode =
+proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string): JsonNode =
   ## The page's fields, in the shape of a scene's, from the host's facts:
   ## the network (those in range, the saved one first when it is not among
   ## them, and a name to type), its password, the rotation and the scale.
-  ## The scales offered leave a layout of 320 px or more on the panel's
-  ## shorter edge `unit` (uiScale's floor: past it the page itself stops
-  ## following), and the scale set elsewhere stays as it is. While a plane is
-  ## being connected, that page's own: the cloud's address, or none.
+  ## Every scale the control plane offers, on any panel: the page itself
+  ## stops following past a layout of 320 px (uiScale), so it can always set
+  ## the scale back. While a plane is being connected, that page's own: the
+  ## cloud's address, or none.
   result = newJArray()
   let link = info{"link"}
   if not link.isNil and link.kind == JObject:
@@ -465,10 +465,8 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
   var scale = field("renderScale", "Scale", "float")
   options = newJArray()
   options.elems.add option("0", "Automatic (" & scaleLabel(autoScale) & ")")
-  let held = info{"renderScale"}.text
   for step in Scales:
-    if unit == 0 or parseFloat(step) * 320 <= max(unit, 320).float or step == held:
-      options.elems.add option(step, scaleLabel(step))
+    options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
   if not info{"clickSounds"}.isNil:
@@ -1272,7 +1270,7 @@ proc brightnessRow(look: Look, pct: int): SvgNode =
   line.children.add look.iconButton(false, PlusPath, HAction + ABrighter)
   result.children.add line
 
-proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit, width,
+proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, width,
     height: int): SvgNode =
   ## The frame page: how it is doing (a card of label and text rows), its
   ## buttons, what can be changed (the same rows as a scene's fields); or,
@@ -1367,7 +1365,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   if not serviceKeysSave.isNil: buttons.children.add look.pressButton("Service keys", AKeys)
   result.children.add buttons
   let
-    fields = self.frameFields(info, autoScale, unit)
+    fields = self.frameFields(info, autoScale)
     edits = self.objectAt("frameValues")
     typing = edits{"typing"}.getBool()
   for i in 0 ..< fields.elems.len:
@@ -1447,7 +1445,7 @@ proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, heigh
   root.children.add el("div", move c, body)
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
-    keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0, panel = 0): SvgNode =
+    keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0): SvgNode =
   ## The panel as a UI tree: a header with Cancel, the scene's name and
   ## Save, and under it the fields in a list that scrolls. With the host's
   ## `info` (frameSettingsRead) a gear left of Save opens the frame page,
@@ -1455,10 +1453,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   ## circle, the keyboard's top at `keyboardTop` while it is up. `sizeUnit`:
   ## what its sizes are a share of (sceneSwitcher's panelUnit: the panel's
   ## shorter edge up to 480, for a UI laid out at its render scale, uiRoom);
-  ## the canvas's without it. `panel`: the panel's shorter edge (panelEdge),
-  ## what the frame page offers its scales for; the canvas's without it.
+  ## the canvas's without it.
   let unit = if sizeUnit > 0: sizeUnit else: min(width, height)
-  let edge = if panel > 0: panel else: min(width, height)
   let autoScale = scaleText(autoFrameRenderScale(self.frameConfig))
   var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
   look.pad = clamp(unit * 4 div 100, 8, 32)
@@ -1478,7 +1474,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
       # is up. Save is lit while there is something to save.
       let edits = self.state{"frameValues"}
       self.roundTree(look, result, width, height, "Frame settings", min(keyboardTop, height),
-        gear = false, self.frameList(look, info, autoScale, edge, width, height),
+        gear = false, self.frameList(look, info, autoScale, width, height),
         cancel = "Back", saveLit = not edits.isNil and edits.len > 0)
     else:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height),
@@ -1516,7 +1512,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header.role("bar")
-  let body = if frame: self.frameList(look, info, autoScale, edge, width, height)
+  let body = if frame: self.frameList(look, info, autoScale, width, height)
     else: self.pageList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 
@@ -1550,7 +1546,7 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     # Turned off while it showed: the frame's pages go with it.
     self.showPage(false)
   if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,
-      keyboardTop, info, self.sizeUnit(image), panelEdge(self.frameConfig, image)), image, self.paper, self.slow,
+      keyboardTop, info, self.sizeUnit(image)), image, self.paper, self.slow,
       onHandler, IdleSeconds, roomW, roomH):
     leave()
 

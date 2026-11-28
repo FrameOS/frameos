@@ -251,7 +251,7 @@ const
 
 proc panelEdge*(frameConfig: FrameConfig, image: Image): int =
   ## The panel's shorter edge, as it is turned (the canvas's without a
-  ## config): what the frame page's scales are offered for.
+  ## config).
   if not frameConfig.isNil:
     let (w, h) = canvasSize(frameConfig)
     result = min(w, h)
