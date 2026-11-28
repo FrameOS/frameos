@@ -639,7 +639,11 @@ export const get = () => (
   [Scrolling](#scrolling-and-clipping)). `localX` / `localY` stay
   from its corner, so they go negative or past its width: a slider clamps
   them. `localX / width` is how far along it the finger is, so a slider
-  needs no width of its own and works on any frame. A move with no press goes to the element under it,
+  needs no width of its own and works on any frame. A press lost without
+  its release (a `pointerCancel`: the input overflowed, the device went
+  away, the browser lost the capture; docs/events.md "Pointer") is the
+  holder's `onPointerUp` with `type` `"pointerCancel"`, so every drag lets
+  go (2026.11.17+; before it, no element heard it and a drag stayed held). A move with no press goes to the element under it,
   as in a browser, with `buttons` 0: a mouse or a pen passing over (a finger is over nothing
   until it presses). `buttons` is the mask of what is held (`1 << button`), so a slider or a
   paint brush that follows the pointer acts only while it is set. A drag renders at

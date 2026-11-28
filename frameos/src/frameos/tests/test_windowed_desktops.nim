@@ -3399,6 +3399,97 @@ suite "the desktop's icons, picked with a rectangle and dragged (each desktop wi
     chooseLayout("")
     discard pass()
 
+  test "the rectangle goes under the windows, and a press lost without its release lets go":
+    # Drawn over a window, the dotted line came over the window's picture as
+    # the cursor does; and a press lost without its release (pointerCancel: a
+    # browser that lost the capture, input that overflowed) left it on the
+    # desktop for good (2026-11-28). On a canvas kept between renders, as a
+    # Pi's and an ESP32's are, so a line left behind would show.
+    let kept = newImage(W, H)
+    rhythmCanvasGeneration = proc(canvas: Image): int64 {.nimcall, raises: [].} = 0
+    proc keptPass(): Image =
+      clock += 0.01
+      rhythmClockOverride = clock
+      render(current, ExecutionContext(scene: current, event: "render", payload: %*{}, image: kept, hasImage: true,
+        loopIndex: 0, loopKey: ".", nextSleep: -1)).copy()
+    let red = colored("#ff0000")
+    for d in iconDesks():
+      checkpoint d.layoutId
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(d.layoutId)
+      discard keptPass()
+      var win = d.win.copy()
+      win["id"] = %"tests/red"
+      win["z"] = %1
+      desk().state["wins"] = %*[win]
+      desk().state["iconSpots"] = %*{}
+      desk().state["picked"] = newJNull()
+      let before = keptPass()
+      # From bare desktop to the middle of the window (the desktop's pixels are
+      # the panel's less its bars: the band's corner says where it starts).
+      let (bx, by) = d.bare
+      discard send("pointerDown", at(bx, by))
+      let
+        cx = d.win["x"].getInt() + d.win["w"].getInt() div 2 + bx - desk().state{"band", "x0"}.getInt()
+        cy = d.win["y"].getInt() + d.win["h"].getInt() div 2 + by - desk().state{"band", "y0"}.getInt()
+      discard send("pointerMove", at((bx + cx) div 2, (by + cy) div 2))
+      discard keptPass()
+      discard send("pointerMove", at(cx, cy))
+      let during = keptPass()
+      shot(during, "band-under-window-" & d.layoutId.replace("/", "-"))
+      # Dotted, black on white, on the desktop...
+      var black, white = false
+      for x in min(bx, cx) + 1 ..< max(bx, cx) - 1:
+        black = black or during.color(x, by) == colored("#000000")
+        white = white or during.color(x, by) == colored("#ffffff")
+      check black and white
+      # ... and the window over it: its corner is under the window's picture.
+      var covered = true
+      for y in cy - 16 .. cy + 16:
+        for x in cx - 16 .. cx + 16:
+          covered = covered and during.color(x, y) == red
+      check covered
+      # Let go over the window: gone, from the desktop and from the window.
+      discard send("pointerUp", at(cx, cy, %*{"buttons": 0}))
+      check desk().state{"band"}.kind == JNull
+      let after = keptPass()
+      var restored = true
+      for x in min(bx, cx) .. max(bx, cx):
+        restored = restored and after.color(x, by) == before.color(x, by)
+      for y in cy - 16 .. cy + 16:
+        for x in cx - 16 .. cx + 16:
+          restored = restored and after.color(x, y) == red
+      check restored
+      # A press lost on the way (pointerCancel): the rectangle goes all the same.
+      discard send("pointerDown", at(bx, by))
+      discard send("pointerMove", at(cx, cy))
+      check desk().state{"band"}.kind == JObject
+      discard send("pointerCancel", at(cx, cy, %*{"buttons": 0}))
+      check desk().state{"band"}.kind == JNull
+      # On a runtime that hands nobody a lost press, the next move with nothing
+      # held ends it.
+      discard send("pointerDown", at(bx, by))
+      discard send("pointerMove", at(cx, cy))
+      discard send("pointerMove", at(bx, by, %*{"buttons": 0}))
+      check desk().state{"band"}.kind == JNull
+      discard send("pointerUp", at(bx, by, %*{"buttons": 0}))
+      # Icons being dragged when the press is lost stay where they were.
+      let (ix, iy) = d.first
+      discard send("pointerDown", at(ix, iy))
+      discard send("pointerMove", at(ix + d.drag[0], iy + d.drag[1]))
+      check desk().state{"iconDrag", "on"}.getBool()
+      discard send("pointerCancel", at(ix + d.drag[0], iy + d.drag[1], %*{"buttons": 0}))
+      check desk().state{"iconDrag"}.kind == JNull
+      check desk().state{"iconSpots"} == %*{}
+      discard keptPass()
+      check problems.len == 0
+      desk().state["picked"] = newJNull()
+    rhythmCanvasGeneration = nil
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
   test "are the same functions, word for word, in every desktop with icons":
     for start in ["// ------------------------------------------------------------ the desktop's icons",
         "// The icons' cells kept", "// The icons picked", "// The icons a rectangle drawn on the desktop touches",

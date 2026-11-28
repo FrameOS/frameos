@@ -442,7 +442,8 @@ to F9. Everywhere else (an editor's preview) they draw the one
 scene, as before.
 **Icons.** The four with icons on the desktop (`Windows 98`, `BeOS`, `Classic
 Mac`, `OS/2 Warp`) take them as the desktops of their day did. A press on bare
-desktop that moves draws a dotted rectangle and picks every icon it touches
+desktop that moves draws a dotted rectangle (over the icons, under the windows,
+which stay holes while it is drawn) and picks every icon it touches
 (Ctrl or Shift keeps those picked before), and a click there picks none; a click
 on an icon picks it alone (Ctrl or Shift: one more, or one less), a double click
 opens it, and a drag of a picked icon moves every icon picked, each let go into
@@ -460,10 +461,14 @@ all the layouts' JavaScript, no runtime or firmware for it: `arranged`,
 `spotsOf`, `pickedOf`, `banded`, `dropped`, `iconColumns`, `iconPointer` and
 `Band` are the same text in the four, each desktop saying only where its cells
 are (`test_windowed_desktops.nim` checks they match). The handlers are on the
-desktop and on each icon, so a press is captured by what it landed on; a move
-with nothing held returns `false`, so a mouse passing over the desktop draws
-nothing, and a maximized window's border takes its press, so no rectangle
-starts there.
+desktop and on each icon, so a press is captured by what it landed on; a press
+lost without its release (a `pointerCancel`, which the holder hears as its
+`onPointerUp`, docs/jsx-ui.md "Events") ends the rectangle and leaves dragged
+icons where they were; a move with nothing held returns `false`, so a mouse
+passing over the desktop draws nothing, unless a rectangle or a drag is still
+going (its release never came: a runtime before 2026.11.17 hands nobody a lost
+press), which it ends; and a maximized window's border takes its press, so no
+rectangle starts there.
 
 `Teletext` and `E-reader` are not desktops, but they read `app.frame.scenes`
 where a host has it: Teletext numbers each page by the scene's place in the list

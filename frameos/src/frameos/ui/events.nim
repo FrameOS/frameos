@@ -2152,6 +2152,13 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     if moved:
       target.inputOnly = true
       result = true
+    # A held press lost without its release (docs/events.md "Pointer": the
+    # input overflowed, the device went away, the browser lost the capture):
+    # the element holding it hears it as its release, `type` "pointerCancel",
+    # so a drag lets go. Nothing heard it before, and a desktop's selection
+    # rectangle stayed on the screen.
+    if captured >= 0 and event == "pointerCancel":
+      kind = ord(uePointerUp)
     if not placed or handled or kind < 0 or target.call.isNil:
       continue
     if not capturing.isNil:

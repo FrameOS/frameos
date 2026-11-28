@@ -562,6 +562,44 @@ suite "jsx events":
     check ui.scene.state{"over"}.getStr() == "20,20"
     check ui.scene.state{"level"}.getInt() == 20
 
+  test "a press lost without its release is its element's release: a drag lets go":
+    # A pointerCancel (docs/events.md "Pointer": the input overflowed, the
+    # device went away, the browser lost the capture) reached no handler, and
+    # a desktop's selection rectangle stayed on the screen (2026-11-28).
+    let id = "tests/jsx-cancel"
+    let ui = newUi("""
+      export const get = () => (
+        <div className="p-10 bg-white">
+          <div className="w-20 h-4 bg-black"
+            onPointerDown={() => frameos.setState('held', true)}
+            onPointerMove={(e) => { if (e.buttons) frameos.setState('level', e.localX) }}
+            onPointerUp={(e) => { frameos.setState('held', false); frameos.setState('how', e.type) }} />
+          <div className="w-10 h-10 bg-red-500" onPointerUp={() => frameos.setState('box', true)} />
+        </div>
+      )
+    """, id)
+    proc mouse(x, y, buttons: int): JsonNode =
+      %*{"x": x, "y": y, "pointerId": 0, "pointerType": "mouse", "buttons": buttons}
+    discard ui.render() # the track at 40,40 (80x16), the box under it at 40,56 (40x40)
+    check dispatchUiEvent(id, "pointerDown", mouse(50, 48, 1))
+    check dispatchUiEvent(id, "pointerMove", mouse(90, 48, 1))
+    check ui.scene.state{"level"}.getInt() == 50
+    discard ui.render()
+    # Lost over the box: the track, which held it, hears it as its release.
+    check dispatchUiEvent(id, "pointerCancel", at(60, 70))
+    check not ui.scene.state{"held"}.getBool()
+    check ui.scene.state{"how"}.getStr() == "pointerCancel"
+    check ui.scene.state{"box"}.isNil
+    # Let go: a move over the box with a button held is no drag of the track.
+    discard dispatchUiEvent(id, "pointerMove", mouse(60, 70, 1))
+    check ui.scene.state{"level"}.getInt() == 50
+    # Nothing held: a cancel is nobody's.
+    check not dispatchUiEvent(id, "pointerCancel", at(50, 48))
+    # A release is a release.
+    check dispatchUiEvent(id, "pointerDown", mouse(50, 48, 1))
+    check dispatchUiEvent(id, "pointerUp", mouse(50, 48, 0))
+    check ui.scene.state{"how"}.getStr() == "pointerUp"
+
   test "a slider follows a mouse only while it is pressed (docs/jsx-ui.md)":
     # A mouse passing over a slider sends it moves too, as in a browser,
     # with buttons 0: the documented slider acts on a move only while a
