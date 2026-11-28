@@ -485,7 +485,7 @@ suite "the Windows 98 desktop":
     # frame), none of the scenes.
     let (ix, iy) = (48, 8 + 1 * 72 + 20)
     discard send("tap", at(ix, iy))
-    check desk().state{"picked"}.getStr() == "system/sceneSettings"
+    check desk().state{"picked"} == %*["system/sceneSettings"]
     # Its name on the selection's blue.
     let picked = pass()
     shot(picked, "11-icons")
@@ -1273,7 +1273,7 @@ suite "the BeOS desktop":
     # list (no store, no Files on this frame).
     let (ix, iy) = (W - BarW div 2, iconTop(1) + 1 * 66 + 20)
     discard send("tap", at(ix, iy))
-    check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
+    check desk().state{"picked"} == %*["system/sceneSwitcher"]
     check send("doubleTap", at(ix, iy)).filterIt(it != "render") == @["sceneSwitcher"]
     check send("doubleTap", at(ix, iconTop(1) + 20)).filterIt(it != "render") == @["sceneSettings"]
     discard pass()
@@ -1399,9 +1399,9 @@ suite "the BeOS desktop":
     # terminal, each below where it reaches.
     check wins().len == 4
     discard send("tap", at(W - BarW div 2, iconTop(4) + 2 * 66 + 20))
-    check desk().state{"picked"}.getStr() == "tests/term-be"
+    check desk().state{"picked"} == %*["tests/term-be"]
     discard send("tap", at(W - BarW div 2, iconTop(4) + 20))
-    check desk().state{"picked"}.getStr() == "system/sceneSettings"
+    check desk().state{"picked"} == %*["system/sceneSettings"]
     discard pass()
     check problems.len == 0
 
@@ -1419,9 +1419,9 @@ suite "the BeOS desktop":
     shot(pass(), "b7-long-deskbar")
     # The disk heads the column left of the Deskbar's, the scene list under it.
     discard send("tap", at(W - BarW - 4 - 88 div 2, 14 + 20))
-    check desk().state{"picked"}.getStr() == "system/sceneSettings"
+    check desk().state{"picked"} == %*["system/sceneSettings"]
     discard send("tap", at(W - BarW - 4 - 88 div 2, 14 + 66 + 20))
-    check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
+    check desk().state{"picked"} == %*["system/sceneSwitcher"]
     check problems.len == 0
 
 proc openIds(): seq[string] =
@@ -1573,7 +1573,7 @@ suite "the Classic Mac desktop":
     # The disk and the scene list (no store, no Files, no terminal on this
     # frame), none of the scenes.
     discard send("tap", at(CIconX, CIconTop + 62 + 16))
-    check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
+    check desk().state{"picked"} == %*["system/sceneSwitcher"]
     let picked = pass()
     shot(picked, "cm4-icons")
     # Its name on black: the label under the folder, inverted.
@@ -1731,7 +1731,7 @@ suite "the Classic Mac desktop":
     discard pass()
     # And so do the icons: the disk, the scene list, the store, the terminal.
     discard send("tap", at(CIconX, CIconTop + 3 * 62 + 16))
-    check desk().state{"picked"}.getStr() == "tests/term-cm"
+    check desk().state{"picked"} == %*["tests/term-cm"]
     check send("doubleTap", at(CIconX, CIconTop + 3 * 62 + 16)).filterIt(it != "render") == @["setCurrentScene"]
     check current.id.string == "tests/term-cm"
     shot(pass(), "cm8-terminal")
@@ -2289,7 +2289,7 @@ suite "the OS/2 Warp desktop":
     # The scenes' folder and System Setup (no store, no Files, no terminal here).
     check byY(rectsOf(Os2).filterIt(it[0] == 8 and it[2] == 92)).len == 2
     discard send("tap", at(Os2IconX, Os2IconTop + 70 + 16))
-    check desk().state{"picked"}.getStr() == "system/sceneSettings"
+    check desk().state{"picked"} == %*["system/sceneSettings"]
     shot(pass(), "w6-icons")
     check acted(send("doubleTap", at(Os2IconX, Os2IconTop + 70 + 16))) == @["sceneSettings"]
     check payloads["sceneSettings"] == %*{"page": "frame"}
@@ -3297,6 +3297,117 @@ proc groupedBy(scenes: string): JsonNode =
   let fn = copiesOf(GroupedStart, [layout])[0] & "\n}\n"
   probe(fn & "export function get(app) {\n  frameos.setState('out', grouped(" & scenes &
     ").map((g) => [g.title].concat(g.scenes.map((s) => s.id))))\n  return <div />\n}\n"){"out"}
+
+type IconDesk = object
+  layoutId: string
+  ids: array[2, string]  ## its first two icons, the second under the first
+  first: (int, int)      ## a point on the first icon, on the panel
+  cellH: int             ## one icon under another
+  win: JsonNode          ## the one window open, clear of what is tried here
+  band: array[4, int]    ## a rectangle from bare desktop over both icons
+  drag: (int, int)       ## two cells over and two down, onto bare desktop
+  bare: (int, int)       ## bare desktop, nothing in reach
+
+proc iconDesks(): seq[IconDesk] =
+  @[
+    IconDesk(layoutId: Layout, ids: ["system/sceneSwitcher", "system/sceneSettings"], first: (48, 28), cellH: 72,
+      win: %*{"x": 400, "y": 250, "w": 200, "h": 120}, band: [150, 20, 40, 120], drag: (160, 144), bare: (300, 40)),
+    IconDesk(layoutId: BeOS, ids: ["system/sceneSettings", "system/sceneSwitcher"], first: (W - BarW div 2, iconTop(1) + 20),
+      cellH: 66, win: %*{"x": 100, "y": 300, "w": 200, "h": 120}, band: [600, 110, 700, 200],
+      # From under the Deskbar to the second column left of it: 460, 14 + 2 * 66.
+      drag: (460 - (W - BarW + (BarW - 88) div 2), 14 + 2 * 66 - iconTop(1)), bare: (300, 40)),
+    IconDesk(layoutId: ClassicMac, ids: ["system/sceneSettings", "system/sceneSwitcher"], first: (CIconX, CIconTop + 16),
+      cellH: 62, win: %*{"x": 100, "y": 250, "w": 200, "h": 120}, band: [650, 40, 760, 120], drag: (-168, 124),
+      bare: (300, 60)),
+    IconDesk(layoutId: Os2, ids: ["system/sceneSwitcher", "system/sceneSettings"], first: (Os2IconX, Os2IconTop + 16),
+      cellH: 70, win: %*{"x": 500, "y": 100, "w": 200, "h": 120}, band: [150, 40, 40, 130], drag: (168, 140),
+      bare: (300, 60))]
+
+suite "the desktop's icons, picked with a rectangle and dragged (each desktop with icons)":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red"}, {"id": "tests/green", "name": "Green"}, {"id": "tests/blue", "name": "Blue"}]
+
+  test "a rectangle picks the icons it touches, a drag puts them two cells on, and they stay there":
+    for d in iconDesks():
+      checkpoint d.layoutId
+      # A desktop of its own with one small window, away from the icons.
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(d.layoutId)
+      discard pass()
+      check desk().id.string == d.layoutId
+      var win = d.win.copy()
+      win["id"] = %"tests/red"
+      win["z"] = %1
+      desk().state["wins"] = %*[win]
+      desk().state["iconSpots"] = %*{}
+      desk().state["picked"] = newJNull()
+      discard pass()
+      # A mouse passing over the desktop draws nothing.
+      check "render" notin send("pointerMove", at(d.bare[0], d.bare[1], %*{"buttons": 0}))
+      # From bare desktop, a rectangle over both: both picked as it goes, drawn
+      # dotted, black on white.
+      discard send("pointerDown", at(d.band[0], d.band[1]))
+      check desk().state{"picked"} == %*[]
+      discard send("pointerMove", at(d.band[2], d.band[3]))
+      check desk().state{"picked"}.getElems().mapIt(it.getStr()).sorted() == (@(d.ids)).sorted()
+      let banded = pass()
+      shot(banded, "icons-band-" & d.layoutId.replace("/", "-"))
+      var black, white = false
+      let y = min(d.band[1], d.band[3])
+      for x in min(d.band[0], d.band[2]) + 1 ..< max(d.band[0], d.band[2]) - 1:
+        black = black or banded.color(x, y) == colored("#000000")
+        white = white or banded.color(x, y) == colored("#ffffff")
+      check black and white
+      discard send("pointerUp", at(d.band[2], d.band[3], %*{"buttons": 0}))
+      check desk().state{"band"}.kind == JNull
+      discard pass()
+      # The first dragged two cells over and two down: both go, the second under it.
+      let (x, y0) = d.first
+      let (tx, ty) = (x + d.drag[0], y0 + d.drag[1])
+      discard send("pointerDown", at(x, y0))
+      discard send("pointerMove", at(tx, ty))
+      check desk().state{"iconDrag", "on"}.getBool()
+      shot(pass(), "icons-drag-" & d.layoutId.replace("/", "-"))
+      discard send("pointerUp", at(tx, ty, %*{"buttons": 0}))
+      check desk().state{"iconDrag"}.kind == JNull
+      check desk().state{"iconSpots"}{d.ids[0]}.getStr() == "2:2"
+      check desk().state{"iconSpots"}{d.ids[1]}.getStr() == "2:3"
+      discard pass()
+      # There they are: a click picks the one there alone, and where it was is bare.
+      discard send("tap", at(tx, ty))
+      check desk().state{"picked"} == %*[d.ids[0]]
+      discard send("tap", at(x, y0))
+      check desk().state{"picked"} == %*[]
+      # Ctrl adds one and takes it away again.
+      for (ids, at2) in [(@[d.ids[0]], (tx, ty)), (@[d.ids[0], d.ids[1]], (tx, ty + d.cellH)),
+          (@[d.ids[0]], (tx, ty + d.cellH))]:
+        discard send("pointerDown", at(at2[0], at2[1], %*{"ctrl": true}))
+        discard send("pointerUp", at(at2[0], at2[1], %*{"buttons": 0}))
+        check desk().state{"picked"} == %ids
+        discard pass()
+      # Kept on disk the field comes back as its text: the same places.
+      desk().state["iconSpots"] = %($desk().state["iconSpots"])
+      discard pass()
+      discard send("tap", at(tx, ty + d.cellH))
+      check desk().state{"picked"} == %*[d.ids[1]]
+      check problems.len == 0
+      desk().state["iconSpots"] = %*{}
+      desk().state["picked"] = newJNull()
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "are the same functions, word for word, in every desktop with icons":
+    for start in ["// ------------------------------------------------------------ the desktop's icons",
+        "// The icons' cells kept", "// The icons picked", "// The icons a rectangle drawn on the desktop touches",
+        "// Where icons dragged", "// What a new window keeps clear of: each column of icons",
+        "// What the pointer does on the desktop and its icons", "// The rectangle a drag on bare desktop draws"]:
+      checkpoint start
+      let copies = copiesOf(start, [layout, beos, classicMac, os2])
+      check copies[0].len > 0
+      for text in copies: check text == copies[0]
 
 suite "a long list of scenes, by category (each desktop's grouped)":
   test "is the same function, word for word, in every desktop with a list of scenes":

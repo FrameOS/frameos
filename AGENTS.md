@@ -857,6 +857,11 @@
   every copy
   (`test_windowed_desktops.nim` checks they match), and `grouped` in the scene
   switcher (`sceneSwitcher/scene.nim`, the same rule in Nim) with them.
+  The four with icons on the desktop (Windows 98, BeOS, Classic Mac, OS/2
+  Warp) pick them with a rectangle and drag them about their grid with one
+  set of functions, the same text in the four (`arranged` to `Band`; each
+  icon's cell kept in the private disk field `iconSpots`): a desktop says
+  only where its cells are (docs/scene-layouts.md "Windows", "Icons").
   Where memory is short only so many run at once (`app_runtime.windowLimit`, by
   the PSRAM the panel leaves (`memory.sceneMemoryBytes`): 2 on an 8 MB ESP32,
   1 on the 13.3" E1004, 4 on 16 MB, `app.frame.windows`): the layouts close the one
