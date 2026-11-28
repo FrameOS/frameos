@@ -915,6 +915,27 @@ suite "the Books scene":
     check scene.view == "book"
     noProblems()
 
+  test "a frame with internal storage alone keeps no downloads and no exports, and says so":
+    problems = @[]
+    let internal = getTempDir() / "frameos-books-internal-only-" & $epochTime().int
+    createDir(internal)
+    storageInternalPath = internal
+    storageCardMounted = false
+    defer:
+      storageInternalPath = ""
+      removeDir(internal)
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"view": "stats", "dl": {"title": "T", "urls": ["https://x.example/t.epub"], "u": 0,
+      "path": "Books/T.epub", "offset": 0, "total": nil, "retries": 0, "state": "busy"}}
+    discard scene.draw(config, "no-card-stats")
+    check scene.spot{"dl"}{"state"}.getStr() == "failed"
+    check scene.spot{"dl"}{"error"}.getStr().contains("TF card")
+    scene.tap(taps()[^2]) # Export notes
+    discard scene.draw(config, "no-card-export")
+    check scene.spot{"notice"}.getStr().contains("TF card")
+    noProblems()
+
   test "a gallery for the eye (FRAMEOS_BOOK_GALLERY=<dir> with FRAMEOS_BOOK_FILES, else skipped)":
     # Real books on the panels a frame has, every page of the app, for the
     # eye and for a pull request: FRAMEOS_BOOK_FILES=<a.epub>:<b.epub> (the
