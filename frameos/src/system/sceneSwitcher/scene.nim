@@ -29,8 +29,8 @@
 ## holds what is typed (`query`, cleared each time it opens).
 ##
 ## Flash is the budget on an ESP32 (AGENTS.md): the firmware gets the names
-## only layout, no keyboard, no pictures and no round panel (none of its
-## boards has one), integer arithmetic, and no Nim checks in this module.
+## only layout, no pictures and no round panel (none of its boards has
+## one), integer arithmetic, and no Nim checks in this module.
 ## Every index here is guarded by the loop or the test that reaches it.
 
 import std/[json, options, strutils, tables, times]
@@ -779,49 +779,48 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     of "primary", "refresh", "menu", "back": self.leave()
     else: discard
 
-when not defined(frameosEmbedded):
-  proc row(self: SceneSwitcherScene, down: bool): int =
-    ## The tile a row below (or above) the highlighted one, in its column or
-    ## the last of a shorter row: a category starts a row of its own, so the
-    ## rows are the tiles' places, not their numbers. Past the last row the
-    ## tile count (the gear, or around to the first), above the first -1
-    ## (the gear, or around to the last).
-    let n = self.entries.len
-    let lit = self.highlighted()
-    if lit < 0 or lit >= n:
-      return (if down: 0 else: -1)
-    let spots = self.spots(self.grid())
-    let (col, top) = spots[lit]
-    result = if down: n else: -1
-    var rowTop = -1
-    var i = if down: lit + 1 else: lit - 1
-    while i >= 0 and i < n and (rowTop < 0 or spots[i].top == rowTop or spots[i].top == top):
-      if spots[i].top != top:
-        rowTop = spots[i].top
-        if spots[i].col <= col and (down or result < 0):
-          result = i
-      i += (if down: 1 else: -1)
+proc row(self: SceneSwitcherScene, down: bool): int =
+  ## The tile a row below (or above) the highlighted one, in its column or
+  ## the last of a shorter row: a category starts a row of its own, so the
+  ## rows are the tiles' places, not their numbers. Past the last row the
+  ## tile count (the gear, or around to the first), above the first -1
+  ## (the gear, or around to the last).
+  let n = self.entries.len
+  let lit = self.highlighted()
+  if lit < 0 or lit >= n:
+    return (if down: 0 else: -1)
+  let spots = self.spots(self.grid())
+  let (col, top) = spots[lit]
+  result = if down: n else: -1
+  var rowTop = -1
+  var i = if down: lit + 1 else: lit - 1
+  while i >= 0 and i < n and (rowTop < 0 or spots[i].top == rowTop or spots[i].top == top):
+    if spots[i].top != top:
+      rowTop = spots[i].top
+      if spots[i].col <= col and (down or result < 0):
+        result = i
+    i += (if down: 1 else: -1)
 
-  proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
-    ## A keyboard (Linux, the preview): the arrows walk the grid, Tab the
-    ## tiles one by one (Shift+Tab back) through the gear, as the frame's
-    ## buttons do, Page Down and Up a screenful, Enter shows, Escape goes
-    ## back. The highlight is the switcher's one focus: Tab never rings a
-    ## tile's icon and its name apart, nor the layout around it.
-    if self.entries.len == 0:
-      self.list()
-    case payload{"code"}.getStr()
-    of "Tab": self.highlight(self.highlighted() + (if payload{"shift"}.getBool(): -1 else: 1))
-    of "ArrowRight": self.highlight(self.highlighted() + 1)
-    of "ArrowLeft": self.highlight(self.highlighted() - 1)
-    of "ArrowDown": self.highlight(self.row(true))
-    of "ArrowUp": self.highlight(self.row(false))
-    of "PageDown": self.screenful(1)
-    of "PageUp": self.screenful(-1)
-    of "Enter", "NumpadEnter", "Space": self.choose(self.highlighted())
-    of "Escape", "Backspace": self.leave()
-    else: return
-    self.touch()
+proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
+  ## A keyboard (Linux, the preview): the arrows walk the grid, Tab the
+  ## tiles one by one (Shift+Tab back) through the gear, as the frame's
+  ## buttons do, Page Down and Up a screenful, Enter shows, Escape goes
+  ## back. The highlight is the switcher's one focus: Tab never rings a
+  ## tile's icon and its name apart, nor the layout around it.
+  if self.entries.len == 0:
+    self.list()
+  case payload{"code"}.getStr()
+  of "Tab": self.highlight(self.highlighted() + (if payload{"shift"}.getBool(): -1 else: 1))
+  of "ArrowRight": self.highlight(self.highlighted() + 1)
+  of "ArrowLeft": self.highlight(self.highlighted() - 1)
+  of "ArrowDown": self.highlight(self.row(true))
+  of "ArrowUp": self.highlight(self.row(false))
+  of "PageDown": self.screenful(1)
+  of "PageUp": self.screenful(-1)
+  of "Enter", "NumpadEnter", "Space": self.choose(self.highlighted())
+  of "Escape", "Backspace": self.leave()
+  else: return
+  self.touch()
 
 # --------------------------------------------------------------- the picture
 #
@@ -1339,16 +1338,15 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       self.screenful(if context.event == evForward: 1 else: -1)
     self.touch()
   else:
-    when not defined(frameosEmbedded):
-      if context.event == "keyDown" and uiTarget(SceneSwitcherId, SwitcherNode).input.focus == 0:
-        self.keyed(payload)
-        return
-      if context.event == "keyDown" and payload{"code"}.getStr() in ["Enter", "NumpadEnter"] and
-          self.entries.len > 0:
-        # Enter in the search shows the scene it found (the first, or the one lit).
-        self.choose(max(self.highlighted(), 0))
-        self.touch()
-        return
+    if context.event == "keyDown" and uiTarget(SceneSwitcherId, SwitcherNode).input.focus == 0:
+      self.keyed(payload)
+      return
+    if context.event == "keyDown" and payload{"code"}.getStr() in ["Enter", "NumpadEnter"] and
+        self.entries.len > 0:
+      # Enter in the search shows the scene it found (the first, or the one lit).
+      self.choose(max(self.highlighted(), 0))
+      self.touch()
+      return
     # A pointer event (and what is not one, which the hit test makes
     # nothing of: it has no position).
     self.pointer(context.event, payload)

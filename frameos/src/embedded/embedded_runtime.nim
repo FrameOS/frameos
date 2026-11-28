@@ -42,6 +42,8 @@ import frameos/utils/svg_frames
 # The loading mark's C entry points (fos_nim_loading_mark_*_impl), drawn by
 # the RGB LCD's own task while a scene switch loads (lcd_st7701s_rgb.c).
 import frameos/loading_mark
+import frameos/cursor_sprite
+from frameos/input_state import setCustomKeyboardLayout, takeCursorDirty, cursorVisible, cursorSpace
 
 # ------------------------------------------------------------------ C hooks
 
@@ -300,11 +302,37 @@ proc recoverFromOomAbort*(): tuple[jsDropped, jsBytes: int] =
   ## single_scene_host.recoverAbortedRun, for the glue's abort handler.
   host.recoverAbortedRun()
 
+proc lcdCursor(visible: bool, x, y, sceneWidth, sceneHeight, shape, rotation: cint) {.
+    importc: "fos_lcd_st7701s_cursor", cdecl.}
+
+proc syncCursor() =
+  ## The mouse cursor where the dispatcher has it (a Bluetooth mouse moved it,
+  ## or it hid after CursorHideMs), onto an RGB LCD over the picture: the
+  ## panel driver draws it (lcd_st7701s_rgb.c), never the canvas. Its shape
+  ## is what the UI under it asks for, as on Linux (runner.presentCursor).
+  ## Another panel has no cursor: its pointer still clicks where it is.
+  if host.events.isNil:
+    return
+  let state = addr host.events.inputState
+  if not state[].takeCursorDirty():
+    return
+  let (sceneWidth, sceneHeight) = state[].cursorSpace
+  var shape = csArrow
+  if state[].cursorVisible and not host.scene.isNil:
+    try:
+      shape = cursorShapeAt(host.scene, state[].cursorX, state[].cursorY)
+    except Exception:
+      shape = csArrow
+  let rotate = if frameConfig.isNil: 0 else: frameConfig.rotate
+  lcdCursor(state[].cursorVisible, state[].cursorX.cint, state[].cursorY.cint, sceneWidth.cint,
+    sceneHeight.cint, ord(shape).cint, rotate.cint)
+
 proc tickInput*(): bool =
   ## Time passing with nothing sent (single_scene_host.tick).
   result = host.tick()
   if result:
     persistSceneState()
+  syncCursor()
 
 proc drainSceneEvents*(): bool =
   ## What async code dispatched (single_scene_host.drainQueued), after the pump.
@@ -365,6 +393,7 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
       persistOwed = true
     else:
       persistSceneState()
+    syncCursor()
   except Exception as e:
     log("event " & $eventName & " failed: " & e.msg)
     result = false
@@ -472,6 +501,21 @@ proc fos_nim_set_event_map_impl(json: cstring) {.exportc, cdecl.} =
     log(&"eventMap: {(if rules.isNil: 0 else: rules.len)} rule(s)")
   except CatchableError as e:
     log("eventMap: ignored, does not parse: " & e.msg)
+
+proc fos_nim_set_keyboard_layout_json_impl(json: cstring): bool {.exportc, cdecl.} =
+  ## The frame's own keyboard layout (`keyboard.json` in its storage, read by
+  ## main/fos_bt.c; frameos/keyboard_tables.nim has the shape), "" for none:
+  ## the firmware knows `us` alone. A layout that does not read keeps the one
+  ## before, and says why in the log.
+  if json == nil or host.events.isNil:
+    return false
+  try:
+    host.events.inputState.setCustomKeyboardLayout($json)
+    log(if ($json).len == 0: "keyboard: us" else: "keyboard: keyboard.json")
+    true
+  except CatchableError as e:
+    log("keyboard: keyboard.json ignored: " & e.msg)
+    false
 
 var lastPaletteJson: string
 

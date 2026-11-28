@@ -54,6 +54,7 @@
 #include "fos_imu.h"
 #include "fos_touch.h"
 #include "fos_usb_pads.h"
+#include "fos_bt.h"
 #include "fos_voice.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -623,6 +624,9 @@ void app_main(void)
      * 1.5 to 5 s at 160 (2026-11-10); a battery pays for it only while awake,
      * and a render that ends sooner sleeps sooner. */
     if (fos_touch_present() && !fos_display_is_lcd() && config->cpu_mode == FOS_CPU_AUTO) cpu_for_mode(config, true);
+    /* Bluetooth keyboards and mice (fos_bt.c): started with `set bluetooth 1`,
+     * else the controller's RAM goes back to the heap. */
+    fos_bt_start();
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",

@@ -41,6 +41,7 @@
 #include "fos_rotation.h"
 #include "fos_touch.h"
 #include "lcd_qspi_amoled.h"
+#include "fos_bt.h"
 #include "lcd_st7701s_rgb.h"
 #include "esp_private/esp_clk.h"
 #include "fos_client.h"
@@ -611,7 +612,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|click_sounds|mic_pins|voice_chat|"
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|click_sounds|bluetooth|mic_pins|voice_chat|"
                "auto_rotate|imu_axes|"
                "cpu_mode|brightness|dim_after|dim_brightness|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
@@ -1315,6 +1316,12 @@ static int cmd_set(int argc, char **argv)
             printf("click_sounds: silent or normal (0 or 1)\n");
             return 1;
         }
+    }
+    else if (strcmp(key, "bluetooth") == 0) {
+        config->bluetooth = atoi(value) != 0;
+        esp_err_t bt_err = fos_bt_set_enabled(config->bluetooth);
+        if (bt_err != ESP_OK) printf("bluetooth saved; could not start now (%s): it starts at the next boot\n",
+                                     esp_err_to_name(bt_err));
     }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
@@ -2253,6 +2260,30 @@ static int cmd_factory_reset(int argc, char **argv)
 
 /* `beep [hz] [ms]`: the buzzer on its own, to check the pin without
  * pressing a button. */
+/* `bt [pair [seconds]|stop|forget [address]]`: the Bluetooth keyboards and
+ * mice (fos_bt.c); `forget` alone forgets every one. */
+static int cmd_bt(int argc, char **argv)
+{
+    if (argc > 1 && strcmp(argv[1], "pair") == 0) {
+        long seconds = argc > 2 ? strtol(argv[2], NULL, 10) : 60;
+        if (seconds < 1 || seconds > 600) seconds = 60;
+        fos_bt_pair((uint32_t)seconds);
+        printf("pairing for %ld s: put the keyboard or mouse in pairing mode\n", seconds);
+    } else if (argc > 1 && strcmp(argv[1], "stop") == 0) {
+        fos_bt_pair(0);
+    } else if (argc > 2 && strcmp(argv[1], "forget") == 0) {
+        printf(fos_bt_forget_one(argv[2]) ? "%s forgotten\n" : "nothing known as %s\n", argv[2]);
+    } else if (argc > 1 && strcmp(argv[1], "forget") == 0) {
+        fos_bt_forget();
+        printf("every bonded device forgotten\n");
+    } else if (argc > 1) {
+        printf("usage: bt [pair [seconds]|stop|forget [address]]\n");
+        return 1;
+    }
+    fos_bt_print_status();
+    return 0;
+}
+
 static int cmd_beep(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
@@ -2560,6 +2591,7 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
+        {.command = "bt", .help = "bt [pair [seconds]|stop|forget [address]] — Bluetooth keyboards and mice", .func = cmd_bt},
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
         {.command = "imu", .help = "imu — the accelerometer's reading, in thousandths of g", .func = cmd_imu},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},

@@ -10647,6 +10647,158 @@
       ]
      }
     ]
+   },
+   {
+    "name": "a relative mouse says how far it went, and its click is at the cursor",
+    "why": "A Bluetooth mouse on an ESP32 (embedded/esp32/main/fos_bt.c) sends pointer 0's motion as movementX / movementY: the cursor (the centre of the 800x480 scene to start) moves by that many scene pixels, clamped to the scene, and a press without a position is where the cursor is.",
+    "steps": [
+     {
+      "at": 0,
+      "send": {
+       "origin": "driver",
+       "event": "pointerMove",
+       "payload": {
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "movementX": 10,
+        "movementY": -4,
+        "buttons": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerMove",
+        "payload": {
+         "x": 410,
+         "y": 236,
+         "pointerId": 0,
+         "pointerType": "mouse"
+        }
+       }
+      ]
+     },
+     {
+      "at": 10,
+      "send": {
+       "origin": "driver",
+       "event": "pointerMove",
+       "payload": {
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "movementX": 5000,
+        "movementY": 0,
+        "buttons": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerMove",
+        "payload": {
+         "x": 799,
+         "y": 236
+        }
+       }
+      ]
+     },
+     {
+      "at": 20,
+      "send": {
+       "origin": "driver",
+       "event": "pointerDown",
+       "payload": {
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0,
+        "buttons": 1
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerDown",
+        "payload": {
+         "x": 799,
+         "y": 236,
+         "button": 0,
+         "buttons": 1,
+         "pointerType": "mouse"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a key by its Linux number is read under the layout and types its text",
+    "why": "A keyboard that knows only the key's number (an ESP32's Bluetooth keyboard sends `linuxCode`): the dispatcher names the code, reads the key under the frame's layout with the modifiers it tracked, and makes the textInput. 42 is ShiftLeft, 30 KeyA.",
+    "steps": [
+     {
+      "at": 0,
+      "send": {
+       "origin": "driver",
+       "event": "keyDown",
+       "payload": {
+        "linuxCode": 42
+       }
+      },
+      "delivered": [
+       {
+        "event": "keyDown",
+        "payload": {
+         "code": "ShiftLeft",
+         "key": "Shift",
+         "shift": true
+        }
+       }
+      ]
+     },
+     {
+      "at": 10,
+      "send": {
+       "origin": "driver",
+       "event": "keyDown",
+       "payload": {
+        "linuxCode": 30
+       }
+      },
+      "delivered": [
+       {
+        "event": "keyDown",
+        "payload": {
+         "code": "KeyA",
+         "key": "A",
+         "shift": true,
+         "repeat": false,
+         "linuxCode": 30
+        }
+       },
+       {
+        "event": "textInput",
+        "payload": {
+         "text": "A"
+        }
+       }
+      ]
+     },
+     {
+      "at": 20,
+      "send": {
+       "origin": "driver",
+       "event": "keyUp",
+       "payload": {
+        "linuxCode": 42
+       }
+      },
+      "delivered": [
+       {
+        "event": "keyUp",
+        "payload": {
+         "code": "ShiftLeft",
+         "shift": false
+        }
+       }
+      ]
+     }
+    ]
    }
   ]
  }

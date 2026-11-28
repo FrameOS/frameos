@@ -179,7 +179,7 @@
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "name-only",
-      "hosts": {"linux": true, "esp32": false, "wasm": true}
+      "hosts": {"linux": true, "esp32": true, "wasm": true}
     },
     {
       "name": "keyUp",
@@ -201,7 +201,7 @@
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "name-only",
-      "hosts": {"linux": true, "esp32": false, "wasm": true}
+      "hosts": {"linux": true, "esp32": true, "wasm": true}
     },
     {
       "name": "textInput",
@@ -217,7 +217,7 @@
       "renderAfter": "if-state-changed",
       "coalesce": "none",
       "log": "name-only",
-      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
       "synthesized": true,
       "since": "2026.9.23"
     },
@@ -537,7 +537,7 @@
       "renderAfter": "never",
       "coalesce": "none",
       "log": "none",
-      "hosts": {"linux": true, "esp32": false, "wasm": true},
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
       "since": "2026.9.21"
     },
     {

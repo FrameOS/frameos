@@ -19,6 +19,8 @@ idf_component_register(
         "fos_touch.c"
         "fos_usb_pads.c"
         "fos_usj_attach.c"
+        "fos_hid_report.c"
+        "fos_bt.c"
         "fos_codec.c"
         "fos_rtc.c"
         "fos_voice_binding.c"
@@ -112,6 +114,7 @@ idf_component_register(
         frameos_nim
         frameos_quickjs
         monocypher
+        bt
 )
 
 # Calls to ROM and IRAM go through veneers in flash (fos_veneers.h): a

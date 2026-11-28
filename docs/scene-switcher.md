@@ -396,7 +396,7 @@ bigger with it than without: the module's code 8.6 KB and its strings
 `fos_scenes.c`) 0.8 KB. The first version was 20.8 KB. What keeps it there:
 
 - No new layout code: the JSX layer it draws with is already in the image.
-- The firmware gets no keyboard (`frameosEmbedded`) and no pictures, and its
+- The firmware gets no pictures (`frameosEmbedded`), and its
   one round board (the Waveshare 1.75" AMOLED, `boardPanelRound`) the round
   list and chrome a Pi's HyperPixel Round gets (about 4.8 KB of flash with
   the keyboard's and the settings' round layouts, 2026-11-23); integer arithmetic, and

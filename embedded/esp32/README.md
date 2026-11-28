@@ -1580,6 +1580,55 @@ the stored display hash forgotten so the first render after the boot draws.
 A full-refresh-only panel draws nothing (seconds the restart would wait out),
 and the caller waits 2 s at most. The log line `restart:notice` says what
 became of it.
+### Bluetooth keyboards and mice
+
+An S3 frame takes Bluetooth LE keyboards and mice (HID over GATT;
+`fos_bt.c`, NimBLE as a central only). Off by default: `set bluetooth 1`
+(or the frame page's switch) starts it at once and `set bluetooth 0` stops
+it, giving its heap back; no restart either way. The controller's static RAM
+is 1.1 KB on the S3 and stays reserved, which is what makes that possible
+(`esp_bt_controller_mem_release` would make the next start a restart). If
+the stack cannot start for want of memory, the setting is kept and it
+starts at the next boot. `bt pair [seconds]` opens a pairing window (60 s by default; `bt stop`
+closes it): the frame connects to the first device advertising the HID
+service and pairs "Just Works", and the bond stays in NVS, so the device
+reconnects by itself when it wakes. `bt` lists every bond with its name
+(read from the device's GAP Device Name and kept in NVS `fos_bt`), what it is
+and whether it is connected; `bt forget <address>` forgets one, `bt forget`
+every one. The frame page on the screen has the same: a switch, the list
+with Forget, and Pair (docs/scene-settings.md). Two at once (a keyboard and a mouse). The report map is read by
+`fos_hid_report.c` (pure, host-tested in `main/tests/test_fos_hid_report.c`),
+with the boot protocol as the fallback. Keys reach the dispatcher as
+`keyDown` / `keyUp` with their Linux number, repeated while held (500 ms, then
+every 40 ms), read under the US layout: the firmware ships no other
+(the tables are `frameos/keyboard_tables.nim`). A frame's own layout is a
+`keyboard.json` at the top of its storage, put there like any asset, in the
+contract's layout shape: `{"inherits": "us", "keys": {"KeyY": ["z", "Z"],
+"Digit2": ["2", "\"", "²"]}}`, each key `[unshifted, shifted, altGr?]` and
+what it does not list as on a US keyboard; any of
+`docs/events-contract.json`'s `keyboard.layouts` copied as it is will do. It
+is read when Bluetooth starts and when a keyboard connects, and stored
+nowhere else;
+the mouse is pointer 0 (`movementX` / `movementY`, buttons, wheel), and its
+cursor is drawn on the RGB LCD (docs/events.md "The cursor"). No C3: its
+overlay leaves `CONFIG_BT_ENABLED` off.
+
+**Qualification and licences.** FrameOS is not a Bluetooth-qualified product, and neither the project nor
+FrameOS Cloud is listed with the Bluetooth SIG. The Bluetooth support in the
+ESP32 firmware (keyboards and mice) is off unless you turn it on. If you sell
+or distribute hardware with FrameOS and Bluetooth turned on, you are the
+product's maker: qualifying it with the Bluetooth SIG, and the radio approvals
+of the market you sell in (FCC, CE / RED, ...), are yours to do. The word
+"Bluetooth" is used here only to say what the feature does; the Bluetooth word
+mark and logos belong to Bluetooth SIG, Inc., and FrameOS uses no logo and
+claims no qualification.
+
+The firmware's Bluetooth stack is Apache NimBLE (Apache License 2.0), with
+Espressif's Bluetooth controller libraries as ESP-IDF ships them (licensed by
+Espressif for use on Espressif chips). Keep Bluetooth off by default,
+keep the Bluetooth logo and the words "certified" / "qualified" out of the
+firmware, the frame page, the docs and the cloud's plans, and do not sell it
+as a feature of a paid plan.
 
 ### The accelerometer
 

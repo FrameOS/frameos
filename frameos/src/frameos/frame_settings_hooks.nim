@@ -21,7 +21,10 @@ type
     ## {percent}, managedBy, version,
     ## actions: ["restart"…], note, about: {chip, soc, cores, mhz, board,
     ## system, display, psram, memory, flash, storage, card, uptime, mac,
-    ## hostname, frameId, server, build}}: `battery` absent without one; `wifi`
+    ## hostname, frameId, server, build}, bluetooth: {on, ready, pairing,
+    ## devices: [{address, name, keyboard, mouse, connected}]}}: `bluetooth`
+    ## absent on a host without it (only an ESP32 S3 has it); `battery`
+    ## absent without one; `wifi`
     ## absent, no network to set here; `state` one of connected, connecting,
     ## notFound, auth, hotspot, unset, off; `password` a password is saved;
     ## `actions` the device commands this host runs besides render and
@@ -30,11 +33,13 @@ type
     ## bytes and [total, free] for what fills (docs/scene-settings.md "About").
   FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
-    ## for the same network, none for another), rotate, renderScale; and,
+    ## for the same network, none for another), rotate, renderScale,
+    ## bluetooth (on or off at once); and,
     ## with no Save, brightness as a finger moves it (`live`: set, not kept).
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
     ## "open" when the page comes up, "close" when it goes, "scan" for the
-    ## networks in range.
+    ## networks in range; "btPair" / "btStop" open and close a minute of
+    ## Bluetooth pairing, "btForget <address>" forgets one device.
 
 var
   frameSettingsRead*: FrameSettingsRead

@@ -732,7 +732,8 @@ picks the edge a press drags (`cursor_shape.nim` `edgeCursor`).
   resized shows its arrows wherever the mouse goes.
 - An element with a `cursor-*` class and nothing else is a region for the
   cursor alone: it takes no press and asks for no event.
-- Not on an ESP32, which has no mouse: the class reads as nothing there.
+- On an ESP32 with a Bluetooth mouse the cursor is drawn on an RGB LCD (the
+  SenseCAP Indicator) by the loading mark's task, and nowhere else.
 - In the browser preview (`frameos-wasm`, the scene workspace's "The frame's
   mouse cursor" toggle) the runtime says the shape under the page's pointer
   (`frameos_wasm_cursor`, the worker's `cursor` message): the page shows it
@@ -784,7 +785,8 @@ export function get(app) {
   beside it leave (not the panel's width). A key is a region of the UI like a button, so it works
   with a finger, a pen or the mouse over the preview, and on e-paper too, a
   refresh a key (it shows no press there). An ESP32 board has no keyboard of
-  its own, ever.
+  its own: a Bluetooth one (`fos_bt.c`) puts the one on the screen away as on
+  a Pi.
 - **On a round panel** (the HyperPixel 2.1" Round, `panel_shape.nim`
   `panelIsRound`) a UI that is the whole canvas gets the keyboard higher up,
   its last row four fifths of the way from the circle's centre to its rim,

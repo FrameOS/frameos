@@ -25,8 +25,7 @@ from frameos/utils/memory import waitingTextDrops
 from frameos/panel_shape import RoundInset
 import frameos/utils/qr
 import frameos/panel_shape
-when not defined(frameosEmbedded):
-  from frameos/cursor_shape import csPointer, cursorCode
+from frameos/cursor_shape import csPointer, cursorCode
 
 export keyboard.KeyboardPage
 
@@ -68,9 +67,8 @@ type
       ## Not an element but a `<Scene>` or `<yield />`, where it is in paint
       ## order: whatever is in a region after it is drawn over the scene and
       ## takes the pointer there (ui/events.uiOverScene).
-    when not defined(frameosEmbedded):
-      cursor*: uint8       ## its `cursor-*` class (tailwind.nim Box.cursor); 0 for none
-      cursorBand*: float32 ## ... `cursor-resize`'s edge, in the UI's pixels
+    cursor*: uint8       ## its `cursor-*` class (tailwind.nim Box.cursor); 0 for none
+    cursorBand*: float32 ## ... `cursor-resize`'s edge, in the UI's pixels
     # Plain values only: regions are copied by the dozen on every layout
     # and every event (a field's text is `fieldText`).
 
@@ -2103,11 +2101,10 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
     arrangement = t.arrange(round(x + t.x + t.size.x) - tx, t.text.align)
   if arrangement.runes.len == 0:
     return
-  when not defined(frameosEmbedded): # only a mouse sets it: none on an ESP32
-    if ui.anchor:
-      # A drag that selects: where it went down is the selection's other end.
-      ui.anchor = false
-      ui.sel = n.value.runeOffset(arrangement.caretAt(ui.anchorX - (tx - x) + sx, ui.anchorY - (ty - y) + sy)) + 1
+  if ui.anchor:
+    # A drag that selects: where it went down is the selection's other end.
+    ui.anchor = false
+    ui.sel = n.value.runeOffset(arrangement.caretAt(ui.anchorX - (tx - x) + sx, ui.anchorY - (ty - y) + sy)) + 1
   if ui.place:
     ui.place = false
     ui.goal = false
@@ -2130,30 +2127,29 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
   var
     i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
     r = arrangement.selectionRects[min(i, arrangement.runes.high)]
-  when not defined(frameosEmbedded):
-    if ui.lineStep != 0:
-      # A line up or down (ArrowUp / ArrowDown on a keyboard): the nearest
-      # edge on that line to the x the caret set out from, kept across the
-      # lines it walks; off the first line the start, off the last the end.
-      var line = arrangement.lines.high
-      for l, span in arrangement.lines:
-        if i <= span[1]:
-          line = l
-          break
-      if not ui.goal:
-        ui.goal = true
-        ui.goalX = if i < arrangement.runes.len: r.x else: r.x + r.w
-      let to = line + ui.lineStep
-      ui.lineStep = 0
-      let rune =
-        if to < 0: 0
-        elif to > arrangement.lines.high: arrangement.runes.len
-        else:
-          let row = arrangement.selectionRects[arrangement.lines[to][0]]
-          arrangement.caretAt(ui.goalX, row.y + row.h / 2)
-      ui.caret = clamp(n.value.runeOffset(rune), 0, n.value.len)
-      i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
-      r = arrangement.selectionRects[min(i, arrangement.runes.high)]
+  if ui.lineStep != 0:
+    # A line up or down (ArrowUp / ArrowDown on a keyboard): the nearest
+    # edge on that line to the x the caret set out from, kept across the
+    # lines it walks; off the first line the start, off the last the end.
+    var line = arrangement.lines.high
+    for l, span in arrangement.lines:
+      if i <= span[1]:
+        line = l
+        break
+    if not ui.goal:
+      ui.goal = true
+      ui.goalX = if i < arrangement.runes.len: r.x else: r.x + r.w
+    let to = line + ui.lineStep
+    ui.lineStep = 0
+    let rune =
+      if to < 0: 0
+      elif to > arrangement.lines.high: arrangement.runes.len
+      else:
+        let row = arrangement.selectionRects[arrangement.lines[to][0]]
+        arrangement.caretAt(ui.goalX, row.y + row.h / 2)
+    ui.caret = clamp(n.value.runeOffset(rune), 0, n.value.len)
+    i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
+    r = arrangement.selectionRects[min(i, arrangement.runes.high)]
   let cw = max(1'f32, round(t.text.size / 16))
   result = [tx + (if i < arrangement.runes.len: r.x else: r.x + r.w), ty + r.y, cw, r.h]
   if ui.sel > 0:
@@ -2274,8 +2270,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     let firstText = textsSeen.len
   n.emitPaint(x, y, w, h, op, drawn, gradients)
   # A link with no `cursor-*` of its own shows the hand, as in a browser.
-  let cursor = when defined(frameosEmbedded): 0'u8
-    else: (if b.cursor == 0 and n.handlers[ueClick] == LinkOpen + 1: csPointer.cursorCode else: b.cursor)
+  let cursor = if b.cursor == 0 and n.handlers[ueClick] == LinkOpen + 1: csPointer.cursorCode else: b.cursor
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
       n.field > 0 or scrolls or cursor != 0:
     # In paint order: whatever comes later is on top.
@@ -2283,9 +2278,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
       scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
       scrollY: (if scrollsY: n.maxY else: 0))
-    when not defined(frameosEmbedded):
-      regions[^1].cursor = cursor
-      regions[^1].cursorBand = b.cursorBand
+    regions[^1].cursor = cursor
+    regions[^1].cursorBand = b.cursorBand
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
