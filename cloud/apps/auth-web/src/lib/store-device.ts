@@ -292,10 +292,17 @@ export async function storeSceneForDevice(
 
 // The shelves, in the store front's order, as slug and title, and `layout:
 // true` on a layouts' shelf (the app's Layouts side, docs/scene-store.md).
-export function storeDeviceCategories(): { slug: string; title: string; layout?: true }[] {
-  return storeCategories.map((category) => ({
-    slug: category.slug,
-    title: category.title,
-    ...(category.kind === "layout" ? { layout: true as const } : {}),
-  }));
+// A shelf whose scenes all need what the frame says it lacks (Video on an
+// ESP32, `without=video`) is left out: it would always be empty there.
+export function storeDeviceCategories(
+  without: readonly string[] = [],
+): { slug: string; title: string; layout?: true }[] {
+  const lacking = new Set(without);
+  return storeCategories
+    .filter((category) => !category.needs || !lacking.has(category.needs))
+    .map((category) => ({
+      slug: category.slug,
+      title: category.title,
+      ...(category.kind === "layout" ? { layout: true as const } : {}),
+    }));
 }

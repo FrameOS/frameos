@@ -222,7 +222,8 @@ export function ruleCategory(facts: SceneFacts): string | undefined {
     return "games";
   }
   if (keywordMatches(keywords, /googlephotos|immich|unsplash|localimage|photoalbum|wikimedia/)) {
-    return "photos";
+    // A photo service's videos are video, not photos.
+    return facts.needs?.includes("video") ? "video" : "photos";
   }
   if (keywordMatches(keywords, /ical|calendar|agenda/)) {
     return "calendar";

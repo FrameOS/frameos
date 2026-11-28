@@ -3,7 +3,7 @@
     "id": "immich-videos",
     "name": "Immich videos",
     "settings": {
-      "category": "Photos",
+      "category": "Video",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",

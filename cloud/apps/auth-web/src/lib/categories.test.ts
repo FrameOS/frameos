@@ -52,6 +52,12 @@ describe('storeCategories', () => {
     expect(getStoreCategory('games')?.title).toBe('Games')
   })
 
+  it('has a Video shelf, by its title too, that only a frame able to play video is offered', () => {
+    expect(getStoreCategory('video')).toMatchObject({ title: 'Video', kind: 'scene', needs: 'video' })
+    expect(categorySlugForTitle('Video')).toBe('video')
+    expect(normalizeCategory('Video')).toBe('video')
+  })
+
   it('gives every category shelf copy and a classifier hint', () => {
     for (const category of storeCategories) {
       expect(category.title.length).toBeGreaterThan(0)

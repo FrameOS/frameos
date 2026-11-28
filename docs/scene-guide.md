@@ -36,7 +36,8 @@ A scenes file is a JSON array of scenes. Each scene is
 - `settings.category` (optional): the scene's category by its name, which a
   desktop layout groups its list of scenes by. Pick one of the store's:
   `"Photos"` (the owner's photos or a photo service), `"Art & galleries"` (a
-  collection of artwork the scene carries), `"Clocks & time"` (clocks, timers,
+  collection of artwork the scene carries), `"Video"` (films and video clips
+  it plays), `"Clocks & time"` (clocks, timers,
   the year at a glance), `"Calendars & agendas"`, `"Weather"` (real
   forecasts), `"Home & dashboards"` (a smart home, data, charts, maps, stats
   from a service), `"Games"`, `"Fun & animations"` (comics, toys,

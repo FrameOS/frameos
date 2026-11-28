@@ -21,7 +21,8 @@ export const runtime = "nodejs";
 // shelf that goes first, `exclude` shelves left out (comma separated),
 // `featured=1` the app's Featured (one page: what was featured, then each
 // shelf's best by turns; store-device.ts), and `categories=1` adds the
-// shelves. A dozen scenes is about 3 KB: an ESP32
+// shelves (not one whose scenes all need what `without` says the frame
+// lacks: no Video on an ESP32). A dozen scenes is about 3 KB: an ESP32
 // parses it beside the scene it is running. Public and cached like the store
 // front's own feed, and readable from any page (the browser preview runs the
 // scene too); a frame asks with no credential, so it is limited per address
@@ -52,7 +53,7 @@ async function handleGet(request: NextRequest) {
       page,
       more,
       scenes,
-      ...(params.get("categories") === "1" ? { categories: storeDeviceCategories() } : {}),
+      ...(params.get("categories") === "1" ? { categories: storeDeviceCategories(options.without) } : {}),
     },
     { headers: { "access-control-allow-origin": "*", "cache-control": "public, max-age=60" } },
   );

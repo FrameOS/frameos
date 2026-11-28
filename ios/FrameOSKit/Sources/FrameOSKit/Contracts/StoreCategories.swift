@@ -8,6 +8,7 @@ public enum StoreCategories {
     public static let shelves: [(slug: String, title: String)] = [
         ("photos", "Photos"),
         ("art", "Art & galleries"),
+        ("video", "Video"),
         ("clocks", "Clocks & time"),
         ("calendar", "Calendars & agendas"),
         ("weather", "Weather"),
