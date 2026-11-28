@@ -39,6 +39,8 @@ Rules worth knowing:
   touchpad tap is `BTN_TOOL_FINGER` plus `BTN_TOUCH`: one `mouseDown`.
 - An event type the driver does not handle (`EV_LED`, `EV_SW`, …) is logged
   once per device per type as `driver:evdev`, never per event.
-- Not handled yet: hotplug (devices are enumerated once at start), multitouch
+- **Devices plugged in later are opened** a moment after their node appears
+  (inotify on `/dev/input`, `hotplug.nim`), and closed when it goes.
+- Not handled yet: multitouch
   (`ABS_MT_*`; the kernel's single-touch emulation is what works), hi-res
   wheel, pressure.
