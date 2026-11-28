@@ -199,6 +199,9 @@ const gameWords =
 const clockWords = /\b(clock|clocks|time|timer|pomodoro|countdown|stopwatch|year progress|memento mori)\b/i;
 const demoWords = /\b(demo|made-up|made up|test pattern|test chart|calibration|sample data|example)\b/i;
 
+// A scene named for departures or a transit feed is a station board.
+const transitWords = /\b(departures?|transit|gtfs)\b/i;
+
 function keywordMatches(keywords: readonly string[], pattern: RegExp): boolean {
   return keywords.some((keyword) => pattern.test(keyword));
 }
@@ -233,6 +236,9 @@ export function ruleCategory(facts: SceneFacts): string | undefined {
   }
   if (clockWords.test(name)) {
     return "clocks";
+  }
+  if (transitWords.test(name)) {
+    return "transit";
   }
   return undefined;
 }

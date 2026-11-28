@@ -148,6 +148,8 @@ describe("ruleCategory", () => {
     expect(ruleCategory({ appKeywords: ["immich"], name: "Family" })).toBe("photos");
     expect(ruleCategory({ appKeywords: ["immich"], name: "Family", needs: ["video"] })).toBe("video");
     expect(ruleCategory({ description: "A week of made-up weather.", name: "Weather demo" })).toBe("demos");
+    expect(ruleCategory({ appKeywords: ["jsxUi"], name: "Transit departures (Norway)" })).toBe("transit");
+    expect(ruleCategory({ name: "GTFS board" })).toBe("transit");
     expect(ruleCategory({ appKeywords: ["jsxUi"], name: "Something" })).toBeUndefined();
   });
 });

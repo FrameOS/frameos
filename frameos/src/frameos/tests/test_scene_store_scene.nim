@@ -51,7 +51,7 @@ var
 initLock(requestsLock)
 
 const Shelves = [("photos", "Photos"), ("art", "Art & galleries"), ("video", "Video"), ("clocks", "Clocks & time"),
-  ("calendar", "Calendars & agendas"), ("weather", "Weather"), ("dashboards", "Home & dashboards"),
+  ("calendar", "Calendars & agendas"), ("weather", "Weather"), ("transit", "Transit"), ("dashboards", "Home & dashboards"),
   ("games", "Games"), ("fun", "Fun & animations"), ("utilities", "Notes & tools"), ("ai", "AI & generative"),
   ("demos", "Demos & examples"), ("system", "System"), ("desktops", "Multi app layouts"), ("layouts", "Single app layouts"),
   ("devices", "Device layouts")]

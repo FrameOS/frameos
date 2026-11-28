@@ -58,6 +58,14 @@ describe('storeCategories', () => {
     expect(normalizeCategory('Video')).toBe('video')
   })
 
+  it('has a Transit shelf, by its title too, after Weather', () => {
+    expect(getStoreCategory('transit')).toMatchObject({ title: 'Transit', kind: 'scene' })
+    expect(categorySlugForTitle('Transit')).toBe('transit')
+    expect(normalizeCategory('Transit')).toBe('transit')
+    const slugs = storeCategories.map((category) => category.slug)
+    expect(slugs.indexOf('transit')).toBe(slugs.indexOf('weather') + 1)
+  })
+
   it('gives every category shelf copy and a classifier hint', () => {
     for (const category of storeCategories) {
       expect(category.title.length).toBeGreaterThan(0)

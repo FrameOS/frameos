@@ -12,6 +12,7 @@ public enum StoreCategories {
         ("clocks", "Clocks & time"),
         ("calendar", "Calendars & agendas"),
         ("weather", "Weather"),
+        ("transit", "Transit"),
         ("dashboards", "Home & dashboards"),
         ("games", "Games"),
         ("fun", "Fun & animations"),
