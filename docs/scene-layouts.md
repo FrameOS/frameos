@@ -440,6 +440,30 @@ the terminal; each in the Dock while it has a window), `BeOS`'s Be menu,
 `Omarchy`'s menu, its dock and Super+Return and Super+Shift+F, and `Commander`'s F7
 to F9. Everywhere else (an editor's preview) they draw the one
 scene, as before.
+**Icons.** The four with icons on the desktop (`Windows 98`, `BeOS`, `Classic
+Mac`, `OS/2 Warp`) take them as the desktops of their day did. A press on bare
+desktop that moves draws a dotted rectangle and picks every icon it touches
+(Ctrl or Shift keeps those picked before), and a click there picks none; a click
+on an icon picks it alone (Ctrl or Shift: one more, or one less), a double click
+opens it, and a drag of a picked icon moves every icon picked, each let go into
+the free cell nearest where it was dropped. The cells are the grid the icons
+always stood on: `Windows 98`'s and `OS/2 Warp`'s columns from the top left
+(none under the LaunchPad), `Classic Mac`'s from the top right, `BeOS`'s under
+the Deskbar and then in columns left of it. From the first drag on the layout
+keeps every icon's cell in `iconSpots`, a private field on disk, so the icons
+are where they were left after a restart. An icon keeps its cell while the grid
+has it; one the desktop gains later (the store installed), or one whose cell a
+smaller desktop does not have, takes the first free cell in the old order, so a
+desktop nobody dragged an icon on looks as it always did. A new window keeps
+clear of the icons where they are (each column of them, `iconColumns`). It is
+all the layouts' JavaScript, no runtime or firmware for it: `arranged`,
+`spotsOf`, `pickedOf`, `banded`, `dropped`, `iconColumns`, `iconPointer` and
+`Band` are the same text in the four, each desktop saying only where its cells
+are (`test_windowed_desktops.nim` checks they match). The handlers are on the
+desktop and on each icon, so a press is captured by what it landed on; a move
+with nothing held returns `false`, so a mouse passing over the desktop draws
+nothing, and a maximized window's border takes its press, so no rectangle
+starts there.
 
 `Teletext` and `E-reader` are not desktops, but they read `app.frame.scenes`
 where a host has it: Teletext numbers each page by the scene's place in the list
