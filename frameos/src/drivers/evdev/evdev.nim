@@ -13,6 +13,7 @@
 import json, posix, strformat, strutils, os, options, times
 import std/inotify
 
+import ./hotplug
 import ./libevdev
 import ./linuxInput
 import ./translate
@@ -249,7 +250,7 @@ proc startThread*(args: ThreadArgs) {.thread.} =
         var still: seq[(string, float)] = @[]
         for pending in pendingPaths:
           if now - pending[1] >= HotplugSettleMs / 1000:
-            if fileExists(pending[0]):
+            if inputNodeExists(pending[0]):
               addDevice(openDevices, pending[0], nextDeviceId, grabKeyboards)
           else:
             still.add(pending)
