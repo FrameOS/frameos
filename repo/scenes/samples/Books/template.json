@@ -1,10 +1,10 @@
 {
   "name": "ePub reader",
-  "description": "Read EPUB books from the frame's card, with their covers and pictures, and your place kept in each book.",
+  "description": "A book reader: your EPUBs with covers and progress, bookmarks, highlights and notes, reading stats, and free books from Project Gutenberg, Standard Ebooks and any OPDS catalog.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
   "imageHeight": 480,
   "scenes": "./scenes.json",
-  "frameosVersion": "2026.11.11"
+  "frameosVersion": "2026.11.14"
 }
