@@ -240,7 +240,7 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
       { setSize: (_, { shortEdge }) => edge(shortEdge), setShortEdge: (_, { shortEdge }) => edge(shortEdge) },
     ],
     fit: [
-      'inside' as UploadResizeFit,
+      'cover' as UploadResizeFit,
       { persist: true, storageKey: 'resizeUploadLogic.fit' },
       { setFit: (_, { fit }) => fit },
     ],

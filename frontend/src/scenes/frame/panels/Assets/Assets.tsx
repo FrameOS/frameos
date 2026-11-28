@@ -227,7 +227,27 @@ function TreeNode({
               </span>
             )}
           </button>
-          <div className={assetRowActionsClassName}>
+          <div className={clsx(assetRowActionsClassName, !node.path && !readOnly && 'w-auto')}>
+            {!node.path && !readOnly ? (
+              <>
+                <button
+                  type="button"
+                  className={playSceneButtonClassName}
+                  title="Upload files"
+                  onClick={() => uploadAssets(node.path)}
+                >
+                  <DocumentArrowUpIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  className={playSceneButtonClassName}
+                  title="Resize and upload: make photos smaller in this browser, to this frame’s size or another, then upload them"
+                  onClick={() => resizeAndUploadAssets(node.path)}
+                >
+                  <ArrowsPointingInIcon className="h-4 w-4" />
+                </button>
+              </>
+            ) : null}
             {hasPlayableImages ? (
               <button
                 type="button"
