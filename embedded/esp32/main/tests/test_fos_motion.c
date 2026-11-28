@@ -4,8 +4,8 @@
  *
  * Build and run (from embedded/esp32/):
  *
- *   cc -std=c11 -Wall -Wextra -Werror -O2 -Imain main/fos_motion.c \
- *      main/tests/test_fos_motion.c -o /tmp/test_fos_motion && /tmp/test_fos_motion
+ *   cc -std=c11 -Wall -Wextra -Werror -O2 -Imain main/fos_motion.c main/fos_imu.c \
+ *      main/tests/test_fos_motion.c -lm -o /tmp/test_fos_motion && /tmp/test_fos_motion
  *
  * (backend/app/tasks/tests/test_esp32_motion.py does exactly that in CI.)
  */
@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "fos_events_gen.h"
+#include "fos_imu.h"
 #include "fos_motion.h"
 
 static int g_failures = 0;
@@ -249,8 +250,44 @@ static void test_axes(void)
     CHECK(!fos_motion_parse_axes("x=x,y=y,z=z,", &axes), "nothing after");
 }
 
+/* The boards' maps (fos_imu.c k_board_axes): each one, the way the bench
+ * found its board standing (2026-11-28), reads upright, and each has the
+ * handedness a map from a chip's axes to the panel's must have. */
+static void test_board_axes(void)
+{
+    static const struct {
+        const char *preset;
+        int chip[3];   /* the chip's reading, standing as its picture is drawn */
+        int upright;   /* that picture's rotation */
+    } boards[] = {
+        {"seeed_reterminal_sticky", {-1030, 9, -37}, 270},
+        {"waveshare_esp32_s3_touch_amoled_1_75", {1049, 0, -4}, 0},
+    };
+    for (size_t i = 0; i < sizeof(boards) / sizeof(boards[0]); i++) {
+        fos_motion_axes_t axes;
+        CHECK(fos_motion_parse_axes(fos_imu_board_axes(boards[i].preset), &axes), "%s parses", boards[i].preset);
+        int m[3][3] = {{0}};
+        for (int r = 0; r < 3; r++) m[r][axes.from[r]] = axes.sign[r];
+        int det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                  m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        CHECK(det == -1, "%s: a right-handed chip onto the panel's x right, y down, z out (det %d)", boards[i].preset, det);
+        rig_t r;
+        rig_init(&r, 0, 0);
+        int panel[3];
+        fos_motion_apply_axes(&axes, boards[i].chip, panel);
+        for (int t = 0; t < 1500; t += STEP_MS) {
+            fos_motion_event_t out[FOS_MOTION_EVENTS_MAX];
+            fos_motion_step(&r.m, panel, r.now, 0, 0, out);
+            r.now += STEP_MS;
+        }
+        CHECK(fos_motion_upright_rotate(&r.m) == boards[i].upright, "%s stands upright at %d (%d)", boards[i].preset,
+              boards[i].upright, fos_motion_upright_rotate(&r.m));
+    }
+}
+
 int main(void)
 {
+    test_board_axes();
     test_rest_is_quiet();
     test_tilt_held();
     test_small_tip_is_nothing();

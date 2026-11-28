@@ -1333,7 +1333,8 @@ static int cmd_set(int argc, char **argv)
         printf("error: %s is set until the next restart but was NOT saved: %s\n", key, esp_err_to_name(err));
         return 1;
     }
-    printf("ok: %s set (some settings need `restart`)\n", key);
+    bool live = strcmp(key, "auto_rotate") == 0 || strcmp(key, "imu_axes") == 0;
+    printf(live ? "ok: %s set (live)\n" : "ok: %s set (some settings need `restart`)\n", key);
     /* A frame that was never on the cloud runs no cloud task: provisioning
      * one (the flasher's `set cloud_url` + `set claim_token`) starts it. */
     if (strcmp(key, "claim_token") == 0 || strcmp(key, "cloud_url") == 0) fos_cloud_start();

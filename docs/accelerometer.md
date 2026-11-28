@@ -111,10 +111,15 @@ Each board's chip sits on its board some way round: `fos_imu.c`'s
 and `set imu_axes <map>` (or `default`) overrides it on a frame, live. The
 console's `imu` prints the chip's reading, gravity along the picture, the map
 in use, the position and auto-rotate's reading: standing the frame upright
-must print `y=+1000` and lying it face up `z=-1000`. **Both boards' rows are
-the chips' own axes until someone turns the boards and checks**; tilts,
-flicks and shakes come regardless, but which side a tilt names, `orientation`
-and auto-rotate follow the map.
+must print `y=+1000` and lying it face up `z=-1000`. The two boards' rows come
+from the bench (2026-11-28, both standing on an edge): the Sticky's chip has
+its -x up standing in the portrait its preset draws, the AMOLED's its +x up
+standing upright at rotation 0. That fixes which chip axis is the panel's y
+(and on the Sticky its x); the z rows assume each chip faces away from the
+glass, and the third axis follows from handedness (`test_fos_motion.c`
+`test_board_axes`). **Lying each board face up once and reading `z=-1000`
+confirms the rest**; tilts, flicks and shakes come regardless, but which side
+a tilt names, `orientation` and auto-rotate follow the map.
 
 ## Power
 

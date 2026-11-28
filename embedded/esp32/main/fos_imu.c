@@ -18,17 +18,23 @@ void fos_imu_decode(const uint8_t raw[6], int *x_mg, int *y_mg, int *z_mg)
  * the chip's axes. A board not listed reads its chip's axes as the panel's.
  * `set imu_axes` overrides either on a frame (docs/accelerometer.md "Axes"),
  * and the console's `imu` says which way down is, to check it by turning the
- * frame. Both boards' rows wait for that check: tilting, flicking and shaking
- * come right whatever the map, but which side a tilt names, and auto-rotate,
- * follow it. */
+ * frame: upright it must say y=+1000, face up z=-1000.
+ *
+ * What the bench showed (2026-11-28, both boards standing on an edge): the
+ * Sticky, standing in the portrait its preset draws (rotation 270), had its
+ * chip's -x up, which is the panel's x as the chip's x; the AMOLED, standing
+ * with its picture upright at 0, had its chip's +x up, which is the panel's
+ * y as the chip's -x. The z rows assume each chip sits behind the glass,
+ * facing away from it, and the remaining axis follows from both frames'
+ * handedness (the chip's is right-handed, the panel's x right, y down, z out
+ * is not). Tilts, flicks and shakes come right whatever the map; which side a
+ * tilt names, `orientation` and auto-rotate follow it. */
 static const struct {
     const char *preset;
     const char *axes;
 } k_board_axes[] = {
-    /* The QMI8658 on the round AMOLED's board. */
-    {"waveshare_esp32_s3_touch_amoled_1_75", "x=x,y=y,z=z"},
-    /* The LSM6DS3TR-C on the Sticky's board. */
-    {"seeed_reterminal_sticky", "x=x,y=y,z=z"},
+    {"waveshare_esp32_s3_touch_amoled_1_75", "x=y,y=-x,z=-z"},
+    {"seeed_reterminal_sticky", "x=x,y=y,z=-z"},
 };
 
 const char *fos_imu_board_axes(const char *hardware_preset)
@@ -174,8 +180,14 @@ static void imu_task(void *arg)
         bool fast = now_us - __atomic_load_n(&s_read_at_us, __ATOMIC_RELAXED) < FAST_FOR_US;
         vTaskDelayUntil(&last, pdMS_TO_TICKS(fast ? FAST_PERIOD_MS : SLOW_PERIOD_MS));
         if (s_axes_changed) {
+            /* Another map is another frame of reference: what was learnt in
+             * the old one (the rest, the position) would read as a tilt and
+             * a turn at the next reading (the bench, 2026-11-28). */
             s_axes_changed = false;
             load_axes();
+            portENTER_CRITICAL(&s_lock);
+            fos_motion_init(&s_motion);
+            portEXIT_CRITICAL(&s_lock);
         }
         int chip[3], panel[3];
         if (fos_imu_read(&chip[0], &chip[1], &chip[2]) != ESP_OK) {
@@ -199,7 +211,9 @@ static void imu_task(void *arg)
              * renders. */
             fos_events_dispatch(FOS_ORIGIN_DRIVER, fos_motion_event_name(events[i].kind), payload);
         }
-        if (config->auto_rotate) fos_rotation_follow(upright);
+        /* Every reading, auto-rotate on or off: switching it either way turns
+         * the picture at the next sample, a still scene included. */
+        fos_rotation_follow(upright);
     }
 }
 

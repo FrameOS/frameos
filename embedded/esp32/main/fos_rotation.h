@@ -21,8 +21,10 @@
 uint16_t fos_rotation(void);
 /* What the next pass should draw at. */
 uint16_t fos_rotation_wanted(void);
-/* The accelerometer's upright rotation (fos_imu.c), -1 lying flat or not
- * known: followed while auto-rotate is on. Any task. */
+/* The accelerometer's upright rotation (fos_imu.c) at every reading, -1
+ * lying flat or not known (the last way it stood is kept): followed while
+ * auto-rotate is on, and a render asked for whenever the picture is not at
+ * the rotation wanted. Any task. */
 void fos_rotation_follow(int upright);
 /* Render task, once a pass before the render: hands the runtime the wanted
  * rotation if it changed. True when it did. */

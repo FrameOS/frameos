@@ -261,7 +261,8 @@ static void test_imu_decode(void)
     fos_imu_decode(flat, NULL, NULL, &z);
     CHECK(z == 1000, "an axis left out");
     /* The LSM6DS3TR-C at +/-4 g sends the same: 0.122 mg a step. */
-    CHECK(strlen(fos_imu_board_axes("seeed_reterminal_sticky")) == 11, "the Sticky has a map");
+    CHECK(strcmp(fos_imu_board_axes("seeed_reterminal_sticky"), "x=x,y=y,z=z") != 0, "the Sticky has a map");
+    CHECK(strcmp(fos_imu_board_axes("waveshare_esp32_s3_touch_amoled_1_75"), "x=x,y=y,z=z") != 0, "so does the AMOLED");
     CHECK(strcmp(fos_imu_board_axes("no_such_board"), "x=x,y=y,z=z") == 0, "a board not listed reads the chip's axes");
     CHECK(strcmp(fos_imu_board_axes(NULL), "x=x,y=y,z=z") == 0, "nor does no board");
 }

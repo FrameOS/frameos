@@ -15,7 +15,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 MAIN_DIR = REPO_ROOT / "embedded" / "esp32" / "main"
-SOURCES = [MAIN_DIR / "fos_motion.c"]
+SOURCES = [MAIN_DIR / "fos_motion.c", MAIN_DIR / "fos_imu.c"]
 TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_motion.c"
 
 

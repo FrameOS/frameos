@@ -547,7 +547,7 @@ jobs:
           /tmp/test_fos_i2c_devices
           # An accelerometer's readings to tilt, flick, shake and orientation, pure.
           cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
-            embedded/esp32/main/fos_motion.c embedded/esp32/main/tests/test_fos_motion.c -lm \
+            embedded/esp32/main/fos_motion.c embedded/esp32/main/fos_imu.c embedded/esp32/main/tests/test_fos_motion.c -lm \
             -o /tmp/test_fos_motion
           /tmp/test_fos_motion
           # The IT8951 panel rows (the reTerminal E1003, the Waveshare 10.3 inch HAT), pure.

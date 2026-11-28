@@ -4541,6 +4541,10 @@ static void client_task(void *arg)
         /* Interpreted scenes: pick up backend changes and any payload
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
+        /* The rotation the picture is drawn at: the frame's, or with
+         * auto-rotate the way it stands (fos_rotation.c). Every pass, before
+         * its render, and only a compare when nothing turned. */
+        fos_rotation_apply();
         if (renders_locally(config)) {
             if (housekeeping && !pulls_after_render && !held_for_input) pass_scenes_sync();
             fos_scenes_apply_pending();
@@ -4610,9 +4614,6 @@ static void client_task(void *arg)
             /* What JSX from .tsx/.jsx apps is laid out for (0 = automatic),
              * the same way: the apps read it off the config every render. */
             frameos_nim_set_render_scale(config->render_scale_milli / 1000.0);
-            /* The rotation the picture is drawn at: the frame's, or with
-             * auto-rotate the way it stands (fos_rotation.c). Live. */
-            fos_rotation_apply();
             /* The colours block (automatic fit switch, frame-wide correction):
              * same contract, the Nim side re-parses only when the text changed. */
             frameos_nim_set_colors(config->colors);
