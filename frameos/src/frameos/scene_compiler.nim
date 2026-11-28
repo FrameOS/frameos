@@ -27,21 +27,6 @@ from frameos/values import eventFilterValue
 
 {.push boundChecks: off, overflowChecks: off.}
 
-type
-  Input = object
-    field: string
-    source: int        ## the producer's node id, for a wired input
-    snippet: string    ## the code, for an inline one
-    inline: bool
-
-  Graph = object
-    nodes: seq[DiagramNode]
-    index: Table[int, int]          ## node id -> position in `nodes`
-    next: Table[int, int]
-    appInputs: Table[int, seq[Input]]
-    codeInputs: Table[int, seq[Input]]
-    fieldTargets: seq[int]
-
 const
   MaxProducerDepth* = 64
     ## A producer chain deeper than this is refused, naming the node (a scene
@@ -93,9 +78,9 @@ proc toJsIdent*(name: string): string =
       if i == 0: result.add '_'
       result.add '_'
 
-proc addInput(table: var Table[int, seq[Input]], target: int, input: Input) =
-  ## One input per field and kind, the last edge winning, as the tables the
-  ## interpreter kept did; in the order the edges came.
+proc addInput(table: var Table[int, seq[SceneInput]], target: int, input: SceneInput) =
+  ## One input per field and kind, the last edge winning; in the order the
+  ## edges came.
   let list = addr table.mgetOrPut(target, @[])
   for existing in list[].mitems:
     if existing.field == input.field and existing.inline == input.inline:
@@ -103,8 +88,25 @@ proc addInput(table: var Table[int, seq[Input]], target: int, input: Input) =
       return
   list[].add input
 
-proc buildGraph(nodes: seq[DiagramNode], edges: seq[DiagramEdge]): Graph =
-  result.nodes = nodes
+proc writeFieldTarget(node: DiagramNode, fieldPath: string, target: int) =
+  ## A `field/<name>[i][j]` edge names a node for an app to run (logic/ifElse's
+  ## thenNode, render/split's panels): its id goes into the app's config under
+  ## the full path as written, where the app and the program's `C<id>` read it.
+  if node.data.isNil or node.data.kind != JObject:
+    node.data = newJObject()
+  if not node.data.hasKey("config") or node.data["config"].kind != JObject:
+    node.data["config"] = newJObject()
+  node.data["config"][fieldPath] = %target
+
+proc sceneGraph*(nodes: seq[DiagramNode], edges: seq[DiagramEdge]): SceneGraph =
+  ## A scene's edges, read once: what the program is compiled from, what the
+  ## image planner asks of a node's fields, and the edges nothing reads (for
+  ## the scene's init to log). The one place an edge is classified.
+  ##
+  ## It writes each `field/<name>` edge's target into its node's config
+  ## (`writeFieldTarget`), so the nodes are complete for the apps and for
+  ## `compileScene` once the graph exists.
+  result = SceneGraph(nodes: nodes)
   for i, node in nodes:
     result.index[node.id.int] = i
   for edge in edges:
@@ -115,29 +117,35 @@ proc buildGraph(nodes: seq[DiagramNode], edges: seq[DiagramEdge]): Graph =
       result.next[edge.source.int] = target
     elif th.startsWith("fieldInput/") or th.startsWith("codeField/"):
       let field = th.split("/")[1]
-      var input = Input(field: field, source: edge.source.int)
+      var input = SceneInput(field: field, source: edge.source.int)
       if sh.startsWith("code/"):
         input.inline = true
         input.snippet = sh.substr(5)
       elif sh != "fieldOutput" and sh != "stateOutput":
+        if edge.edgeType != "codeNodeEdge":
+          result.ignored.add edge
         continue
       if th[0] == 'f': result.appInputs.addInput(target, input)
       else: result.codeInputs.addInput(target, input)
     elif sh.startsWith("field/") and th == "prev":
       result.fieldTargets.add target
+      if result.index.hasKey(edge.source.int):
+        writeFieldTarget(nodes[result.index[edge.source.int]], sh.substr("field/".len), target)
+    elif edge.edgeType != "codeNodeEdge":
+      result.ignored.add edge
 
-proc has(g: Graph, id: int): bool {.inline.} = g.index.hasKey(id)
-proc node(g: Graph, id: int): DiagramNode {.inline.} = g.nodes[g.index[id]]
+proc has(g: SceneGraph, id: int): bool {.inline.} = g.index.hasKey(id)
+proc node(g: SceneGraph, id: int): DiagramNode {.inline.} = g.nodes[g.index[id]]
 
 # ------------------------------------------------------------------ analysis
 
-proc dataProducers(g: Graph, id: int): seq[int] =
+proc dataProducers(g: SceneGraph, id: int): seq[int] =
   for input in g.appInputs.getOrDefault(id):
     if not input.inline and g.has(input.source): result.add input.source
   for input in g.codeInputs.getOrDefault(id):
     if not input.inline and g.has(input.source): result.add input.source
 
-proc cyclicDataNodes(g: Graph): seq[bool] =
+proc cyclicDataNodes(g: SceneGraph): seq[bool] =
   ## The nodes on a cycle of the data graph (an input fed, through any number
   ## of producers, by the node itself): Tarjan's components, iteratively.
   let n = g.nodes.len
@@ -184,13 +192,13 @@ proc cyclicDataNodes(g: Graph): seq[bool] =
         if members.len > 1 or v in succ[v]:
           for w in members: result[w] = true
 
-proc producerDepths(g: Graph, cyclic: seq[bool]): seq[int] =
+proc producerDepths(g: SceneGraph, cyclic: seq[bool]): seq[int] =
   ## How deep each node's producer chain goes (1 = no producers), outside the
   ## cycles, which are guarded at run time instead.
   let n = g.nodes.len
   result = newSeq[int](n)
   var visiting = newSeq[bool](n)
-  proc depth(g: Graph, i: int, cyclic: seq[bool], depths: var seq[int], visiting: var seq[bool]): int =
+  proc depth(g: SceneGraph, i: int, cyclic: seq[bool], depths: var seq[int], visiting: var seq[bool]): int =
     if depths[i] > 0: return depths[i]
     if cyclic[i] or visiting[i]: return 1
     visiting[i] = true
@@ -203,7 +211,7 @@ proc producerDepths(g: Graph, cyclic: seq[bool]): seq[int] =
   for i in 0 ..< n:
     discard depth(g, i, cyclic, result, visiting)
 
-proc flowCycleNodes(g: Graph): seq[bool] =
+proc flowCycleNodes(g: SceneGraph): seq[bool] =
   ## The nodes on a cycle of `next` edges. Each node has at most one next, so
   ## walking from every node finds them.
   let n = g.nodes.len
@@ -229,7 +237,7 @@ proc flowCycleNodes(g: Graph): seq[bool] =
       at = g.index[g.next[id]]
     for p in path: state[p] = 2
 
-proc flowNodes(g: Graph): seq[bool] =
+proc flowNodes(g: SceneGraph): seq[bool] =
   ## The nodes a flow can reach: what an event node or a `field/<name>` edge
   ## (an app's execNode) leads to, and the chains of `next` from there, and
   ## any node a `next` edge touches. The others are only ever read for their
@@ -365,7 +373,7 @@ proc snippetFunction(e: var Emitter, nodeId: int, kind: ProgramSnippetKind, name
   e.snip.add(if header.len > 0: "\n))(__S,A,__C)}\n" else: "\n);\n")
   e.snipLines += lines + 3
 
-proc addProducer(e: var Emitter, input: Input, node: DiagramNode) =
+proc addProducer(e: var Emitter, input: SceneInput, node: DiagramNode) =
   ## The value for one input: its producer's, or its inline snippet's (`I`:
   ## an error in it is logged and becomes nothing, as evalInline did).
   if input.inline:
@@ -378,7 +386,7 @@ proc addProducer(e: var Emitter, input: Input, node: DiagramNode) =
   else:
     e.put "g#()", input.source
 
-proc addFlowCall(e: var Emitter, g: Graph, id: int, passV: bool) =
+proc addFlowCall(e: var Emitter, g: SceneGraph, id: int, passV: bool) =
   e.put(if not g.has(id): "NF(#)" elif passV: "f#(V)" else: "f#()", id)
 
 proc addThrow(e: var Emitter, message: string) =
@@ -386,7 +394,7 @@ proc addThrow(e: var Emitter, message: string) =
   e.addStr message
   e.add ")"
 
-iterator ordered(g: Graph, inputs: seq[Input]): Input =
+iterator ordered(g: SceneGraph, inputs: seq[SceneInput]): SceneInput =
   ## Wired inputs first, then inline ones, as the interpreter set them; a
   ## wired one whose producer is not in the scene is skipped, as it was.
   for input in inputs:
@@ -394,12 +402,12 @@ iterator ordered(g: Graph, inputs: seq[Input]): Input =
   for input in inputs:
     if input.inline: yield input
 
-proc needsCatch(kind: int, input: Input): bool {.inline.} =
+proc needsCatch(kind: int, input: SceneInput): bool {.inline.} =
   ## A wired input's producer may throw, and so may an app's field refuse an
   ## inline value; an inline value alone never throws (`I` catches).
   not input.inline or kind == 0
 
-proc addInputFailure(e: var Emitter, kind: int, id: int, input: Input) =
+proc addInputFailure(e: var Emitter, kind: int, id: int, input: SceneInput) =
   ## `catch(x){EI(…)}` for an input whose producer threw (kind as in `EI`).
   if not needsCatch(kind, input):
     e.add ";\n"
@@ -448,7 +456,7 @@ proc codeType(node: DiagramNode, key, name: string): string =
         return item{"type"}.getStr()
   ""
 
-proc emitCodeBody(e: var Emitter, g: Graph, node: DiagramNode, id: int, data: bool,
+proc emitCodeBody(e: var Emitter, g: SceneGraph, node: DiagramNode, id: int, data: bool,
     broken: seq[(NodeId, string)]) =
   ## A code node's work, its result's handle left in `h`: each argument a
   ## handle (one that fails is its type's zero and named in `D`, so the result
@@ -505,7 +513,7 @@ proc emitCodeBody(e: var Emitter, g: Graph, node: DiagramNode, id: int, data: bo
   elif jBoolOr(node.data, "logOutput", false):
     e.put "lo(#,h);\n", id
 
-proc emitCodeFunction(e: var Emitter, g: Graph, node: DiagramNode, id: int) =
+proc emitCodeFunction(e: var Emitter, g: SceneGraph, node: DiagramNode, id: int) =
   ## `__c<id>(A)`: the node's code, given its arguments' values by name and
   ## as `args`.
   var names: seq[string]
@@ -550,8 +558,8 @@ proc appName(node: DiagramNode): string =
 
 proc emitProgramAppConfig(e: var Emitter, node: DiagramNode, id: int) =
   ## `const C<id>=`: the node's config, which holds the targets of its
-  ## `field/<name>` edges too (logic/ifElse's branches): interpreter.init
-  ## writes them in (`setNodeFieldFromEdge`) before a program is compiled.
+  ## `field/<name>` edges too (logic/ifElse's branches), which `sceneGraph`
+  ## wrote in.
   let config = node.data{"config"}
   e.put "const C#=", id
   e.add(if config.isNil or config.kind != JObject: "{}" else: $config)
@@ -616,7 +624,7 @@ proc wrapEnd(e: var Emitter, id: int, cyclic, profile, isData: bool) =
   if cyclic:
     e.put "}finally{W.delete(#)}", id
 
-proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = false,
+proc compileScene*(g: SceneGraph, profile = false,
     brokenCache: seq[(NodeId, string)] = @[]): CompiledScene =
   ## The program for a scene. It evaluates to a function of the kit
   ## (`ProgramKit` called with interpreter.nim's natives, `programOp`)
@@ -629,7 +637,6 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
   ## (`frameConfig.debug`); `brokenCache` names cached nodes whose expression
   ## did not compile, and why: they say so on every run instead.
   result = CompiledScene(profile: profile, brokenCache: brokenCache)
-  let g = buildGraph(nodes, edges)
   let cyclic = cyclicDataNodes(g)
   let depths = producerDepths(g, cyclic)
   let looping = flowCycleNodes(g)
@@ -861,5 +868,10 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
   result.source.add e.glue
   result.source.add tables
   result.snippets = move e.snippets
+
+proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = false,
+    brokenCache: seq[(NodeId, string)] = @[]): CompiledScene =
+  ## The program for nodes and edges not read yet (the tests).
+  compileScene(sceneGraph(nodes, edges), profile, brokenCache)
 
 {.pop.}

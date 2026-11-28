@@ -13,6 +13,7 @@ import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/js_runtime/burrito
 import frameos/scene_compiler
+import frameos/cache_key
 import frameos/retired_apps
 import frameos/channels
 import frameos/js_runtime/run_budget
@@ -375,44 +376,12 @@ proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext)
 # Cache utilities
 # -------------------------
 
-# Turn an interpreter Value into a stable JSON "key" snippet for cache-keying.
-proc valueToKeyJson(v: Value): JsonNode =
-  case v.kind
-  of fkImage:
-    # Images aren't JSON; key by dimensions (pointer identity would be fragile).
-    let im = v.asImage()
-    result = %* {"__image": {"w": im.width, "h": im.height}}
-  of fkImageSpool:
-    # Same identity as an in-memory image: the tier a value happens to sit in
-    # must never change what it keys as.
-    result = %* {"__image": {"w": v.imgSp.width, "h": v.imgSp.height}}
-  of fkColor:
-    result = %* v.asColor().toHtmlHex
-  of fkJson:
-    if v.asJson().isNil: result = %* {}
-    else: result = v.asJson()
-  of fkSpool:
-    # Key by size + a content hash computed a window at a time. The whole point
-    # of a file-backed spool is that the body is not resident; the cache key
-    # must not be the thing that pulls a 4MB feed back into memory and parks it
-    # in cacheKeys for the cache's lifetime. Byte-wise FNV-1a so the key
-    # depends only on the bytes, not on how the tier happened to chunk them —
-    # the same body can sit in memory one render and in a file the next.
-    var h = 14695981039346656037'u64
-    for window in v.sp.windows():
-      for c in window:
-        h = (h xor uint64(c)) * 1099511628211'u64
-    result = %* {"__spool": {"len": v.sp.len, "hash": $h}}
-  else:
-    # string/text/float/int/bool/node/scene/none
-    result = valueToJson(v)
-
 proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheConfig,
-    inputKey, expr: JsonNode, allowStore: bool): tuple[hit: bool, value: Value, remake: bool] =
+    inputKey, expr: CacheKey, allowStore: bool): tuple[hit: bool, value: Value, remake: bool] =
   ## The node cache's answer for a node about to compute: the value it holds,
   ## if it is still good (its duration, its cache expression's value and its
-  ## inputs, each when the node keys on it). `inputKey` is nil when no input
-  ## was built, `expr` when the node has no expression (or it failed).
+  ## inputs, each when the node keys on it). `inputKey` is NoCacheKey when no
+  ## input was set, `expr` when the node has no expression (or it failed).
   ##
   ## `allowStore = false` (the inputs were degraded: a producer failed and was
   ## zero-filled) still serves an entry; it only keeps the entry from going
@@ -422,11 +391,11 @@ proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheC
   var current = scene.cacheTimes.hasKey(nodeId)
   if current and cache.durationEnabled:
     current = epochTime() <= scene.cacheTimes[nodeId] + cache.durationSec
-  if current and not expr.isNil:
+  if current and expr != NoCacheKey:
     # Recompute when the cache expression's value changes.
-    current = scene.cacheExprs.hasKey(nodeId) and scene.cacheExprs[nodeId] == expr
-  if current and cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
-    current = scene.cacheKeys.hasKey(nodeId) and scene.cacheKeys[nodeId] == inputKey
+    current = scene.cacheExprs.getOrDefault(nodeId, NoCacheKey) == expr
+  if current and cache.inputEnabled and inputKey != NoCacheKey:
+    current = scene.cacheKeys.getOrDefault(nodeId, NoCacheKey) == inputKey
   if current and scene.cacheValues.hasKey(nodeId):
     var served = scene.cacheValues[nodeId]
     if served.kind == fkImageSpool:
@@ -453,7 +422,7 @@ proc cacheLookup(scene: InterpretedFrameScene, nodeId: NodeId, cache: NodeCacheC
     scene.cacheValues.del(nodeId)
 
 proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: ExecutionContext,
-    cache: NodeCacheConfig, inputKey, expr: JsonNode, fresh: Value) =
+    cache: NodeCacheConfig, inputKey, expr: CacheKey, fresh: Value) =
   ## A freshly computed value into the node cache. `context` is read by the
   ## image disk tier only: to refuse snapshotting the live canvas, and to
   ## size the spill cap.
@@ -485,9 +454,9 @@ proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: Execution
   else:
     scene.cacheValues.del(nodeId) # an older disk-tier entry must not pass for this one
   scene.cacheTimes[nodeId] = epochTime()
-  if not expr.isNil:
+  if expr != NoCacheKey:
     scene.cacheExprs[nodeId] = expr
-  if cache.inputEnabled and not inputKey.isNil and inputKey.len > 0:
+  if cache.inputEnabled and inputKey != NoCacheKey:
     scene.cacheKeys[nodeId] = inputKey
 
 # -------------------------
@@ -1435,19 +1404,19 @@ proc withdrawImageHints(keyword: string, offered: int, context: ExecutionContext
     context.decodeBoundsHeight = 0
     context.decodeBoundsNodeId = 0.NodeId
 
-proc cacheExpressionKey(scene: InterpretedFrameScene, ctx: ptr JSContext, x: JSValueConst): JsonNode =
+proc cacheExpressionKey(scene: InterpretedFrameScene, ctx: ptr JSContext, x: JSValueConst): CacheKey =
   ## A cache expression's value as the program hands it (`[value]`), as a
-  ## key; nil when the node has none or it did not compile.
+  ## key; NoCacheKey when the node has none or it did not compile.
   if JS_IsArray(ctx, x) == 0:
-    return nil
+    return NoCacheKey
   let value = JS_GetPropertyUint32(ctx, x, 0)
-  result = valueToKeyJson(jsValueToValue(ctx, value))
+  result = valueKey(jsValueToValue(ctx, value))
   JS_FreeValue(ctx, value)
 
-proc takeCacheInputKey(scene: InterpretedFrameScene, nodeId: NodeId): JsonNode =
-  result = scene.cacheInputKeys.getOrDefault(nodeId, nil)
-  if not result.isNil:
-    scene.cacheInputKeys.del(nodeId)
+proc takeCacheInputKey(scene: InterpretedFrameScene, nodeId: NodeId): CacheKey =
+  var keys: seq[(uint64, CacheKey)]
+  if scene.cacheInputKeys.pop(nodeId, keys):
+    result = inputsKey(keys)
 
 proc ensureChildScene(scene: InterpretedFrameScene, nodeId: NodeId): tuple[child: FrameScene, exported: ExportedScene] =
   ## A scene node's scene, started on first use.
@@ -1635,7 +1604,7 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
     setInterpretedAppField(app.appKeyword, app, field, value)
     let cache = scene.cacheConfigs.getOrDefault(id)
     if cache.enabled and cache.inputEnabled:
-      scene.cacheInputKeys.mgetOrPut(id, newJObject())[field] = valueToKeyJson(value)
+      scene.cacheInputKeys.mgetOrPut(id, @[]).setInputKey(field, value)
   of opInputImage:
     # A producer failed. It may have taken the decode target first, the state
     # mayMutateImageInPlace reads as "the chain fused", and the error image
@@ -1669,7 +1638,7 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
   of opScene:
     scene.runChildScene(id, context)
   of opCacheKey:
-    scene.cacheInputKeys.mgetOrPut(id, newJObject())[toNimString(ctx, a(1))] = valueToKeyJson(scene.held(ctx, a(2)))
+    scene.cacheInputKeys.mgetOrPut(id, @[]).setInputKey(toNimString(ctx, a(1)), scene.held(ctx, a(2)))
   of opCacheLookup:
     let key = scene.takeCacheInputKey(id)
     let expr = scene.cacheExpressionKey(ctx, a(2))
@@ -1760,6 +1729,12 @@ proc programNative(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: 
       deadlineTripMessage(max(1, renderDeadlineBudgetMs()), true).cstring)
     JS_SetUncatchableException(ctx, 1)
 
+proc graphOf(source: ExportedInterpretedScene): SceneGraph =
+  ## The scene's edges, read by its first instance and shared by the rest.
+  if source.graph.isNil:
+    source.graph = sceneGraph(source.nodes, source.edges)
+  source.graph
+
 proc programProfile(scene: InterpretedFrameScene): bool {.inline.} =
   scene.frameConfig != nil and scene.frameConfig.debug
 
@@ -1774,7 +1749,7 @@ proc programFor(scene: InterpretedFrameScene): CompiledScene =
   if source.isNil:
     return scene.program
   if source.compiled.isNil or source.compiled.profile != profile:
-    source.compiled = compileScene(source.nodes, source.edges, profile)
+    source.compiled = compileScene(graphOf(source), profile)
   source.compiled
 
 proc programFailure(scene: InterpretedFrameScene, message: string): ref Exception =
@@ -1788,7 +1763,7 @@ proc snippetFailure(scene: InterpretedFrameScene, k: int, message: string, line:
   if snippet.kind == psCache:
     if scene.source.isNil:
       return scene.programFailure(message)
-    let program = compileScene(scene.source.nodes, scene.source.edges, scene.program.profile,
+    let program = compileScene(graphOf(scene.source), scene.program.profile,
       scene.program.brokenCache & @[(snippet.nodeId, error)])
     scene.program = program
     scene.source.compiled = program
@@ -1980,25 +1955,6 @@ proc programData(scene: InterpretedFrameScene, nodeId: NodeId, context: Executio
 # Scene wiring helpers
 # -------------------------
 
-proc ensureConfig*(scene: InterpretedFrameScene, node: DiagramNode): JsonNode =
-  ## Make sure node.data["config"] exists and is an object; return it.
-  if node.data.isNil:
-    node.data = %*{}
-  if not node.data.hasKey("config") or node.data["config"].kind != JObject:
-    node.data["config"] = %*{}
-  node.data["config"]
-
-proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
-  ## Map edges of the form:
-  ##   sourceHandle: "field/<fieldName>[idx][idx]..."
-  ##   targetHandle: "prev"
-  ## into node.config["<fieldName>[idx][idx]"] = target NodeId (int).
-  if not edge.sourceHandle.startsWith("field/"): return
-  if edge.targetHandle != "prev": return
-  if not scene.nodes.hasKey(edge.source): return
-  let fieldPath = edge.sourceHandle.substr("field/".len) # keep full path inc. [i][j]
-  scene.ensureConfig(scene.nodes[edge.source])[fieldPath] = %(edge.target.int)
-
 # -------------------------
 # Scene lifecycle
 # -------------------------
@@ -2078,35 +2034,23 @@ proc initScene(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   stateFieldTypesByScene[sceneId] = typeMap
   scene.syncRefreshInterval()
 
-  # The nodes, and what the planner and the apps read off the edges: which
-  # node feeds an app's field, and the node a `field/<name>` edge names (into
-  # the app's config, e.g. logic/ifElse's thenNode). The flow itself is the
-  # program's (scene_compiler.nim).
+  # The nodes, and the edges as read once for every instance of the scene
+  # (scene_compiler.sceneGraph): which node feeds an app's field, for the
+  # planner, and the node a `field/<name>` edge names, already in the app's
+  # config (logic/ifElse's thenNode). The flow itself is the program's.
+  scene.graph = graphOf(exportedScene)
   for node in exportedScene.nodes:
     scene.nodes[node.id] = node
     if node.nodeType in ["app", "code"]:
       let cache = readCacheConfig(node.data)
       if cache.enabled:
         scene.cacheConfigs[node.id] = cache
-  for edge in exportedScene.edges:
-    let th = edge.targetHandle
-    let sh = edge.sourceHandle
-    if th.startsWith("fieldInput/"):
-      let inline = sh.startsWith("code/")
-      if inline or sh == "fieldOutput" or sh == "stateOutput":
-        scene.appInputs.add AppInput(target: edge.target, source: edge.source,
-          field: th.split("/")[1], inline: inline)
-        continue
-    elif sh.startsWith("field/") and th == "prev":
-      scene.setNodeFieldFromEdge(edge)
-      continue
-    if (sh == "next" and th == "prev") or edge.edgeType == "codeNodeEdge" or
-        (th.startsWith("codeField/") and (sh in ["fieldOutput", "stateOutput"] or sh.startsWith("code/"))):
-      continue
+  for edge in scene.graph.ignored:
     logger.log(%*{"event": "initInterpretedEdge:ignored", "sceneId": scene.id.string, "edgeId": edge.id.int,
-        "source": edge.source.int, "target": edge.target.int, "sourceHandle": sh, "targetHandle": th})
+        "source": edge.source.int, "target": edge.target.int, "sourceHandle": edge.sourceHandle,
+        "targetHandle": edge.targetHandle})
 
-  # The apps, after the edges have written what they name into their config.
+  # The apps, whose config holds what their `field/` edges name.
   for node in exportedScene.nodes:
     if node.nodeType == "app":
       let keyword = node.data{"keyword"}.getStr()
@@ -2925,7 +2869,7 @@ proc forgetSceneGraph*(scene: InterpretedFrameScene) =
   for _, app in scene.appsByNodeId:
     releaseJsAppRuntime(app)
   scene.appsByNodeId.clear()
-  scene.appInputs = @[]
+  scene.graph = nil
   scene.sceneNodes.clear()
   scene.sceneExportByNodeId.clear()
   scene.eventApps = @[]

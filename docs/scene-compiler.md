@@ -76,6 +76,13 @@ return{ev(n){…},flow(i){…},data(i){…}}},[…where each snippet is…],[…
   where the flow comes round again), the render flow that is one node
   (`ExecutionContext.wholeFrame`), the events the scene listens for
   (`sceneListensTo`).
+- **The edges are read once**, by `sceneGraph` (`scene_compiler.nim`), the
+  one place an edge is classified: the first instance of a scene keeps its
+  `SceneGraph` on the export, and the compiler, the image planner and the
+  init's log of edges nothing reads all take it from there. It also writes
+  each `field/<name>` edge's target into its node's config, where the apps
+  and the program's `C<id>` read it. A new edge kind is a case there, never
+  a second walk of the edges.
 
 ## Values
 
@@ -91,7 +98,8 @@ outermost run of the program ends.
 ## The natives (`interpreter.nim`, `programOp`)
 
 `g`/`r`/`s` get, run and set an app (the node cache, keyed by what `s` set,
-is `g`'s); `p`/`q` offer and withdraw the image hints the planner decided
+is `g`'s; a key is 64 bits of the value, `cache_key.nim`, and none of the
+value is kept); `p`/`q` offer and withdraw the image hints the planner decided
 (decode target, bounds) and pay the background owed; `ei` paints a failed
 producer's error into an image field; `t` reads a state node; `d` sends a
 dispatch node's payload; `ss`/`sc` set a scene node's state and run it;
@@ -123,8 +131,8 @@ and so out of every image). They are `logic/ifElse`,
 
 - **What they do is the kit's** (`AP` in `ProgramKit`, bytecode in the ESP32
   image). The compiler emits only a constant `C<id>` with the node's config
-  (which holds the targets of its `field/<name>` edges: `interpreter.init`
-  writes them in before a program is compiled), a wired input as a key of it
+  (which holds the targets of its `field/<name>` edges: `sceneGraph`
+  writes them in when it reads the edges), a wired input as a key of it
   (`C<id>[field]=j(handle)`), and a call: `AP(keyword, C<id>, run, name)`.
 - **`AP` reads a field** with the generated loader's default and in its kind
   (`"true"`/`"yes"` a bool, `"7.5"` a number), whether it came from the
@@ -262,8 +270,8 @@ of each program, or a plan the kit turns into closures, would give.
 
 ## Next
 
-- The planner (`planner.nim`) still works on the graph in Nim at scene
-  start (on `scene.appInputs`, the edges into fields); it could decide in the
+- The planner (`planner.nim`) still decides in Nim at scene start (on the
+  scene's `SceneGraph`, the edges into fields); it could decide in the
   compiler instead.
 - Code node to code node, a value still goes through a Nim `Value` (with the
   type the producer declares): passing the JavaScript value along where the

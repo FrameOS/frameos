@@ -19,8 +19,9 @@ proc sceneWith(nodes: seq[DiagramNode],
   )
   for n in nodes:
     result.nodes[n.id] = n
+  result.graph = SceneGraph()
   for (target, field, source) in inputs:
-    result.appInputs.add AppInput(target: target.NodeId, source: source.NodeId, field: field)
+    result.graph.appInputs.mgetOrPut(target, @[]).add SceneInput(field: field, source: source)
 
 proc consumer(id: int, config: JsonNode): DiagramNode =
   node(id, "app", %*{"keyword": "render/image", "config": config})
